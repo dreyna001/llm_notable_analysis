@@ -1,0 +1,176 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: S3-triggered notable analysis pipeline using Bedrock Nova Pro (pure CloudFormation)
+
+Parameters:
+  InputBucketName:
+    Type: String
+    Description: Name for the input S3 bucket (notables will be uploaded here)
+    Default: notable-input-bucket
+  
+  OutputBucketName:
+    Type: String
+    Description: Name for the output S3 bucket (for test mode)
+    Default: notable-output-bucket
+  
+  SplunkSinkMode:
+    Type: String
+    Description: Output sink mode
+    Default: s3
+    AllowedValues:
+      - s3
+      - hec
+      - notable_rest
+  
+  InputRetentionDays:
+    Type: Number
+    Description: Number of days to retain input notables before automatic deletion
+    Default: 2
+    MinValue: 1
+    MaxValue: 365
+  
+  OutputRetentionDays:
+    Type: Number
+    Description: Number of days to retain output reports before automatic deletion
+    Default: 7
+    MinValue: 1
+    MaxValue: 365
+  
+  LambdaCodeS3Bucket:
+    Type: String
+    Description: S3 bucket containing the Lambda deployment package
+  
+  LambdaCodeS3Key:
+    Type: String
+    Description: S3 key for the Lambda deployment package (zip file)
+    Default: lambda-package.zip
+
+Resources:
+  InputBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: LambdaInvokePermission
+    Properties:
+      BucketName: !Ref InputBucketName
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt NotableAnalyzerFunction.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: incoming/
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteIncomingNotablesAfterRetention
+            Status: Enabled
+            Prefix: incoming/
+            ExpirationInDays: !Ref InputRetentionDays
+  
+  OutputBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref OutputBucketName
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOutputReportsAfterRetention
+            Status: Enabled
+            Prefix: reports/
+            ExpirationInDays: !Ref OutputRetentionDays
+  
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: NotableAnalyzerLambdaRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${InputBucketName}'
+                  - !Sub 'arn:aws:s3:::${InputBucketName}/*'
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub 'arn:aws:s3:::${OutputBucketName}/*'
+        - PolicyName: BedrockInvokePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.nova-pro-v1:0'
+        - PolicyName: CloudWatchLogsPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/notable-analyzer-s3:*'
+  
+  NotableAnalyzerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: notable-analyzer-s3
+      Runtime: python3.12
+      Handler: lambda_handler.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 180
+      MemorySize: 512
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          BEDROCK_MODEL_ID: amazon.nova-pro-v1:0
+          SPLUNK_SINK_MODE: !Ref SplunkSinkMode
+          INPUT_BUCKET_NAME: !Ref InputBucketName
+          OUTPUT_BUCKET_NAME: !Ref OutputBucketName
+          OUTPUT_PREFIX: reports
+  
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref NotableAnalyzerFunction
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub 'arn:aws:s3:::${InputBucketName}'
+
+Outputs:
+  FunctionArn:
+    Description: Lambda Function ARN
+    Value: !GetAtt NotableAnalyzerFunction.Arn
+  
+  InputBucketName:
+    Description: Input S3 bucket name
+    Value: !Ref InputBucket
+  
+  OutputBucketName:
+    Description: Output S3 bucket name
+    Value: !Ref OutputBucket
+  
+  TestCommand:
+    Description: Command to upload a test notable
+    Value: !Sub 'aws s3 cp test-notable.txt s3://${InputBucket}/incoming/test-notable.txt'
+
+

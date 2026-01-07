@@ -1,0 +1,34 @@
+[Unit]
+Description=Notable Analyzer Retention Cleanup (oneshot)
+Documentation=https://github.com/your-org/notable-analyzer
+After=network.target
+
+[Service]
+Type=oneshot
+User=notable-analyzer
+Group=notable-analyzer
+
+# Working directory
+WorkingDirectory=/opt/notable-analyzer
+
+# Environment file with retention config
+EnvironmentFile=/etc/notable-analyzer/config.env
+
+# Run retention cleanup via Python module
+ExecStart=/opt/notable-analyzer/venv/bin/python -c "from onprem_service.config import load_config; from onprem_service.retention import run_retention; import logging; logging.basicConfig(level=logging.INFO); stats = run_retention(load_config()); print(f'Retention: moved={stats.moved} deleted={stats.deleted} errors={stats.errors}')"
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/notables
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=notable-retention
+
+[Install]
+WantedBy=multi-user.target
+

@@ -1,0 +1,4 @@
+# Dependencies for notable_analysis.py
+requests>=2.31.0           # HTTP client
+openai>=1.0.0              # OpenAI API client
+python-dotenv>=1.0.0       # Environment variable management (.env file support)

@@ -1,0 +1,17 @@
+[Unit]
+Description=Daily retention cleanup for Notable Analyzer
+Documentation=https://github.com/your-org/notable-analyzer
+
+[Timer]
+# Run daily at 3:00 AM local time
+OnCalendar=*-*-* 03:00:00
+
+# If missed (e.g., system was off), run immediately on next boot
+Persistent=true
+
+# Randomize start by up to 30 minutes to avoid thundering herd
+RandomizedDelaySec=1800
+
+[Install]
+WantedBy=timers.target
+

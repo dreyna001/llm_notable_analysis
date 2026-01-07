@@ -1,0 +1,16 @@
+{
+  "name": "s3-notable-pipeline-arch-viz",
+  "private": true,
+  "description": "Local-only Mermaid diagram renderer for s3_notable_pipeline/architecture.mmd",
+  "devDependencies": {
+    "@mermaid-js/mermaid-cli": "11.12.0"
+  },
+  "scripts": {
+    "render:svg": "mmdc -i architecture.mmd -o architecture.svg -t neutral --backgroundColor \"#1f232a\"",
+    "render:png": "mmdc -i architecture.mmd -o architecture.png -t neutral --backgroundColor \"#1f232a\"",
+    "render:pdf": "mmdc -i architecture.mmd -o architecture.pdf -t neutral --backgroundColor \"#1f232a\"",
+    "todos": "python tools/todo_report.py --write"
+  }
+}
+
+

@@ -1,0 +1,47 @@
+[Unit]
+Description=Notable Analysis Service (On-Prem LLM)
+Documentation=https://github.com/your-org/notable-analyzer
+After=network.target vllm.service
+Wants=vllm.service
+
+[Service]
+Type=simple
+User=notable-analyzer
+Group=notable-analyzer
+
+# Working directory
+WorkingDirectory=/opt/notable-analyzer
+
+# Environment file with configuration
+EnvironmentFile=/etc/notable-analyzer/config.env
+
+# Python virtual environment activation and service start
+ExecStart=/opt/notable-analyzer/venv/bin/python -m onprem_service.onprem_main
+
+# Graceful shutdown
+TimeoutStopSec=30
+KillMode=mixed
+KillSignal=SIGTERM
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/notables
+
+# Resource limits
+LimitNOFILE=65535
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=notable-analyzer
+
+[Install]
+WantedBy=multi-user.target
+

@@ -1,0 +1,94 @@
+%%{init: {
+  "theme":"base",
+  "flowchart": { "nodeSpacing": 30, "rankSpacing": 45 },
+  "themeVariables":{
+    "background":"#1f232a",
+    "fontFamily":"Inter, Segoe UI, Roboto, Arial, sans-serif",
+    "fontSize":"18px",
+    "primaryColor":"#2a2f38",
+    "primaryTextColor":"#e6edf3",
+    "primaryBorderColor":"#6b7280",
+    "lineColor":"#9aa4b2",
+    "secondaryColor":"#242a33",
+    "tertiaryColor":"#242a33",
+    "clusterBkg":"#20252d",
+    "clusterBorder":"#3b4250",
+    "edgeLabelBackground":"#1f232a"
+  }
+}}%%
+
+flowchart TD
+    %% Executive swimlanes (delineate responsibilities; no code-level calls)
+
+    subgraph S3[" "]
+        direction TB
+        s3title["Amazon S3"]
+        s3put["<span style='font-size:12px; font-weight:700; letter-spacing:0.6px;'>EVENT</span><br/>Upload Event<br/>New notable file lands in incoming/"]
+        s3in["<span style='font-size:12px; font-weight:700; letter-spacing:0.6px;'>OBJECT</span><br/>Input object stored<br/>Raw notable content (json/text)"]
+        s3out["<span style='font-size:12px; font-weight:700; letter-spacing:0.6px;'>OUTPUT</span><br/>Output bucket (optional)<br/>Stores generated report for review"]
+    end
+
+    subgraph LAMBDA[" "]
+        direction TB
+        lambdatitle["AWS Lambda<br/>(Pipeline Orchestrator)"]
+        recv["<span style='font-size:12px; font-weight:700; letter-spacing:0.6px;'>TRIGGER</span><br/>Triggered by S3 event<br/>Receives bucket + key"]
+        fetch["<span style='font-size:12px; font-weight:700; letter-spacing:0.6px;'>READ</span><br/>Read notable from S3"]
+        norm["<span style='font-size:12px; font-weight:700; letter-spacing:0.6px;'>NORMALIZE</span><br/>Normalize & extract key fields<br/>Summary + risk context + raw event data"]
+        prep["<span style='font-size:12px; font-weight:700; letter-spacing:0.6px;'>PREPARE</span><br/>Prepare analysis input<br/>Consistent, evidence-focused format"]
+        report["<span style='font-size:12px; font-weight:700; letter-spacing:0.6px;'>REPORT</span><br/>Generate analyst-ready report<br/>Findings, evidence, suggested next steps"]
+        package["<span style='font-size:12px; font-weight:700; letter-spacing:0.6px;'>PACKAGE</span><br/>Assemble final analysis package<br/>Report + structured results + metadata"]
+        route{"ROUTE<br/>Route to configured destination"}
+        err["<span style='font-size:12px; font-weight:700; letter-spacing:0.6px;'>ERROR</span><br/>Error handling<br/>Log + record processing failure"]
+    end
+
+    subgraph BEDROCK[" "]
+        direction TB
+        bedrocktitle["AWS Bedrock"]
+        llm["<span style='font-size:12px; font-weight:700; letter-spacing:0.6px;'>ANALYZE</span><br/>LLM analysis<br/>Map alert to likely MITRE ATT&CK techniques<br/>Return structured results"]
+    end
+
+    subgraph SPLUNK[" "]
+        direction TB
+        splunktitle["Splunk<br/>(optional sinks)"]
+        hec["<span style='font-size:12px; font-weight:700; letter-spacing:0.6px;'>HEC</span><br/>Splunk HEC<br/>Ingest analysis as a new event"]
+        rest["<span style='font-size:12px; font-weight:700; letter-spacing:0.6px;'>REST</span><br/>Splunk REST Notable Update<br/>Attach report to the existing notable"]
+    end
+
+    %% Cross-service data flow (who calls what)
+    %% Anchor lane titles to the top (hide these edges via linkStyle below)
+    s3title --> s3put
+    lambdatitle --> recv
+    bedrocktitle --> llm
+    splunktitle --> hec
+
+    s3put --> s3in
+    s3put --> recv
+    recv --> fetch
+    s3in -.-> fetch
+
+    fetch --> norm --> prep --> llm --> report --> package --> route
+
+    route --> s3out
+    route --> hec
+    route --> rest
+    route --> err
+
+    %% Hide the 4 title-anchor edges (keep real data flow edges visible)
+    linkStyle 0 stroke-width:0,opacity:0
+    linkStyle 1 stroke-width:0,opacity:0
+    linkStyle 2 stroke-width:0,opacity:0
+    linkStyle 3 stroke-width:0,opacity:0
+
+    %% Light styling for readability
+    classDef laneTitle fill:#2a2f38,stroke:#6b7280,stroke-width:1px,color:#e6edf3;
+    classDef store fill:#183654,stroke:#3b82f6,stroke-width:1px,color:#e6edf3;
+    classDef compute fill:#1f3b2c,stroke:#22c55e,stroke-width:1px,color:#e6edf3;
+    classDef external fill:#3d2f16,stroke:#f59e0b,stroke-width:1px,color:#e6edf3;
+    classDef error fill:#3a1f1f,stroke:#ef4444,stroke-width:1px,color:#e6edf3;
+
+    class s3title,lambdatitle,bedrocktitle,splunktitle laneTitle;
+    class s3put,s3in,s3out store;
+    class recv,fetch,norm,prep,report,package,route compute;
+    class llm external;
+    class hec,rest external;
+    class err error;

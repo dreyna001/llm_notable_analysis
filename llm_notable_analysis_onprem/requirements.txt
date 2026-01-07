@@ -1,0 +1,6 @@
+# On-prem notable analysis service dependencies
+# Python 3.10+ required
+
+# HTTP client for LLM API calls
+requests>=2.31.0
+
