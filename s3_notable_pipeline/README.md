@@ -207,6 +207,13 @@ aws bedrock list-foundation-models --region us-east-1
 - `requirements.txt` - Python dependencies (requests only; boto3 included in base image)
 - `Dockerfile` - Container image definition for Lambda
 
+### Lambda naming vs runtime handler (important)
+
+- **`FunctionName` in `template-sam.yaml`** (e.g., `notable-analyzer-s3`) is just the **deployed Lambda resource name**.
+- **What must match for execution** is the container handler entrypoint in `Dockerfile`:
+  - `CMD ["lambda_handler.handler"]` means `lambda_handler.py` must export `def handler(event, context):`.
+- **If you change `FunctionName`**, also update any IAM resources that hardcode it (notably the CloudWatch Logs ARN that references `/aws/lambda/<FunctionName>:*`), otherwise log writes can fail.
+
 **Infrastructure Templates:**
 - `template-sam.yaml` - AWS SAM template for deployment (recommended)
 - `template-cfn.yaml` - Pure CloudFormation template (alternative)
