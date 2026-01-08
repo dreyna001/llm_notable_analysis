@@ -36,7 +36,9 @@ Parameters:
     MinValue: 1
     MaxValue: 365
   
-  ECRImageUri:
+  # NOTE: This parameter is intentionally named `ImageUri` (not `ECRImageUri`) because other templates/tools
+  # in this repo expect the standard `ImageUri` name for image-based SAM functions.
+  ImageUri:
     Type: String
     Description: Full ECR image URI with tag (e.g., 123456789012.dkr.ecr.us-east-1.amazonaws.com/notable-analyzer-s3:latest)
     Default: 123456789012.dkr.ecr.us-east-1.amazonaws.com/notable-analyzer-s3:latest
@@ -106,7 +108,7 @@ Resources:
                 - logs:CreateLogStream
                 - logs:PutLogEvents
               Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/notable-analyzer-s3:*'
-      ImageUri: !Ref ECRImageUri
+      ImageUri: !Ref ImageUri
   
   LambdaInvokePermission:
     Type: AWS::Lambda::Permission
