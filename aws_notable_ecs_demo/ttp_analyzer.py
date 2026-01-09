@@ -16,6 +16,277 @@ from botocore.exceptions import ClientError
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+# =============================================================================
+# TOOL SCHEMA - Enforces structured JSON output via Bedrock tool calling
+# =============================================================================
+
+ANALYZE_NOTABLE_TOOL = {
+    "toolSpec": {
+        "name": "analyze_notable",
+        "description": "Analyze a security alert and return structured TTP analysis",
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "ttp_analysis": {"type": "array", "items": {"type": "object"}},
+                    "attack_chain": {"type": "object"},
+                    "ioc_extraction": {"type": "object"},
+                    "correlation_keys": {"type": "object"},
+                    "evidence_vs_inference": {"type": "object"},
+                    "containment_playbook": {"type": "object"},
+                    "splunk_enrichment": {"type": "array", "items": {"type": "object"}},
+                    "tactic_framing": {"type": "object"},
+                    "benign_explanations": {"type": "array", "items": {"type": "object"}},
+                    "competing_hypotheses": {"type": "array", "items": {"type": "object"}},
+                    "context_enrichment": {"type": "object"}
+                },
+                "required": ["ttp_analysis", "attack_chain", "ioc_extraction",
+                             "correlation_keys", "evidence_vs_inference",
+                             "containment_playbook", "splunk_enrichment",
+                             "tactic_framing", "benign_explanations",
+                             "competing_hypotheses", "context_enrichment"]
+            }
+        }
+    }
+}
+
+# =============================================================================
+# PROMPT SECTIONS - Modular prompt components for maintainability
+# =============================================================================
+
+ANALYST_DOCTRINE = """
+ANALYST DOCTRINE (apply to every case)
+- MITRE ATT&CK is many-to-many: a single technique may support several tactics. Always state (a) the tactic you're assigning in this alert AND (b) other plausible tactics this technique commonly serves (tactic-span note). Base on MITRE ATT&CK v17.
+- FACT vs. INFERENCE: List literal, direct alert evidence first (field=value from the alert), then inferences and assumptions separately (with uncertainty).
+- IOC labeling hygiene: Do not list core OS/generic binaries as IOCs without explicit malicious context. Instead, list as "system_components_observed" if present in the alert.
+- STATELESS ANALYSIS: Reasoning must rely only on observable fields in this notable. If a required fact is not present, state "unknown" and list what would disambiguate.
+"""
+
+EVIDENCE_GATE = """
+EVIDENCE-GATE: Only include a technique (TTP) if:
+A. There is a direct data-component match in the alert (quote it).
+B. Your explanation cites the matching field/value.
+C. No inference or external context is necessary.
+D. If evidence correctness depends on context not in the log (e.g., domain internal/external, IP a DC), drop to the parent technique or reduce confidence by >=0.20 and state the missing context in your explanation.
+"""
+
+SCORING_RUBRIC = """
+Scoring Rubric:
+- high >= 0.80 = direct, unambiguous
+- med 0.50-0.79 = strongly suggestive; one element missing
+- low < 0.30 = plausible but needs corroboration
+"""
+
+TACTIC_FRAMING = """
+TACTIC FRAMING (Notable-First)
+Given this notable ONLY (stateless), do:
+- List the ATT&CK technique(s) implicated.
+- Provide a "Primary Tactic (most plausible)" and "Secondary Tactic(s) (possible)" based on the observable semantics of the event(s), not on assumed environment.
+
+Rules:
+- Do not label a tactic as "Primary" unless the notable contains direct supporting evidence for that tactic.
+- If multiple tactics fit, keep "tactic span" but explicitly state what additional fields/logs would disambiguate primary vs secondary.
+- If required context is missing, state "unknown" and list what would disambiguate.
+
+Output in tactic_framing key:
+- primary_tactic: object with tactic_id, tactic_name, justification (1-2 sentences referencing fields in the notable)
+- secondary_tactics: list of objects with tactic_id, tactic_name, why_plausible (1 sentence each)
+- disambiguation_checklist: list of 3-5 specific questions/fields/log sources to confirm primary vs secondary
+"""
+
+BENIGN_EXPLANATIONS = """
+BENIGN EXPLANATIONS (Legitimate Activity Hypotheses)
+Provide 3-5 plausible legitimate explanations for this notable.
+
+For each hypothesis include:
+- hypothesis: string (the benign explanation)
+- expect_if_true: list of 1-2 concrete indicators we would expect to see if this is legitimate
+- argue_against: string (1 concrete indicator that would argue against this being legitimate)
+- best_validation: string (the single best query/log source to validate it quickly)
+
+Keep it concise and do not assume extra telemetry unless you name it explicitly.
+"""
+
+CAUSAL_HUMILITY = """
+CAUSAL HUMILITY + PIVOT STRATEGY (Stateless)
+Do not assume a single root cause from one notable. Use this reasoning procedure:
+
+1) Generate 3-5 competing hypotheses for how the observable could occur.
+   - Include at least 1 benign hypothesis.
+   - Include at least 2 distinct adversary hypotheses (different initial vectors).
+
+2) For each hypothesis:
+   - hypothesis_type: "benign" or "adversary"
+   - hypothesis: string description
+   - evidence_support: list of field=value pairs from the notable that support it
+   - evidence_gaps: list of critical evidence that is missing
+   - best_pivots: list of 1-2 pivots (each with log_source and key_fields)
+
+3) Pivot selection rules (use what is available; do not invent telemetry):
+   - If network origin matters: pivot to VPN/jump host/PAM session logs and firewall allow logs.
+   - If identity is in question: pivot to IdP sign-in logs (if federated/hybrid) and AD authentication trails.
+   - If local compromise is suspected: pivot to endpoint telemetry (Sysmon/EDR) and process/access signals.
+   - If only Windows Security logs exist, state limitations explicitly and downgrade confidence.
+"""
+
+CONTEXT_ENRICHMENT = """
+CONTEXT ENRICHMENT + BASELINE-FIRST (Reasoning Rule)
+When a notable includes any network-origin fields (e.g., IpAddress/src_ip/dest_ip), do:
+
+A) Enrichment (only if the field exists):
+- geo: iplocation on the IP
+- ownership: ASN/org lookup for the IP
+- internal_vs_external: check against internal CIDR ranges
+- known_egress: check against known VPN/proxy/jump egress lists
+- reputation: only if a reputation source is available; otherwise state "not available"
+
+B) Baseline (avoid one-off conclusions):
+- Propose baseline queries that answer:
+  - How common is this actor->target interaction in the last N days?
+  - What source IP ranges are typical for this user/host/app?
+  - Is the timing/volume unusual relative to baseline?
+- Prefer per-entity baselines (user, host, source IP range) over global counts.
+
+C) Output requirements:
+- State the enriched context explicitly OR state "not available" for each.
+- Use baseline results (or absence of baseline data) to set confidence.
+- If baseline cannot be run, downgrade confidence and label as "needs baseline validation".
+- List any limitations in the limitations field.
+"""
+
+MITIGATION_RULES = """
+MITIGATIONS (Containment + Hardening only)
+When proposing mitigations, do NOT list generic best practices. Use this procedure:
+
+1) Identify the likely ATT&CK technique(s) implicated by the evidence.
+
+2) Propose mitigations in TWO tiers only (max 5 total, ranked by risk reduction):
+   - Containment (hours): actions that reduce immediate risk
+   - Hardening (days/weeks): controls that reduce recurrence
+
+3) For each mitigation, include:
+   - rationale: which evidence/inference it addresses (cite fields/observables)
+   - preconditions: environment dependencies inferred from notable, or "unknown" if not determinable
+   - tradeoffs: operational impact or failure modes
+   - confidence_effect: what would increase/decrease confidence that this mitigation is the right priority
+
+4) Ensure mitigations match the scenario:
+   - Only include controls relevant to the technique and feasible under inferred conditions
+   - Avoid suggesting disruptive actions (e.g., "isolate DC") without a narrower, safer alternative
+   - Cite ATT&CK mitigations by ID where relevant (e.g., M1032, M1026, M1030)
+"""
+
+PROCEDURE = """
+PROCEDURE:
+1. **Think silently**: classify activity -> tactics -> candidate techniques.
+2. Self-check against the tactic checklist.
+3. Decode/deobfuscate common encodings (Base64, hex, URL-encoded, gzip) if found.
+4. Use sub-techniques when specific variant is confirmed (e.g., T1059.001 for PowerShell).
+5. Default to parent techniques when sub-technique cannot be precisely assigned.
+6. Apply Tactic Framing, Benign Explanations, Causal Humility, and Context Enrichment reasoning.
+"""
+
+OUTPUT_SCHEMA = """
+Use the analyze_notable tool to return your analysis. The tool expects the following schema:
+
+SCHEMA:
+- ttp_analysis: list of objects, each with:
+    - ttp_id: string (MITRE ATT&CK ID, e.g. "T1059.001")
+    - ttp_name: string (official technique name)
+    - confidence_score: float (0.0-1.0)
+    - explanation: string (A brief explanation of why this TTP was inferred, using quoted evidence from the alert. End with "Uncertainty: [brief statement]" acknowledging what is inferred vs. direct evidence, and any missing context like geo/VPN metadata, edge telemetry, etc.)
+    - tactic_span_note: string (One sentence naming other ATT&CK tactics this technique commonly supports and why they may apply here)
+    - evidence_fields: list of strings (Specific alert field=value pairs that directly support this TTP)
+    - immediate_actions: string (Urgent remediation steps if this TTP is confirmed)
+    - remediation_recommendations: string (Specific defensive measures citing MITRE mitigations by ID)
+    - mitre_url: mitre version permalink url for the technique
+
+- attack_chain: object with:
+    - likely_previous_steps: list of EXACTLY 1 object with:
+        - tactic_id: string (MITRE ATT&CK Tactic ID)
+        - tactic_name: string (official tactic name)
+        - mitre_url: string (tactic MITRE version permalink URL)
+        - why_this_step: string (One concise sentence explaining the hypothesis - cite alert field=value pairs)
+        - what_to_check: string (One concise sentence listing specific artifacts, event IDs, or data sources to investigate)
+        - uncertainty_alternatives: string (One concise sentence describing what is uncertain or alternative explanations)
+        - investigation_tree: object with exactly 3 questions (Q1, Q2, Q3), each containing question: string
+    - likely_next_steps: list of EXACTLY 1 object (same structure as likely_previous_steps)
+    - kill_chain_phase: string (must match MITRE phase name)
+    - tactic_span_note: string (One-line note naming other ATT&CK tactics the top technique supports)
+
+- ioc_extraction: object with:
+    - ip_addresses: list of strings
+    - domains: list of strings
+    - user_accounts: list of strings
+    - hostnames: list of strings
+    - file_paths: list of strings
+    - process_names: list of strings
+    - file_hashes: list of strings
+    - event_ids: list of strings
+    - urls: list of strings
+
+- correlation_keys: object with:
+    - primary_indicators: list of strings
+    - search_terms: list of strings
+    - time_window_suggested: string
+
+- evidence_vs_inference: object with:
+    - evidence: list of strings (Literal field=value facts from the alert)
+    - inferences: list of strings (Hypotheses with noted uncertainties)
+
+- containment_playbook: object with:
+    - immediate: list of strings (2-4 concrete containment actions within hours)
+    - short_term: list of strings (2-4 hardening actions within 24-48h)
+    - references: list of strings (ATT&CK Mitigations by ID)
+
+- splunk_enrichment: list of 1-4 objects, each with:
+    - phase: "previous" or "next"
+    - supports_tactic: string
+    - purpose: string
+    - query: string (Splunk SPL using only observable data; index/sourcetype as PLACEHOLDER)
+    - confidence_boost_rule: string
+    - confidence_reduce_rule: string
+
+- tactic_framing: object with:
+    - primary_tactic: object with tactic_id, tactic_name, justification
+    - secondary_tactics: list of objects with tactic_id, tactic_name, why_plausible
+    - disambiguation_checklist: list of 3-5 strings (questions/fields/log sources to confirm)
+
+- benign_explanations: list of 3-5 objects, each with:
+    - hypothesis: string (the benign explanation)
+    - expect_if_true: list of 1-2 strings (indicators expected if legitimate)
+    - argue_against: string (indicator arguing against legitimacy)
+    - best_validation: string (best query/log source to validate)
+
+- competing_hypotheses: list of 3-5 objects, each with:
+    - hypothesis_type: "benign" or "adversary"
+    - hypothesis: string
+    - evidence_support: list of strings (field=value pairs supporting this)
+    - evidence_gaps: list of strings (critical missing evidence)
+    - best_pivots: list of objects with log_source and key_fields
+
+- context_enrichment: object with:
+    - enrichment_steps: list of objects, each with field, enrichment_type, result_or_status
+    - baseline_queries: list of objects, each with purpose and query
+    - limitations: string (what cannot be concluded from provided data)
+"""
+
+RULES = """
+RULES:
+- CRITICAL: NO EMOJIS OR UNICODE SYMBOLS; Use only plain ASCII text characters.
+- ATTACK CHAIN: ALWAYS include EXACTLY 1 previous step and EXACTLY 1 next step as hypotheses.
+- TIME WINDOWS: If ALERT_TIME is provided, previous queries use earliest=-24h@h latest=ALERT_TIME, next queries use earliest=ALERT_TIME latest=+24h@h. If not provided, use relative time.
+- EVIDENCE VS INFERENCE: Populate "evidence" with only direct field=value facts. Populate "inferences" with hypotheses and note uncertainties.
+- CONTAINMENT: Keep to 3-6 bullets total. Cite ATT&CK mitigations by ID.
+- HUNT FAMILIES: Provide 3-4 enrichment queries covering applicable telemetry families.
+- All enrichment queries must use only evidence present in the alert; index/sourcetype as PLACEHOLDER.
+- TTP EXPLANATIONS: Always end with "Uncertainty: [brief statement]".
+- IOC EXTRACTION: Extract ALL IOCs; leave arrays empty [] if not found. Do not label core OS components as IOCs without malicious context.
+- STATELESS: If context is missing (e.g., IP ownership, VPN status), state "unknown" and list what would disambiguate.
+- All fields and keys must match the schema exactly.
+"""
+
+
 class TTPValidator:
     """Validator for MITRE ATT&CK TTP IDs using local data.
     
@@ -140,6 +411,58 @@ class BedrockAnalyzer:
         
         # Store last response for markdown generation
         self.last_llm_response = None
+        # Store raw content for debugging
+        self.last_raw_content = None
+
+    def _build_prompt(self, alert_text: str, alert_time: Optional[str], valid_ttps_list: str) -> str:
+        """Assemble the full prompt from modular sections.
+        
+        Args:
+            alert_text: Formatted alert text to analyze.
+            alert_time: Optional ISO timestamp of the alert.
+            valid_ttps_list: Comma-separated list of valid TTP IDs.
+            
+        Returns:
+            Complete prompt string for LLM.
+        """
+        alert_time_str = f"\n**ALERT_TIME:** {alert_time}\n" if alert_time else ""
+        
+        return f"""You are a cybersecurity expert mapping MITRE ATT&CK techniques from a single alert.
+{alert_time_str}
+---
+
+{ANALYST_DOCTRINE}
+
+{EVIDENCE_GATE}
+
+{SCORING_RUBRIC}
+
+{TACTIC_FRAMING}
+
+{BENIGN_EXPLANATIONS}
+
+{CAUSAL_HUMILITY}
+
+{CONTEXT_ENRICHMENT}
+
+{MITIGATION_RULES}
+
+{PROCEDURE}
+
+Use only the ATT&CK techniques from this allowed list:
+{valid_ttps_list}
+
+SECURITY ALERT INPUT:
+{alert_text}
+
+---
+
+{OUTPUT_SCHEMA}
+
+---
+
+{RULES}
+"""
     
     def format_alert_input(self, summary: str, risk_index: Dict[str, Any], raw_log: Dict[str, Any]) -> str:
         """Format alert data into a structured text block.
@@ -171,7 +494,8 @@ class BedrockAnalyzer:
         """Use LLM to analyze the alert and identify relevant MITRE ATT&CK TTPs.
         
         This method constructs a detailed prompt with analyst doctrine, sends it to
-        Bedrock Nova Pro, parses the structured JSON response, and filters out invalid TTPs.
+        Bedrock Nova Pro using forced tool calling, parses the structured response,
+        and filters out invalid TTPs.
         
         Args:
             alert_text: Formatted alert text to analyze.
@@ -189,152 +513,8 @@ class BedrockAnalyzer:
         total_ttps = self.validator.get_ttp_count()
         logger.info(f"Loaded {total_ttps} valid TTPs for prompt")
         
-        alert_time_str = f"\n        **ALERT_TIME:** {alert_time}\n        " if alert_time else ""
-        prompt = f"""You are a cybersecurity expert mapping MITRE ATT&CK techniques from a single alert.
-
-{alert_time_str}
-        ---
-
-        ANALYST DOCTRINE (apply to every case)
-        - MITRE ATT&CK is many-to-many: a single technique may support several tactics. Always state (a) the tactic you're assigning in this alert AND (b) other plausible tactics this technique commonly serves (tactic-span note). Base on MITRE ATT&CK v17.
-        - FACT vs. INFERENCE: List literal, direct alert evidence first (field=value from the alert), then inferences and assumptions separately (with uncertainty).
-        - Containment Focus: Provide a minimal 3-step containment playbook (containment, eradication, recovery) aligned with NIST 800-61 and mapped to relevant ATT&CK mitigations.
-        - Hunt by Telemetry Family: When proposing enrichment, include at least one check from each applicable telemetry family:
-            * Authentication (failures/successes, privilege use)
-            * Directory/Identity changes (object modifications)
-            * Lateral movement (remote services, shares, tasks)
-            * Persistence/Privilege (new users/groups, scheduled tasks)
-            * Kerberos/Ticketing (KDC/pre-auth anomalies)
-        - IOC labeling hygiene: Do not list core OS/generic binaries as IOCs without explicit malicious context. Instead, list as "system_components_observed" if present in the alert.
-
-        EVIDENCE-GATE: Only include a technique (TTP) if: 
-        A. There is a direct data-component match in the alert (quote it).
-        B. Your explanation cites the matching field/value.
-        C. No inference or external context is necessary.
-        D. If evidence correctness depends on context not in the log (e.g., domain internal/external, IP a DC), drop to the parent technique or reduce confidence by ≥0.20 and state the missing context in your explanation.
-
-        Scoring Rubric: 
-        - high ≥ 0.80 = direct, unambiguous
-        - med 0.50-0.79 = strongly suggestive; one element missing
-        - low < 0.30 = plausible but needs corroboration
-
-        MITIGATIONS & DETECTIONS:
-        - Prefer ATT&CK mitigations that materially reduce technique feasibility (e.g., M1032 MFA, M1026 PAM, M1030 segmentation).
-        - If uncertain between sub-technique and parent, select the parent and state why; use the sub-technique only with explicit evidence. 
-
-        PROCEDURE:
-        1. **Think silently**: classify activity -> tactics -> candidate techniques.
-        2. Self-check against the tactic checklist.
-        3. Decode/deobfuscate common encodings (Base64, hex, URL-encoded, gzip) if found.
-        4. Use sub-techniques when specific variant is confirmed (e.g., T1059.001 for PowerShell).
-        5. Default to parent techniques when sub-technique cannot be precisely assigned.
-        6. Use only the ATT&CK techniques from this allowed list:
-        {valid_ttps_list}
-
-        SECURITY ALERT INPUT:
-        {alert_text}
-
-        ---
-
-        OUTPUT FORMAT: Return ONLY a single valid JSON object. Do not include markdown code fences or any text outside the JSON. Start your response with an opening brace and end with a closing brace . The JSON object must have these top-level keys:
-        - `ttp_analysis`
-        - `attack_chain`
-        - `ioc_extraction`
-        - `correlation_keys`
-        - `evidence_vs_inference`
-        - `containment_playbook`
-        - `splunk_enrichment`
-
-        SCHEMA:
-        - ttp_analysis: list of objects, each with:
-            - ttp_id: string (MITRE ATT&CK ID, e.g. "T1059.001")
-            - ttp_name: string (official technique name)
-            - confidence_score: float (0.0–1.0)
-            - explanation: string (A brief explanation of why this TTP was inferred, using quoted evidence from the alert. End with "Uncertainty: [brief statement]" acknowledging what is inferred vs. direct evidence, and any missing context like geo/VPN metadata, edge telemetry, etc.)
-            - tactic_span_note: string (One sentence naming other ATT&CK tactics this technique commonly supports and why they may apply here, e.g. "This technique also commonly supports Persistence (TA0003) and Privilege Escalation (TA0004) when used to maintain access or elevate privileges")
-            - evidence_fields: list of strings (Specific alert field=value pairs that directly support this TTP, e.g. ["event_id=4624", "user=DOMAIN\\\\admin", "ip_address=203.0.113.45"])
-            - immediate_actions: string (Urgent remediation steps if this TTP is confirmed, e.g. "Disable affected user account, reset credentials, isolate affected system")
-            - remediation_recommendations: string (Specific defensive measures to prevent or detect this technique, citing MITRE mitigations by ID where relevant, e.g. M1032, M1026, M1030)
-            - mitre_url: mitre version permalink url for the technique (e.g."https://attack.mitre.org/versions/v17/techniques/T1059/001/")
-
-        - attack_chain: object with:
-            - likely_previous_steps: list of EXACTLY 1 object (ALWAYS include exactly 1 previous step as a hypothesis), with:
-                - tactic_id: string (MITRE ATT&CK Tactic ID, e.g. "TA0006")
-                - tactic_name: string (official tactic name)
-                - mitre_url: string (tactic mitre url - MITRE version permalink URL, e.g. "https://attack.mitre.org/versions/v17/tactics/TA0006/")
-                - why_this_step: string (One concise sentence explaining the hypothesis - cite alert field=value pairs that suggest this step)
-                - what_to_check: string (One concise sentence listing specific artifacts, event IDs, or data sources to investigate next)
-                - uncertainty_alternatives: string (One concise sentence describing what is uncertain, missing context, or alternative explanations)
-                - investigation_tree: object with exactly 3 questions (Q1, Q2, Q3), each containing:
-                    - question: string (the investigation question)
-            - likely_next_steps: list of EXACTLY 1 object (ALWAYS include exactly 1 next step as a hypothesis), with:
-                - tactic_id: string (MITRE ATT&CK Tactic ID, e.g. "TA0008")
-                - tactic_name: string (official tactic name)
-                - mitre_url: string (tactic mitre url - MITRE version permalink URL, e.g. "https://attack.mitre.org/versions/v17/tactics/TA0008/")
-                - why_this_step: string (One concise sentence explaining the hypothesis - cite alert field=value pairs that suggest this step)
-                - what_to_check: string (One concise sentence listing specific artifacts, event IDs, or data sources to investigate next)
-                - uncertainty_alternatives: string (One concise sentence describing what is uncertain, missing context, or alternative explanations)
-                - investigation_tree: object with exactly 3 questions (Q1, Q2, Q3), each containing:
-                    - question: string (the investigation question)
-            - kill_chain_phase: string (must match MITRE phase name; The most appropriate cyber kill chain phase; based on the identified technique(s) and their ATT&CK tactic assignments.)
-            - tactic_span_note: string (One-line note naming other ATT&CK tactics that the top technique commonly supports, with rationale, and why you selected the current kill_chain_phase for this alert)
-
-        - ioc_extraction: object with:
-            - ip_addresses: list of strings (All IP addresses found in the alert, e.g. ["203.0.113.45"])
-            - domains: list of strings (All domain names found, e.g. ["malicious.example.com"])
-            - user_accounts: list of strings (All user accounts found, e.g. ["DOMAIN\\\\admin"])
-            - hostnames: list of strings (All hostnames/computers found, e.g. ["DC-01", "WORKSTATION-01"])
-            - file_paths: list of strings (All file paths found, e.g. ["C:\\\\Windows\\\\System32\\\\lsass.exe"])
-            - process_names: list of strings (All process names found, e.g. ["powershell.exe", "cmd.exe"])
-            - file_hashes: list of strings (MD5, SHA1, or SHA256 hashes if present, e.g. ["a1b2c3d4..."])
-            - event_ids: list of strings (Windows Event IDs if present, e.g. ["4624", "4625"])
-            - urls: list of strings (URLs found in the alert)
-
-        - correlation_keys: object with:
-            - primary_indicators: list of strings (Most important fields for SIEM correlation, e.g. ["ip_address=203.0.113.45", "user=DOMAIN\\\\admin"])
-            - search_terms: list of strings (Key terms for searching across logs, e.g. ["203.0.113.45", "DOMAIN\\\\admin", "DC-01"])
-            - time_window_suggested: string (Suggested time window for correlation searches, e.g. "-24h to +24h")
-
-        - evidence_vs_inference: object with:
-            - evidence: list of strings (Literal field=value facts copied directly from the alert, e.g. ["event_id=4624", "user=DOMAIN\\\\admin", "ip_address=203.0.113.45"])
-            - inferences: list of strings (Hypotheses, deductions, and assumptions with noted uncertainties, e.g. ["IP categorized as external by convention; alert lacks geo/VPN metadata", "Credentials assumed compromised; no direct evidence of theft method"])
-
-        - containment_playbook: object with:
-            - immediate: list of strings (2-4 concrete actions that can be executed within hours, e.g. ["Expire/kill active sessions for DOMAIN\\\\admin", "Rotate credentials for affected account", "Block IP 203.0.113.45 at firewall"])
-            - short_term: list of strings (2-4 actions within 24-48h, e.g. ["Restrict egress from DC-01", "Review AD object modifications", "Preserve logs/artifacts for forensics"])
-            - references: list of strings (ATT&CK Mitigations by ID where relevant, e.g. ["M1032 Multi-factor Authentication", "M1026 Privileged Account Management", "M1030 Network Segmentation"])
-
-        - splunk_enrichment: list of 1-4 objects, each with:
-            - phase: "previous" or "next" — which kill chain side this supports
-            - supports_tactic: string — one tactic from `likely_previous_steps' or `likely_next_steps`
-            - purpose: string — what evidence the query attempts to find
-            - query: string — write a Splunk SPL query using only data observable in the alert. Use relative time windows: previous queries use earliest=-24h@h latest=ALERT_TIME, next queries use earliest=ALERT_TIME latest=+24h@h
-            - confidence_boost_rule: string — what result pattern would increase confidence in the tactic
-            - confidence_reduce_rule: string — what null or negative result would imply
-
-        ---
-
-        RULES:
-        - CRITICAL: NO EMOJIS OR UNICODE SYMBOLS; Do NOT include any emojis, unicode symbols, or special characters anywhere in your JSON response. Use only plain ASCII text characters.
-        - ATTACK CHAIN: ALWAYS include EXACTLY 1 previous step and EXACTLY 1 next step** - These are hypotheses based on typical attack patterns. Quote alert field=value pairs that suggest each step, but you may infer tactics without direct proof. Include uncertainty_alternatives to acknowledge what's unknown.
-        - **ATTACK-CHAIN TACTIC-SPAN REQUIREMENT** - For the top technique you identify, add a one-line "tactic_span_note" naming other ATT&CK tactics that technique commonly supports (with rationale) and why you selected the current kill_chain_phase for this alert.
-        - **TIME WINDOWS: Use ALERT_TIME for relative windows** - If ALERT_TIME is provided, previous queries use earliest=-24h@h latest=ALERT_TIME, next queries use earliest=ALERT_TIME latest=+24h@h. If not provided, use relative time (earliest=-24h@h, latest=+24h@h).
-        - **EVIDENCE VS INFERENCE** - Populate "evidence" with only direct field=value facts from the alert. Populate "inferences" with hypotheses and note uncertainties (geo/VPN tagging absent, protocol unknown, etc.).
-        - **CONTAINMENT PLAYBOOK RULES** - Keep to 3-6 bullets total (concise). Examples: expire/kill active sessions/tokens for affected identities; rotate credentials; restrict egress from involved hosts; block non-approved admin source paths; preserve logs/artifacts. Cite ATT&CK mitigations by ID where relevant (e.g., M1032 MFA, M1026 Privileged Account Management, M1030 Network Segmentation, M1018 User Account Management, M1027 Password Policies).
-        - **HUNT FAMILIES COVERAGE** - Provide 3-4 enrichment queries total. When the alert involves Windows domain authentication or privileged accounts, ensure coverage across these families (as applicable to the alert's fields): (A) Authentication anomalies (e.g., prior failures around the same user/IP), (B) Directory/Identity changes (e.g., object changes or new users/groups - event IDs 5136, 4720, 4728, 4732), (C) Lateral-movement effects (e.g., remote service creation, share access, scheduled tasks), (D) Kerberos clues (e.g., pre-auth or ticket anomalies - event IDs 4769, 4776). Use only values present in the alert and generic event families; do not invent fields or indexes. Keep index/sourcetype as PLACEHOLDER unless provided by the alert.
-        - All enrichment queries must be limited to evidence present in the alert (do not fabricate fields, indexes, or sourcetypes)
-        - Index/sourcetype/source must be left as `PLACEHOLDER` unless clearly identifiable in alert
-        - TTP EXPLANATIONS: Always end with "Uncertainty: [brief statement]" acknowledging what is inferred vs. direct evidence
-        - TTP TACTIC SPAN NOTE: For each TTP, add "tactic_span_note" naming other ATT&CK tactics that technique commonly supports and why they may apply here (one sentence).
-        - TTP EVIDENCE FIELDS: For each TTP, list all alert field=value pairs that directly support it (e.g. ["event_id=4624", "user=DOMAIN\\\\admin"])
-        - TTP IMMEDIATE ACTIONS: Provide urgent remediation steps if this TTP is confirmed (e.g. "Disable user account, reset credentials, isolate system")
-        - TTP REMEDIATION: Provide specific defensive measures based on MITRE mitigations for this technique, citing mitigation IDs (e.g., M1032, M1026, M1030)
-        - IOC EXTRACTION: Extract ALL IOCs from the alert (IPs, domains, users, hosts, processes, file paths, hashes, event IDs, URLs) - leave arrays empty [] if not found. Do not label core OS components or generic system binaries as IOCs unless the alert contains explicit malicious context.
-        - CORRELATION KEYS: Identify primary indicators and search terms most useful for SIEM correlation searches
-        - Do not return markdown, comments, or extra prose
-        - Output only the raw JSON object
-        - All fields and keys must match exactly
-        """
+        # Build prompt using modular sections
+        prompt = self._build_prompt(alert_text, alert_time, valid_ttps_list)
         
         # Input validation
         if not alert_text or not alert_text.strip():
@@ -361,10 +541,14 @@ class BedrockAnalyzer:
                                 "content": [{"text": prompt}]
                             }
                         ],
+                        toolConfig={
+                            "tools": [ANALYZE_NOTABLE_TOOL],
+                            "toolChoice": {"tool": {"name": "analyze_notable"}}
+                        },
                         inferenceConfig={
                             "maxTokens": 2000,
-                            "temperature": 1.0,
-                            "topP": 0.9
+                            "temperature": 0.7,
+                            "topP": 0.95
                         }
                     )
                     
@@ -382,24 +566,37 @@ class BedrockAnalyzer:
                         logger.error(f"All {max_retries} API call attempts failed")
                         raise
             
-            # Parse the response
+            # Parse the response - prefer toolUse block
             logger.info("Parsing LLM response")
-            content = response['output']['message']['content'][0]['text']
-            logger.info(f"Raw LLM response length: {len(content)} characters")
+            content_blocks = response['output']['message']['content']
             
-            # Store raw content for debugging
-            self.last_raw_content = content
+            result = None
             
-            try:
-                result = json.loads(content)
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse JSON response: {e}")
-                logger.error(f"Response content (first 500 chars): {content[:500]}")
-                # Store the raw content as the response so UI can display it
-                self.last_llm_response = {"raw_error": content}
+            # Try toolUse block first (preferred path with forced tool choice)
+            for block in content_blocks:
+                if 'toolUse' in block:
+                    tool_input = block['toolUse'].get('input', {})
+                    if isinstance(tool_input, dict):
+                        logger.info("Parsed response from toolUse block")
+                        result = tool_input
+                        break
+            
+            # Fallback: if no toolUse, check for text block (shouldn't happen with forced tool choice)
+            if result is None:
+                for block in content_blocks:
+                    if 'text' in block:
+                        raw_text = block['text']
+                        logger.warning(f"No toolUse block found, falling back to text parsing")
+                        self.last_raw_content = raw_text
+                        self.last_llm_response = {"raw_error": raw_text}
+                        return []
+                
+                # No toolUse or text block found
+                logger.error("No toolUse or text block found in response")
+                self.last_llm_response = {"raw_error": str(content_blocks)}
                 return []
             
-            logger.info(f"Parsed JSON result type: {type(result)}")
+            logger.info(f"Parsed result type: {type(result)}")
             
             # Store the last LLM response for markdown generation
             self.last_llm_response = result
@@ -413,7 +610,7 @@ class BedrockAnalyzer:
             
             # Handle the structured response with ttp_analysis
             if "ttp_analysis" in result:
-                logger.info(f"Processing structured response with ttp_analysis")
+                logger.info("Processing structured response with ttp_analysis")
                 if not isinstance(result["ttp_analysis"], list):
                     logger.error(f"ttp_analysis must be a list, got {type(result['ttp_analysis'])}")
                     return []
@@ -468,4 +665,3 @@ def extract_score(ttp: Dict[str, Any]) -> float:
         if key in ttp:
             return ttp[key]
     return 0.0
-
