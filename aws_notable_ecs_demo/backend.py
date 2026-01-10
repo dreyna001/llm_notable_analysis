@@ -56,7 +56,7 @@ def normalize_alert(request_body):
                 summary = payload[:400] if len(payload) > 400 else payload
                 raw_log = {"raw_event": payload}
         except json.JSONDecodeError:
-            logger.warning("Failed to parse payload as JSON, treating as raw text")
+            logger.info("Failed to parse payload as JSON, treating as raw text")
             summary = payload[:400] if len(payload) > 400 else payload
             raw_log = {"raw_event": payload}
     else:

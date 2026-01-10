@@ -34,7 +34,19 @@ async function analyzeAlert() {
         return;
     }
     
-    const payloadType = document.querySelector('input[name="payloadType"]:checked').value;
+    let payloadType = document.querySelector('input[name="payloadType"]:checked').value;
+
+    // If user selected raw_json but the payload isn't valid JSON, downgrade to raw_text.
+    // This avoids backend warnings and prevents accidental "raw_json" labeling.
+    if (payloadType === 'raw_json') {
+        try {
+            JSON.parse(payload);
+        } catch (_e) {
+            payloadType = 'raw_text';
+            statusDiv.className = 'analyzing';
+            statusDiv.innerHTML = '<span class="spinner"></span>Selected Raw JSON, but payload is not valid JSON. Sending as Raw Text...';
+        }
+    }
     
     // Build request body
     const requestBody = {
@@ -58,10 +70,22 @@ async function analyzeAlert() {
         });
         
         if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+            const contentType = response.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+            }
+            const text = await response.text();
+            const snippet = (text || '').slice(0, 300).replace(/\s+/g, ' ').trim();
+            throw new Error(`HTTP ${response.status}: ${response.statusText}${snippet ? ` — ${snippet}` : ''}`);
         }
         
+        const okContentType = response.headers.get('content-type') || '';
+        if (!okContentType.includes('application/json')) {
+            const text = await response.text();
+            const snippet = (text || '').slice(0, 300).replace(/\s+/g, ' ').trim();
+            throw new Error(`Expected JSON but got ${okContentType || 'unknown content-type'}${snippet ? ` — ${snippet}` : ''}`);
+        }
         const data = await response.json();
         
         // Show success status
