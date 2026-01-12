@@ -44,7 +44,10 @@ ANALYZE_NOTABLE_TOOL = {
                                 "evidence_fields": {"type": "array", "items": {"type": "string"}},
                                 "immediate_actions": {"type": "string"},
                                 "remediation_recommendations": {"type": "string"},
-                                "mitre_url": {"type": "string"},
+                                "mitre_url": {
+                                    "type": "string",
+                                    "pattern": r"^$|^https://attack\\.mitre\\.org/versions/v17/techniques/T\\d{4}(?:/\\d{3})?/?$",
+                                },
                             },
                             "required": [
                                 "ttp_id",
@@ -73,7 +76,10 @@ ANALYZE_NOTABLE_TOOL = {
                                     "properties": {
                                         "tactic_id": {"type": "string"},
                                         "tactic_name": {"type": "string"},
-                                        "mitre_url": {"type": "string"},
+                                        "mitre_url": {
+                                            "type": "string",
+                                            "pattern": r"^$|^https://attack\\.mitre\\.org/versions/v17/tactics/TA\\d{4}/?$",
+                                        },
                                         "why_this_step": {"type": "string"},
                                         "what_to_check": {"type": "string"},
                                         "uncertainty_alternatives": {"type": "string"},
@@ -124,7 +130,10 @@ ANALYZE_NOTABLE_TOOL = {
                                     "properties": {
                                         "tactic_id": {"type": "string"},
                                         "tactic_name": {"type": "string"},
-                                        "mitre_url": {"type": "string"},
+                                        "mitre_url": {
+                                            "type": "string",
+                                            "pattern": r"^$|^https://attack\\.mitre\\.org/versions/v17/tactics/TA\\d{4}/?$",
+                                        },
                                         "why_this_step": {"type": "string"},
                                         "what_to_check": {"type": "string"},
                                         "uncertainty_alternatives": {"type": "string"},
@@ -226,7 +235,10 @@ ANALYZE_NOTABLE_TOOL = {
                         "properties": {
                             "immediate": {"type": "array", "items": {"type": "string"}},
                             "short_term": {"type": "array", "items": {"type": "string"}},
-                            "references": {"type": "array", "items": {"type": "string"}},
+                            "references": {
+                                "type": "array",
+                                "items": {"type": "string", "pattern": r"^M\\d{4}$"},
+                            },
                         },
                         "required": ["immediate", "short_term", "references"],
                     },
@@ -660,9 +672,13 @@ RULES:
 - ATTACK CHAIN: ALWAYS include EXACTLY 1 previous step and EXACTLY 1 next step as hypotheses.
 - TIME WINDOWS: If ALERT_TIME is provided, previous queries use earliest=-24h@h latest=ALERT_TIME, next queries use earliest=ALERT_TIME latest=+24h@h. If not provided, use relative time.
 - EVIDENCE VS INFERENCE: Populate "evidence" with only direct field=value facts. Populate "inferences" with hypotheses and note uncertainties.
-- CONTAINMENT: Keep to 3-6 bullets total. Cite ATT&CK mitigations by ID.
+- CONTAINMENT: Keep to 3-6 bullets total. Cite ATT&CK mitigations by ID (e.g., M1032). Do NOT output URLs in containment references.
 - HUNT FAMILIES: Provide 3-4 enrichment queries covering applicable telemetry families.
 - All enrichment queries must use only evidence present in the alert; index/sourcetype as PLACEHOLDER.
+- URL POLICY:
+  - All fields named "mitre_url" MUST be a MITRE ATT&CK v17 permalink (https://attack.mitre.org/versions/v17/...) OR an empty string.
+  - Never output example.com (or any example/test domain) anywhere.
+  - Never output the word PLACEHOLDER/placeholder anywhere EXCEPT inside Splunk query strings for index/sourcetype placeholders.
 - TTP EXPLANATIONS: Always end with "Uncertainty: [brief statement]".
 - IOC EXTRACTION: Extract ALL IOCs; leave arrays empty [] if not found. Do not label core OS components as IOCs without malicious context.
 - STATELESS: If context is missing (e.g., IP ownership, VPN status), state "unknown" and list what would disambiguate.
@@ -690,6 +706,74 @@ def validate_response_schema(result: Dict[str, Any]) -> Tuple[bool, Optional[str
         if not isinstance(result[key], expected_type):
             return False, f"Key '{key}' must be {expected_type.__name__}, got {type(result[key]).__name__}"
     
+    return True, None
+
+
+MITRE_V17_TECHNIQUE_URL_RE = re.compile(r"^https://attack\\.mitre\\.org/versions/v17/techniques/T\\d{4}(?:/\\d{3})?/?$")
+MITRE_V17_TACTIC_URL_RE = re.compile(r"^https://attack\\.mitre\\.org/versions/v17/tactics/TA\\d{4}/?$")
+
+
+def _iter_strings(obj: Any, *, path: str = "") -> List[Tuple[str, str]]:
+    """Collect (path, value) for all string leaves in a nested structure."""
+    found: List[Tuple[str, str]] = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            child_path = f"{path}.{k}" if path else str(k)
+            found.extend(_iter_strings(v, path=child_path))
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            child_path = f"{path}[{i}]"
+            found.extend(_iter_strings(v, path=child_path))
+    elif isinstance(obj, str):
+        found.append((path, obj))
+    return found
+
+
+def validate_content_policies(result: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """Validate policy constraints that are hard to express purely via JSON schema.
+
+    Enforces:
+    - No example.com (or other example/test domains) anywhere
+    - No PLACEHOLDER tokens except inside query strings
+    - mitre_url fields must be MITRE ATT&CK v17 permalinks or empty
+    - containment_playbook.references must be mitigation IDs (M####), not URLs
+    """
+    # 1) Containment references must be mitigation IDs (M####)
+    try:
+        refs = result.get("containment_playbook", {}).get("references", [])
+        if isinstance(refs, list):
+            for i, ref in enumerate(refs):
+                if not isinstance(ref, str):
+                    return False, f"containment_playbook.references[{i}] must be a string"
+                if not re.fullmatch(r"M\\d{4}", ref.strip()):
+                    return False, f"containment_playbook.references[{i}] must be an ATT&CK mitigation ID like M1032 (got: {ref!r})"
+    except Exception:
+        return False, "Failed to validate containment_playbook.references"
+
+    # 2) Global string policy scan
+    for p, s in _iter_strings(result):
+        s_lower = s.lower()
+
+        if "example.com" in s_lower:
+            return False, f"Disallowed placeholder domain in {p}"
+
+        # Allow PLACEHOLDER only within query strings (we intentionally use it for index/sourcetype templates)
+        if "placeholder" in s_lower:
+            if not p.endswith(".query"):
+                return False, f"Disallowed PLACEHOLDER token outside query field: {p}"
+
+        # Enforce MITRE-only URLs for mitre_url fields (or empty string)
+        if p.endswith("mitre_url"):
+            if s.strip() == "":
+                continue
+            if MITRE_V17_TECHNIQUE_URL_RE.match(s) or MITRE_V17_TACTIC_URL_RE.match(s):
+                continue
+            return False, f"Invalid mitre_url in {p}: must be MITRE v17 permalink or empty"
+
+        # If any other field contains an http(s) URL, it's not allowed (only mitre_url may contain URLs)
+        if ("http://" in s_lower or "https://" in s_lower) and (not p.endswith("mitre_url")):
+            return False, f"Disallowed URL outside mitre_url field: {p}"
+
     return True, None
 
 
@@ -1201,6 +1285,13 @@ SECURITY ALERT INPUT:
                     error_msg = f"Schema validation: {validation_error}"
                     raw_content = raw_content or str(result)[:2000]
                     result = None  # treat as parse failure, triggers retry
+                else:
+                    policy_ok, policy_err = validate_content_policies(result)
+                    if not policy_ok:
+                        logger.warning(f"Content policy validation failed: {policy_err}")
+                        error_msg = f"Content policy: {policy_err}"
+                        raw_content = raw_content or str(result)[:2000]
+                        result = None
             
             # Content retry: if parsing or validation failed, try once more with a repair prompt
             if result is None and error_msg:
@@ -1226,6 +1317,11 @@ SECURITY ALERT INPUT:
                         is_valid, validation_error = validate_response_schema(result)
                         if not is_valid:
                             logger.error(f"Retry schema validation failed: {validation_error}")
+                            self.last_llm_response = {"raw_error": retry_raw or str(result)[:2000]}
+                            return []
+                        policy_ok, policy_err = validate_content_policies(result)
+                        if not policy_ok:
+                            logger.error(f"Retry content policy validation failed: {policy_err}")
                             self.last_llm_response = {"raw_error": retry_raw or str(result)[:2000]}
                             return []
                         logger.info("Content retry succeeded")
