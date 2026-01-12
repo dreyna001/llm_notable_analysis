@@ -237,7 +237,7 @@ ANALYZE_NOTABLE_TOOL = {
                             "short_term": {"type": "array", "items": {"type": "string"}},
                             "references": {
                                 "type": "array",
-                                "items": {"type": "string", "pattern": r"^M\\d{4}$"},
+                                "items": {"type": "string", "pattern": r"^M\d{4}$"},
                             },
                         },
                         "required": ["immediate", "short_term", "references"],
@@ -745,7 +745,7 @@ def validate_content_policies(result: Dict[str, Any]) -> Tuple[bool, Optional[st
             for i, ref in enumerate(refs):
                 if not isinstance(ref, str):
                     return False, f"containment_playbook.references[{i}] must be a string"
-                if not re.fullmatch(r"M\\d{4}", ref.strip()):
+                if not re.fullmatch(r"M\d{4}", ref.strip()):
                     return False, f"containment_playbook.references[{i}] must be an ATT&CK mitigation ID like M1032 (got: {ref!r})"
     except Exception:
         return False, "Failed to validate containment_playbook.references"
