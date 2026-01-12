@@ -684,6 +684,16 @@ aws logs tail /aws/lambda/notable-analyzer-s3 --since 1h
 - Check notables include `notable_id` or `search_name`
 - Ensure Lambda can reach Splunk (VPC/network config)
 
+**Lambda logs "Skipping" or "Read 0 characters":**
+- This is expected behavior for **folder markers** and **empty objects**
+- When you create a folder via the S3 console (e.g., `incoming/`), S3 creates a 0-byte marker object that triggers the Lambda
+- The Lambda intentionally skips these cases and logs `status=skipped` with a reason:
+  - Keys ending with `/` (folder markers)
+  - 0-byte objects (empty files)
+  - Placeholder filenames: `.keep`, `.gitkeep`, `_SUCCESS`, `.placeholder`
+- **Recommended:** Upload files directly to `incoming/<filename>` rather than first creating the `incoming/` folder via console
+- If you see `status=skipped` in results, check CloudWatch logs for the skip reason
+
 ### CloudWatch Metrics
 
 Monitor these metrics in CloudWatch:

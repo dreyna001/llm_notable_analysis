@@ -22,6 +22,35 @@ logger.setLevel(logging.INFO)
 # Initialize S3 client
 s3_client = boto3.client('s3')
 
+# Placeholder filenames to skip (case-insensitive basename match)
+PLACEHOLDER_FILENAMES = frozenset({'.keep', '.gitkeep', '_success', '.placeholder'})
+
+
+def should_skip_object(key: str, size: int) -> tuple[bool, str]:
+    """Check if an S3 object should be skipped (folder marker, placeholder, or empty).
+    
+    Args:
+        key: S3 object key.
+        size: Object size in bytes (from S3 event metadata).
+        
+    Returns:
+        Tuple of (should_skip: bool, reason: str). If should_skip is False, reason is empty.
+    """
+    # Skip folder markers (keys ending with '/')
+    if key.endswith('/'):
+        return True, "folder marker (key ends with '/')"
+    
+    # Skip 0-byte objects
+    if size == 0:
+        return True, "empty object (0 bytes)"
+    
+    # Skip common placeholder filenames
+    basename = key.rsplit('/', 1)[-1].lower()
+    if basename in PLACEHOLDER_FILENAMES:
+        return True, f"placeholder file ({basename})"
+    
+    return False, ""
+
 
 def normalize_notable(content: str, content_type: str = 'text') -> Dict[str, Any]:
     """Normalize S3 notable content into internal alert structure.
@@ -249,11 +278,23 @@ def handler(event, context):
     
     for record in event.get('Records', []):
         try:
-            # Extract S3 bucket and key
+            # Extract S3 bucket, key, and size from event
             bucket = record['s3']['bucket']['name']
             key = record['s3']['object']['key']
+            size = record['s3']['object'].get('size', -1)
             
-            logger.info(f"Processing s3://{bucket}/{key}")
+            logger.info(f"Processing s3://{bucket}/{key} (size={size})")
+            
+            # Skip folder markers, placeholders, and empty objects
+            skip, reason = should_skip_object(key, size)
+            if skip:
+                logger.info(f"Skipping s3://{bucket}/{key}: {reason}")
+                results.append({
+                    "key": key,
+                    "status": "skipped",
+                    "reason": reason
+                })
+                continue
             
             # Read object from S3
             response = s3_client.get_object(Bucket=bucket, Key=key)
