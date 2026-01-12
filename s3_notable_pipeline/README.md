@@ -566,6 +566,7 @@ aws logs tail /aws/lambda/$LAMBDA_NAME --follow
 - `SPLUNK_SINK_MODE` - Output mode: `s3`, `hec`, or `notable_rest` (default: `s3`)
 - `INPUT_BUCKET_NAME` - S3 bucket for input notables
 - `OUTPUT_PREFIX` - S3 prefix for output files (default: `reports`)
+- `MAX_OUTPUT_TOKENS` - Bedrock max output tokens (default: `4096`)
 
 #### S3 Sink (Test Mode)
 - `OUTPUT_BUCKET_NAME` - S3 bucket for markdown output (required for `s3` mode)

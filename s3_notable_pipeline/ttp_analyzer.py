@@ -7,6 +7,7 @@ Ports the core logic from notable_analysis.py without modifying the original.
 import json
 import re
 import time
+import os
 import logging
 from typing import List, Dict, Any, Set, Optional, Tuple
 from pathlib import Path
@@ -17,6 +18,9 @@ from botocore.exceptions import ClientError
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+# If tool use fails with a Bedrock ModelErrorException, we fall back to raw-JSON mode
+# (no toolConfig) to keep the pipeline operational.
+
 # Tool schema for Bedrock converse API - enforces structured JSON output
 ANALYZE_NOTABLE_TOOL = {
     "toolSpec": {
@@ -26,23 +30,362 @@ ANALYZE_NOTABLE_TOOL = {
             "json": {
                 "type": "object",
                 "properties": {
-                    "ttp_analysis": {"type": "array", "items": {"type": "object"}},
-                    "attack_chain": {"type": "object"},
-                    "ioc_extraction": {"type": "object"},
-                    "correlation_keys": {"type": "object"},
-                    "evidence_vs_inference": {"type": "object"},
-                    "containment_playbook": {"type": "object"},
-                    "splunk_enrichment": {"type": "array", "items": {"type": "object"}},
-                    "tactic_framing": {"type": "object"},
-                    "benign_explanations": {"type": "array", "items": {"type": "object"}},
-                    "competing_hypotheses": {"type": "array", "items": {"type": "object"}},
-                    "context_enrichment": {"type": "object"}
+                    "ttp_analysis": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "ttp_id": {"type": "string"},
+                                "ttp_name": {"type": "string"},
+                                "confidence_score": {"type": "number"},
+                                "explanation": {"type": "string"},
+                                "tactic_span_note": {"type": "string"},
+                                "evidence_fields": {"type": "array", "items": {"type": "string"}},
+                                "immediate_actions": {"type": "string"},
+                                "remediation_recommendations": {"type": "string"},
+                                "mitre_url": {"type": "string"},
+                            },
+                            "required": [
+                                "ttp_id",
+                                "ttp_name",
+                                "confidence_score",
+                                "explanation",
+                                "tactic_span_note",
+                                "evidence_fields",
+                                "immediate_actions",
+                                "remediation_recommendations",
+                                "mitre_url",
+                            ],
+                        },
+                    },
+                    "attack_chain": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "likely_previous_steps": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": 1,
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "tactic_id": {"type": "string"},
+                                        "tactic_name": {"type": "string"},
+                                        "mitre_url": {"type": "string"},
+                                        "why_this_step": {"type": "string"},
+                                        "what_to_check": {"type": "string"},
+                                        "uncertainty_alternatives": {"type": "string"},
+                                        "investigation_tree": {
+                                            "type": "object",
+                                            "additionalProperties": False,
+                                            "properties": {
+                                                "Q1": {
+                                                    "type": "object",
+                                                    "additionalProperties": False,
+                                                    "properties": {"question": {"type": "string"}},
+                                                    "required": ["question"],
+                                                },
+                                                "Q2": {
+                                                    "type": "object",
+                                                    "additionalProperties": False,
+                                                    "properties": {"question": {"type": "string"}},
+                                                    "required": ["question"],
+                                                },
+                                                "Q3": {
+                                                    "type": "object",
+                                                    "additionalProperties": False,
+                                                    "properties": {"question": {"type": "string"}},
+                                                    "required": ["question"],
+                                                },
+                                            },
+                                            "required": ["Q1", "Q2", "Q3"],
+                                        },
+                                    },
+                                    "required": [
+                                        "tactic_id",
+                                        "tactic_name",
+                                        "mitre_url",
+                                        "why_this_step",
+                                        "what_to_check",
+                                        "uncertainty_alternatives",
+                                        "investigation_tree",
+                                    ],
+                                },
+                            },
+                            "likely_next_steps": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": 1,
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "tactic_id": {"type": "string"},
+                                        "tactic_name": {"type": "string"},
+                                        "mitre_url": {"type": "string"},
+                                        "why_this_step": {"type": "string"},
+                                        "what_to_check": {"type": "string"},
+                                        "uncertainty_alternatives": {"type": "string"},
+                                        "investigation_tree": {
+                                            "type": "object",
+                                            "additionalProperties": False,
+                                            "properties": {
+                                                "Q1": {
+                                                    "type": "object",
+                                                    "additionalProperties": False,
+                                                    "properties": {"question": {"type": "string"}},
+                                                    "required": ["question"],
+                                                },
+                                                "Q2": {
+                                                    "type": "object",
+                                                    "additionalProperties": False,
+                                                    "properties": {"question": {"type": "string"}},
+                                                    "required": ["question"],
+                                                },
+                                                "Q3": {
+                                                    "type": "object",
+                                                    "additionalProperties": False,
+                                                    "properties": {"question": {"type": "string"}},
+                                                    "required": ["question"],
+                                                },
+                                            },
+                                            "required": ["Q1", "Q2", "Q3"],
+                                        },
+                                    },
+                                    "required": [
+                                        "tactic_id",
+                                        "tactic_name",
+                                        "mitre_url",
+                                        "why_this_step",
+                                        "what_to_check",
+                                        "uncertainty_alternatives",
+                                        "investigation_tree",
+                                    ],
+                                },
+                            },
+                            "kill_chain_phase": {"type": "string"},
+                            "tactic_span_note": {"type": "string"},
+                        },
+                        "required": [
+                            "likely_previous_steps",
+                            "likely_next_steps",
+                            "kill_chain_phase",
+                            "tactic_span_note",
+                        ],
+                    },
+                    "ioc_extraction": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "ip_addresses": {"type": "array", "items": {"type": "string"}},
+                            "domains": {"type": "array", "items": {"type": "string"}},
+                            "user_accounts": {"type": "array", "items": {"type": "string"}},
+                            "hostnames": {"type": "array", "items": {"type": "string"}},
+                            "file_paths": {"type": "array", "items": {"type": "string"}},
+                            "process_names": {"type": "array", "items": {"type": "string"}},
+                            "file_hashes": {"type": "array", "items": {"type": "string"}},
+                            "event_ids": {"type": "array", "items": {"type": "string"}},
+                            "urls": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": [
+                            "ip_addresses",
+                            "domains",
+                            "user_accounts",
+                            "hostnames",
+                            "file_paths",
+                            "process_names",
+                            "file_hashes",
+                            "event_ids",
+                            "urls",
+                        ],
+                    },
+                    "correlation_keys": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "primary_indicators": {"type": "array", "items": {"type": "string"}},
+                            "search_terms": {"type": "array", "items": {"type": "string"}},
+                            "time_window_suggested": {"type": "string"},
+                        },
+                        "required": ["primary_indicators", "search_terms", "time_window_suggested"],
+                    },
+                    "evidence_vs_inference": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "evidence": {"type": "array", "items": {"type": "string"}},
+                            "inferences": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["evidence", "inferences"],
+                    },
+                    "containment_playbook": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "immediate": {"type": "array", "items": {"type": "string"}},
+                            "short_term": {"type": "array", "items": {"type": "string"}},
+                            "references": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["immediate", "short_term", "references"],
+                    },
+                    "splunk_enrichment": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 4,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "phase": {"type": "string", "enum": ["previous", "next"]},
+                                "supports_tactic": {"type": "string"},
+                                "purpose": {"type": "string"},
+                                "query": {"type": "string"},
+                                "confidence_boost_rule": {"type": "string"},
+                                "confidence_reduce_rule": {"type": "string"},
+                            },
+                            "required": [
+                                "phase",
+                                "supports_tactic",
+                                "purpose",
+                                "query",
+                                "confidence_boost_rule",
+                                "confidence_reduce_rule",
+                            ],
+                        },
+                    },
+                    "tactic_framing": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "primary_tactic": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "properties": {
+                                    "tactic_id": {"type": "string"},
+                                    "tactic_name": {"type": "string"},
+                                    "justification": {"type": "string"},
+                                },
+                                "required": ["tactic_id", "tactic_name", "justification"],
+                            },
+                            "secondary_tactics": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "tactic_id": {"type": "string"},
+                                        "tactic_name": {"type": "string"},
+                                        "why_plausible": {"type": "string"},
+                                    },
+                                    "required": ["tactic_id", "tactic_name", "why_plausible"],
+                                },
+                            },
+                            "disambiguation_checklist": {
+                                "type": "array",
+                                "minItems": 3,
+                                "maxItems": 5,
+                                "items": {"type": "string"},
+                            },
+                        },
+                        "required": ["primary_tactic", "secondary_tactics", "disambiguation_checklist"],
+                    },
+                    "benign_explanations": {
+                        "type": "array",
+                        "minItems": 3,
+                        "maxItems": 5,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "hypothesis": {"type": "string"},
+                                "expect_if_true": {
+                                    "type": "array",
+                                    "minItems": 1,
+                                    "maxItems": 2,
+                                    "items": {"type": "string"},
+                                },
+                                "argue_against": {"type": "string"},
+                                "best_validation": {"type": "string"},
+                            },
+                            "required": ["hypothesis", "expect_if_true", "argue_against", "best_validation"],
+                        },
+                    },
+                    "competing_hypotheses": {
+                        "type": "array",
+                        "minItems": 3,
+                        "maxItems": 5,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "hypothesis_type": {"type": "string", "enum": ["benign", "adversary"]},
+                                "hypothesis": {"type": "string"},
+                                "evidence_support": {"type": "array", "items": {"type": "string"}},
+                                "evidence_gaps": {"type": "array", "items": {"type": "string"}},
+                                "best_pivots": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "additionalProperties": False,
+                                        "properties": {
+                                            "log_source": {"type": "string"},
+                                            "key_fields": {"type": "array", "items": {"type": "string"}},
+                                        },
+                                        "required": ["log_source", "key_fields"],
+                                    },
+                                },
+                            },
+                            "required": [
+                                "hypothesis_type",
+                                "hypothesis",
+                                "evidence_support",
+                                "evidence_gaps",
+                                "best_pivots",
+                            ],
+                        },
+                    },
+                    "context_enrichment": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "enrichment_steps": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "field": {"type": "string"},
+                                        "enrichment_type": {"type": "string"},
+                                        "result_or_status": {"type": "string"},
+                                    },
+                                    "required": ["field", "enrichment_type", "result_or_status"],
+                                },
+                            },
+                            "baseline_queries": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "purpose": {"type": "string"},
+                                        "query": {"type": "string"},
+                                    },
+                                    "required": ["purpose", "query"],
+                                },
+                            },
+                            "limitations": {"type": "string"},
+                        },
+                        "required": ["enrichment_steps", "baseline_queries", "limitations"],
+                    },
                 },
                 "required": ["ttp_analysis", "attack_chain", "ioc_extraction",
                              "correlation_keys", "evidence_vs_inference",
                              "containment_playbook", "splunk_enrichment",
                              "tactic_framing", "benign_explanations",
-                             "competing_hypotheses", "context_enrichment"]
+                             "competing_hypotheses", "context_enrichment"],
+                "additionalProperties": False,
             }
         }
     }
@@ -72,6 +415,16 @@ Previous output (truncated):
 {prior_output}
 
 Please use the analyze_notable tool to return your analysis. Return ONLY the tool call with valid JSON matching the schema. Do not include any text outside the tool call."""
+
+# Repair prompt for raw-JSON mode (no tool use)
+REPAIR_PROMPT_TEMPLATE_RAW_JSON = """Your previous response could not be parsed.
+
+Error: {error}
+
+Previous output (truncated):
+{prior_output}
+
+Return ONLY a single valid JSON object matching the schema. Do not include markdown fences, tool calls, or any extra text."""
 
 # =============================================================================
 # PROMPT SECTIONS - Modular prompt components for maintainability
@@ -295,6 +648,11 @@ SCHEMA:
     - baseline_queries: list of objects, each with purpose and query
     - limitations: string (what cannot be concluded from provided data)
 """
+
+OUTPUT_SCHEMA_RAW_JSON = OUTPUT_SCHEMA.replace(
+    "Use the analyze_notable tool to return your analysis. The tool expects the following schema:",
+    "Return ONLY a single JSON object matching the schema below. Do not include markdown fences or any extra text."
+)
 
 RULES = """
 RULES:
@@ -569,7 +927,7 @@ class BedrockAnalyzer:
         # Store raw content for retry/debugging
         self.last_raw_content = None
 
-    def _build_prompt(self, alert_text: str, alert_time: Optional[str], valid_ttps_list: str) -> str:
+    def _build_prompt(self, alert_text: str, alert_time: Optional[str], valid_ttps_list: str, *, use_tool: bool) -> str:
         """Assemble the full prompt from modular sections.
         
         Args:
@@ -581,6 +939,7 @@ class BedrockAnalyzer:
             Complete prompt string for LLM.
         """
         alert_time_str = f"\n**ALERT_TIME:** {alert_time}\n" if alert_time else ""
+        output_schema = OUTPUT_SCHEMA if use_tool else OUTPUT_SCHEMA_RAW_JSON
         
         return f"""You are a cybersecurity expert mapping MITRE ATT&CK techniques from a single alert.
 {alert_time_str}
@@ -612,12 +971,49 @@ SECURITY ALERT INPUT:
 
 ---
 
-{OUTPUT_SCHEMA}
+{output_schema}
 
 ---
 
 {RULES}
 """
+
+    @staticmethod
+    def _is_tooluse_model_error(err: ClientError) -> bool:
+        """Return True if this ClientError looks like a tool-use invalid sequence ModelErrorException."""
+        try:
+            code = (err.response or {}).get("Error", {}).get("Code", "")
+            msg = (err.response or {}).get("Error", {}).get("Message", "") or str(err)
+        except Exception:
+            return False
+        return code == "ModelErrorException" and "ToolUse" in msg and "invalid sequence" in msg.lower()
+
+    def _converse(self, prompt: str, *, use_tool: bool) -> Dict[str, Any]:
+        """Call Bedrock converse with optional toolConfig."""
+        default_max_tokens = 4096
+        try:
+            max_tokens = int(os.environ.get("MAX_OUTPUT_TOKENS", str(default_max_tokens)))
+        except ValueError:
+            max_tokens = default_max_tokens
+        # Clamp to a sane range to avoid accidental runaway costs / invalid values
+        max_tokens = max(256, min(max_tokens, 8192))
+
+        kwargs: Dict[str, Any] = {
+            "modelId": self.model_id,
+            "messages": [{"role": "user", "content": [{"text": prompt}]}],
+            "inferenceConfig": {
+                "maxTokens": max_tokens,
+                # Lower temperature reduces the chance of malformed tool-call sequences
+                "temperature": 0.2,
+                "topP": 0.95,
+            },
+        }
+        if use_tool:
+            kwargs["toolConfig"] = {
+                "tools": [ANALYZE_NOTABLE_TOOL],
+                "toolChoice": {"tool": {"name": "analyze_notable"}},
+            }
+        return self.bedrock_client.converse(**kwargs)
     
     def _parse_bedrock_response(self, response: Dict[str, Any]) -> Tuple[Optional[Dict], Optional[str], Optional[str]]:
         """Parse Bedrock converse API response, extracting structured output.
@@ -721,8 +1117,9 @@ SECURITY ALERT INPUT:
         total_ttps = self.validator.get_ttp_count()
         logger.info(f"Loaded {total_ttps} valid TTPs for prompt")
         
-        # Build prompt using modular sections
-        prompt = self._build_prompt(alert_text, alert_time, valid_ttps_list)
+        # Build prompt using modular sections (start in tool-use mode)
+        prompt_tool = self._build_prompt(alert_text, alert_time, valid_ttps_list, use_tool=True)
+        prompt_raw = self._build_prompt(alert_text, alert_time, valid_ttps_list, use_tool=False)
         
         # Input validation
         if not alert_text or not alert_text.strip():
@@ -737,34 +1134,25 @@ SECURITY ALERT INPUT:
             max_retries = 3
             retry_delay = 5
             
+            response: Optional[Dict[str, Any]] = None
+            used_tool = True
+
+            # Phase 1: Tool-use mode (preferred)
             for attempt in range(max_retries):
                 try:
-                    logger.info(f"API call attempt {attempt + 1}/{max_retries}")
-                    
-                    response = self.bedrock_client.converse(
-                        modelId=self.model_id,
-                        messages=[
-                            {
-                                "role": "user",
-                                "content": [{"text": prompt}]
-                            }
-                        ],
-                        toolConfig={
-                            "tools": [ANALYZE_NOTABLE_TOOL],
-                            "toolChoice": {"tool": {"name": "analyze_notable"}}
-                        },
-                        inferenceConfig={
-                            "maxTokens": 2000,
-                            "temperature": 0.7,
-                            "topP": 0.95
-                        }
-                    )
-                    
+                    logger.info(f"API call attempt {attempt + 1}/{max_retries} (tool_use=True)")
+                    response = self._converse(prompt_tool, use_tool=True)
                     api_end_time = time.time()
                     logger.info(f"API call completed in {api_end_time - api_start_time:.2f} seconds")
                     break
-                    
                 except ClientError as api_error:
+                    # If Bedrock reports a tool-use invalid sequence, immediately fall back to raw JSON mode.
+                    if self._is_tooluse_model_error(api_error):
+                        logger.warning("Tool-use mode failed with ModelErrorException (invalid ToolUse sequence). Falling back to raw JSON mode.")
+                        used_tool = False
+                        response = None
+                        break
+
                     logger.warning(f"API call attempt {attempt + 1} failed: {str(api_error)}")
                     if attempt < max_retries - 1:
                         logger.info(f"Retrying in {retry_delay} seconds...")
@@ -773,6 +1161,29 @@ SECURITY ALERT INPUT:
                     else:
                         logger.error(f"All {max_retries} API call attempts failed")
                         raise
+
+            # Phase 2: Raw JSON mode (no toolConfig), only if tool-use mode was abandoned
+            if response is None and used_tool is False:
+                retry_delay = 5
+                for attempt in range(max_retries):
+                    try:
+                        logger.info(f"API call attempt {attempt + 1}/{max_retries} (tool_use=False)")
+                        response = self._converse(prompt_raw, use_tool=False)
+                        api_end_time = time.time()
+                        logger.info(f"API call completed in {api_end_time - api_start_time:.2f} seconds")
+                        break
+                    except ClientError as api_error:
+                        logger.warning(f"Raw JSON API call attempt {attempt + 1} failed: {str(api_error)}")
+                        if attempt < max_retries - 1:
+                            logger.info(f"Retrying in {retry_delay} seconds...")
+                            time.sleep(retry_delay)
+                            retry_delay *= 2
+                        else:
+                            logger.error(f"All {max_retries} raw JSON API call attempts failed")
+                            raise
+
+            if response is None:
+                raise RuntimeError("Bedrock converse did not return a response")
             
             # Parse the response using helper method
             logger.info("Parsing LLM response")
@@ -797,31 +1208,15 @@ SECURITY ALERT INPUT:
                 
                 # Build repair prompt with truncated prior output
                 prior_output = (raw_content or "")[:2000]
-                repair_prompt = REPAIR_PROMPT_TEMPLATE.format(
+                repair_template = REPAIR_PROMPT_TEMPLATE if used_tool else REPAIR_PROMPT_TEMPLATE_RAW_JSON
+                repair_prompt = repair_template.format(
                     error=error_msg,
                     prior_output=prior_output
                 )
                 
                 try:
                     logger.info("Content retry: calling Bedrock with repair prompt")
-                    retry_response = self.bedrock_client.converse(
-                        modelId=self.model_id,
-                        messages=[
-                            {
-                                "role": "user",
-                                "content": [{"text": repair_prompt}]
-                            }
-                        ],
-                        toolConfig={
-                            "tools": [ANALYZE_NOTABLE_TOOL],
-                            "toolChoice": {"tool": {"name": "analyze_notable"}}
-                        },
-                        inferenceConfig={
-                            "maxTokens": 2000,
-                            "temperature": 0.7,
-                            "topP": 0.95
-                        }
-                    )
+                    retry_response = self._converse(repair_prompt, use_tool=used_tool)
                     
                     # Parse retry response
                     result, retry_error, retry_raw = self._parse_bedrock_response(retry_response)
