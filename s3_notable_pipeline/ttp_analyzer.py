@@ -773,7 +773,7 @@ def validate_content_policies(result: Dict[str, Any]) -> Tuple[bool, Optional[st
         # If any other field contains an http(s) URL, it's not allowed (only mitre_url may contain URLs)
         if ("http://" in s_lower or "https://" in s_lower) and (not p.endswith("mitre_url")):
             return False, f"Disallowed URL outside mitre_url field: {p}"
-
+    
     return True, None
 
 
@@ -1061,7 +1061,7 @@ SECURITY ALERT INPUT:
 
 {RULES}
 """
-
+    
     @staticmethod
     def _is_tooluse_model_error(err: ClientError) -> bool:
         """Return True if this ClientError looks like a tool-use invalid sequence ModelErrorException."""
@@ -1099,7 +1099,12 @@ SECURITY ALERT INPUT:
             }
         return self.bedrock_client.converse(**kwargs)
     
-    def _parse_bedrock_response(self, response: Dict[str, Any]) -> Tuple[Optional[Dict], Optional[str], Optional[str]]:
+    def _parse_bedrock_response(
+        self,
+        response: Dict[str, Any],
+        *,
+        allow_text_fallback: bool,
+    ) -> Tuple[Optional[Dict], Optional[str], Optional[str]]:
         """Parse Bedrock converse API response, extracting structured output.
         
         Args:
@@ -1121,7 +1126,13 @@ SECURITY ALERT INPUT:
                     logger.info("Parsed response from toolUse block")
                     return tool_input, None, None
         
-        # Fallback: try text extraction if no toolUse
+        if not allow_text_fallback:
+            # In tool-use mode, treat non-tool responses as invalid and force a repair retry.
+            error_msg = "No toolUse block found in response (tool_use required)"
+            logger.error(error_msg)
+            return None, error_msg, str(content_blocks)[:2000]
+
+        # Fallback: try text extraction if no toolUse (raw JSON mode only)
         for block in content_blocks:
             if 'text' in block:
                 raw_text = block['text']
@@ -1271,7 +1282,10 @@ SECURITY ALERT INPUT:
             
             # Parse the response using helper method
             logger.info("Parsing LLM response")
-            result, error_msg, raw_content = self._parse_bedrock_response(response)
+            result, error_msg, raw_content = self._parse_bedrock_response(
+                response,
+                allow_text_fallback=(used_tool is False),
+            )
             
             # Store raw content for debugging
             if raw_content:
@@ -1310,7 +1324,10 @@ SECURITY ALERT INPUT:
                     retry_response = self._converse(repair_prompt, use_tool=used_tool)
                     
                     # Parse retry response
-                    result, retry_error, retry_raw = self._parse_bedrock_response(retry_response)
+                    result, retry_error, retry_raw = self._parse_bedrock_response(
+                        retry_response,
+                        allow_text_fallback=(used_tool is False),
+                    )
                     
                     # Validate schema if retry parse succeeded
                     if result is not None:
