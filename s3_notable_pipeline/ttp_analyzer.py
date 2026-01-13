@@ -1116,14 +1116,36 @@ SECURITY ALERT INPUT:
             - error_message: Error description if parsing failed, None otherwise.
             - raw_content: Raw text content (for retry prompt), None if toolUse succeeded.
         """
+        # Log minimal response metadata (helps diagnose truncation/stop reasons without dumping content)
+        try:
+            stop_reason = (response.get("stopReason") or response.get("output", {}).get("stopReason") or "unknown")
+            usage = response.get("usage") or response.get("output", {}).get("usage") or {}
+            if isinstance(usage, dict) and usage:
+                logger.info(f"Bedrock stopReason={stop_reason} usage={usage}")
+            else:
+                logger.info(f"Bedrock stopReason={stop_reason}")
+        except Exception:
+            # Keep parsing resilient; logging should never break execution
+            pass
+
         content_blocks = response['output']['message']['content']
+        try:
+            logger.info(f"Bedrock content block types: {[list(b.keys()) for b in content_blocks]}")
+        except Exception:
+            pass
         
         # Try toolUse block first (preferred path with forced tool choice)
         for block in content_blocks:
             if 'toolUse' in block:
                 tool_input = block['toolUse'].get('input', {})
                 if isinstance(tool_input, dict):
-                    logger.info("Parsed response from toolUse block")
+                    try:
+                        tool_name = block["toolUse"].get("name", "unknown")
+                        tool_id = block["toolUse"].get("toolUseId", "unknown")
+                        logger.info(f"Parsed response from toolUse block name={tool_name} toolUseId={tool_id}")
+                        logger.info(f"tool_input keys: {list(tool_input.keys())}")
+                    except Exception:
+                        logger.info("Parsed response from toolUse block")
                     return tool_input, None, None
         
         if not allow_text_fallback:
