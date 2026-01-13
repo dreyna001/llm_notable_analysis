@@ -1293,9 +1293,13 @@ SECURITY ALERT INPUT:
             
             # Validate schema if parse succeeded
             if result is not None:
+                # Log raw structure for debugging
+                logger.info(f"Parsed result keys: {list(result.keys()) if isinstance(result, dict) else type(result).__name__}")
+                
                 is_valid, validation_error = validate_response_schema(result)
                 if not is_valid:
                     logger.warning(f"Schema validation failed: {validation_error}")
+                    logger.warning(f"Got keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
                     error_msg = f"Schema validation: {validation_error}"
                     raw_content = raw_content or str(result)[:2000]
                     result = None  # treat as parse failure, triggers retry
@@ -1331,9 +1335,12 @@ SECURITY ALERT INPUT:
                     
                     # Validate schema if retry parse succeeded
                     if result is not None:
+                        logger.info(f"Retry parsed result keys: {list(result.keys()) if isinstance(result, dict) else type(result).__name__}")
+                        
                         is_valid, validation_error = validate_response_schema(result)
                         if not is_valid:
                             logger.error(f"Retry schema validation failed: {validation_error}")
+                            logger.error(f"Retry got keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
                             self.last_llm_response = {"raw_error": retry_raw or str(result)[:2000]}
                             return []
                         policy_ok, policy_err = validate_content_policies(result)
