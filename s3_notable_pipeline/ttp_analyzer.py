@@ -1088,7 +1088,7 @@ SECURITY ALERT INPUT:
             "inferenceConfig": {
                 "maxTokens": max_tokens,
                 # Lower temperature reduces the chance of malformed tool-call sequences
-                "temperature": 0.2,
+                "temperature": 0.1,
                 "topP": 0.95,
             },
         }
