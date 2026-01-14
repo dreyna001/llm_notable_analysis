@@ -18,6 +18,45 @@ from botocore.exceptions import ClientError
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+# Some models / intermediaries occasionally wrap the JSON payload in an extra
+# top-level container key (e.g., {"ttp_analyzer": {...}}). This helper unwraps
+# common container shapes so downstream schema validation is robust.
+_COMMON_RESULT_WRAPPER_KEYS = (
+    "ttp_analyzer",
+    "analyze_notable",
+    "analysis",
+    "result",
+    "data",
+    "payload",
+)
+
+
+def _normalize_llm_result_shape(result: Any) -> Any:
+    """Normalize common wrapper shapes around the expected top-level schema.
+
+    Expected schema is a dict with keys like 'ttp_analysis', 'attack_chain', etc.
+    Sometimes responses come back wrapped under a single container key; unwrap it.
+    """
+    if not isinstance(result, dict):
+        return result
+
+    # 1) Explicit wrapper keys (best effort)
+    for k in _COMMON_RESULT_WRAPPER_KEYS:
+        v = result.get(k)
+        if isinstance(v, dict):
+            logger.warning(f"Unwrapping LLM result from container key: {k!r}")
+            return v
+
+    # 2) Singleton dict wrapper: {"something": {...}}
+    if len(result) == 1:
+        (only_key, only_val), = result.items()
+        if isinstance(only_val, dict):
+            logger.warning(f"Unwrapping singleton LLM result container key: {only_key!r}")
+            return only_val
+
+    return result
+
+
 # If tool use fails with a Bedrock ModelErrorException, we fall back to raw-JSON mode
 # (no toolConfig) to keep the pipeline operational.
 
@@ -417,6 +456,9 @@ REQUIRED_RESPONSE_KEYS = {
     "competing_hypotheses": list,
     "context_enrichment": dict,
 }
+
+# Stable, deterministic list of required top-level keys for logging/debugging
+REQUIRED_RESPONSE_KEYS_LIST = list(REQUIRED_RESPONSE_KEYS.keys())
 
 # Repair prompt template for content retry when parsing fails
 REPAIR_PROMPT_TEMPLATE = """Your previous response could not be parsed.
@@ -1315,8 +1357,12 @@ SECURITY ALERT INPUT:
             
             # Validate schema if parse succeeded
             if result is not None:
+                # Normalize wrapper shapes (e.g., {"ttp_analyzer": {...}}) before validation
+                result = _normalize_llm_result_shape(result)
+
                 # Log raw structure for debugging
                 logger.info(f"Parsed result keys: {list(result.keys()) if isinstance(result, dict) else type(result).__name__}")
+                logger.info(f"Required top-level keys: {REQUIRED_RESPONSE_KEYS_LIST}")
                 
                 is_valid, validation_error = validate_response_schema(result)
                 if not is_valid:
@@ -1357,6 +1403,9 @@ SECURITY ALERT INPUT:
                     
                     # Validate schema if retry parse succeeded
                     if result is not None:
+                        # Normalize wrapper shapes before validation (retry path)
+                        result = _normalize_llm_result_shape(result)
+
                         logger.info(f"Retry parsed result keys: {list(result.keys()) if isinstance(result, dict) else type(result).__name__}")
                         
                         is_valid, validation_error = validate_response_schema(result)
