@@ -1131,7 +1131,6 @@ SECURITY ALERT INPUT:
                 "maxTokens": max_tokens,
                 # Lower temperature reduces the chance of malformed tool-call sequences
                 "temperature": 0.1,
-                "topP": 0.95,
             },
         }
         if use_tool:
