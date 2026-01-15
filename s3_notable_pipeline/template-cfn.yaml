@@ -116,7 +116,7 @@ Resources:
                 Action:
                   - bedrock:InvokeModel
                 Resource:
-                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.nova-pro-v1:0'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0'
         - PolicyName: CloudWatchLogsPolicy
           PolicyDocument:
             Version: '2012-10-17'
@@ -142,7 +142,7 @@ Resources:
         S3Key: !Ref LambdaCodeS3Key
       Environment:
         Variables:
-          BEDROCK_MODEL_ID: amazon.nova-pro-v1:0
+          BEDROCK_MODEL_ID: anthropic.claude-sonnet-4-5-20250929-v1:0
           SPLUNK_SINK_MODE: !Ref SplunkSinkMode
           INPUT_BUCKET_NAME: !Ref InputBucketName
           OUTPUT_BUCKET_NAME: !Ref OutputBucketName

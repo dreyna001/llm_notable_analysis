@@ -306,7 +306,7 @@ def handler(event, context):
             alert_obj = normalize_notable(content)
             
             # Initialize analyzer
-            model_id = os.environ.get('BEDROCK_MODEL_ID', 'amazon.nova-pro-v1:0')
+            model_id = os.environ.get('BEDROCK_MODEL_ID', 'anthropic.claude-sonnet-4-5-20250929-v1:0')
             logger.info(f"Initializing analyzer with model: {model_id}")
             analyzer = BedrockAnalyzer(model_id=model_id)
             
