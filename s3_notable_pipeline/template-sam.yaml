@@ -85,7 +85,7 @@ Resources:
       MemorySize: 512
       Environment:
         Variables:
-          BEDROCK_MODEL_ID: anthropic.claude-sonnet-4-5-20250929-v1:0
+          BEDROCK_MODEL_ID: arn:aws:bedrock:us-east-1:911167903110:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0
           SPLUNK_SINK_MODE: !Ref SplunkSinkMode
           INPUT_BUCKET_NAME: !Ref InputBucketName
           OUTPUT_BUCKET_NAME: !Ref OutputBucketName
@@ -100,7 +100,7 @@ Resources:
               Action:
                 - bedrock:InvokeModel
               Resource: 
-                - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0'
+                - arn:aws:bedrock:us-east-1:911167903110:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0
         - Statement:
             - Effect: Allow
               Action:
