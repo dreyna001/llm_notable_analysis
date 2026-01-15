@@ -621,6 +621,19 @@ PROCEDURE:
 OUTPUT_SCHEMA = """
 Use the analyze_notable tool to return your analysis. The tool expects the following schema:
 
+OUTPUT FORMAT: Return a single valid JSON object with these top-level keys:
+- `ttp_analysis`
+- `attack_chain`
+- `ioc_extraction`
+- `correlation_keys`
+- `evidence_vs_inference`
+- `containment_playbook`
+- `splunk_enrichment`
+- `tactic_framing`
+- `benign_explanations`
+- `competing_hypotheses`
+- `context_enrichment`
+
 SCHEMA:
 - ttp_analysis: list of objects, each with:
     - ttp_id: string (MITRE ATT&CK ID, e.g. "T1059.001")

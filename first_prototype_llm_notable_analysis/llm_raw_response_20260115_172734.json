@@ -1,0 +1,335 @@
+{
+  "ttp_analysis": [
+    {
+      "ttp_id": "T1110.003",
+      "ttp_name": "Brute Force: Password Spraying",
+      "confidence_score": 0.85,
+      "explanation": "The alert shows multiple 'event_id=4625' failures with 'FailureReason=Unknown user name or bad password' and 'LogonType=3' indicating repeated network logon attempts using the same password across accounts or repeated attempts against a specific account (TargetUserName=admin) from IpAddress=198.51.100.54. This matches password spraying behavior rather than single credential misuse. Uncertainty: the single event does not confirm multiple hosts/users; needs aggregation of similar events to confirm spray pattern.",
+      "tactic_span_note": "This technique primarily supports the Credential Access tactic but may also relate to Initial Access or Defense Evasion when used to validate harvested credentials.",
+      "evidence_fields": [
+        "event_id=4625",
+        "FailureReason=Unknown user name or bad password.",
+        "LogonType=3",
+        "TargetUserName=admin",
+        "IpAddress=198.51.100.54"
+      ],
+      "immediate_actions": "Check for repeated 4625 events from the same IP addressing multiple accounts; block or rate-limit source IP 198.51.100.54 if verified malicious.",
+      "remediation_recommendations": "Enforce account lockout policies (M1027), require MFA on remote logons (M1032), monitor failed login volume (M1047), deploy network rate limiting (M1030).",
+      "mitre_url": "https://attack.mitre.org/techniques/T1110/003/"
+    }
+  ],
+  "attack_chain": {
+    "likely_previous_steps": [
+      {
+        "tactic_id": "TA0043",
+        "tactic_name": "Reconnaissance",
+        "mitre_url": "https://attack.mitre.org/tactics/TA0043/",
+        "why_this_step": "Adversaries often perform user enumeration or credential collection before password spraying; the host may have been identified via prior reconnaissance. Evidence: event_id=4625, TargetUserName=admin.",
+        "what_to_check": "Look for event_id=4648, LDAP enumeration logs, or web directory access patterns.",
+        "uncertainty_alternatives": "Could have been an automated spray targeting generic accounts without prior recon.",
+        "investigation_tree": {
+          "Q1": "Are there enumeration events (LDAP queries or SMB session setup attempts) from the same IP before the spray?",
+          "Q2": "Was the IP 198.51.100.54 previously seen interacting with other hosts?",
+          "Q3": "Does this IP correlate with known threat reconnaissance activity?"
+        }
+      }
+    ],
+    "likely_next_steps": [
+      {
+        "tactic_id": "TA0006",
+        "tactic_name": "Credential Access",
+        "mitre_url": "https://attack.mitre.org/tactics/TA0006/",
+        "why_this_step": "If successful logins occur, adversaries may escalate or reuse gained credentials. Evidence: repeated failed logons show credential probing intent.",
+        "what_to_check": "Query for event_id=4624 success events from the same IP after this time in +24h window.",
+        "uncertainty_alternatives": "If no subsequent success events occur, this might be purely scanning or misconfiguration.",
+        "investigation_tree": {
+          "Q1": "Were any successful logons (4624) from the same IP observed shortly after?",
+          "Q2": "Were credential dumpers or suspicious processes spawned on target?",
+          "Q3": "Were abnormal authentications from this IP seen across other systems?"
+        }
+      }
+    ],
+    "kill_chain_phase": "Credential Access",
+    "tactic_span_note": "Password spraying ties primarily to Credential Access but can also serve Initial Access in opportunistic credential-use campaigns."
+  },
+  "ioc_extraction": {
+    "ip_addresses": [
+      "198.51.100.54"
+    ],
+    "domains": [
+      "DOMAIN"
+    ],
+    "user_accounts": [
+      "admin"
+    ],
+    "hostnames": [
+      "WORKSTATION-01"
+    ],
+    "file_paths": [],
+    "process_names": [],
+    "file_hashes": [],
+    "event_ids": [
+      "4625"
+    ],
+    "urls": []
+  },
+  "correlation_keys": {
+    "primary_indicators": [
+      "IpAddress=198.51.100.54",
+      "TargetUserName=admin"
+    ],
+    "search_terms": [
+      "event_id=4625",
+      "FailureReason=Unknown user name or bad password",
+      "LogonType=3"
+    ],
+    "time_window_suggested": "-24h to +24h around 2024-03-20T10:00:00Z"
+  },
+  "evidence_vs_inference": {
+    "evidence": [
+      "event_id=4625",
+      "FailureReason=Unknown user name or bad password.",
+      "LogonType=3",
+      "TargetUserName=admin",
+      "IpAddress=198.51.100.54",
+      "WorkstationName=WORKSTATION-01"
+    ],
+    "inferences": [
+      "Repeated failures from a single IP may indicate password spraying; needs confirmation by volume.",
+      "Source 198.51.100.54 may be external; ownership and geolocation unknown.",
+      "TargetUserName=admin suggests attempt against privileged account."
+    ]
+  },
+  "containment_playbook": {
+    "immediate": [
+      "Correlate IP 198.51.100.54 with other login failures in last 24h; block if confirmed malicious.",
+      "Force reset of 'admin' account credentials if compromise suspected.",
+      "Enable temporary lockout policy for account failure thresholds."
+    ],
+    "short_term": [
+      "Review and tighten remote logon policies (network logon type 3).",
+      "Enable MFA for administrative accounts.",
+      "Apply adaptive authentication and conditional access controls."
+    ],
+    "references": [
+      "M1027",
+      "M1032",
+      "M1030",
+      "M1047"
+    ]
+  },
+  "splunk_enrichment": [
+    {
+      "phase": "previous",
+      "supports_tactic": "Reconnaissance",
+      "purpose": "Identify possible username enumeration or prior failed authentications from same IP.",
+      "query": "index=PLACEHOLDER sourcetype=PLACEHOLDER event_id=4625 IpAddress=198.51.100.54 earliest=-24h@h latest=2024-03-20T10:00:00Z | stats count by TargetUserName",
+      "confidence_boost_rule": "Multiple distinct TargetUserName values increase likelihood of password spraying.",
+      "confidence_reduce_rule": "Only one account targeted suggests possible misconfiguration instead of spraying."
+    },
+    {
+      "phase": "next",
+      "supports_tactic": "Credential Access",
+      "purpose": "Search for subsequent successful logons indicating partial credential compromise.",
+      "query": "index=PLACEHOLDER sourcetype=PLACEHOLDER event_id=4624 IpAddress=198.51.100.54 earliest=2024-03-20T10:00:00Z latest=+24h@h | stats count by TargetUserName",
+      "confidence_boost_rule": "Presence of 4624 events for same IP after failures.",
+      "confidence_reduce_rule": "No 4624 or continued failures indicate noise."
+    },
+    {
+      "phase": "next",
+      "supports_tactic": "Credential Access",
+      "purpose": "Check if source IP also targeted other endpoints indicating horizontal spraying.",
+      "query": "index=PLACEHOLDER event_id=4625 IpAddress=198.51.100.54 earliest=-24h latest=+24h | stats dc(WorkstationName) as targets",
+      "confidence_boost_rule": "High number of distinct WorkstationName indicates wider spray.",
+      "confidence_reduce_rule": "Only one target indicates isolated issue."
+    }
+  ],
+  "tactic_framing": {
+    "primary_tactic": {
+      "tactic_id": "TA0006",
+      "tactic_name": "Credential Access",
+      "justification": "The failed logons with 'FailureReason=Unknown user name or bad password' clearly reflect attempts to obtain valid credentials."
+    },
+    "secondary_tactics": [
+      {
+        "tactic_id": "TA0001",
+        "tactic_name": "Initial Access",
+        "why_plausible": "If the attacker intended to gain entry via RDP or SMB using valid credentials, this could represent an initial access attempt."
+      },
+      {
+        "tactic_id": "TA0007",
+        "tactic_name": "Discovery",
+        "why_plausible": "Bulk scanning of usernames prior to brute-force could represent discovery of valid account names."
+      }
+    ],
+    "disambiguation_checklist": [
+      "Was the IP internal or external (network boundary context)?",
+      "Did multiple usernames experience failed logons from same IP?",
+      "Were there subsequent successful (4624) logons from that IP?",
+      "Is admin account used by automated tooling or human actor?",
+      "What authentication protocol and service (RDP/SMB) was used?"
+    ]
+  },
+  "benign_explanations": [
+    {
+      "hypothesis": "User mistyped password during remote connection attempt.",
+      "expect_if_true": [
+        "Low number of failures",
+        "Followed by successful logon from same IP shortly after"
+      ],
+      "argue_against": "Dozens of failures and varying targets from same IP",
+      "best_validation": "Windows Security Event Log search for repeated 4625 followed by 4624 for same user"
+    },
+    {
+      "hypothesis": "Service misconfiguration causing repeated authentication retries.",
+      "expect_if_true": [
+        "Consistent logon attempts from same service account",
+        "Application log errors at same time"
+      ],
+      "argue_against": "Different usernames or repeated IPs across hosts",
+      "best_validation": "Application logs on WORKSTATION-01"
+    },
+    {
+      "hypothesis": "Penetration testing or vulnerability scanning in progress.",
+      "expect_if_true": [
+        "IP in known internal scanner range",
+        "Official change or test ticket reference"
+      ],
+      "argue_against": "External IP not in authorized scanner list",
+      "best_validation": "Firewall/VPN logs mapping IP 198.51.100.54 to internal asset"
+    }
+  ],
+  "competing_hypotheses": [
+    {
+      "hypothesis_type": "adversary",
+      "hypothesis": "External attacker conducting password spraying against admin account.",
+      "evidence_support": [
+        "event_id=4625",
+        "TargetUserName=admin",
+        "IpAddress=198.51.100.54",
+        "FailureReason=Unknown user name or bad password"
+      ],
+      "evidence_gaps": [
+        "No confirmation if IP external",
+        "No evidence of other accounts targeted",
+        "No successful logons confirmed"
+      ],
+      "best_pivots": [
+        {
+          "log_source": "Firewall logs",
+          "key_fields": [
+            "src_ip",
+            "dest_host"
+          ]
+        },
+        {
+          "log_source": "Windows Security logs",
+          "key_fields": [
+            "IpAddress",
+            "TargetUserName"
+          ]
+        }
+      ]
+    },
+    {
+      "hypothesis_type": "adversary",
+      "hypothesis": "Compromised internal system performing brute-force against local admin account.",
+      "evidence_support": [
+        "event_id=4625",
+        "LogonType=3"
+      ],
+      "evidence_gaps": [
+        "Cannot confirm internal IP range without network context"
+      ],
+      "best_pivots": [
+        {
+          "log_source": "EDR telemetry",
+          "key_fields": [
+            "process_name",
+            "network_connection_ip"
+          ]
+        },
+        {
+          "log_source": "NetFlow logs",
+          "key_fields": [
+            "src_ip",
+            "dst_ip"
+          ]
+        }
+      ]
+    },
+    {
+      "hypothesis_type": "benign",
+      "hypothesis": "User or admin mistyped password or used wrong credentials via remote desktop session.",
+      "evidence_support": [
+        "FailureReason=Unknown user name or bad password",
+        "LogonType=3"
+      ],
+      "evidence_gaps": [
+        "Need to know if subsequent success occurred",
+        "No knowledge if this was user activity window"
+      ],
+      "best_pivots": [
+        {
+          "log_source": "Windows Security logs",
+          "key_fields": [
+            "event_id",
+            "IpAddress",
+            "TargetUserName"
+          ]
+        },
+        {
+          "log_source": "VPN logs",
+          "key_fields": [
+            "client_ip",
+            "user"
+          ]
+        }
+      ]
+    }
+  ],
+  "context_enrichment": {
+    "enrichment_steps": [
+      {
+        "field": "IpAddress",
+        "enrichment_type": "geo",
+        "result_or_status": "unknown"
+      },
+      {
+        "field": "IpAddress",
+        "enrichment_type": "ownership",
+        "result_or_status": "unknown"
+      },
+      {
+        "field": "IpAddress",
+        "enrichment_type": "internal_vs_external",
+        "result_or_status": "unknown"
+      },
+      {
+        "field": "IpAddress",
+        "enrichment_type": "known_egress",
+        "result_or_status": "unknown"
+      },
+      {
+        "field": "IpAddress",
+        "enrichment_type": "reputation",
+        "result_or_status": "not available"
+      }
+    ],
+    "baseline_queries": [
+      {
+        "purpose": "Determine how often 198.51.100.54 authenticates to any domain host.",
+        "query": "index=PLACEHOLDER event_id=4625 OR event_id=4624 IpAddress=198.51.100.54 earliest=-7d@d latest=now | stats count by TargetUserName"
+      },
+      {
+        "purpose": "Compare failed logon volume against baseline for admin account.",
+        "query": "index=PLACEHOLDER event_id=4625 TargetUserName=admin earliest=-30d latest=now | timechart count span=1d"
+      },
+      {
+        "purpose": "Identify how many distinct source IPs usually attempt admin logons.",
+        "query": "index=PLACEHOLDER event_id=4625 TargetUserName=admin earliest=-7d latest=now | stats dc(IpAddress)"
+      }
+    ],
+    "limitations": "No network context to confirm if 198.51.100.54 is internal or external; single event cannot prove spray pattern without broader correlation."
+  }
+}

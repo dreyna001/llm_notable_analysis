@@ -650,3 +650,36 @@ SYNTHETIC_LOGS = [
     }
   }
 ]
+
+
+def get_test_cases():
+    """Return test cases in the structure expected by notable_analysis.py.
+
+    notable_analysis.py expects:
+      [{"name": str, "alert": {"summary": str, "risk_index": dict, "raw_log": dict}}, ...]
+    """
+    cases = []
+    for item in SYNTHETIC_LOGS:
+        case_name = item.get("case_name", "UnnamedCase")
+        source_product = item.get("source_product", "unknown")
+        threat_category = item.get("threat_category", [])
+        if isinstance(threat_category, list):
+            threat_category_str = ", ".join(str(x) for x in threat_category)
+        else:
+            threat_category_str = str(threat_category)
+
+        raw_log = item.get("raw_log", {})
+        if not isinstance(raw_log, dict):
+            raw_log = {"raw_event": raw_log}
+
+        alert = {
+            "summary": f"Synthetic notable: {case_name}",
+            "risk_index": {
+                "risk_score": "N/A",
+                "source_product": source_product,
+                "threat_category": threat_category_str or "N/A",
+            },
+            "raw_log": raw_log,
+        }
+        cases.append({"name": case_name, "alert": alert})
+    return cases

@@ -23,6 +23,21 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
+# Expected top-level keys in the LLM JSON response
+EXPECTED_TOP_LEVEL_KEYS = [
+    "ttp_analysis",
+    "attack_chain",
+    "ioc_extraction",
+    "correlation_keys",
+    "evidence_vs_inference",
+    "containment_playbook",
+    "splunk_enrichment",
+    "tactic_framing",
+    "benign_explanations",
+    "competing_hypotheses",
+    "context_enrichment",
+]
+
 # Validate required environment variables
 api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
@@ -585,6 +600,16 @@ SECURITY ALERT INPUT:
             # Log the raw JSON structure for debugging
             logger.info("Raw LLM JSON Response Structure:")
             logger.info(json.dumps(result, indent=2))
+
+            if isinstance(result, dict):
+                got_keys = sorted(result.keys())
+                missing_keys = [k for k in EXPECTED_TOP_LEVEL_KEYS if k not in result]
+                extra_keys = [k for k in got_keys if k not in set(EXPECTED_TOP_LEVEL_KEYS)]
+                logger.info(f"LLM top-level keys: {got_keys}")
+                logger.info(f"Missing top-level keys: {missing_keys}")
+                logger.info(f"Extra top-level keys: {extra_keys}")
+            else:
+                logger.warning(f"LLM response is not a dict; cannot validate top-level keys (type={type(result).__name__})")
             
             # Also save to a file for inspection
             debug_json_file = SCRIPT_DIR / f"llm_raw_response_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
