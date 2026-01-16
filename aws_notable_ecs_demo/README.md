@@ -8,6 +8,41 @@ ECS-based deployment where all analysis logic runs in a single container.
 Browser → ALB → ECS Container (nginx + Flask + Bedrock) → Bedrock Nova Pro
 ```
 
+## Timeouts (LLM calls can exceed 30s)
+
+If you see `WORKER TIMEOUT` in logs with a traceback starting at `gunicorn/workers/sync.py`, that's gunicorn's **default 30 second timeout** killing the request while the LLM call is still running.
+
+This container uses **nginx → gunicorn (Flask)**. You need to align timeouts across:
+
+- **gunicorn**: request execution timeout (default 30s)
+- **nginx**: `proxy_read_timeout` / `proxy_send_timeout`
+- **ALB** (if used): **idle timeout** (AWS default is often 60s)
+
+### Gunicorn knobs (set via env vars)
+
+`supervisord.conf` supports these environment variables:
+
+- **`GUNICORN_TIMEOUT`**: seconds before gunicorn kills a worker handling a request (default: `180`)
+- **`GUNICORN_GRACEFUL_TIMEOUT`**: graceful shutdown window (default: `30`)
+- **`GUNICORN_WORKERS`**: number of workers (default: `2`)
+- **`GUNICORN_KEEPALIVE`**: keep-alive seconds (default: `2`)
+
+Example (local docker):
+
+```bash
+docker run --rm -p 8081:80 ^
+  -e GUNICORN_TIMEOUT=300 ^
+  -e GUNICORN_WORKERS=2 ^
+  notable-frontend
+```
+
+### Preferred production approach (beyond “just increase timeout”)
+
+Increasing the timeout is fine for a demo, but a long LLM call keeps a web worker busy. For higher reliability/scale, prefer:
+
+- **Async job**: enqueue analysis (SQS/Celery/Step Functions), return a `job_id`, poll `/api/status/<job_id>` or push via SSE/WebSocket
+- **Streaming**: stream partial output (SSE/chunked), paired with nginx buffering off and appropriate proxy timeouts
+
 ## Files
 
 - `index.html`, `styles.css`, `main.js` - Frontend UI
