@@ -3,7 +3,7 @@
 ### How we anchor the LLM to MITRE ATT&CK
 - Load the official ATT&CK v17.1 ID list (`enterprise_attack_v17.1_ids.json`) and build a validator that separates parent techniques and sub-techniques; only IDs from this list are allowed.
 - Inject the **full allowed ID list** into the prompt (`get_valid_ttps_for_prompt`) and **drop any LLM outputs** whose `ttp_id` is not in the list.
-- Force ATT&CK-aligned outputs via a strict JSON schema (keys: `ttp_analysis`, `attack_chain`, `ioc_extraction`, `correlation_keys`, `evidence_vs_inference`, `containment_playbook`, `splunk_enrichment`).
+- Force ATT&CK-aligned outputs via a strict JSON schema (keys: `ttp_analysis`, `attack_chain`, `ioc_extraction`, `evidence_vs_inference`, `containment_playbook`, `splunk_enrichment`).
 - Require **exactly one previous and one next attack-chain step** with ATT&CK tactic IDs/URLs, plus tactic-span notes to keep reasoning grounded in ATT&CK tactics.
 
 ### Evidence discipline and scoring

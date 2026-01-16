@@ -34,7 +34,7 @@ _COMMON_RESULT_WRAPPER_KEYS = (
 def _normalize_llm_result_shape(result: Any) -> Any:
     """Normalize common wrapper shapes around the expected top-level schema.
 
-    Expected schema is a dict with keys like 'ttp_analysis', 'attack_chain', etc.
+    Expected schema is a dict with keys like 'ttp_analysis', 'ioc_extraction', etc.
     Sometimes responses come back wrapped under a single container key; unwrap it.
     """
     if not isinstance(result, dict):
@@ -79,149 +79,16 @@ ANALYZE_NOTABLE_TOOL = {
                                 "ttp_name": {"type": "string"},
                                 "confidence_score": {"type": "number"},
                                 "explanation": {"type": "string"},
-                                "tactic_span_note": {"type": "string"},
                                 "evidence_fields": {"type": "array", "items": {"type": "string"}},
-                                "immediate_actions": {"type": "string"},
-                                "remediation_recommendations": {"type": "string"},
-                                "mitre_url": {
-                                    "type": "string",
-                                    "pattern": r"^$|^https://attack\\.mitre\\.org/versions/v17/techniques/T\\d{4}(?:/\\d{3})?/?$",
-                                },
                             },
                             "required": [
                                 "ttp_id",
                                 "ttp_name",
                                 "confidence_score",
                                 "explanation",
-                                "tactic_span_note",
                                 "evidence_fields",
-                                "immediate_actions",
-                                "remediation_recommendations",
-                                "mitre_url",
                             ],
                         },
-                    },
-                    "attack_chain": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "likely_previous_steps": {
-                                "type": "array",
-                                "minItems": 1,
-                                "maxItems": 1,
-                                "items": {
-                                    "type": "object",
-                                    "additionalProperties": False,
-                                    "properties": {
-                                        "tactic_id": {"type": "string"},
-                                        "tactic_name": {"type": "string"},
-                                        "mitre_url": {
-                                            "type": "string",
-                                            "pattern": r"^$|^https://attack\\.mitre\\.org/versions/v17/tactics/TA\\d{4}/?$",
-                                        },
-                                        "why_this_step": {"type": "string"},
-                                        "what_to_check": {"type": "string"},
-                                        "uncertainty_alternatives": {"type": "string"},
-                                        "investigation_tree": {
-                                            "type": "object",
-                                            "additionalProperties": False,
-                                            "properties": {
-                                                "Q1": {
-                                                    "type": "object",
-                                                    "additionalProperties": False,
-                                                    "properties": {"question": {"type": "string"}},
-                                                    "required": ["question"],
-                                                },
-                                                "Q2": {
-                                                    "type": "object",
-                                                    "additionalProperties": False,
-                                                    "properties": {"question": {"type": "string"}},
-                                                    "required": ["question"],
-                                                },
-                                                "Q3": {
-                                                    "type": "object",
-                                                    "additionalProperties": False,
-                                                    "properties": {"question": {"type": "string"}},
-                                                    "required": ["question"],
-                                                },
-                                            },
-                                            "required": ["Q1", "Q2", "Q3"],
-                                        },
-                                    },
-                                    "required": [
-                                        "tactic_id",
-                                        "tactic_name",
-                                        "mitre_url",
-                                        "why_this_step",
-                                        "what_to_check",
-                                        "uncertainty_alternatives",
-                                        "investigation_tree",
-                                    ],
-                                },
-                            },
-                            "likely_next_steps": {
-                                "type": "array",
-                                "minItems": 1,
-                                "maxItems": 1,
-                                "items": {
-                                    "type": "object",
-                                    "additionalProperties": False,
-                                    "properties": {
-                                        "tactic_id": {"type": "string"},
-                                        "tactic_name": {"type": "string"},
-                                        "mitre_url": {
-                                            "type": "string",
-                                            "pattern": r"^$|^https://attack\\.mitre\\.org/versions/v17/tactics/TA\\d{4}/?$",
-                                        },
-                                        "why_this_step": {"type": "string"},
-                                        "what_to_check": {"type": "string"},
-                                        "uncertainty_alternatives": {"type": "string"},
-                                        "investigation_tree": {
-                                            "type": "object",
-                                            "additionalProperties": False,
-                                            "properties": {
-                                                "Q1": {
-                                                    "type": "object",
-                                                    "additionalProperties": False,
-                                                    "properties": {"question": {"type": "string"}},
-                                                    "required": ["question"],
-                                                },
-                                                "Q2": {
-                                                    "type": "object",
-                                                    "additionalProperties": False,
-                                                    "properties": {"question": {"type": "string"}},
-                                                    "required": ["question"],
-                                                },
-                                                "Q3": {
-                                                    "type": "object",
-                                                    "additionalProperties": False,
-                                                    "properties": {"question": {"type": "string"}},
-                                                    "required": ["question"],
-                                                },
-                                            },
-                                            "required": ["Q1", "Q2", "Q3"],
-                                        },
-                                    },
-                                    "required": [
-                                        "tactic_id",
-                                        "tactic_name",
-                                        "mitre_url",
-                                        "why_this_step",
-                                        "what_to_check",
-                                        "uncertainty_alternatives",
-                                        "investigation_tree",
-                                    ],
-                                },
-                            },
-                            "kill_chain_phase": {"type": "string"},
-                            "tactic_span_note": {"type": "string"},
-                        },
-                        "required": [
-                            "likely_previous_steps",
-                            "likely_next_steps",
-                            "kill_chain_phase",
-                            "tactic_span_note",
-                        ],
                     },
                     "ioc_extraction": {
                         "type": "object",
@@ -258,105 +125,10 @@ ANALYZE_NOTABLE_TOOL = {
                         },
                         "required": ["evidence", "inferences"],
                     },
-                    "containment_playbook": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "immediate": {"type": "array", "items": {"type": "string"}},
-                            "short_term": {"type": "array", "items": {"type": "string"}},
-                            "references": {
-                                "type": "array",
-                                "items": {"type": "string", "pattern": r"^M\d{4}$"},
-                            },
-                        },
-                        "required": ["immediate", "short_term", "references"],
-                    },
-                    "splunk_enrichment": {
-                        "type": "array",
-                        "minItems": 1,
-                        "maxItems": 4,
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "phase": {"type": "string", "enum": ["previous", "next"]},
-                                "supports_tactic": {"type": "string"},
-                                "purpose": {"type": "string"},
-                                "query": {"type": "string"},
-                                "confidence_boost_rule": {"type": "string"},
-                                "confidence_reduce_rule": {"type": "string"},
-                            },
-                            "required": [
-                                "phase",
-                                "supports_tactic",
-                                "purpose",
-                                "query",
-                                "confidence_boost_rule",
-                                "confidence_reduce_rule",
-                            ],
-                        },
-                    },
-                    "tactic_framing": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "primary_tactic": {
-                                "type": "object",
-                                "additionalProperties": False,
-                                "properties": {
-                                    "tactic_id": {"type": "string"},
-                                    "tactic_name": {"type": "string"},
-                                    "justification": {"type": "string"},
-                                },
-                                "required": ["tactic_id", "tactic_name", "justification"],
-                            },
-                            "secondary_tactics": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "additionalProperties": False,
-                                    "properties": {
-                                        "tactic_id": {"type": "string"},
-                                        "tactic_name": {"type": "string"},
-                                        "why_plausible": {"type": "string"},
-                                    },
-                                    "required": ["tactic_id", "tactic_name", "why_plausible"],
-                                },
-                            },
-                            "disambiguation_checklist": {
-                                "type": "array",
-                                "minItems": 3,
-                                "maxItems": 5,
-                                "items": {"type": "string"},
-                            },
-                        },
-                        "required": ["primary_tactic", "secondary_tactics", "disambiguation_checklist"],
-                    },
-                    "benign_explanations": {
-                        "type": "array",
-                        "minItems": 3,
-                        "maxItems": 5,
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "hypothesis": {"type": "string"},
-                                "expect_if_true": {
-                                    "type": "array",
-                                    "minItems": 1,
-                                    "maxItems": 2,
-                                    "items": {"type": "string"},
-                                },
-                                "argue_against": {"type": "string"},
-                                "best_validation": {"type": "string"},
-                            },
-                            "required": ["hypothesis", "expect_if_true", "argue_against", "best_validation"],
-                        },
-                    },
                     "competing_hypotheses": {
                         "type": "array",
-                        "minItems": 3,
-                        "maxItems": 5,
+                        "minItems": 6,
+                        "maxItems": 6,
                         "items": {
                             "type": "object",
                             "additionalProperties": False,
@@ -387,44 +159,10 @@ ANALYZE_NOTABLE_TOOL = {
                             ],
                         },
                     },
-                    "context_enrichment": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "enrichment_steps": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "additionalProperties": False,
-                                    "properties": {
-                                        "field": {"type": "string"},
-                                        "enrichment_type": {"type": "string"},
-                                        "result_or_status": {"type": "string"},
-                                    },
-                                    "required": ["field", "enrichment_type", "result_or_status"],
-                                },
-                            },
-                            "baseline_queries": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "additionalProperties": False,
-                                    "properties": {
-                                        "purpose": {"type": "string"},
-                                        "query": {"type": "string"},
-                                    },
-                                    "required": ["purpose", "query"],
-                                },
-                            },
-                            "limitations": {"type": "string"},
-                        },
-                        "required": ["enrichment_steps", "baseline_queries", "limitations"],
-                    },
                 },
-                "required": ["ttp_analysis", "attack_chain", "ioc_extraction",
-                             "evidence_vs_inference", "containment_playbook",
-                             "splunk_enrichment", "tactic_framing", "benign_explanations",
-                             "competing_hypotheses", "context_enrichment"],
+                "required": ["ttp_analysis", "ioc_extraction",
+                             "evidence_vs_inference",
+                             "competing_hypotheses"],
                 "additionalProperties": False,
             }
         }
@@ -434,15 +172,9 @@ ANALYZE_NOTABLE_TOOL = {
 # Required keys and their expected types for schema validation
 REQUIRED_RESPONSE_KEYS = {
     "ttp_analysis": list,
-    "attack_chain": dict,
     "ioc_extraction": dict,
     "evidence_vs_inference": dict,
-    "containment_playbook": dict,
-    "splunk_enrichment": list,
-    "tactic_framing": dict,
-    "benign_explanations": list,
     "competing_hypotheses": list,
-    "context_enrichment": dict,
 }
 
 # Stable, deterministic list of required top-level keys for logging/debugging
@@ -497,43 +229,13 @@ Scoring Rubric:
 - low < 0.30 = plausible but needs corroboration
 """
 
-TACTIC_FRAMING = """
-TACTIC FRAMING (Notable-First)
-Given this notable ONLY (stateless), do:
-- List the ATT&CK technique(s) implicated.
-- Provide a "Primary Tactic (most plausible)" and "Secondary Tactic(s) (possible)" based on the observable semantics of the event(s), not on assumed environment.
-
-Rules:
-- Do not label a tactic as "Primary" unless the notable contains direct supporting evidence for that tactic.
-- If multiple tactics fit, keep "tactic span" but explicitly state what additional fields/logs would disambiguate primary vs secondary.
-- If required context is missing, state "unknown" and list what would disambiguate.
-
-Output in tactic_framing key:
-- primary_tactic: object with tactic_id, tactic_name, justification (1-2 sentences referencing fields in the notable)
-- secondary_tactics: list of objects with tactic_id, tactic_name, why_plausible (1 sentence each)
-- disambiguation_checklist: list of 3-5 specific questions/fields/log sources to confirm primary vs secondary
-"""
-
-BENIGN_EXPLANATIONS = """
-BENIGN EXPLANATIONS (Legitimate Activity Hypotheses)
-Provide 3-5 plausible legitimate explanations for this notable.
-
-For each hypothesis include:
-- hypothesis: string (the benign explanation)
-- expect_if_true: list of 1-2 concrete indicators we would expect to see if this is legitimate
-- argue_against: string (1 concrete indicator that would argue against this being legitimate)
-- best_validation: string (the single best query/log source to validate it quickly)
-
-Keep it concise and do not assume extra telemetry unless you name it explicitly.
-"""
-
 CAUSAL_HUMILITY = """
 CAUSAL HUMILITY + PIVOT STRATEGY (Stateless)
 Do not assume a single root cause from one notable. Use this reasoning procedure:
 
-1) Generate 3-5 competing hypotheses for how the observable could occur.
-   - Include at least 1 benign hypothesis.
-   - Include at least 2 distinct adversary hypotheses (different initial vectors).
+1) Generate EXACTLY 6 competing hypotheses for how the observable could occur:
+   - EXACTLY 3 benign hypotheses
+   - EXACTLY 3 adversary hypotheses (different initial vectors)
 
 2) For each hypothesis:
    - hypothesis_type: "benign" or "adversary"
@@ -547,31 +249,6 @@ Do not assume a single root cause from one notable. Use this reasoning procedure
    - If identity is in question: pivot to IdP sign-in logs (if federated/hybrid) and AD authentication trails.
    - If local compromise is suspected: pivot to endpoint telemetry (Sysmon/EDR) and process/access signals.
    - If only Windows Security logs exist, state limitations explicitly and downgrade confidence.
-"""
-
-CONTEXT_ENRICHMENT = """
-CONTEXT ENRICHMENT + BASELINE-FIRST (Reasoning Rule)
-When a notable includes any network-origin fields (e.g., IpAddress/src_ip/dest_ip), do:
-
-A) Enrichment (only if the field exists):
-- geo: iplocation on the IP
-- ownership: ASN/org lookup for the IP
-- internal_vs_external: check against internal CIDR ranges
-- known_egress: check against known VPN/proxy/jump egress lists
-- reputation: only if a reputation source is available; otherwise state "not available"
-
-B) Baseline (avoid one-off conclusions):
-- Propose baseline queries that answer:
-  - How common is this actor->target interaction in the last N days?
-  - What source IP ranges are typical for this user/host/app?
-  - Is the timing/volume unusual relative to baseline?
-- Prefer per-entity baselines (user, host, source IP range) over global counts.
-
-C) Output requirements:
-- State the enriched context explicitly OR state "not available" for each.
-- Use baseline results (or absence of baseline data) to set confidence.
-- If baseline cannot be run, downgrade confidence and label as "needs baseline validation".
-- List any limitations in the limitations field.
 """
 
 MITIGATION_RULES = """
@@ -603,7 +280,7 @@ PROCEDURE:
 3. Decode/deobfuscate common encodings (Base64, hex, URL-encoded, gzip) if found.
 4. Use sub-techniques when specific variant is confirmed (e.g., T1059.001 for PowerShell).
 5. Default to parent techniques when sub-technique cannot be precisely assigned.
-6. Apply Tactic Framing, Benign Explanations, Causal Humility, and Context Enrichment reasoning.
+6. Apply Causal Humility reasoning.
 """
 
 OUTPUT_SCHEMA = """
@@ -611,15 +288,9 @@ Use the analyze_notable tool to return your analysis. The tool expects the follo
 
 OUTPUT FORMAT: Return a single valid JSON object with these top-level keys:
 - `ttp_analysis`
-- `attack_chain`
 - `ioc_extraction`
 - `evidence_vs_inference`
-- `containment_playbook`
-- `splunk_enrichment`
-- `tactic_framing`
-- `benign_explanations`
 - `competing_hypotheses`
-- `context_enrichment`
 
 SCHEMA:
 - ttp_analysis: list of objects, each with:
@@ -627,24 +298,7 @@ SCHEMA:
     - ttp_name: string (official technique name)
     - confidence_score: float (0.0-1.0)
     - explanation: string (A brief explanation of why this TTP was inferred, using quoted evidence from the alert. End with "Uncertainty: [brief statement]" acknowledging what is inferred vs. direct evidence, and any missing context like geo/VPN metadata, edge telemetry, etc.)
-    - tactic_span_note: string (One sentence naming other ATT&CK tactics this technique commonly supports and why they may apply here)
     - evidence_fields: list of strings (Specific alert field=value pairs that directly support this TTP)
-    - immediate_actions: string (Urgent remediation steps if this TTP is confirmed)
-    - remediation_recommendations: string (Specific defensive measures citing MITRE mitigations by ID)
-    - mitre_url: mitre version permalink url for the technique
-
-- attack_chain: object with:
-    - likely_previous_steps: list of EXACTLY 1 object with:
-        - tactic_id: string (MITRE ATT&CK Tactic ID)
-        - tactic_name: string (official tactic name)
-        - mitre_url: string (tactic MITRE version permalink URL)
-        - why_this_step: string (One concise sentence explaining the hypothesis - cite alert field=value pairs)
-        - what_to_check: string (One concise sentence listing specific artifacts, event IDs, or data sources to investigate)
-        - uncertainty_alternatives: string (One concise sentence describing what is uncertain or alternative explanations)
-        - investigation_tree: object with exactly 3 questions (Q1, Q2, Q3), each containing question: string
-    - likely_next_steps: list of EXACTLY 1 object (same structure as likely_previous_steps)
-    - kill_chain_phase: string (must match MITRE phase name)
-    - tactic_span_note: string (One-line note naming other ATT&CK tactics the top technique supports)
 
 - ioc_extraction: object with:
     - ip_addresses: list of strings
@@ -661,41 +315,12 @@ SCHEMA:
     - evidence: list of strings (Literal field=value facts from the alert)
     - inferences: list of strings (Hypotheses with noted uncertainties)
 
-- containment_playbook: object with:
-    - immediate: list of strings (2-4 concrete containment actions within hours)
-    - short_term: list of strings (2-4 hardening actions within 24-48h)
-    - references: list of strings (ATT&CK Mitigations by ID)
-
-- splunk_enrichment: list of 1-4 objects, each with:
-    - phase: "previous" or "next"
-    - supports_tactic: string
-    - purpose: string
-    - query: string (Splunk SPL using only observable data; index/sourcetype as PLACEHOLDER)
-    - confidence_boost_rule: string
-    - confidence_reduce_rule: string
-
-- tactic_framing: object with:
-    - primary_tactic: object with tactic_id, tactic_name, justification
-    - secondary_tactics: list of objects with tactic_id, tactic_name, why_plausible
-    - disambiguation_checklist: list of 3-5 strings (questions/fields/log sources to confirm)
-
-- benign_explanations: list of 3-5 objects, each with:
-    - hypothesis: string (the benign explanation)
-    - expect_if_true: list of 1-2 strings (indicators expected if legitimate)
-    - argue_against: string (indicator arguing against legitimacy)
-    - best_validation: string (best query/log source to validate)
-
-- competing_hypotheses: list of 3-5 objects, each with:
+- competing_hypotheses: list of EXACTLY 6 objects (EXACTLY 3 benign + EXACTLY 3 adversary), each with:
     - hypothesis_type: "benign" or "adversary"
     - hypothesis: string
     - evidence_support: list of strings (field=value pairs supporting this)
     - evidence_gaps: list of strings (critical missing evidence)
     - best_pivots: list of objects with log_source and key_fields
-
-- context_enrichment: object with:
-    - enrichment_steps: list of objects, each with field, enrichment_type, result_or_status
-    - baseline_queries: list of objects, each with purpose and query
-    - limitations: string (what cannot be concluded from provided data)
 """
 
 OUTPUT_SCHEMA_RAW_JSON = OUTPUT_SCHEMA.replace(
@@ -706,16 +331,11 @@ OUTPUT_SCHEMA_RAW_JSON = OUTPUT_SCHEMA.replace(
 RULES = """
 RULES:
 - CRITICAL: NO EMOJIS OR UNICODE SYMBOLS; Use only plain ASCII text characters.
-- ATTACK CHAIN: ALWAYS include EXACTLY 1 previous step and EXACTLY 1 next step as hypotheses.
 - TIME WINDOWS: If ALERT_TIME is provided, previous queries use earliest=-24h@h latest=ALERT_TIME, next queries use earliest=ALERT_TIME latest=+24h@h. If not provided, use relative time.
 - EVIDENCE VS INFERENCE: Populate "evidence" with only direct field=value facts. Populate "inferences" with hypotheses and note uncertainties.
-- CONTAINMENT: Keep to 3-6 bullets total. Cite ATT&CK mitigations by ID (e.g., M1032). Do NOT output URLs in containment references.
-- HUNT FAMILIES: Provide 3-4 enrichment queries covering applicable telemetry families.
-- All enrichment queries must use only evidence present in the alert; index/sourcetype as PLACEHOLDER.
 - URL POLICY:
-  - All fields named "mitre_url" MUST be a MITRE ATT&CK v17 permalink (https://attack.mitre.org/versions/v17/...) OR an empty string.
   - Never output example.com (or any example/test domain) anywhere.
-  - Never output the word PLACEHOLDER/placeholder anywhere EXCEPT inside Splunk query strings for index/sourcetype placeholders.
+  - Never output the word PLACEHOLDER/placeholder anywhere.
 - TTP EXPLANATIONS: Always end with "Uncertainty: [brief statement]".
 - IOC EXTRACTION: Extract ALL IOCs; leave arrays empty [] if not found. Do not label core OS components as IOCs without malicious context.
 - STATELESS: If context is missing (e.g., IP ownership, VPN status), state "unknown" and list what would disambiguate.
@@ -746,8 +366,31 @@ def validate_response_schema(result: Dict[str, Any]) -> Tuple[bool, Optional[str
     return True, None
 
 
-MITRE_V17_TECHNIQUE_URL_RE = re.compile(r"^https://attack\\.mitre\\.org/versions/v17/techniques/T\\d{4}(?:/\\d{3})?/?$")
-MITRE_V17_TACTIC_URL_RE = re.compile(r"^https://attack\\.mitre\\.org/versions/v17/tactics/TA\\d{4}/?$")
+def validate_competing_hypotheses_balance(result: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """Enforce competing_hypotheses contains EXACTLY 3 benign + EXACTLY 3 adversary items."""
+    ch = result.get("competing_hypotheses")
+    if not isinstance(ch, list):
+        return False, "competing_hypotheses must be a list"
+    if len(ch) != 6:
+        return False, f"competing_hypotheses must contain exactly 6 items (got {len(ch)})"
+
+    benign = 0
+    adversary = 0
+    for i, item in enumerate(ch):
+        if not isinstance(item, dict):
+            return False, f"competing_hypotheses[{i}] must be an object"
+        t = item.get("hypothesis_type")
+        if t == "benign":
+            benign += 1
+        elif t == "adversary":
+            adversary += 1
+        else:
+            return False, f"competing_hypotheses[{i}].hypothesis_type must be 'benign' or 'adversary'"
+
+    if benign != 3 or adversary != 3:
+        return False, f"competing_hypotheses must include exactly 3 benign + 3 adversary (got benign={benign}, adversary={adversary})"
+
+    return True, None
 
 
 def _iter_strings(obj: Any, *, path: str = "") -> List[Tuple[str, str]]:
@@ -772,22 +415,9 @@ def validate_content_policies(result: Dict[str, Any]) -> Tuple[bool, Optional[st
     Enforces:
     - No example.com (or other example/test domains) anywhere
     - No PLACEHOLDER tokens except inside query strings
-    - mitre_url fields must be MITRE ATT&CK v17 permalinks or empty
-    - containment_playbook.references must be mitigation IDs (M####), not URLs
+    - URLs only allowed in ioc_extraction.urls[]
     """
-    # 1) Containment references must be mitigation IDs (M####)
-    try:
-        refs = result.get("containment_playbook", {}).get("references", [])
-        if isinstance(refs, list):
-            for i, ref in enumerate(refs):
-                if not isinstance(ref, str):
-                    return False, f"containment_playbook.references[{i}] must be a string"
-                if not re.fullmatch(r"M\d{4}", ref.strip()):
-                    return False, f"containment_playbook.references[{i}] must be an ATT&CK mitigation ID like M1032 (got: {ref!r})"
-    except Exception:
-        return False, "Failed to validate containment_playbook.references"
-
-    # 2) Global string policy scan
+    # 1) Global string policy scan
     for p, s in _iter_strings(result):
         s_lower = s.lower()
 
@@ -796,20 +426,12 @@ def validate_content_policies(result: Dict[str, Any]) -> Tuple[bool, Optional[st
 
         # Allow PLACEHOLDER only within query strings (we intentionally use it for index/sourcetype templates)
         if "placeholder" in s_lower:
-            if not p.endswith(".query"):
-                return False, f"Disallowed PLACEHOLDER token outside query field: {p}"
+            return False, f"Disallowed PLACEHOLDER token in {p}"
 
-        # Enforce MITRE-only URLs for mitre_url fields (or empty string)
-        if p.endswith("mitre_url"):
-            if s.strip() == "":
-                continue
-            if MITRE_V17_TECHNIQUE_URL_RE.match(s) or MITRE_V17_TACTIC_URL_RE.match(s):
-                continue
-            return False, f"Invalid mitre_url in {p}: must be MITRE v17 permalink or empty"
-
-        # If any other field contains an http(s) URL, it's not allowed (only mitre_url may contain URLs)
-        if ("http://" in s_lower or "https://" in s_lower) and (not p.endswith("mitre_url")):
-            return False, f"Disallowed URL outside mitre_url field: {p}"
+        # URLs: allow only within ioc_extraction.urls[]
+        if ("http://" in s_lower or "https://" in s_lower):
+            if not p.startswith("ioc_extraction.urls["):
+                return False, f"Disallowed URL outside ioc_extraction.urls: {p}"
     
     return True, None
 
@@ -1072,13 +694,7 @@ class BedrockAnalyzer:
 
 {SCORING_RUBRIC}
 
-{TACTIC_FRAMING}
-
-{BENIGN_EXPLANATIONS}
-
 {CAUSAL_HUMILITY}
-
-{CONTEXT_ENRICHMENT}
 
 {MITIGATION_RULES}
 
@@ -1366,12 +982,19 @@ SECURITY ALERT INPUT:
                     raw_content = raw_content or str(result)[:2000]
                     result = None  # treat as parse failure, triggers retry
                 else:
-                    policy_ok, policy_err = validate_content_policies(result)
-                    if not policy_ok:
-                        logger.warning(f"Content policy validation failed: {policy_err}")
-                        error_msg = f"Content policy: {policy_err}"
+                    ch_ok, ch_err = validate_competing_hypotheses_balance(result)
+                    if not ch_ok:
+                        logger.warning(f"Competing hypotheses validation failed: {ch_err}")
+                        error_msg = f"Competing hypotheses: {ch_err}"
                         raw_content = raw_content or str(result)[:2000]
                         result = None
+                    else:
+                        policy_ok, policy_err = validate_content_policies(result)
+                        if not policy_ok:
+                            logger.warning(f"Content policy validation failed: {policy_err}")
+                            error_msg = f"Content policy: {policy_err}"
+                            raw_content = raw_content or str(result)[:2000]
+                            result = None
             
             # Content retry: if parsing or validation failed, try once more with a repair prompt
             if result is None and error_msg:
@@ -1406,6 +1029,11 @@ SECURITY ALERT INPUT:
                         if not is_valid:
                             logger.error(f"Retry schema validation failed: {validation_error}")
                             logger.error(f"Retry got keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
+                            self.last_llm_response = {"raw_error": retry_raw or str(result)[:2000]}
+                            return []
+                        ch_ok, ch_err = validate_competing_hypotheses_balance(result)
+                        if not ch_ok:
+                            logger.error(f"Retry competing hypotheses validation failed: {ch_err}")
                             self.last_llm_response = {"raw_error": retry_raw or str(result)[:2000]}
                             return []
                         policy_ok, policy_err = validate_content_policies(result)
@@ -1463,11 +1091,7 @@ SECURITY ALERT INPUT:
                         "ttp_name": item.get("ttp_name", ""),
                         "score": float(item.get("confidence_score", item.get("score", item.get("confidence", 0)))),
                         "explanation": item.get("explanation", ""),
-                        "tactic_span_note": item.get("tactic_span_note", ""),
                         "evidence_fields": item.get("evidence_fields", []),
-                        "immediate_actions": item.get("immediate_actions", ""),
-                        "remediation_recommendations": item.get("remediation_recommendations", ""),
-                        "mitre_url": item.get("mitre_url", "")
                     })
                 logger.info(f"Extracted {len(scored_ttps)} TTPs from ttp_analysis")
             

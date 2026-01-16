@@ -53,18 +53,6 @@ def generate_markdown_report(
             lines.append(f"**URLs:** {', '.join(iocs['urls'])}\n")
         lines.append("\n")
     
-    # Correlation Keys
-    if "correlation_keys" in llm_response:
-        corr_keys = llm_response["correlation_keys"]
-        lines.append("### Correlation Keys\n\n")
-        if corr_keys.get('primary_indicators'):
-            lines.append(f"**Primary Indicators:** {', '.join(corr_keys['primary_indicators'])}\n")
-        if corr_keys.get('search_terms'):
-            lines.append(f"**Search Terms:** {', '.join(corr_keys['search_terms'])}\n")
-        if corr_keys.get('time_window_suggested'):
-            lines.append(f"**Suggested Time Window:** {corr_keys['time_window_suggested']}\n")
-        lines.append("\n")
-    
     # Evidence vs Inference
     if "evidence_vs_inference" in llm_response:
         evi = llm_response["evidence_vs_inference"]
