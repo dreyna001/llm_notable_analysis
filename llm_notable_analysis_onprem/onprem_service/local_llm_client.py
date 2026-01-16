@@ -6,14 +6,337 @@ to vLLM server running gpt-oss-20b.
 
 import json
 import logging
+import re
 import time
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import requests
 
 from .config import Config
 from .ttp_validator import TTPValidator
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# s3_testing-compatible prompt + output contract + validation helpers
+# =============================================================================
+
+# Some models / intermediaries occasionally wrap the JSON payload in an extra
+# top-level container key (e.g., {"analysis": {...}}). This helper unwraps
+# common container shapes so downstream schema validation is robust.
+_COMMON_RESULT_WRAPPER_KEYS = (
+    "ttp_analyzer",
+    "analyze_notable",
+    "analysis",
+    "result",
+    "data",
+    "payload",
+)
+
+
+def _normalize_llm_result_shape(result: Any) -> Any:
+    """Normalize common wrapper shapes around the expected top-level schema."""
+    if not isinstance(result, dict):
+        return result
+
+    for k in _COMMON_RESULT_WRAPPER_KEYS:
+        v = result.get(k)
+        if isinstance(v, dict):
+            logger.warning(f"Unwrapping LLM result from container key: {k!r}")
+            return v
+
+    if len(result) == 1:
+        (only_key, only_val), = result.items()
+        if isinstance(only_val, dict):
+            logger.warning(f"Unwrapping singleton LLM result container key: {only_key!r}")
+            return only_val
+
+    return result
+
+
+# Required keys and their expected types for schema validation (matches s3_testing)
+REQUIRED_RESPONSE_KEYS: Dict[str, type] = {
+    "ttp_analysis": list,
+    "ioc_extraction": dict,
+    "evidence_vs_inference": dict,
+    "competing_hypotheses": list,
+}
+
+
+ANALYST_DOCTRINE = """
+ANALYST DOCTRINE (apply to every case)
+- MITRE ATT&CK is many-to-many: a single technique may support several tactics. Always state (a) the tactic you're assigning in this alert AND (b) other plausible tactics this technique commonly serves (tactic-span note). Base on MITRE ATT&CK v17.
+- FACT vs. INFERENCE: List literal, direct alert evidence first (field=value from the alert), then inferences and assumptions separately (with uncertainty).
+- IOC labeling hygiene: Do not list core OS/generic binaries as IOCs without explicit malicious context. Instead, list as "system_components_observed" if present in the alert.
+- STATELESS ANALYSIS: Reasoning must rely only on observable fields in this notable. If a required fact is not present, state "unknown" and list what would disambiguate.
+""".strip()
+
+
+EVIDENCE_GATE = """
+EVIDENCE-GATE: Only include a technique (TTP) if:
+A. There is a direct data-component match in the alert (quote it).
+B. Your explanation cites the matching field/value.
+C. No inference or external context is necessary.
+D. If evidence correctness depends on context not in the log (e.g., domain internal/external, IP a DC), drop to the parent technique or reduce confidence by >=0.20 and state the missing context in your explanation.
+""".strip()
+
+
+SCORING_RUBRIC = """
+Scoring Rubric:
+- high >= 0.80 = direct, unambiguous
+- med 0.50-0.79 = strongly suggestive; one element missing
+- low < 0.30 = plausible but needs corroboration
+""".strip()
+
+
+CAUSAL_HUMILITY = """
+CAUSAL HUMILITY + PIVOT STRATEGY (Stateless)
+Do not assume a single root cause from one notable. Use this reasoning procedure:
+
+1) Generate EXACTLY 6 competing hypotheses for how the observable could occur:
+   - EXACTLY 3 benign hypotheses
+   - EXACTLY 3 adversary hypotheses (different initial vectors)
+
+2) For each hypothesis:
+   - hypothesis_type: "benign" or "adversary"
+   - hypothesis: string description
+   - evidence_support: list of field=value pairs from the notable that support it
+   - evidence_gaps: list of critical evidence that is missing
+   - best_pivots: list of 1-2 pivots (each with log_source and key_fields)
+
+3) Pivot selection rules (use what is available; do not invent telemetry):
+   - If network origin matters: pivot to VPN/jump host/PAM session logs and firewall allow logs.
+   - If identity is in question: pivot to IdP sign-in logs (if federated/hybrid) and AD authentication trails.
+   - If local compromise is suspected: pivot to endpoint telemetry (Sysmon/EDR) and process/access signals.
+   - If only Windows Security logs exist, state limitations explicitly and downgrade confidence.
+""".strip()
+
+
+PROCEDURE = """
+PROCEDURE:
+1. Decode/deobfuscate common encodings (Base64, hex, URL-encoded, gzip) if found.
+2. Use sub-techniques when specific variant is confirmed (e.g., T1059.001 for PowerShell); default to parent techniques otherwise.
+""".strip()
+
+
+OUTPUT_SCHEMA_RAW_JSON = """
+Return ONLY a single JSON object matching the schema. Do not include markdown fences or any extra text.
+
+Additional constraints:
+- explanation: must end with "Uncertainty: [brief statement]".
+- URLs are only allowed in ioc_extraction.urls[]; no URLs elsewhere.
+- Leave arrays empty [] when no items apply.
+
+Top-level keys (required):
+- ttp_analysis
+- ioc_extraction
+- evidence_vs_inference
+- competing_hypotheses
+""".strip()
+
+
+RULES = """
+RULES:
+- NO EMOJIS OR UNICODE SYMBOLS; use only plain ASCII text.
+- Never output example.com or PLACEHOLDER anywhere.
+""".strip()
+
+
+REPAIR_PROMPT_TEMPLATE_RAW_JSON = """Your previous response could not be parsed or validated.
+
+Error: {error}
+
+Previous output (truncated):
+{prior_output}
+
+Return ONLY a single valid JSON object matching the schema and constraints. Do not include markdown fences or any extra text.
+"""
+
+
+def validate_response_schema(result: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    if not isinstance(result, dict):
+        return False, f"Expected dict, got {type(result).__name__}"
+
+    for key, expected_type in REQUIRED_RESPONSE_KEYS.items():
+        if key not in result:
+            return False, f"Missing required key: {key}"
+        if not isinstance(result[key], expected_type):
+            return False, f"Key '{key}' must be {expected_type.__name__}, got {type(result[key]).__name__}"
+
+    return True, None
+
+
+def validate_competing_hypotheses_balance(result: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """Enforce competing_hypotheses contains EXACTLY 3 benign + EXACTLY 3 adversary items."""
+    ch = result.get("competing_hypotheses")
+    if not isinstance(ch, list):
+        return False, "competing_hypotheses must be a list"
+    if len(ch) != 6:
+        return False, f"competing_hypotheses must contain exactly 6 items (got {len(ch)})"
+
+    benign = 0
+    adversary = 0
+    for i, item in enumerate(ch):
+        if not isinstance(item, dict):
+            return False, f"competing_hypotheses[{i}] must be an object"
+        t = item.get("hypothesis_type")
+        if t == "benign":
+            benign += 1
+        elif t == "adversary":
+            adversary += 1
+        else:
+            return False, f"competing_hypotheses[{i}].hypothesis_type must be 'benign' or 'adversary'"
+
+    if benign != 3 or adversary != 3:
+        return False, f"competing_hypotheses must include exactly 3 benign + 3 adversary (got benign={benign}, adversary={adversary})"
+
+    return True, None
+
+
+def _iter_strings(obj: Any, *, path: str = "") -> List[Tuple[str, str]]:
+    """Collect (path, value) for all string leaves in a nested structure."""
+    found: List[Tuple[str, str]] = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            child_path = f"{path}.{k}" if path else str(k)
+            found.extend(_iter_strings(v, path=child_path))
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            child_path = f"{path}[{i}]"
+            found.extend(_iter_strings(v, path=child_path))
+    elif isinstance(obj, str):
+        found.append((path, obj))
+    return found
+
+
+def validate_content_policies(result: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """Validate policy constraints not fully expressible via JSON schema."""
+    for p, s in _iter_strings(result):
+        s_lower = s.lower()
+        if "example.com" in s_lower:
+            return False, f"Disallowed placeholder domain in {p}"
+        if "placeholder" in s_lower:
+            return False, f"Disallowed PLACEHOLDER token in {p}"
+        if ("http://" in s_lower or "https://" in s_lower):
+            if not p.startswith("ioc_extraction.urls["):
+                return False, f"Disallowed URL outside ioc_extraction.urls: {p}"
+    return True, None
+
+
+def _safe_float(v: Any, default: float = 0.0) -> float:
+    try:
+        return float(v)
+    except Exception:
+        return default
+
+
+def extract_scored_ttps(result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extract a normalized scored TTP list from a parsed LLM result.
+
+    Mirrors the post-processing used in `s3_testing/ttp_analyzer.py`:
+    - emits a stable shape used by markdown rendering
+    - normalizes score from confidence_score/score/confidence
+    """
+    scored: List[Dict[str, Any]] = []
+    ttp_list = result.get("ttp_analysis", [])
+    if not isinstance(ttp_list, list):
+        return scored
+
+    for i, item in enumerate(ttp_list):
+        if not isinstance(item, dict):
+            logger.warning(f"Skipping invalid TTP item at index {i}: not a dict")
+            continue
+        ttp_id = item.get("ttp_id")
+        if not ttp_id:
+            logger.warning(f"Skipping invalid TTP item at index {i}: missing ttp_id")
+            continue
+
+        scored.append(
+            {
+                "ttp_id": ttp_id,
+                "ttp_name": item.get("ttp_name", ""),
+                "score": _safe_float(item.get("confidence_score", item.get("score", item.get("confidence", 0.0)))),
+                "explanation": item.get("explanation", ""),
+                "evidence_fields": item.get("evidence_fields", []),
+            }
+        )
+
+    return scored
+
+
+def _extract_brace_balanced_object(text: str) -> Optional[str]:
+    """Extract the first complete brace-balanced JSON object from text."""
+    if not text or not text.startswith("{"):
+        return None
+
+    depth = 0
+    in_string = False
+    escape_next = False
+
+    for i, char in enumerate(text):
+        if escape_next:
+            escape_next = False
+            continue
+
+        if char == "\\" and in_string:
+            escape_next = True
+            continue
+
+        if char == '"' and not escape_next:
+            in_string = not in_string
+            continue
+
+        if in_string:
+            continue
+
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[: i + 1]
+
+    return None
+
+
+def extract_json_object(raw_text: str) -> Tuple[str, Optional[str]]:
+    """Extract a JSON object from text that may contain fences, preamble, or trailing content."""
+    if not raw_text:
+        return raw_text, None
+
+    text = raw_text.strip()
+    notes: List[str] = []
+
+    if text.startswith("\ufeff"):
+        text = text[1:]
+        notes.append("stripped BOM")
+
+    fence_pattern = r"^```(?:json)?\s*\n?(.*?)\n?```\s*$"
+    fence_match = re.match(fence_pattern, text, re.DOTALL | re.IGNORECASE)
+    if fence_match:
+        text = fence_match.group(1).strip()
+        notes.append("stripped code fences")
+
+    text_stripped = text.strip()
+    if text_stripped.startswith("{"):
+        extracted = _extract_brace_balanced_object(text_stripped)
+        if extracted and extracted != text_stripped:
+            notes.append("extracted brace-balanced object")
+            text = extracted
+        elif extracted:
+            text = extracted
+    else:
+        first_brace = text.find("{")
+        if first_brace != -1:
+            notes.append(f"skipped {first_brace} chars of preamble")
+            extracted = _extract_brace_balanced_object(text[first_brace:])
+            if extracted:
+                text = extracted
+                notes.append("extracted brace-balanced object")
+            else:
+                text = text[first_brace:]
+
+    return text, ("; ".join(notes) if notes else None)
 
 
 class LocalLLMClient:
@@ -41,132 +364,35 @@ class LocalLLMClient:
         Returns:
             Formatted prompt string.
         """
-        valid_ttps_list = self.ttp_validator.get_valid_ttps_for_prompt()
-        alert_time_str = f"\n        **ALERT_TIME:** {alert_time}\n        " if alert_time else ""
-        
-        prompt = f"""You are a cybersecurity expert mapping MITRE ATT&CK techniques from a single alert.
+        alert_time_str = f"\n**ALERT_TIME:** {alert_time}\n" if alert_time else ""
 
+        return f"""You are a cybersecurity expert mapping MITRE ATT&CK techniques from a single alert.
 {alert_time_str}
-        ---
+---
 
-        ANALYST DOCTRINE (apply to every case)
-        - MITRE ATT&CK is many-to-many: a single technique may support several tactics. Always state (a) the tactic you're assigning in this alert AND (b) other plausible tactics this technique commonly serves (tactic-span note). Base on MITRE ATT&CK v17.
-        - FACT vs. INFERENCE: List literal, direct alert evidence first (field=value from the alert), then inferences and assumptions separately (with uncertainty).
-        - Containment Focus: Provide a minimal 3-step containment playbook (containment, eradication, recovery) aligned with NIST 800-61 and mapped to relevant ATT&CK mitigations.
-        - Hunt by Telemetry Family: When proposing enrichment, include at least one check from each applicable telemetry family:
-            * Authentication (failures/successes, privilege use)
-            * Directory/Identity changes (object modifications)
-            * Lateral movement (remote services, shares, tasks)
-            * Persistence/Privilege (new users/groups, scheduled tasks)
-            * Kerberos/Ticketing (KDC/pre-auth anomalies)
-        - IOC labeling hygiene: Do not list core OS/generic binaries as IOCs without explicit malicious context. Instead, list as "system_components_observed" if present in the alert.
+{ANALYST_DOCTRINE}
 
-        EVIDENCE-GATE: Only include a technique (TTP) if: 
-        A. There is a direct data-component match in the alert (quote it).
-        B. Your explanation cites the matching field/value.
-        C. No inference or external context is necessary.
-        D. If evidence correctness depends on context not in the log (e.g., domain internal/external, IP a DC), drop to the parent technique or reduce confidence by >=0.20 and state the missing context in your explanation.
+{EVIDENCE_GATE}
 
-        Scoring Rubric: 
-        - high >= 0.80 = direct, unambiguous
-        - med 0.50-0.79 = strongly suggestive; one element missing
-        - low < 0.30 = plausible but needs corroboration
+{SCORING_RUBRIC}
 
-        MITIGATIONS & DETECTIONS:
-        - Prefer ATT&CK mitigations that materially reduce technique feasibility (e.g., M1032 MFA, M1026 PAM, M1030 segmentation).
-        - If uncertain between sub-technique and parent, select the parent and state why; use the sub-technique only with explicit evidence. 
+{CAUSAL_HUMILITY}
 
-        PROCEDURE:
-        1. **Think silently**: classify activity -> tactics -> candidate techniques.
-        2. Self-check against the tactic checklist.
-        3. Decode/deobfuscate common encodings (Base64, hex, URL-encoded, gzip) if found.
-        4. Use sub-techniques when specific variant is confirmed (e.g., T1059.001 for PowerShell).
-        5. Default to parent techniques when sub-technique cannot be precisely assigned.
-        6. Use only the ATT&CK techniques from this allowed list:
-        {valid_ttps_list}
+{PROCEDURE}
 
-        SECURITY ALERT INPUT:
-        {alert_text}
+Use MITRE ATT&CK v17 technique IDs (format: T#### or T####.###). If unsure, omit; invalid IDs will be discarded.
 
-        ---
+SECURITY ALERT INPUT:
+{alert_text}
 
-        OUTPUT FORMAT: Return ONLY a single valid JSON object. Do not include markdown code fences or any text outside the JSON. Start your response with an opening brace and end with a closing brace. The JSON object must have these top-level keys:
-        - `ttp_analysis`
-        - `attack_chain`
-        - `ioc_extraction`
-        - `correlation_keys`
-        - `evidence_vs_inference`
-        - `containment_playbook`
-        - `splunk_enrichment`
+---
 
-        SCHEMA:
-        - ttp_analysis: list of objects, each with:
-            - ttp_id: string (MITRE ATT&CK ID, e.g. "T1059.001")
-            - ttp_name: string (official technique name)
-            - confidence_score: float (0.0-1.0)
-            - explanation: string (A brief explanation of why this TTP was inferred, using quoted evidence from the alert. End with "Uncertainty: [brief statement]" acknowledging what is inferred vs. direct evidence, and any missing context like geo/VPN metadata, edge telemetry, etc.)
-            - tactic_span_note: string (One sentence naming other ATT&CK tactics this technique commonly supports and why they may apply here)
-            - evidence_fields: list of strings (Specific alert field=value pairs that directly support this TTP)
-            - immediate_actions: string (Urgent remediation steps if this TTP is confirmed)
-            - remediation_recommendations: string (Specific defensive measures to prevent or detect this technique, citing MITRE mitigations by ID)
-            - mitre_url: mitre version permalink url for the technique
+{OUTPUT_SCHEMA_RAW_JSON}
 
-        - attack_chain: object with:
-            - likely_previous_steps: list of EXACTLY 1 object (hypothesis), with:
-                - tactic_id: string (MITRE ATT&CK Tactic ID)
-                - tactic_name: string
-                - mitre_url: string
-                - why_this_step: string
-                - what_to_check: string
-                - uncertainty_alternatives: string
-                - investigation_tree: object with exactly 3 questions (Q1, Q2, Q3)
-            - likely_next_steps: list of EXACTLY 1 object (hypothesis), same structure
-            - kill_chain_phase: string
-            - tactic_span_note: string
+---
 
-        - ioc_extraction: object with:
-            - ip_addresses: list of strings
-            - domains: list of strings
-            - user_accounts: list of strings
-            - hostnames: list of strings
-            - file_paths: list of strings
-            - process_names: list of strings
-            - file_hashes: list of strings
-            - event_ids: list of strings
-            - urls: list of strings
-
-        - correlation_keys: object with:
-            - primary_indicators: list of strings
-            - search_terms: list of strings
-            - time_window_suggested: string
-
-        - evidence_vs_inference: object with:
-            - evidence: list of strings
-            - inferences: list of strings
-
-        - containment_playbook: object with:
-            - immediate: list of strings (2-4 concrete actions)
-            - short_term: list of strings (2-4 actions within 24-48h)
-            - references: list of strings (ATT&CK Mitigations by ID)
-
-        - splunk_enrichment: list of 1-4 objects, each with:
-            - phase: "previous" or "next"
-            - supports_tactic: string
-            - purpose: string
-            - query: string (Splunk SPL query)
-            - confidence_boost_rule: string
-            - confidence_reduce_rule: string
-
-        ---
-
-        RULES:
-        - CRITICAL: NO EMOJIS OR UNICODE SYMBOLS; use only plain ASCII text characters.
-        - ATTACK CHAIN: ALWAYS include EXACTLY 1 previous step and EXACTLY 1 next step.
-        - Do not return markdown, comments, or extra prose.
-        - Output only the raw JSON object.
-        - All fields and keys must match exactly.
-        """
-        return prompt
+{RULES}
+"""
     
     def _parse_llm_response(self, response_text: str) -> Dict[str, Any]:
         """Parse LLM response text into structured JSON.
@@ -180,23 +406,15 @@ class LocalLLMClient:
         Raises:
             json.JSONDecodeError: If response is not valid JSON.
         """
-        # Strip markdown code fences if present
-        text = response_text.strip()
-        if text.startswith("```json"):
-            text = text[7:]
-        if text.startswith("```"):
-            text = text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-        text = text.strip()
-        
-        # Find the first { and last } to extract JSON
-        start_idx = text.find("{")
-        end_idx = text.rfind("}")
-        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-            text = text[start_idx:end_idx + 1]
-        
-        return json.loads(text)
+        candidate, note = extract_json_object(response_text)
+        if note:
+            logger.info(f"LLM JSON extraction: {note}")
+
+        parsed = json.loads(candidate)
+        parsed = _normalize_llm_result_shape(parsed)
+        if not isinstance(parsed, dict):
+            raise ValueError(f"Expected top-level JSON object, got {type(parsed).__name__}")
+        return parsed
     
     def analyze_alert(
         self,
@@ -211,14 +429,11 @@ class LocalLLMClient:
             
         Returns:
             Dict containing:
-                - ttp_analysis: List of scored, validated TTPs
-                - attack_chain: Chain analysis
+                - ttp_analysis: List of scored, validated TTPs (normalized shape)
                 - ioc_extraction: Extracted IOCs
-                - correlation_keys: Correlation hints
                 - evidence_vs_inference: Evidence breakdown
-                - containment_playbook: Response actions
-                - splunk_enrichment: Enrichment queries
-                - raw_response: Original LLM response
+                - competing_hypotheses: Hypotheses & pivots
+                - raw_response: Original LLM response text
                 - metadata: Processing metadata
         """
         if not alert_text or not alert_text.strip():
@@ -226,93 +441,135 @@ class LocalLLMClient:
             return {"error": "Empty alert text", "ttp_analysis": []}
         
         prompt = self._build_prompt(alert_text, alert_time)
-        
-        # Build vLLM/OpenAI-compatible request
-        request_body = {
-            "model": self.config.LLM_MODEL_NAME,
-            "prompt": prompt,
-            "max_tokens": self.config.LLM_MAX_TOKENS,
-            "temperature": 0.0
-        }
-        
+
         headers = {"Content-Type": "application/json"}
         if self.config.LLM_API_TOKEN:
             headers["Authorization"] = f"Bearer {self.config.LLM_API_TOKEN}"
-        
-        # Retry logic
+
+        def _extract_choice_text(response_json: Dict[str, Any]) -> str:
+            if "choices" in response_json and len(response_json["choices"]) > 0:
+                choice0 = response_json["choices"][0]
+                if "text" in choice0:
+                    return choice0["text"]
+                if "message" in choice0 and isinstance(choice0["message"], dict):
+                    return choice0["message"].get("content", "")
+                raise ValueError("Unexpected response format from LLM choices[0]")
+            raise ValueError("No choices in LLM response")
+
+        def _call_llm(prompt_text: str) -> Tuple[str, float]:
+            request_body = {
+                "model": self.config.LLM_MODEL_NAME,
+                "prompt": prompt_text,
+                "max_tokens": self.config.LLM_MAX_TOKENS,
+                "temperature": 0.0,
+            }
+            start_time = time.time()
+            response = requests.post(
+                self.config.LLM_API_URL,
+                json=request_body,
+                headers=headers,
+                timeout=self.config.LLM_TIMEOUT,
+            )
+            response.raise_for_status()
+            elapsed = time.time() - start_time
+            response_json = response.json()
+            return _extract_choice_text(response_json), elapsed
+
+        def _validate_and_postprocess(parsed: Dict[str, Any]) -> Tuple[bool, Optional[str], Dict[str, Any]]:
+            parsed = _normalize_llm_result_shape(parsed)
+            if not isinstance(parsed, dict):
+                return False, f"Expected dict after normalization, got {type(parsed).__name__}", {}
+
+            schema_ok, schema_err = validate_response_schema(parsed)
+            if not schema_ok:
+                return False, f"Schema validation: {schema_err}", {}
+
+            ch_ok, ch_err = validate_competing_hypotheses_balance(parsed)
+            if not ch_ok:
+                return False, f"Competing hypotheses validation: {ch_err}", {}
+
+            policy_ok, policy_err = validate_content_policies(parsed)
+            if not policy_ok:
+                return False, f"Content policy validation: {policy_err}", {}
+
+            try:
+                parsed["ttp_analysis_raw"] = parsed.get("ttp_analysis", [])
+                extracted = extract_scored_ttps(parsed)
+                parsed["ttp_analysis"] = self.ttp_validator.filter_valid_ttps(extracted)
+            except Exception as e:
+                return False, f"TTP filtering failed: {e}", {}
+
+            return True, None, parsed
+
+        # Retry logic (transport)
         max_retries = 3
         retry_delay = 5
-        
+        last_error: Optional[str] = None
+
         for attempt in range(max_retries):
             try:
                 logger.info(f"LLM API call attempt {attempt + 1}/{max_retries}")
-                start_time = time.time()
-                
-                response = requests.post(
-                    self.config.LLM_API_URL,
-                    json=request_body,
-                    headers=headers,
-                    timeout=self.config.LLM_TIMEOUT
-                )
-                response.raise_for_status()
-                
-                elapsed = time.time() - start_time
-                logger.info(f"LLM API call completed in {elapsed:.2f}s")
-                
-                response_json = response.json()
-                
-                # Extract text from OpenAI-compatible response
-                if "choices" in response_json and len(response_json["choices"]) > 0:
-                    # vLLM completions format
-                    if "text" in response_json["choices"][0]:
-                        llm_text = response_json["choices"][0]["text"]
-                    # OpenAI chat format
-                    elif "message" in response_json["choices"][0]:
-                        llm_text = response_json["choices"][0]["message"]["content"]
-                    else:
-                        raise ValueError("Unexpected response format from LLM")
-                else:
-                    raise ValueError("No choices in LLM response")
-                
-                # Parse the response
+                llm_text, elapsed = _call_llm(prompt)
+
                 parsed = self._parse_llm_response(llm_text)
-                
-                # Validate and filter TTPs
-                if "ttp_analysis" in parsed:
-                    parsed["ttp_analysis"] = self.ttp_validator.filter_valid_ttps(
-                        parsed["ttp_analysis"]
-                    )
-                
-                # Add metadata
-                parsed["metadata"] = {
-                    "model": self.config.LLM_MODEL_NAME,
-                    "inference_time_seconds": elapsed,
-                    "prompt_length": len(prompt),
-                    "attempt": attempt + 1
-                }
-                parsed["raw_response"] = llm_text
-                
-                return parsed
-                
+                ok, err, final_obj = _validate_and_postprocess(parsed)
+                if ok:
+                    final_obj["metadata"] = {
+                        "model": self.config.LLM_MODEL_NAME,
+                        "inference_time_seconds": elapsed,
+                        "prompt_length": len(prompt),
+                        "attempt": attempt + 1,
+                        "repair_attempted": False,
+                    }
+                    final_obj["raw_response"] = llm_text
+                    return final_obj
+
+                last_error = err or "Unknown validation error"
+                logger.warning(f"LLM output invalid, attempting single repair: {last_error}")
+
+                prior = (llm_text or "")[:4000]
+                repair_prompt = REPAIR_PROMPT_TEMPLATE_RAW_JSON.format(error=last_error, prior_output=prior)
+                llm_text2, elapsed2 = _call_llm(repair_prompt)
+
+                parsed2 = self._parse_llm_response(llm_text2)
+                ok2, err2, final_obj2 = _validate_and_postprocess(parsed2)
+                if ok2:
+                    final_obj2["metadata"] = {
+                        "model": self.config.LLM_MODEL_NAME,
+                        "inference_time_seconds": elapsed2,
+                        "prompt_length": len(repair_prompt),
+                        "attempt": attempt + 1,
+                        "repair_attempted": True,
+                        "repair_reason": last_error,
+                    }
+                    final_obj2["raw_response"] = llm_text2
+                    return final_obj2
+
+                last_error = err2 or "Unknown validation error after repair"
+                logger.error(f"Repair attempt failed: {last_error}")
+                return {"error": f"Response validation error: {last_error}", "ttp_analysis": []}
+
             except requests.exceptions.Timeout:
                 logger.warning(f"LLM API timeout on attempt {attempt + 1}")
+                last_error = "LLM API timeout"
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
                     retry_delay *= 2
                 else:
                     return {"error": "LLM API timeout after retries", "ttp_analysis": []}
-                    
+
             except requests.exceptions.RequestException as e:
                 logger.error(f"LLM API request error: {e}")
+                last_error = f"LLM API error: {e}"
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
                     retry_delay *= 2
                 else:
                     return {"error": f"LLM API error: {e}", "ttp_analysis": []}
-                    
+
             except (json.JSONDecodeError, ValueError) as e:
                 logger.error(f"LLM response parsing error: {e}")
                 return {"error": f"Response parsing error: {e}", "ttp_analysis": []}
-        
-        return {"error": "Max retries exceeded", "ttp_analysis": []}
+
+        return {"error": f"Max retries exceeded ({last_error or 'unknown'})", "ttp_analysis": []}
 
