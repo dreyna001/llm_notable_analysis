@@ -251,95 +251,35 @@ Do not assume a single root cause from one notable. Use this reasoning procedure
    - If only Windows Security logs exist, state limitations explicitly and downgrade confidence.
 """
 
-MITIGATION_RULES = """
-MITIGATIONS (Containment + Hardening only)
-When proposing mitigations, do NOT list generic best practices. Use this procedure:
-
-1) Identify the likely ATT&CK technique(s) implicated by the evidence.
-
-2) Propose mitigations in TWO tiers only (max 5 total, ranked by risk reduction):
-   - Containment (hours): actions that reduce immediate risk
-   - Hardening (days/weeks): controls that reduce recurrence
-
-3) For each mitigation, include:
-   - rationale: which evidence/inference it addresses (cite fields/observables)
-   - preconditions: environment dependencies inferred from notable, or "unknown" if not determinable
-   - tradeoffs: operational impact or failure modes
-   - confidence_effect: what would increase/decrease confidence that this mitigation is the right priority
-
-4) Ensure mitigations match the scenario:
-   - Only include controls relevant to the technique and feasible under inferred conditions
-   - Avoid suggesting disruptive actions (e.g., "isolate DC") without a narrower, safer alternative
-   - Cite ATT&CK mitigations by ID where relevant (e.g., M1032, M1026, M1030)
-"""
-
 PROCEDURE = """
 PROCEDURE:
-1. **Think silently**: classify activity -> tactics -> candidate techniques.
-2. Self-check against the tactic checklist.
-3. Decode/deobfuscate common encodings (Base64, hex, URL-encoded, gzip) if found.
-4. Use sub-techniques when specific variant is confirmed (e.g., T1059.001 for PowerShell).
-5. Default to parent techniques when sub-technique cannot be precisely assigned.
-6. Apply Causal Humility reasoning.
+1. Decode/deobfuscate common encodings (Base64, hex, URL-encoded, gzip) if found.
+2. Use sub-techniques when specific variant is confirmed (e.g., T1059.001 for PowerShell); default to parent techniques otherwise.
 """
 
 OUTPUT_SCHEMA = """
-Use the analyze_notable tool to return your analysis. The tool expects the following schema:
+Use the analyze_notable tool to return your analysis. Follow the tool's JSON schema exactly.
 
-OUTPUT FORMAT: Return a single valid JSON object with these top-level keys:
-- `ttp_analysis`
-- `ioc_extraction`
-- `evidence_vs_inference`
-- `competing_hypotheses`
-
-SCHEMA:
-- ttp_analysis: list of objects, each with:
-    - ttp_id: string (MITRE ATT&CK ID, e.g. "T1059.001")
-    - ttp_name: string (official technique name)
-    - confidence_score: float (0.0-1.0)
-    - explanation: string (A brief explanation of why this TTP was inferred, using quoted evidence from the alert. End with "Uncertainty: [brief statement]" acknowledging what is inferred vs. direct evidence, and any missing context like geo/VPN metadata, edge telemetry, etc.)
-    - evidence_fields: list of strings (Specific alert field=value pairs that directly support this TTP)
-
-- ioc_extraction: object with:
-    - ip_addresses: list of strings
-    - domains: list of strings
-    - user_accounts: list of strings
-    - hostnames: list of strings
-    - file_paths: list of strings
-    - process_names: list of strings
-    - file_hashes: list of strings
-    - event_ids: list of strings
-    - urls: list of strings
-
-- evidence_vs_inference: object with:
-    - evidence: list of strings (Literal field=value facts from the alert)
-    - inferences: list of strings (Hypotheses with noted uncertainties)
-
-- competing_hypotheses: list of EXACTLY 6 objects (EXACTLY 3 benign + EXACTLY 3 adversary), each with:
-    - hypothesis_type: "benign" or "adversary"
-    - hypothesis: string
-    - evidence_support: list of strings (field=value pairs supporting this)
-    - evidence_gaps: list of strings (critical missing evidence)
-    - best_pivots: list of objects with log_source and key_fields
+Additional constraints (not enforceable in JSON schema):
+- explanation: must end with "Uncertainty: [brief statement]".
+- URLs are only allowed in ioc_extraction.urls[]; no URLs elsewhere.
+- Leave arrays empty [] when no items apply.
+- Return ONLY the tool call; no extra text.
 """
 
-OUTPUT_SCHEMA_RAW_JSON = OUTPUT_SCHEMA.replace(
-    "Use the analyze_notable tool to return your analysis. The tool expects the following schema:",
-    "Return ONLY a single JSON object matching the schema below. Do not include markdown fences or any extra text."
-)
+OUTPUT_SCHEMA_RAW_JSON = """
+Return ONLY a single JSON object matching the schema. Do not include markdown fences or any extra text.
+
+Additional constraints:
+- explanation: must end with "Uncertainty: [brief statement]".
+- URLs are only allowed in ioc_extraction.urls[]; no URLs elsewhere.
+- Leave arrays empty [] when no items apply.
+"""
 
 RULES = """
 RULES:
-- CRITICAL: NO EMOJIS OR UNICODE SYMBOLS; Use only plain ASCII text characters.
-- TIME WINDOWS: If ALERT_TIME is provided, previous queries use earliest=-24h@h latest=ALERT_TIME, next queries use earliest=ALERT_TIME latest=+24h@h. If not provided, use relative time.
-- EVIDENCE VS INFERENCE: Populate "evidence" with only direct field=value facts. Populate "inferences" with hypotheses and note uncertainties.
-- URL POLICY:
-  - Never output example.com (or any example/test domain) anywhere.
-  - Never output the word PLACEHOLDER/placeholder anywhere.
-- TTP EXPLANATIONS: Always end with "Uncertainty: [brief statement]".
-- IOC EXTRACTION: Extract ALL IOCs; leave arrays empty [] if not found. Do not label core OS components as IOCs without malicious context.
-- STATELESS: If context is missing (e.g., IP ownership, VPN status), state "unknown" and list what would disambiguate.
-- All fields and keys must match the schema exactly.
+- NO EMOJIS OR UNICODE SYMBOLS; use only plain ASCII text.
+- Never output example.com or PLACEHOLDER anywhere.
 """
 
 
@@ -603,15 +543,6 @@ class TTPValidator:
         """
         return ttp_id in self._valid_subtechniques or ttp_id in self._valid_parent_techniques
     
-    def get_valid_ttps_for_prompt(self) -> str:
-        """Get formatted list of valid TTPs for inclusion in prompt.
-        
-        Returns:
-            Comma-separated string of all valid TTP IDs.
-        """
-        all_ttps = sorted(list(self._valid_subtechniques)) + sorted(list(self._valid_parent_techniques))
-        return ", ".join(all_ttps)
-    
     def filter_valid_ttps(self, scored_ttps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Filter out invalid TTPs and return only valid ones.
         
@@ -670,13 +601,13 @@ class BedrockAnalyzer:
         # Store raw content for retry/debugging
         self.last_raw_content = None
 
-    def _build_prompt(self, alert_text: str, alert_time: Optional[str], valid_ttps_list: str, *, use_tool: bool) -> str:
+    def _build_prompt(self, alert_text: str, alert_time: Optional[str], *, use_tool: bool) -> str:
         """Assemble the full prompt from modular sections.
         
         Args:
             alert_text: Formatted alert text to analyze.
             alert_time: Optional ISO timestamp of the alert.
-            valid_ttps_list: Comma-separated list of valid TTP IDs.
+            use_tool: Whether to use tool-calling mode (affects output schema instructions).
             
         Returns:
             Complete prompt string for LLM.
@@ -696,12 +627,9 @@ class BedrockAnalyzer:
 
 {CAUSAL_HUMILITY}
 
-{MITIGATION_RULES}
-
 {PROCEDURE}
 
-Use only the ATT&CK techniques from this allowed list:
-{valid_ttps_list}
+Use MITRE ATT&CK v17 technique IDs (format: T#### or T####.###). If unsure, omit; invalid IDs will be discarded.
 
 SECURITY ALERT INPUT:
 {alert_text}
@@ -881,14 +809,13 @@ SECURITY ALERT INPUT:
         logger.info("Starting TTP analysis")
         start_time = time.time()
         
-        # Get valid TTPs for the prompt
-        valid_ttps_list = self.validator.get_valid_ttps_for_prompt()
+        # Log validator stats (validation happens post-LLM via filter_valid_ttps)
         total_ttps = self.validator.get_ttp_count()
-        logger.info(f"Loaded {total_ttps} valid TTPs for prompt")
+        logger.info(f"Loaded {total_ttps} valid TTPs for post-response validation")
         
         # Build prompt using modular sections (start in tool-use mode)
-        prompt_tool = self._build_prompt(alert_text, alert_time, valid_ttps_list, use_tool=True)
-        prompt_raw = self._build_prompt(alert_text, alert_time, valid_ttps_list, use_tool=False)
+        prompt_tool = self._build_prompt(alert_text, alert_time, use_tool=True)
+        prompt_raw = self._build_prompt(alert_text, alert_time, use_tool=False)
         
         # Input validation
         if not alert_text or not alert_text.strip():
