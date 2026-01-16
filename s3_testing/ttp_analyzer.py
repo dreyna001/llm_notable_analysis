@@ -686,7 +686,7 @@ SECURITY ALERT INPUT:
         allow_text_fallback: bool,
     ) -> Tuple[Optional[Dict], Optional[str], Optional[str]]:
         """Parse Bedrock converse API response, extracting structured output.
-        
+
         Args:
             response: Raw response from bedrock_client.converse().
             

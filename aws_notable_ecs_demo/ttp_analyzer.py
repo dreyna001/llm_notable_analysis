@@ -6,6 +6,7 @@ Ports the core logic from notable_analysis.py without modifying the original.
 
 import json
 import time
+import os
 import logging
 from typing import List, Dict, Any, Set, Optional
 from pathlib import Path
@@ -546,7 +547,9 @@ SECURITY ALERT INPUT:
                             "toolChoice": {"tool": {"name": "analyze_notable"}}
                         },
                         inferenceConfig={
-                            "maxTokens": 2000,
+                            # maxTokens is the model's maximum number of tokens to generate (output budget),
+                            # not the input prompt size. Cap hard at 8000 to prevent runaway cost / invalid values.
+                            "maxTokens": max(256, min(int(os.environ.get("MAX_OUTPUT_TOKENS", "2000")), 8000)),
                             "temperature": 0.7,
                             "topP": 0.95
                         }
