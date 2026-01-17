@@ -103,6 +103,25 @@ If you use `install.sh`, it will create `/opt/vllm/venv` and install vLLM by def
   - Notes: best-effort; uses `huggingface_hub` HTTP downloads (no `git lfs` required)
 - **Auto-start services after install (best-effort)**: `sudo AUTO_START_SERVICES=true bash install.sh`
 
+## Compliance / Gov-ready: generating a dependency manifest (what was installed)
+
+For environments that require scanning/approving every installed component, generate an evidence-based manifest on the target host:
+
+```bash
+cd /path/to/llm_notable_analysis_onprem
+sudo bash tools/generate_dependency_manifest.sh
+```
+
+This produces a timestamped folder (example: `dependency_manifest_20260117_033000/`) containing:
+- OS/kernel info
+- GPU driver/runtime info (`nvidia-smi` if present)
+- System package inventory (RPM or DPKG, depending on distro)
+- Python venv inventories (`pip freeze`) for `/opt/notable-analyzer/venv` and `/opt/vllm/venv`
+- systemd unit file copies + hashes
+- Model directory inventory + SHA256 hashes (if present at `/opt/models/gpt-oss-20b`)
+
+This is generally more accurate than a hand-written list because it reflects the *actual* host state after install.
+
 ### 5. Verify
 
 ```bash

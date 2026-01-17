@@ -522,12 +522,15 @@ if [[ "${AUTO_START_SERVICES:-false}" == "true" ]]; then
     if [[ ! -f "$VLLM_MODEL_PATH/config.json" ]]; then
         warn "Model not present at $VLLM_MODEL_PATH (missing config.json); skipping auto-start of vLLM"
     else
-        systemctl enable --now vllm 2>/dev/null || warn "Could not start vllm.service (check systemctl/journalctl)"
+        # Use restart (not start) so re-running install.sh applies updated unit files/venvs cleanly.
+        systemctl enable vllm 2>/dev/null || true
+        systemctl restart vllm 2>/dev/null || systemctl start vllm 2>/dev/null || warn "Could not start/restart vllm.service (check systemctl/journalctl)"
         if wait_for_http_200_best_effort "http://127.0.0.1:8000/health" 240; then
             info "vLLM health check OK"
         else
             warn "vLLM health check timed out; check: sudo journalctl -u vllm -n 200 --no-pager"
         fi
-        systemctl enable --now notable-analyzer 2>/dev/null || warn "Could not start notable-analyzer.service (check systemctl/journalctl)"
+        systemctl enable notable-analyzer 2>/dev/null || true
+        systemctl restart notable-analyzer 2>/dev/null || systemctl start notable-analyzer 2>/dev/null || warn "Could not start/restart notable-analyzer.service (check systemctl/journalctl)"
     fi
 fi
