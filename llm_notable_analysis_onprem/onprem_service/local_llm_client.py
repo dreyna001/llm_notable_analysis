@@ -254,6 +254,87 @@ def _coerce_evidence_vs_inference(value: Any) -> Dict[str, Any]:
     return base
 
 
+_TTP_ID_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
+
+
+def _coerce_ttp_id(value: Any) -> Optional[str]:
+    """Extract a MITRE technique ID (T#### or T####.###) from common shapes."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        m = _TTP_ID_RE.search(value.strip())
+        return m.group(1) if m else None
+    return _coerce_ttp_id(str(value))
+
+
+def _coerce_ttp_analysis(value: Any) -> List[Dict[str, Any]]:
+    """Coerce ttp_analysis into a list of objects with at least a ttp_id field."""
+    if value is None:
+        return []
+
+    items: List[Any]
+    if isinstance(value, list):
+        items = value
+    else:
+        items = [value]
+
+    out: List[Dict[str, Any]] = []
+    for item in items:
+        if isinstance(item, str):
+            ttp_id = _coerce_ttp_id(item)
+            if ttp_id:
+                out.append(
+                    {
+                        "ttp_id": ttp_id,
+                        "ttp_name": "",
+                        "confidence_score": 0.5,
+                        "explanation": "Extracted from model output (non-schema). Uncertainty: output format drift.",
+                        "evidence_fields": [],
+                    }
+                )
+            continue
+
+        if isinstance(item, dict):
+            raw_id = (
+                item.get("ttp_id")
+                or item.get("technique_id")
+                or item.get("mitre_technique_id")
+                or item.get("technique")
+                or item.get("id")
+            )
+            ttp_id = _coerce_ttp_id(raw_id)
+            if not ttp_id:
+                ttp_id = _coerce_ttp_id(item.get("ttp_name")) or _coerce_ttp_id(item.get("explanation")) or _coerce_ttp_id(item.get("rationale"))
+
+            out.append(
+                {
+                    **item,
+                    "ttp_id": ttp_id,
+                    "ttp_name": item.get("ttp_name", item.get("technique_name", item.get("name", ""))),
+                    "confidence_score": item.get("confidence_score", item.get("score", item.get("confidence", 0.5))),
+                    "explanation": item.get("explanation", item.get("rationale", "")),
+                    "evidence_fields": item.get("evidence_fields", item.get("evidence", [])),
+                }
+            )
+            continue
+
+    return out
+
+
+def _extract_ttp_ids_from_text(text: str) -> List[str]:
+    """Extract unique technique IDs from arbitrary text (including preamble)."""
+    if not text:
+        return []
+    ids = _TTP_ID_RE.findall(text)
+    seen = set()
+    out: List[str] = []
+    for t in ids:
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
 def _normalize_and_fill_defaults(parsed: Dict[str, Any]) -> Dict[str, Any]:
     """Make the parsed object robust to minor schema drift from local models."""
     if not isinstance(parsed, dict):
@@ -261,7 +342,7 @@ def _normalize_and_fill_defaults(parsed: Dict[str, Any]) -> Dict[str, Any]:
 
     out = dict(parsed)
     # Ensure required top-level keys exist with reasonable defaults.
-    out.setdefault("ttp_analysis", [])
+    out["ttp_analysis"] = _coerce_ttp_analysis(out.get("ttp_analysis", []))
     out["ioc_extraction"] = _coerce_ioc_extraction(out.get("ioc_extraction", {}))
     out["evidence_vs_inference"] = _coerce_evidence_vs_inference(out.get("evidence_vs_inference", {}))
     ch = out.get("competing_hypotheses", [])
@@ -559,13 +640,29 @@ SECURITY ALERT INPUT:
             response_json = response.json()
             return _extract_choice_text(response_json), elapsed
 
-        def _validate_and_postprocess(parsed: Dict[str, Any]) -> Tuple[bool, Optional[str], Dict[str, Any]]:
+        def _validate_and_postprocess(parsed: Dict[str, Any], *, raw_text: str) -> Tuple[bool, Optional[str], Dict[str, Any]]:
             parsed = _normalize_llm_result_shape(parsed)
             if not isinstance(parsed, dict):
                 return False, f"Expected dict after normalization, got {type(parsed).__name__}", {}
 
             # Make schema a bit more resilient for local inference (best-effort coercion).
             parsed = _normalize_and_fill_defaults(parsed)
+
+            # If the model ignored the schema but mentioned technique IDs in the preamble,
+            # salvage them into ttp_analysis as a last resort.
+            if not parsed.get("ttp_analysis"):
+                extracted_ids = _extract_ttp_ids_from_text(raw_text)
+                if extracted_ids:
+                    parsed["ttp_analysis"] = [
+                        {
+                            "ttp_id": t,
+                            "ttp_name": "",
+                            "confidence_score": 0.5,
+                            "explanation": "Extracted from model preamble (non-schema). Uncertainty: output format drift.",
+                            "evidence_fields": [],
+                        }
+                        for t in extracted_ids
+                    ]
 
             schema_ok, schema_err = validate_response_schema(parsed)
             if not schema_ok:
@@ -599,7 +696,7 @@ SECURITY ALERT INPUT:
                 llm_text, elapsed = _call_llm(prompt)
 
                 parsed = self._parse_llm_response(llm_text)
-                ok, err, final_obj = _validate_and_postprocess(parsed)
+                ok, err, final_obj = _validate_and_postprocess(parsed, raw_text=llm_text)
                 if ok:
                     final_obj["metadata"] = {
                         "model": self.config.LLM_MODEL_NAME,
@@ -619,7 +716,7 @@ SECURITY ALERT INPUT:
                 llm_text2, elapsed2 = _call_llm(repair_prompt)
 
                 parsed2 = self._parse_llm_response(llm_text2)
-                ok2, err2, final_obj2 = _validate_and_postprocess(parsed2)
+                ok2, err2, final_obj2 = _validate_and_postprocess(parsed2, raw_text=llm_text2)
                 if ok2:
                     final_obj2["metadata"] = {
                         "model": self.config.LLM_MODEL_NAME,

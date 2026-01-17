@@ -136,6 +136,24 @@ sudo ANALYZER_PYTHON_BIN=python3.11 VLLM_PYTHON_BIN=python3.11 bash install.sh
 
 If the specified interpreter is not present on the host, `install.sh` will fail early (so you don’t end up with a partially working deployment).
 
+## Freeform paragraphs mode (no JSON schema)
+
+If you want a report that is just a few paragraphs (to avoid schema/tooling fragility), you can run the alternative service:
+
+- systemd unit: `notable-analyzer-freeform.service`
+- entrypoint: `python -m onprem_service.freeform_main`
+
+It writes reports as `*_freeform.md` into `REPORT_DIR` (default: `/var/notables/reports`).
+
+Enable it (make sure `vllm` is running first):
+
+```bash
+sudo systemctl enable --now notable-analyzer-freeform
+sudo journalctl -u notable-analyzer-freeform -f
+```
+
+Note: Do not run both the structured analyzer and freeform analyzer against the same `INCOMING_DIR` at the same time.
+
 ### 5. Verify
 
 ```bash

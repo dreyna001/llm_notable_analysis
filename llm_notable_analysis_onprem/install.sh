@@ -441,17 +441,39 @@ fi
 #------------------------------------------------------------------------------
 echo "[7/8] Installing systemd units..."
 
-for unit in notable-analyzer.service vllm.service notable-retention.service notable-retention.timer; do
-    src="$SCRIPT_DIR/systemd/$unit"
-    [[ -f "$src" ]] || err "Missing systemd unit: $src"
-    # Prevent subtle failures when unit files were edited on Windows.
-    strip_crlf_in_file_best_effort "$src"
-    cp "$src" /etc/systemd/system/ || err "Failed to copy $unit"
-    strip_crlf_in_file_best_effort "/etc/systemd/system/$unit"
-    info "Installed: $unit"
-done
+# If you want to "comment out" systemd unit installation without deleting code:
+#   sudo INSTALL_SYSTEMD_UNITS=false bash install.sh
+if [[ "${INSTALL_SYSTEMD_UNITS:-true}" == "true" ]]; then
+    # Default units (stable baseline)
+    units=(
+        notable-analyzer.service
+        vllm.service
+        notable-retention.service
+        notable-retention.timer
+    )
 
-systemctl daemon-reload || err "Failed to reload systemd"
+    # Optional: install the freeform (paragraphs-only) analyzer as an additional unit.
+    # This avoids modifying/replacing the baseline unit and removes "remember to change it back" risk.
+    # Enable with:
+    #   sudo INSTALL_FREEFORM_SERVICE=true bash install.sh
+    if [[ "${INSTALL_FREEFORM_SERVICE:-false}" == "true" ]]; then
+        units+=(notable-analyzer-freeform.service)
+    fi
+
+    for unit in "${units[@]}"; do
+        src="$SCRIPT_DIR/systemd/$unit"
+        [[ -f "$src" ]] || err "Missing systemd unit: $src"
+        # Prevent subtle failures when unit files were edited on Windows.
+        strip_crlf_in_file_best_effort "$src"
+        cp "$src" /etc/systemd/system/ || err "Failed to copy $unit"
+        strip_crlf_in_file_best_effort "/etc/systemd/system/$unit"
+        info "Installed: $unit"
+    done
+
+    systemctl daemon-reload || err "Failed to reload systemd"
+else
+    warn "INSTALL_SYSTEMD_UNITS=false; skipping systemd unit installation and daemon-reload"
+fi
 
 #------------------------------------------------------------------------------
 # 8. Configure SFTP chroot in sshd_config
