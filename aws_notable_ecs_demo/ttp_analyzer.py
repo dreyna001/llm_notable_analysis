@@ -5,17 +5,79 @@ Ports the core logic from notable_analysis.py without modifying the original.
 """
 
 import json
+import re
 import time
 import os
 import logging
-from typing import List, Dict, Any, Set, Optional
+from typing import List, Dict, Any, Set, Optional, Tuple
 from pathlib import Path
 import boto3
 from botocore.exceptions import ClientError
+from botocore.config import Config
 
 # Configure logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+URL_RE = re.compile(r"https?://[^\s\]\[<>\")'}]+", re.IGNORECASE)
+
+
+def _sanitize_urls_for_content_policy(result: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+    """Relocate disallowed URLs into ioc_extraction.urls and redact them elsewhere.
+
+    Keeps reports stable when models include reference links in free-text fields like
+    ttp_analysis[].explanation.
+    """
+    if not isinstance(result, dict):
+        return result, []
+
+    collected: List[str] = []
+
+    def _walk(obj: Any, *, path: str) -> Any:
+        allowed_prefix = "ioc_extraction.urls["
+
+        if isinstance(obj, dict):
+            for k, v in list(obj.items()):
+                child_path = f"{path}.{k}" if path else str(k)
+                obj[k] = _walk(v, path=child_path)
+            return obj
+        if isinstance(obj, list):
+            for i, v in enumerate(obj):
+                child_path = f"{path}[{i}]"
+                obj[i] = _walk(v, path=child_path)
+            return obj
+        if isinstance(obj, str):
+            urls = URL_RE.findall(obj)
+            if not urls:
+                return obj
+            for u in urls:
+                collected.append(u)
+            if path.startswith(allowed_prefix):
+                return obj
+            return URL_RE.sub("[URL_REDACTED]", obj)
+        return obj
+
+    result = _walk(result, path="")
+
+    if collected:
+        ioc = result.get("ioc_extraction")
+        if isinstance(ioc, dict):
+            urls_list = ioc.get("urls")
+            if not isinstance(urls_list, list):
+                urls_list = []
+            merged: List[str] = []
+            seen: Set[str] = set()
+            for item in urls_list:
+                if isinstance(item, str) and item and item not in seen:
+                    merged.append(item)
+                    seen.add(item)
+            for u in collected:
+                if u and u not in seen:
+                    merged.append(u)
+                    seen.add(u)
+            ioc["urls"] = merged
+
+    return result, collected
 
 # =============================================================================
 # TOOL SCHEMA - Enforces structured JSON output via Bedrock tool calling
@@ -403,7 +465,28 @@ class BedrockAnalyzer:
         Args:
             model_id: The Bedrock model ID to use (default: amazon.nova-pro-v1:0).
         """
-        self.bedrock_client = boto3.client('bedrock-runtime')
+        # Bedrock calls can be long-running; set explicit client timeouts so we don't
+        # hang until an outer runtime limit (e.g., gunicorn/ALB) kills the request.
+        default_read_timeout_s = 300
+        default_connect_timeout_s = 10
+        try:
+            read_timeout_s = int(os.environ.get("BEDROCK_READ_TIMEOUT_SECONDS", str(default_read_timeout_s)))
+        except ValueError:
+            read_timeout_s = default_read_timeout_s
+        try:
+            connect_timeout_s = int(os.environ.get("BEDROCK_CONNECT_TIMEOUT_SECONDS", str(default_connect_timeout_s)))
+        except ValueError:
+            connect_timeout_s = default_connect_timeout_s
+        read_timeout_s = max(30, min(read_timeout_s, 900))
+        connect_timeout_s = max(1, min(connect_timeout_s, 60))
+
+        self.bedrock_client = boto3.client(
+            "bedrock-runtime",
+            config=Config(
+                read_timeout=read_timeout_s,
+                connect_timeout=connect_timeout_s,
+            ),
+        )
         self.model_id = model_id
         
         # Initialize validator
@@ -581,7 +664,9 @@ SECURITY ALERT INPUT:
                     tool_input = block['toolUse'].get('input', {})
                     if isinstance(tool_input, dict):
                         logger.info("Parsed response from toolUse block")
-                        result = tool_input
+                        result, moved_urls = _sanitize_urls_for_content_policy(tool_input)
+                        if moved_urls:
+                            logger.warning(f"Sanitized {len(moved_urls)} URL(s) into ioc_extraction.urls")
                         break
             
             # Fallback: if no toolUse, check for text block (shouldn't happen with forced tool choice)
