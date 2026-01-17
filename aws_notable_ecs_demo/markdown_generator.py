@@ -173,60 +173,72 @@ def generate_markdown_report(
     if "attack_chain" in llm_response:
         lines.append("### Attack Chain Analysis\n\n")
         attack_chain = llm_response["attack_chain"]
+
+        # Defensive parsing: LLM responses can occasionally return wrong shapes (e.g., missing keys,
+        # step objects instead of step lists, etc.). Never let markdown generation crash.
+        if not isinstance(attack_chain, dict):
+            lines.append("Attack chain: unavailable (invalid format)\n\n")
+            attack_chain = {}
+
+        def _get_first_step(chain: Dict[str, Any], key: str) -> Any:
+            val = chain.get(key)
+            if isinstance(val, list):
+                return val[0] if val else None
+            if isinstance(val, dict):
+                return val
+            return None
         
-        if "likely_previous_steps" in attack_chain and attack_chain["likely_previous_steps"]:
-            step = attack_chain["likely_previous_steps"][0]
-            if isinstance(step, dict):
-                lines.append(f"**Likely Previous Step:** {step.get('tactic_name', 'N/A')} ({step.get('tactic_id', 'N/A')})\n\n")
-                if step.get('mitre_url'):
-                    lines.append(f"MITRE URL: {step['mitre_url']}\n\n")
-                
-                if step.get('why_this_step'):
-                    lines.append(f"**Why:** {step['why_this_step']}\n\n")
-                
-                if step.get('what_to_check'):
-                    lines.append(f"**Check:** {step['what_to_check']}\n\n")
-                
-                if step.get('uncertainty_alternatives'):
-                    lines.append(f"**Uncertainty:** {step['uncertainty_alternatives']}\n\n")
-                
-                if step.get('investigation_tree'):
-                    lines.append("**Investigation Questions:**\n\n")
-                    inv_tree = step['investigation_tree']
-                    if isinstance(inv_tree, dict):
-                        for question_id, tree in inv_tree.items():
-                            if isinstance(tree, dict):
-                                lines.append(f"- {question_id}: {tree.get('question', 'N/A')}\n")
-                            else:
-                                lines.append(f"- {question_id}: {tree}\n")
-                    lines.append("\n")
+        step = _get_first_step(attack_chain, "likely_previous_steps")
+        if isinstance(step, dict):
+            lines.append(f"**Likely Previous Step:** {step.get('tactic_name', 'N/A')} ({step.get('tactic_id', 'N/A')})\n\n")
+            if step.get('mitre_url'):
+                lines.append(f"MITRE URL: {step.get('mitre_url')}\n\n")
+
+            if step.get('why_this_step'):
+                lines.append(f"**Why:** {step.get('why_this_step')}\n\n")
+
+            if step.get('what_to_check'):
+                lines.append(f"**Check:** {step.get('what_to_check')}\n\n")
+
+            if step.get('uncertainty_alternatives'):
+                lines.append(f"**Uncertainty:** {step.get('uncertainty_alternatives')}\n\n")
+
+            if step.get('investigation_tree'):
+                lines.append("**Investigation Questions:**\n\n")
+                inv_tree = step.get('investigation_tree')
+                if isinstance(inv_tree, dict):
+                    for question_id, tree in inv_tree.items():
+                        if isinstance(tree, dict):
+                            lines.append(f"- {question_id}: {tree.get('question', 'N/A')}\n")
+                        else:
+                            lines.append(f"- {question_id}: {tree}\n")
+                lines.append("\n")
         
-        if "likely_next_steps" in attack_chain and attack_chain["likely_next_steps"]:
-            step = attack_chain["likely_next_steps"][0]
-            if isinstance(step, dict):
-                lines.append(f"**Likely Next Step:** {step.get('tactic_name', 'N/A')} ({step.get('tactic_id', 'N/A')})\n\n")
-                if step.get('mitre_url'):
-                    lines.append(f"MITRE URL: {step['mitre_url']}\n\n")
-                
-                if step.get('why_this_step'):
-                    lines.append(f"**Why:** {step['why_this_step']}\n\n")
-                
-                if step.get('what_to_check'):
-                    lines.append(f"**Check:** {step['what_to_check']}\n\n")
-                
-                if step.get('uncertainty_alternatives'):
-                    lines.append(f"**Uncertainty:** {step['uncertainty_alternatives']}\n\n")
-                
-                if step.get('investigation_tree'):
-                    lines.append("**Investigation Questions:**\n\n")
-                    inv_tree = step['investigation_tree']
-                    if isinstance(inv_tree, dict):
-                        for question_id, tree in inv_tree.items():
-                            if isinstance(tree, dict):
-                                lines.append(f"- {question_id}: {tree.get('question', 'N/A')}\n")
-                            else:
-                                lines.append(f"- {question_id}: {tree}\n")
-                    lines.append("\n")
+        step = _get_first_step(attack_chain, "likely_next_steps")
+        if isinstance(step, dict):
+            lines.append(f"**Likely Next Step:** {step.get('tactic_name', 'N/A')} ({step.get('tactic_id', 'N/A')})\n\n")
+            if step.get('mitre_url'):
+                lines.append(f"MITRE URL: {step.get('mitre_url')}\n\n")
+
+            if step.get('why_this_step'):
+                lines.append(f"**Why:** {step.get('why_this_step')}\n\n")
+
+            if step.get('what_to_check'):
+                lines.append(f"**Check:** {step.get('what_to_check')}\n\n")
+
+            if step.get('uncertainty_alternatives'):
+                lines.append(f"**Uncertainty:** {step.get('uncertainty_alternatives')}\n\n")
+
+            if step.get('investigation_tree'):
+                lines.append("**Investigation Questions:**\n\n")
+                inv_tree = step.get('investigation_tree')
+                if isinstance(inv_tree, dict):
+                    for question_id, tree in inv_tree.items():
+                        if isinstance(tree, dict):
+                            lines.append(f"- {question_id}: {tree.get('question', 'N/A')}\n")
+                        else:
+                            lines.append(f"- {question_id}: {tree}\n")
+                lines.append("\n")
         
         if "kill_chain_phase" in attack_chain:
             lines.append(f"**Kill Chain Phase:** {attack_chain['kill_chain_phase']}\n\n")
