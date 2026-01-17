@@ -655,7 +655,8 @@ SECURITY ALERT INPUT:
 
     def _converse(self, prompt: str, *, use_tool: bool) -> Dict[str, Any]:
         """Call Bedrock converse with optional toolConfig."""
-        default_max_tokens = 4096
+        # Default to the highest allowed cap; can be overridden via MAX_OUTPUT_TOKENS
+        default_max_tokens = 8192
         try:
             max_tokens = int(os.environ.get("MAX_OUTPUT_TOKENS", str(default_max_tokens)))
         except ValueError:
