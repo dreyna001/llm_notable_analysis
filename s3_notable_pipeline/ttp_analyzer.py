@@ -356,8 +356,8 @@ ANALYZE_NOTABLE_TOOL = {
                     },
                     "competing_hypotheses": {
                         "type": "array",
-                        "minItems": 3,
-                        "maxItems": 5,
+                        "minItems": 6,
+                        "maxItems": 6,
                         "items": {
                             "type": "object",
                             "additionalProperties": False,
@@ -532,9 +532,9 @@ CAUSAL_HUMILITY = """
 CAUSAL HUMILITY + PIVOT STRATEGY (Stateless)
 Do not assume a single root cause from one notable. Use this reasoning procedure:
 
-1) Generate 3-5 competing hypotheses for how the observable could occur.
-   - Include at least 1 benign hypothesis.
-   - Include at least 2 distinct adversary hypotheses (different initial vectors).
+1) Generate EXACTLY 6 competing hypotheses for how the observable could occur:
+   - EXACTLY 3 benign hypotheses
+   - EXACTLY 3 adversary hypotheses (different initial vectors)
 
 2) For each hypothesis:
    - hypothesis_type: "benign" or "adversary"
@@ -686,7 +686,7 @@ SCHEMA:
     - argue_against: string (indicator arguing against legitimacy)
     - best_validation: string (best query/log source to validate)
 
-- competing_hypotheses: list of 3-5 objects, each with:
+- competing_hypotheses: list of EXACTLY 6 objects (EXACTLY 3 benign + EXACTLY 3 adversary), each with:
     - hypothesis_type: "benign" or "adversary"
     - hypothesis: string
     - evidence_support: list of strings (field=value pairs supporting this)
@@ -744,6 +744,33 @@ def validate_response_schema(result: Dict[str, Any]) -> Tuple[bool, Optional[str
         if not isinstance(result[key], expected_type):
             return False, f"Key '{key}' must be {expected_type.__name__}, got {type(result[key]).__name__}"
     
+    return True, None
+
+
+def validate_competing_hypotheses_balance(result: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """Enforce competing_hypotheses contains EXACTLY 3 benign + EXACTLY 3 adversary items."""
+    ch = result.get("competing_hypotheses")
+    if not isinstance(ch, list):
+        return False, "competing_hypotheses must be a list"
+    if len(ch) != 6:
+        return False, f"competing_hypotheses must contain exactly 6 items (got {len(ch)})"
+
+    benign = 0
+    adversary = 0
+    for i, item in enumerate(ch):
+        if not isinstance(item, dict):
+            return False, f"competing_hypotheses[{i}] must be an object"
+        t = item.get("hypothesis_type")
+        if t == "benign":
+            benign += 1
+        elif t == "adversary":
+            adversary += 1
+        else:
+            return False, f"competing_hypotheses[{i}].hypothesis_type must be 'benign' or 'adversary'"
+
+    if benign != 3 or adversary != 3:
+        return False, f"competing_hypotheses must include exactly 3 benign + 3 adversary (got benign={benign}, adversary={adversary})"
+
     return True, None
 
 
@@ -1173,7 +1200,7 @@ SECURITY ALERT INPUT:
 
     def _converse(self, prompt: str, *, use_tool: bool) -> Dict[str, Any]:
         """Call Bedrock converse with optional toolConfig."""
-        default_max_tokens = 4096
+        default_max_tokens = 8192
         try:
             max_tokens = int(os.environ.get("MAX_OUTPUT_TOKENS", str(default_max_tokens)))
         except ValueError:
@@ -1428,6 +1455,13 @@ SECURITY ALERT INPUT:
                     raw_content = raw_content or str(result)[:2000]
                     result = None  # treat as parse failure, triggers retry
                 else:
+                    ch_ok, ch_err = validate_competing_hypotheses_balance(result)
+                    if not ch_ok:
+                        logger.warning(f"Competing hypotheses validation failed: {ch_err}")
+                        error_msg = f"Competing hypotheses: {ch_err}"
+                        raw_content = raw_content or str(result)[:2000]
+                        result = None
+                if result is not None:
                     result, removed_urls = _sanitize_urls_for_content_policy(result)
                     if removed_urls:
                         logger.warning(f"Sanitized {len(removed_urls)} URL(s) outside mitre_url to satisfy content policy")
@@ -1471,6 +1505,11 @@ SECURITY ALERT INPUT:
                         if not is_valid:
                             logger.error(f"Retry schema validation failed: {validation_error}")
                             logger.error(f"Retry got keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
+                            self.last_llm_response = {"raw_error": retry_raw or str(result)[:2000]}
+                            return []
+                        ch_ok, ch_err = validate_competing_hypotheses_balance(result)
+                        if not ch_ok:
+                            logger.error(f"Retry competing hypotheses validation failed: {ch_err}")
                             self.last_llm_response = {"raw_error": retry_raw or str(result)[:2000]}
                             return []
                         result, removed_urls = _sanitize_urls_for_content_policy(result)
