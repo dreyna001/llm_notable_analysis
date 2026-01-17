@@ -13,6 +13,7 @@ from typing import List, Dict, Any, Set, Optional, Tuple
 from pathlib import Path
 import boto3
 from botocore.exceptions import ClientError
+from botocore.config import Config
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -589,7 +590,29 @@ class BedrockAnalyzer:
         Args:
             model_id: The Bedrock model ID to use (default: amazon.nova-pro-v1:0).
         """
-        self.bedrock_client = boto3.client('bedrock-runtime')
+        # Bedrock calls can be long-running; set explicit client timeouts so we don't
+        # hang until an outer runtime limit (e.g., Lambda timeout) kills the task.
+        default_read_timeout_s = 300
+        default_connect_timeout_s = 10
+        try:
+            read_timeout_s = int(os.environ.get("BEDROCK_READ_TIMEOUT_SECONDS", str(default_read_timeout_s)))
+        except ValueError:
+            read_timeout_s = default_read_timeout_s
+        try:
+            connect_timeout_s = int(os.environ.get("BEDROCK_CONNECT_TIMEOUT_SECONDS", str(default_connect_timeout_s)))
+        except ValueError:
+            connect_timeout_s = default_connect_timeout_s
+        # Clamp to sane bounds
+        read_timeout_s = max(30, min(read_timeout_s, 900))
+        connect_timeout_s = max(1, min(connect_timeout_s, 60))
+
+        self.bedrock_client = boto3.client(
+            "bedrock-runtime",
+            config=Config(
+                read_timeout=read_timeout_s,
+                connect_timeout=connect_timeout_s,
+            ),
+        )
         self.model_id = model_id
         
         # Initialize validator
