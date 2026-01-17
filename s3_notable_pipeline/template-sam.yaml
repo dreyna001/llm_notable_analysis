@@ -81,7 +81,7 @@ Resources:
     Properties:
       FunctionName: notable-analyzer-s3
       PackageType: Image
-      Timeout: 180
+      Timeout: 360
       MemorySize: 512
       Environment:
         Variables:
