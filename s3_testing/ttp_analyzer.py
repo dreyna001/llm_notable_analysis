@@ -377,6 +377,72 @@ def validate_content_policies(result: Dict[str, Any]) -> Tuple[bool, Optional[st
     return True, None
 
 
+URL_RE = re.compile(r"https?://[^\s\]\[<>\")'}]+", re.IGNORECASE)
+
+
+def _sanitize_urls_for_content_policy(result: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+    """Relocate disallowed URLs into ioc_extraction.urls and redact them elsewhere.
+
+    This prevents repeated failures where the model includes MITRE/reference links in free-text
+    fields like ttp_analysis[].explanation, which violates our content policy.
+    """
+    if not isinstance(result, dict):
+        return result, []
+
+    collected: List[str] = []
+
+    def _walk(obj: Any, *, path: str) -> Any:
+        # Allowed location: ioc_extraction.urls[*]
+        allowed_prefix = "ioc_extraction.urls["
+
+        if isinstance(obj, dict):
+            for k, v in list(obj.items()):
+                child_path = f"{path}.{k}" if path else str(k)
+                obj[k] = _walk(v, path=child_path)
+            return obj
+        if isinstance(obj, list):
+            for i, v in enumerate(obj):
+                child_path = f"{path}[{i}]"
+                obj[i] = _walk(v, path=child_path)
+            return obj
+        if isinstance(obj, str):
+            # Keep URLs inside ioc_extraction.urls[] (but still collect them for de-dupe)
+            urls = URL_RE.findall(obj)
+            if not urls:
+                return obj
+            for u in urls:
+                collected.append(u)
+            if path.startswith(allowed_prefix):
+                # If someone stuffed extra text around the URL, keep as-is; policy allows URLs here.
+                return obj
+            # Redact URLs everywhere else
+            return URL_RE.sub("[URL_REDACTED]", obj)
+        return obj
+
+    result = _walk(result, path="")
+
+    # Ensure ioc_extraction.urls contains all collected URLs (de-duped), since URLs elsewhere were redacted.
+    if collected:
+        ioc = result.get("ioc_extraction")
+        if isinstance(ioc, dict):
+            urls_list = ioc.get("urls")
+            if not isinstance(urls_list, list):
+                urls_list = []
+            # Keep existing entries, append new URLs, then de-dupe while preserving order
+            merged: List[str] = []
+            seen: Set[str] = set()
+            for item in urls_list:
+                if isinstance(item, str) and item and item not in seen:
+                    merged.append(item)
+                    seen.add(item)
+            for u in collected:
+                if u and u not in seen:
+                    merged.append(u)
+                    seen.add(u)
+            ioc["urls"] = merged
+    return result, collected
+
+
 def extract_json_object(raw_text: str) -> Tuple[str, Optional[str]]:
     """Extract a JSON object from text that may contain fences, preamble, or trailing content.
     
@@ -940,6 +1006,10 @@ SECURITY ALERT INPUT:
                         raw_content = raw_content or str(result)[:2000]
                         result = None
                     else:
+                        # Sanitize disallowed URLs before enforcing content policies.
+                        result, moved_urls = _sanitize_urls_for_content_policy(result)
+                        if moved_urls:
+                            logger.warning(f"Sanitized {len(moved_urls)} URL(s) into ioc_extraction.urls to satisfy content policy")
                         policy_ok, policy_err = validate_content_policies(result)
                         if not policy_ok:
                             logger.warning(f"Content policy validation failed: {policy_err}")
@@ -987,6 +1057,9 @@ SECURITY ALERT INPUT:
                             logger.error(f"Retry competing hypotheses validation failed: {ch_err}")
                             self.last_llm_response = {"raw_error": retry_raw or str(result)[:2000]}
                             return []
+                        result, moved_urls = _sanitize_urls_for_content_policy(result)
+                        if moved_urls:
+                            logger.warning(f"Retry sanitize: moved {len(moved_urls)} URL(s) into ioc_extraction.urls to satisfy content policy")
                         policy_ok, policy_err = validate_content_policies(result)
                         if not policy_ok:
                             logger.error(f"Retry content policy validation failed: {policy_err}")

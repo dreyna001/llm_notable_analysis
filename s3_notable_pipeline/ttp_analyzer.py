@@ -749,6 +749,43 @@ def validate_response_schema(result: Dict[str, Any]) -> Tuple[bool, Optional[str
 
 MITRE_V17_TECHNIQUE_URL_RE = re.compile(r"^https://attack\\.mitre\\.org/versions/v17/techniques/T\\d{4}(?:/\\d{3})?/?$")
 MITRE_V17_TACTIC_URL_RE = re.compile(r"^https://attack\\.mitre\\.org/versions/v17/tactics/TA\\d{4}/?$")
+URL_RE = re.compile(r"https?://[^\s\]\[<>\")'}]+", re.IGNORECASE)
+
+
+def _sanitize_urls_for_content_policy(result: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+    """Redact http(s) URLs outside allowed mitre_url fields (and keep a list of what was removed).
+
+    This makes the pipeline resilient when the model includes reference links in free-text fields.
+    """
+    if not isinstance(result, dict):
+        return result, []
+
+    removed: List[str] = []
+
+    def _walk(obj: Any, *, path: str) -> Any:
+        if isinstance(obj, dict):
+            for k, v in list(obj.items()):
+                child_path = f"{path}.{k}" if path else str(k)
+                obj[k] = _walk(v, path=child_path)
+            return obj
+        if isinstance(obj, list):
+            for i, v in enumerate(obj):
+                child_path = f"{path}[{i}]"
+                obj[i] = _walk(v, path=child_path)
+            return obj
+        if isinstance(obj, str):
+            urls = URL_RE.findall(obj)
+            if not urls:
+                return obj
+            # Only mitre_url is allowed to contain URLs in this pipeline.
+            if path.endswith("mitre_url"):
+                return obj
+            for u in urls:
+                removed.append(u)
+            return URL_RE.sub("[URL_REDACTED]", obj)
+        return obj
+
+    return _walk(result, path=""), removed
 
 
 def _iter_strings(obj: Any, *, path: str = "") -> List[Tuple[str, str]]:
@@ -1391,6 +1428,9 @@ SECURITY ALERT INPUT:
                     raw_content = raw_content or str(result)[:2000]
                     result = None  # treat as parse failure, triggers retry
                 else:
+                    result, removed_urls = _sanitize_urls_for_content_policy(result)
+                    if removed_urls:
+                        logger.warning(f"Sanitized {len(removed_urls)} URL(s) outside mitre_url to satisfy content policy")
                     policy_ok, policy_err = validate_content_policies(result)
                     if not policy_ok:
                         logger.warning(f"Content policy validation failed: {policy_err}")
@@ -1433,6 +1473,9 @@ SECURITY ALERT INPUT:
                             logger.error(f"Retry got keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
                             self.last_llm_response = {"raw_error": retry_raw or str(result)[:2000]}
                             return []
+                        result, removed_urls = _sanitize_urls_for_content_policy(result)
+                        if removed_urls:
+                            logger.warning(f"Retry sanitize: removed {len(removed_urls)} URL(s) outside mitre_url to satisfy content policy")
                         policy_ok, policy_err = validate_content_policies(result)
                         if not policy_ok:
                             logger.error(f"Retry content policy validation failed: {policy_err}")
