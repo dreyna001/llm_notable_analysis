@@ -15,11 +15,11 @@ def generate_markdown_report(
     """Generate a markdown report from analysis results.
     
     Mirrors the format from notable_analysis.py output files, including sections
-    for alert text, IOCs, correlation keys, evidence vs inference, containment
+    for IOCs, correlation keys, evidence vs inference, containment
     playbook, scored TTPs, attack chain analysis, and Splunk enrichment queries.
     
     Args:
-        alert_text: The original formatted alert text.
+        alert_text: The original formatted alert text. (Not rendered in the ECS demo report.)
         llm_response: Full structured response from the LLM containing all analysis sections.
         scored_ttps: List of validated TTP dictionaries with scores and metadata.
         
@@ -27,10 +27,7 @@ def generate_markdown_report(
         Markdown-formatted string containing the complete analysis report.
     """
     lines = []
-    
-    # Alert Text section
-    lines.append("## Alert Text\n")
-    lines.append(alert_text + "\n\n")
+    # Intentionally omit raw alert text in the ECS demo output to avoid echoing sensitive data.
     
     # IOC Extraction
     if "ioc_extraction" in llm_response:

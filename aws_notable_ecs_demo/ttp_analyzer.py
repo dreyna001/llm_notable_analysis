@@ -548,8 +548,8 @@ SECURITY ALERT INPUT:
                         },
                         inferenceConfig={
                             # maxTokens is the model's maximum number of tokens to generate (output budget),
-                            # not the input prompt size. Cap hard at 8000 to prevent runaway cost / invalid values.
-                            "maxTokens": max(256, min(int(os.environ.get("MAX_OUTPUT_TOKENS", "2000")), 8000)),
+                            # not the input prompt size. Cap hard at 8192 to prevent runaway cost / invalid values.
+                            "maxTokens": max(256, min(int(os.environ.get("MAX_OUTPUT_TOKENS", "8192")), 8192)),
                             "temperature": 0.7,
                             "topP": 0.95
                         }
