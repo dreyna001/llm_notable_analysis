@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import time
+import ast
 from typing import List, Dict, Any, Optional, Tuple
 import requests
 
@@ -167,30 +168,109 @@ def validate_response_schema(result: Dict[str, Any]) -> Tuple[bool, Optional[str
 
 
 def validate_competing_hypotheses_balance(result: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
-    """Enforce competing_hypotheses contains EXACTLY 3 benign + EXACTLY 3 adversary items."""
+    """Validate competing_hypotheses shape.
+
+    Historically this enforced EXACTLY 3 benign + 3 adversary hypotheses (6 total).
+    In practice, some local models intermittently violate this constraint even when
+    asked. For resilience, we only enforce "list of objects" here and treat count/
+    balance as best-effort (the markdown generator can handle an empty list).
+    """
     ch = result.get("competing_hypotheses")
+    if ch is None:
+        return True, None
     if not isinstance(ch, list):
         return False, "competing_hypotheses must be a list"
-    if len(ch) != 6:
-        return False, f"competing_hypotheses must contain exactly 6 items (got {len(ch)})"
-
-    benign = 0
-    adversary = 0
     for i, item in enumerate(ch):
         if not isinstance(item, dict):
             return False, f"competing_hypotheses[{i}] must be an object"
-        t = item.get("hypothesis_type")
-        if t == "benign":
-            benign += 1
-        elif t == "adversary":
-            adversary += 1
-        else:
-            return False, f"competing_hypotheses[{i}].hypothesis_type must be 'benign' or 'adversary'"
-
-    if benign != 3 or adversary != 3:
-        return False, f"competing_hypotheses must include exactly 3 benign + 3 adversary (got benign={benign}, adversary={adversary})"
-
     return True, None
+
+
+def _coerce_ioc_extraction(value: Any) -> Dict[str, Any]:
+    """Coerce ioc_extraction into the dict shape expected by markdown rendering."""
+    base: Dict[str, Any] = {
+        "ip_addresses": [],
+        "domains": [],
+        "user_accounts": [],
+        "hostnames": [],
+        "process_names": [],
+        "file_paths": [],
+        "file_hashes": [],
+        "event_ids": [],
+        "urls": [],
+    }
+    if isinstance(value, dict):
+        # Keep known keys; coerce leaf values into lists of strings.
+        for k in list(base.keys()):
+            v = value.get(k, [])
+            if v is None:
+                continue
+            if isinstance(v, list):
+                base[k] = [str(x) for x in v if str(x)]
+            elif isinstance(v, str):
+                base[k] = [v]
+            else:
+                base[k] = [str(v)]
+        return base
+
+    # If the model returned a list of strings, do light heuristic bucketing.
+    if isinstance(value, list):
+        for item in value:
+            s = str(item).strip()
+            if not s:
+                continue
+            if s.startswith("http://") or s.startswith("https://"):
+                base["urls"].append(s)
+            elif re.match(r"^\d{1,3}(\.\d{1,3}){3}$", s):
+                base["ip_addresses"].append(s)
+            elif "\\" in s or "@" in s:
+                base["user_accounts"].append(s)
+            elif "/" in s or s.startswith("\\"):
+                base["file_paths"].append(s)
+            elif "." in s and " " not in s:
+                base["domains"].append(s)
+            else:
+                base["hostnames"].append(s)
+        return base
+
+    # Anything else: return empty base.
+    return base
+
+
+def _coerce_evidence_vs_inference(value: Any) -> Dict[str, Any]:
+    base: Dict[str, Any] = {"evidence": [], "inferences": []}
+    if isinstance(value, dict):
+        ev = value.get("evidence", [])
+        inf = value.get("inferences", [])
+        base["evidence"] = [str(x) for x in (ev if isinstance(ev, list) else [ev]) if str(x)]
+        base["inferences"] = [str(x) for x in (inf if isinstance(inf, list) else [inf]) if str(x)]
+        return base
+    if isinstance(value, list):
+        base["evidence"] = [str(x) for x in value if str(x)]
+        return base
+    if isinstance(value, str):
+        base["evidence"] = [value]
+        return base
+    return base
+
+
+def _normalize_and_fill_defaults(parsed: Dict[str, Any]) -> Dict[str, Any]:
+    """Make the parsed object robust to minor schema drift from local models."""
+    if not isinstance(parsed, dict):
+        return {}
+
+    out = dict(parsed)
+    # Ensure required top-level keys exist with reasonable defaults.
+    out.setdefault("ttp_analysis", [])
+    out["ioc_extraction"] = _coerce_ioc_extraction(out.get("ioc_extraction", {}))
+    out["evidence_vs_inference"] = _coerce_evidence_vs_inference(out.get("evidence_vs_inference", {}))
+    ch = out.get("competing_hypotheses", [])
+    if isinstance(ch, dict):
+        ch = [ch]
+    if not isinstance(ch, list):
+        ch = []
+    out["competing_hypotheses"] = ch
+    return out
 
 
 def _iter_strings(obj: Any, *, path: str = "") -> List[Tuple[str, str]]:
@@ -410,7 +490,11 @@ SECURITY ALERT INPUT:
         if note:
             logger.info(f"LLM JSON extraction: {note}")
 
-        parsed = json.loads(candidate)
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            # Some models return Python-like dicts (single quotes). Try a safe parse.
+            parsed = ast.literal_eval(candidate)
         parsed = _normalize_llm_result_shape(parsed)
         if not isinstance(parsed, dict):
             raise ValueError(f"Expected top-level JSON object, got {type(parsed).__name__}")
@@ -479,6 +563,9 @@ SECURITY ALERT INPUT:
             parsed = _normalize_llm_result_shape(parsed)
             if not isinstance(parsed, dict):
                 return False, f"Expected dict after normalization, got {type(parsed).__name__}", {}
+
+            # Make schema a bit more resilient for local inference (best-effort coercion).
+            parsed = _normalize_and_fill_defaults(parsed)
 
             schema_ok, schema_err = validate_response_schema(parsed)
             if not schema_ok:

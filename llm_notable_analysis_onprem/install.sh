@@ -15,6 +15,8 @@ readonly CONFIG_DIR="/etc/notable-analyzer"
 readonly DATA_DIR="/var/notables"
 readonly SFTP_CHROOT="/var/sftp/soar"
 readonly VLLM_MODEL_PATH="/opt/models/gpt-oss-20b"
+readonly VLLM_INSTALL_DIR="/opt/vllm"
+readonly VLLM_VENV_DIR="/opt/vllm/venv"
 
 # Users
 readonly SVC_USER="notable-analyzer"
@@ -31,6 +33,114 @@ readonly MIN_PYTHON_MINOR=10
 err() { echo "ERROR: $*" >&2; exit 1; }
 warn() { echo "WARN: $*" >&2; }
 info() { echo "  $*"; }
+
+strip_crlf_in_file_best_effort() {
+    # Best-effort: strip Windows CRLF from a file if present; never fail install.
+    local file="$1"
+    if [[ -f "$file" ]]; then
+        sed -i 's/\r$//' "$file" 2>/dev/null || true
+    fi
+}
+
+download_model_best_effort() {
+    # Optional: download model weights non-interactively via Hugging Face Hub.
+    #
+    # Enable with:
+    #   sudo MODEL_DOWNLOAD=true HF_TOKEN=... bash install.sh
+    #
+    # Optional:
+    #   MODEL_REPO=openai/gpt-oss-20b   (default)
+    #
+    # Never fails the installer; logs warnings on failure.
+    local model_repo="${MODEL_REPO:-openai/gpt-oss-20b}"
+    local model_dir="$VLLM_MODEL_PATH"
+    local token="${HF_TOKEN:-${HUGGINGFACE_TOKEN:-}}"
+
+    if [[ "${MODEL_DOWNLOAD:-false}" != "true" ]]; then
+        return 0
+    fi
+
+    if [[ -z "$token" ]]; then
+        warn "MODEL_DOWNLOAD=true but HF_TOKEN/HUGGINGFACE_TOKEN not set; skipping model download"
+        return 0
+    fi
+
+    info "MODEL_DOWNLOAD=true: attempting to download model '$model_repo' into $model_dir (best-effort)"
+
+    # Use the analyzer venv as a stable tool environment for downloads.
+    if [[ ! -x "$INSTALL_DIR/venv/bin/python" ]]; then
+        warn "Analyzer venv not found at $INSTALL_DIR/venv; skipping model download"
+        return 0
+    fi
+
+    "$INSTALL_DIR/venv/bin/pip" install --quiet "huggingface_hub>=0.23.0" \
+        || { warn "Failed to install huggingface_hub; skipping model download"; return 0; }
+
+    mkdir -p "$model_dir" 2>/dev/null || true
+
+    # Snapshot download into the target directory; avoids git-lfs.
+    "$INSTALL_DIR/venv/bin/python" - << 'PY' || true
+import os
+from huggingface_hub import snapshot_download
+
+repo_id = os.environ.get("MODEL_REPO", "openai/gpt-oss-20b")
+token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_TOKEN")
+local_dir = os.environ.get("VLLM_MODEL_PATH", "/opt/models/gpt-oss-20b")
+
+snapshot_download(
+    repo_id=repo_id,
+    local_dir=local_dir,
+    local_dir_use_symlinks=False,
+    token=token,
+    resume_download=True,
+)
+print(f"Downloaded {repo_id} to {local_dir}")
+PY
+
+    if [[ -f "$model_dir/config.json" ]]; then
+        info "Model download appears complete (found: $model_dir/config.json)"
+    else
+        warn "Model download step did not produce $model_dir/config.json (continuing)"
+    fi
+}
+
+wait_for_http_200_best_effort() {
+    # Best-effort health poll. Never fails install.
+    # Usage: wait_for_http_200_best_effort "http://127.0.0.1:8000/health" 180
+    local url="$1"
+    local timeout_s="${2:-120}"
+
+    local start
+    start="$(date +%s)"
+
+    while true; do
+        if command -v curl &>/dev/null; then
+            if curl -fsS "$url" &>/dev/null; then
+                return 0
+            fi
+        else
+            # Fallback to Python if curl is not installed
+            python3 - <<PY >/dev/null 2>&1 || true
+import sys, urllib.request
+try:
+    urllib.request.urlopen("$url", timeout=2).read()
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+PY
+            if [[ $? -eq 0 ]]; then
+                return 0
+            fi
+        fi
+
+        local now
+        now="$(date +%s)"
+        if (( now - start >= timeout_s )); then
+            return 1
+        fi
+        sleep 2
+    done
+}
 
 check_root() {
     [[ $EUID -eq 0 ]] || err "This script must be run as root (or sudo)"
@@ -54,6 +164,12 @@ check_python_version() {
         err "Python $MIN_PYTHON_MAJOR.$MIN_PYTHON_MINOR+ required (found $ver)"
     fi
     info "Python version: $ver"
+
+    # vLLM compatibility varies by platform/Python; warn early if we're on a very new Python.
+    # (Do not fail install: some environments ship newer Pythons by default.)
+    if [[ "$major" -eq 3 && "$minor" -ge 12 ]]; then
+        warn "Detected Python $ver. If vLLM fails to start, try using Python 3.10/3.11 for the vLLM venv."
+    fi
 }
 
 create_user_if_missing() {
@@ -152,6 +268,32 @@ else
     info "Created symlink: $DATA_DIR/incoming -> $SFTP_CHROOT/incoming"
 fi
 
+# Model directory (best-effort; do not fail install if this can't be created/chowned)
+#
+# We intentionally store model weights outside the repo at a stable system path:
+#   /opt/models/gpt-oss-20b
+#
+# This matches the default `vllm.service` --model argument.
+echo ""
+echo "[2b] Preparing model directory (best-effort)..."
+mkdir -p "$(dirname "$VLLM_MODEL_PATH")" "$VLLM_MODEL_PATH" 2>/dev/null || warn "Could not create /opt/models directory (you may need to create it manually)"
+
+# Ensure the vLLM service user can read the model directory (best-effort).
+# Keep ownership flexible: downloads are often done as the interactive admin user,
+# but the vLLM systemd service runs as `vllm`.
+chmod 755 "$(dirname "$VLLM_MODEL_PATH")" "$VLLM_MODEL_PATH" 2>/dev/null || true
+
+# If invoked via sudo, chown to the real user to make it easy to download weights.
+_owner_user="${SUDO_USER:-}"
+if [[ -n "$_owner_user" ]]; then
+    chown -R "${_owner_user}:${_owner_user}" "$(dirname "$VLLM_MODEL_PATH")" 2>/dev/null || warn "Could not chown /opt/models to ${_owner_user} (continuing)"
+else
+    info "SUDO_USER not set; leaving /opt/models ownership unchanged"
+fi
+
+# Regardless of ownership, ensure the vLLM service user will be able to read files (if present).
+chmod -R a+rX "$VLLM_MODEL_PATH" 2>/dev/null || true
+
 #------------------------------------------------------------------------------
 # 3. Handle SELinux (RHEL)
 #------------------------------------------------------------------------------
@@ -208,6 +350,57 @@ fi
 chown -R "$SVC_USER:$SVC_USER" "$INSTALL_DIR/venv"
 info "Dependencies installed"
 
+# Optional model download (best-effort)
+export VLLM_MODEL_PATH
+download_model_best_effort
+
+#------------------------------------------------------------------------------
+# 5b. Create vLLM virtual environment (optional but recommended)
+#------------------------------------------------------------------------------
+echo ""
+echo "[5b] Creating vLLM virtual environment (optional)..."
+
+# Allow skipping vLLM install (useful for air-gapped environments where vLLM is pre-installed)
+# Example:
+#   sudo VLLM_SKIP_INSTALL=true bash install.sh
+if [[ "${VLLM_SKIP_INSTALL:-false}" == "true" ]]; then
+    warn "VLLM_SKIP_INSTALL=true; skipping vLLM venv creation and vLLM installation"
+else
+    ensure_dir "$VLLM_INSTALL_DIR" "$VLLM_USER:$VLLM_USER" 755
+
+    if [[ -d "$VLLM_VENV_DIR" ]]; then
+        info "vLLM venv exists; upgrading dependencies..."
+    else
+        python3 -m venv "$VLLM_VENV_DIR" \
+            || err "Failed to create vLLM virtual environment at $VLLM_VENV_DIR"
+        info "Created vLLM venv at $VLLM_VENV_DIR"
+    fi
+
+    "$VLLM_VENV_DIR/bin/pip" install --upgrade pip --quiet \
+        || err "Failed to upgrade pip in vLLM venv"
+
+    # NOTE: vLLM requires a compatible GPU driver/runtime (typically NVIDIA CUDA).
+    # On a fresh host, install GPU drivers BEFORE starting the vllm.service.
+    "$VLLM_VENV_DIR/bin/pip" install vllm --quiet \
+        || err "Failed to install vLLM (pip install vllm). Ensure GPU drivers/toolkit are installed."
+
+    chown -R "$VLLM_USER:$VLLM_USER" "$VLLM_VENV_DIR"
+    info "vLLM installed in $VLLM_VENV_DIR"
+
+    # Best-effort smoke checks (never fail install)
+    if sudo -u "$VLLM_USER" "$VLLM_VENV_DIR/bin/python" -c 'import vllm; print(getattr(vllm, "__version__", "unknown"))' &>/dev/null; then
+        info "vLLM import smoke-test OK"
+    else
+        warn "vLLM import smoke-test failed (continuing). If vllm.service fails, review journal logs."
+    fi
+
+    if [[ "${VLLM_SMOKE_TEST:-false}" == "true" ]]; then
+        info "VLLM_SMOKE_TEST=true: running additional best-effort checks..."
+        command -v nvidia-smi &>/dev/null && nvidia-smi &>/dev/null || warn "nvidia-smi not available (GPU drivers may be missing)"
+        [[ -f "$VLLM_MODEL_PATH/config.json" ]] || warn "Model not detected at $VLLM_MODEL_PATH (download weights before starting vLLM)"
+    fi
+fi
+
 #------------------------------------------------------------------------------
 # 6. Install configuration
 #------------------------------------------------------------------------------
@@ -232,7 +425,10 @@ echo "[7/8] Installing systemd units..."
 for unit in notable-analyzer.service vllm.service notable-retention.service notable-retention.timer; do
     src="$SCRIPT_DIR/systemd/$unit"
     [[ -f "$src" ]] || err "Missing systemd unit: $src"
+    # Prevent subtle failures when unit files were edited on Windows.
+    strip_crlf_in_file_best_effort "$src"
     cp "$src" /etc/systemd/system/ || err "Failed to copy $unit"
+    strip_crlf_in_file_best_effort "/etc/systemd/system/$unit"
     info "Installed: $unit"
 done
 
@@ -293,3 +489,45 @@ echo ""
 echo "Verify:"
 echo "  sudo systemctl status vllm notable-analyzer"
 echo "  sudo journalctl -u notable-analyzer -f"
+echo ""
+echo "Troubleshooting vLLM:"
+echo "  - If vllm.service fails with status=203/EXEC:"
+echo "      sudo ls -la $VLLM_VENV_DIR/bin/python"
+echo "  - If vllm.service starts then immediately exits, run vLLM in foreground to see the real error:"
+echo "      sudo systemctl stop vllm"
+echo "      sudo -u $VLLM_USER $VLLM_VENV_DIR/bin/python -m vllm.entrypoints.openai.api_server \\"
+echo "        --model $VLLM_MODEL_PATH \\"
+echo "        --served-model-name gpt-oss-20b \\"
+echo "        --host 127.0.0.1 --port 8000 \\"
+echo "        --gpu-memory-utilization 0.9 --max-model-len 131072 --dtype auto"
+echo "  - If the error mentions trust_remote_code, consider enabling it explicitly (security tradeoff):"
+echo "      sudo vi /etc/systemd/system/vllm.service  # add --trust-remote-code"
+echo "      sudo systemctl daemon-reload && sudo systemctl restart vllm"
+echo ""
+echo "Optional installer flags:"
+echo "  - Skip vLLM install (air-gapped / preinstalled):"
+echo "      sudo VLLM_SKIP_INSTALL=true bash install.sh"
+echo "  - Add extra vLLM smoke checks (non-fatal):"
+echo "      sudo VLLM_SMOKE_TEST=true bash install.sh"
+echo "  - Download model non-interactively (requires internet + HF token):"
+echo "      sudo MODEL_DOWNLOAD=true HF_TOKEN=... bash install.sh"
+echo "      # optional: MODEL_REPO=openai/gpt-oss-20b"
+echo "  - Auto-start services after install (best-effort):"
+echo "      sudo AUTO_START_SERVICES=true bash install.sh"
+
+# Best-effort auto-start (disabled by default)
+if [[ "${AUTO_START_SERVICES:-false}" == "true" ]]; then
+    echo ""
+    info "AUTO_START_SERVICES=true: attempting to start services (best-effort)"
+    if [[ ! -f "$VLLM_MODEL_PATH/config.json" ]]; then
+        warn "Model not present at $VLLM_MODEL_PATH (missing config.json); skipping auto-start of vLLM"
+    else
+        systemctl enable --now vllm 2>/dev/null || warn "Could not start vllm.service (check systemctl/journalctl)"
+        if wait_for_http_200_best_effort "http://127.0.0.1:8000/health" 240; then
+            info "vLLM health check OK"
+        else
+            warn "vLLM health check timed out; check: sudo journalctl -u vllm -n 200 --no-pager"
+        fi
+        systemctl enable --now notable-analyzer 2>/dev/null || warn "Could not start notable-analyzer.service (check systemctl/journalctl)"
+    fi
+fi

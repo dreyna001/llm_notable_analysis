@@ -118,7 +118,23 @@ Required settings:
 - `LLM_MODEL_NAME` — Model name matching vLLM `--served-model-name`
 - `SPLUNK_BASE_URL` / `SPLUNK_API_TOKEN` — If Splunk writeback enabled
 
-### 2. Download Model Weights
+### 2. Install vLLM (if not already installed)
+
+The analyzer talks to an OpenAI-compatible local endpoint (vLLM). The included `vllm.service` expects vLLM to be installed in:
+
+- `/opt/vllm/venv` (Python venv)
+
+If you ran `install.sh` without overrides, it will create this venv and install vLLM automatically.
+
+If you need to skip vLLM install (common in air-gapped environments where you pre-stage wheels), run:
+
+```bash
+sudo VLLM_SKIP_INSTALL=true bash install.sh
+```
+
+Then install vLLM yourself into `/opt/vllm/venv` (or update `vllm.service` to point to your chosen interpreter).
+
+### 3. Download Model Weights
 
 Transfer model weights to `/opt/models/gpt-oss-20b` (or your chosen path).
 
@@ -129,7 +145,7 @@ sudo vi /etc/systemd/system/vllm.service
 sudo systemctl daemon-reload
 ```
 
-### 3. Add SOAR SSH Key
+### 4. Add SOAR SSH Key
 
 ```bash
 # Get public key from SOAR appliance
@@ -141,13 +157,13 @@ ls -la /var/sftp/soar/.ssh/
 # -rw------- soar-uploader soar-uploader authorized_keys
 ```
 
-### 4. Restart sshd
+### 5. Restart sshd
 
 ```bash
 sudo systemctl restart sshd
 ```
 
-### 5. Start Services
+### 6. Start Services
 
 ```bash
 # Start vLLM first (analyzer depends on it)

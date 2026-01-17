@@ -32,7 +32,12 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-ReadWritePaths=/var/notables
+# NOTE: INCOMING_DIR is often a symlink to the SFTP chroot drop path:
+#   /var/notables/incoming -> /var/sftp/soar/incoming
+# With ProtectSystem=strict, systemd will treat the *resolved* path as read-only
+# unless explicitly allowed here. Without this, moves out of INCOMING_DIR can fail
+# with "Read-only file system".
+ReadWritePaths=/var/notables /var/sftp/soar
 
 # Resource limits
 LimitNOFILE=65535

@@ -81,6 +81,28 @@ sudo systemctl start vllm
 sudo systemctl start notable-analyzer
 ```
 
+### Note on vLLM installation
+
+The analyzer expects a local OpenAI-compatible vLLM endpoint. The included `vllm.service` uses:
+
+- Interpreter: `/opt/vllm/venv/bin/python`
+- Model path: `/opt/models/gpt-oss-20b`
+
+If you use `install.sh`, it will create `/opt/vllm/venv` and install vLLM by default (set `VLLM_SKIP_INSTALL=true` to skip). If you install vLLM elsewhere, update `systemd/vllm.service` accordingly.
+
+### Note on model weights directory
+
+`install.sh` will also **best-effort** create `/opt/models` (and `/opt/models/gpt-oss-20b`) and attempt to `chown` it to the invoking sudo user to make it easier to download/copy model weights. If this fails due to permissions, the install continues and you can create/chown the directory manually.
+
+### Optional install.sh flags (quality-of-life)
+
+- **Skip vLLM install**: `sudo VLLM_SKIP_INSTALL=true bash install.sh` (useful for air-gapped hosts where you pre-stage wheels)
+- **Enable extra vLLM smoke checks**: `sudo VLLM_SMOKE_TEST=true bash install.sh` (non-fatal checks like `nvidia-smi` + model path presence)
+- **Download model weights (non-interactive)**: `sudo MODEL_DOWNLOAD=true HF_TOKEN=... bash install.sh`
+  - Optional: `MODEL_REPO=openai/gpt-oss-20b`
+  - Notes: best-effort; uses `huggingface_hub` HTTP downloads (no `git lfs` required)
+- **Auto-start services after install (best-effort)**: `sudo AUTO_START_SERVICES=true bash install.sh`
+
 ### 5. Verify
 
 ```bash
