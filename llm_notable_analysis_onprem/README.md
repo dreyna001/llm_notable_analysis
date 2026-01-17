@@ -122,6 +122,20 @@ This produces a timestamped folder (example: `dependency_manifest_20260117_03300
 
 This is generally more accurate than a hand-written list because it reflects the *actual* host state after install.
 
+## Reproducibility: pinning Python for the venvs (recommended for regulated envs)
+
+For the highest-confidence installs over time, pin the Python interpreter used for each virtualenv.
+
+Recommended maximum (broadly safe across many environments): **Python 3.11**.
+
+Example (pin both venvs to Python 3.11):
+
+```bash
+sudo ANALYZER_PYTHON_BIN=python3.11 VLLM_PYTHON_BIN=python3.11 bash install.sh
+```
+
+If the specified interpreter is not present on the host, `install.sh` will fail early (so you don’t end up with a partially working deployment).
+
 ### 5. Verify
 
 ```bash

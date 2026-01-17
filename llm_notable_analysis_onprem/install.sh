@@ -18,6 +18,16 @@ readonly VLLM_MODEL_PATH="/opt/models/gpt-oss-20b"
 readonly VLLM_INSTALL_DIR="/opt/vllm"
 readonly VLLM_VENV_DIR="/opt/vllm/venv"
 
+# Python interpreter selection (pinning / reproducibility)
+#
+# For regulated environments, prefer pinning vLLM to a specific Python (commonly 3.11).
+# Example:
+#   sudo ANALYZER_PYTHON_BIN=python3.11 VLLM_PYTHON_BIN=python3.11 bash install.sh
+#
+# If these are set and missing/unusable, the installer will fail early.
+readonly ANALYZER_PYTHON_BIN="${ANALYZER_PYTHON_BIN:-python3}"
+readonly VLLM_PYTHON_BIN="${VLLM_PYTHON_BIN:-python3}"
+
 # Users
 readonly SVC_USER="notable-analyzer"
 readonly VLLM_USER="vllm"
@@ -150,6 +160,13 @@ check_command() {
     command -v "$1" &>/dev/null || err "Required command not found: $1. Install it first."
 }
 
+check_python_interpreter() {
+    local pybin="$1"
+    check_command "$pybin"
+    "$pybin" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' >/dev/null 2>&1 \
+        || err "Python interpreter not usable: $pybin"
+}
+
 check_python_version() {
     local ver
     ver=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null) \
@@ -200,6 +217,8 @@ check_root
 check_command python3
 check_command pip3
 check_command systemctl
+check_python_interpreter "$ANALYZER_PYTHON_BIN"
+check_python_interpreter "$VLLM_PYTHON_BIN"
 check_python_version
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -337,7 +356,7 @@ echo "[5/8] Creating Python virtual environment..."
 if [[ -d "$INSTALL_DIR/venv" ]]; then
     info "Venv exists; upgrading dependencies..."
 else
-    python3 -m venv "$INSTALL_DIR/venv" \
+    "$ANALYZER_PYTHON_BIN" -m venv "$INSTALL_DIR/venv" \
         || err "Failed to create virtual environment"
     info "Created venv at $INSTALL_DIR/venv"
 fi
@@ -371,7 +390,7 @@ else
     if [[ -d "$VLLM_VENV_DIR" ]]; then
         info "vLLM venv exists; upgrading dependencies..."
     else
-        python3 -m venv "$VLLM_VENV_DIR" \
+        "$VLLM_PYTHON_BIN" -m venv "$VLLM_VENV_DIR" \
             || err "Failed to create vLLM virtual environment at $VLLM_VENV_DIR"
         info "Created vLLM venv at $VLLM_VENV_DIR"
     fi
