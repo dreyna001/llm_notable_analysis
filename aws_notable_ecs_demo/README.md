@@ -22,7 +22,7 @@ This container uses **nginx → gunicorn (Flask)**. You need to align timeouts a
 
 `supervisord.conf` supports these environment variables:
 
-- **`GUNICORN_TIMEOUT`**: seconds before gunicorn kills a worker handling a request (default: `180`)
+- **`GUNICORN_TIMEOUT`**: seconds before gunicorn kills a worker handling a request (default: `300`)
 - **`GUNICORN_GRACEFUL_TIMEOUT`**: graceful shutdown window (default: `30`)
 - **`GUNICORN_WORKERS`**: number of workers (default: `2`)
 - **`GUNICORN_KEEPALIVE`**: keep-alive seconds (default: `2`)
