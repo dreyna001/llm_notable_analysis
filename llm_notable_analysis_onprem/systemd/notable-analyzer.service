@@ -29,6 +29,17 @@ RestartSec=10
 
 # Security hardening
 NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes

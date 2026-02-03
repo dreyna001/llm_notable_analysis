@@ -18,6 +18,14 @@ readonly VLLM_MODEL_PATH="/opt/models/gpt-oss-20b"
 readonly VLLM_INSTALL_DIR="/opt/vllm"
 readonly VLLM_VENV_DIR="/opt/vllm/venv"
 
+# vLLM install pinning (supply chain / reproducibility)
+# - Default pins to a known-good version.
+# - Override for air-gapped installs to point at an internal wheelhouse or local artifact.
+#   Examples:
+#     sudo VLLM_PIP_SPEC="vllm==0.14.1" bash install.sh
+#     sudo VLLM_PIP_SPEC="/mnt/media/wheels/vllm-0.14.1-*.whl" bash install.sh
+readonly VLLM_PIP_SPEC="${VLLM_PIP_SPEC:-vllm==0.14.1}"
+
 # Python interpreter selection (pinning / reproducibility)
 #
 # For regulated environments, prefer pinning vLLM to a specific Python (commonly 3.11).
@@ -400,8 +408,8 @@ else
 
     # NOTE: vLLM requires a compatible GPU driver/runtime (typically NVIDIA CUDA).
     # On a fresh host, install GPU drivers BEFORE starting the vllm.service.
-    "$VLLM_VENV_DIR/bin/pip" install vllm --quiet \
-        || err "Failed to install vLLM (pip install vllm). Ensure GPU drivers/toolkit are installed."
+    "$VLLM_VENV_DIR/bin/pip" install "$VLLM_PIP_SPEC" --quiet \
+        || err "Failed to install vLLM ($VLLM_PIP_SPEC). Ensure GPU drivers/toolkit are installed and artifacts are available."
 
     chown -R "$VLLM_USER:$VLLM_USER" "$VLLM_VENV_DIR"
     info "vLLM installed in $VLLM_VENV_DIR"

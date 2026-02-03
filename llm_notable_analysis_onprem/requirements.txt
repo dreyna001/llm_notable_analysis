@@ -2,5 +2,5 @@
 # Python 3.10+ required
 
 # HTTP client for LLM API calls
-requests>=2.31.0
+requests==2.32.5
 

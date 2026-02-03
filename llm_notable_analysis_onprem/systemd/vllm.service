@@ -44,8 +44,23 @@ Environment="CUDA_VISIBLE_DEVICES=0"
 
 # Security hardening
 NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
 ProtectHome=yes
 PrivateTmp=yes
+
+# Network hardening: vLLM is local-only and should not need off-host egress.
+IPAddressDeny=any
+IPAddressAllow=127.0.0.1
 
 # Resource limits
 LimitNOFILE=65535

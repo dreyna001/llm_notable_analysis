@@ -151,7 +151,6 @@ fi
 # We don't install these automatically; orgs often have their own scanners.
 if have syft; then
   write_cmd "sbom_syft_json" syft packages dir:/opt/notable-analyzer -o json
-  write_cmd "sbom_syft_cyclonedx_json" syft packages dir:/opt/notable-analyzer -o cyclonedx-json
 else
   echo "syft not installed; skipping SBOM generation" > "${out_dir}/sbom_syft.txt"
 fi
