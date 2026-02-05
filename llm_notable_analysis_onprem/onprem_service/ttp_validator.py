@@ -77,6 +77,9 @@ class TTPValidator:
     def get_valid_ttps_for_prompt(self) -> str:
         """Get formatted list of valid TTPs for inclusion in prompt.
         
+        NOTE: Unused in the current on-prem prompt path. If we decide to inject the
+        full allowed TTP ID list into each LLM prompt, this is the method to use.
+        
         Returns:
             Comma-separated string of all valid TTP IDs.
         """

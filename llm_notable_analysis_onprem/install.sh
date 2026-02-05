@@ -175,25 +175,34 @@ check_python_interpreter() {
         || err "Python interpreter not usable: $pybin"
 }
 
+_python_major_minor() {
+    local pybin="$1"
+    "$pybin" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null \
+        || return 1
+}
+
 check_python_version() {
+    local pybin="$1"
+    local label="${2:-Python}"
+
     local ver
-    ver=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null) \
-        || err "python3 not found or broken"
-    
+    ver="$(_python_major_minor "$pybin")" || err "$label interpreter not found or broken: $pybin"
+
     local major minor
     major="${ver%%.*}"
     minor="${ver##*.}"
-    
+
     if [[ "$major" -lt "$MIN_PYTHON_MAJOR" ]] || \
        { [[ "$major" -eq "$MIN_PYTHON_MAJOR" ]] && [[ "$minor" -lt "$MIN_PYTHON_MINOR" ]]; }; then
-        err "Python $MIN_PYTHON_MAJOR.$MIN_PYTHON_MINOR+ required (found $ver)"
+        err "$label requires Python $MIN_PYTHON_MAJOR.$MIN_PYTHON_MINOR+ (found $ver at $pybin)"
     fi
-    info "Python version: $ver"
+
+    info "$label Python version: $ver ($pybin)"
 
     # vLLM compatibility varies by platform/Python; warn early if we're on a very new Python.
     # (Do not fail install: some environments ship newer Pythons by default.)
     if [[ "$major" -eq 3 && "$minor" -ge 12 ]]; then
-        warn "Detected Python $ver. If vLLM fails to start, try using Python 3.10/3.11 for the vLLM venv."
+        warn "Detected $label Python $ver. If vLLM fails to start, try using Python 3.10/3.11 for the vLLM venv."
     fi
 }
 
@@ -227,7 +236,8 @@ check_command pip3
 check_command systemctl
 check_python_interpreter "$ANALYZER_PYTHON_BIN"
 check_python_interpreter "$VLLM_PYTHON_BIN"
-check_python_version
+check_python_version "$ANALYZER_PYTHON_BIN" "Analyzer"
+check_python_version "$VLLM_PYTHON_BIN" "vLLM"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -509,11 +519,11 @@ fi
 
 # Create .ssh directory for authorized_keys
 SSH_DIR="$SFTP_CHROOT/.ssh"
-ensure_dir "$SSH_DIR" "$SFTP_USER:$SFTP_USER" 700
+ensure_dir "$SSH_DIR" "root:root" 700
 
 if [[ ! -f "$SSH_DIR/authorized_keys" ]]; then
     touch "$SSH_DIR/authorized_keys"
-    chown "$SFTP_USER:$SFTP_USER" "$SSH_DIR/authorized_keys"
+    chown "root:root" "$SSH_DIR/authorized_keys"
     chmod 600 "$SSH_DIR/authorized_keys"
     info "Created $SSH_DIR/authorized_keys (add SOAR public key here)"
 fi

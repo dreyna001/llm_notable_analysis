@@ -61,7 +61,7 @@ def process_notable(
     Returns:
         True if processing succeeded, False otherwise.
     """
-    correlation_id = set_correlation_id()
+    set_correlation_id()
     logger.info(f"Processing notable: {file_path.name}")
     
     try:

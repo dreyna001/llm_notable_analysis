@@ -6,10 +6,8 @@ failure modes when models drift from structured output contracts.
 """
 
 import signal
-import sys
 import time
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import load_config, Config
