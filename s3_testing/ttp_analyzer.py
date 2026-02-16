@@ -126,6 +126,32 @@ ANALYZE_NOTABLE_TOOL = {
                         },
                         "required": ["evidence", "inferences"],
                     },
+                    "alert_reconciliation": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "verdict": {
+                                "type": "string",
+                                "enum": [
+                                    "likely_true_positive",
+                                    "likely_benign",
+                                    "likely_false_positive",
+                                    "unknown",
+                                ],
+                            },
+                            "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                            "one_sentence_summary": {"type": "string"},
+                            "decision_drivers": {"type": "array", "items": {"type": "string"}},
+                            "recommended_actions": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": [
+                            "verdict",
+                            "confidence",
+                            "one_sentence_summary",
+                            "decision_drivers",
+                            "recommended_actions",
+                        ],
+                    },
                     "competing_hypotheses": {
                         "type": "array",
                         "minItems": 6,
@@ -163,6 +189,7 @@ ANALYZE_NOTABLE_TOOL = {
                 },
                 "required": ["ttp_analysis", "ioc_extraction",
                              "evidence_vs_inference",
+                             "alert_reconciliation",
                              "competing_hypotheses"],
                 "additionalProperties": False,
             }
@@ -175,6 +202,7 @@ REQUIRED_RESPONSE_KEYS = {
     "ttp_analysis": list,
     "ioc_extraction": dict,
     "evidence_vs_inference": dict,
+    "alert_reconciliation": dict,
     "competing_hypotheses": list,
 }
 
@@ -256,6 +284,14 @@ PROCEDURE = """
 PROCEDURE:
 1. Decode/deobfuscate common encodings (Base64, hex, URL-encoded, gzip) if found.
 2. Use sub-techniques when specific variant is confirmed (e.g., T1059.001 for PowerShell); default to parent techniques otherwise.
+"""
+
+ALERT_RECONCILIATION = """
+ALERT RECONCILIATION (required):
+- Provide a direct, actionable verdict about what to do with THIS alert right now.
+- Use only evidence present in the notable; if you cannot decide, use verdict "unknown".
+- decision_drivers must cite field=value facts from the notable and/or explicitly state unknowns as "unknown: <missing fact>".
+- recommended_actions must be concrete next steps (pivots, validation checks, containment). Do not assume telemetry that is not present.
 """
 
 OUTPUT_SCHEMA = """
@@ -717,6 +753,8 @@ class BedrockAnalyzer:
 {CAUSAL_HUMILITY}
 
 {PROCEDURE}
+
+{ALERT_RECONCILIATION}
 
 Use MITRE ATT&CK v17 technique IDs (format: T#### or T####.###). If unsure, omit; invalid IDs will be discarded.
 
