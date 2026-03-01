@@ -57,10 +57,11 @@ def _normalize_llm_result_shape(result: Any) -> Any:
 
 # Required keys and their expected types for schema validation (matches s3_testing)
 REQUIRED_RESPONSE_KEYS: Dict[str, type] = {
-    "ttp_analysis": list,
-    "ioc_extraction": dict,
-    "evidence_vs_inference": dict,
+    "alert_reconciliation": dict,
     "competing_hypotheses": list,
+    "evidence_vs_inference": dict,
+    "ioc_extraction": dict,
+    "ttp_analysis": list,
 }
 
 
@@ -127,12 +128,14 @@ Additional constraints:
 - explanation: must end with "Uncertainty: [brief statement]".
 - URLs are only allowed in ioc_extraction.urls[]; no URLs elsewhere.
 - Leave arrays empty [] when no items apply.
+- alert_reconciliation: object with verdict, confidence, one_sentence_summary, decision_drivers (list), recommended_actions (list).
 
 Top-level keys (required):
-- ttp_analysis
-- ioc_extraction
-- evidence_vs_inference
+- alert_reconciliation
 - competing_hypotheses
+- evidence_vs_inference
+- ioc_extraction
+- ttp_analysis
 """.strip()
 
 
@@ -341,16 +344,26 @@ def _normalize_and_fill_defaults(parsed: Dict[str, Any]) -> Dict[str, Any]:
         return {}
 
     out = dict(parsed)
-    # Ensure required top-level keys exist with reasonable defaults.
-    out["ttp_analysis"] = _coerce_ttp_analysis(out.get("ttp_analysis", []))
-    out["ioc_extraction"] = _coerce_ioc_extraction(out.get("ioc_extraction", {}))
-    out["evidence_vs_inference"] = _coerce_evidence_vs_inference(out.get("evidence_vs_inference", {}))
+    # Ensure required top-level keys exist with reasonable defaults, in stable order.
+    ar = out.get("alert_reconciliation", {})
+    if not isinstance(ar, dict):
+        ar = {}
+    out["alert_reconciliation"] = {
+        "verdict": str(ar.get("verdict", "")) if ar.get("verdict") is not None else "",
+        "confidence": str(ar.get("confidence", "")) if ar.get("confidence") is not None else "",
+        "one_sentence_summary": str(ar.get("one_sentence_summary", "")) if ar.get("one_sentence_summary") is not None else "",
+        "decision_drivers": [str(x) for x in (ar.get("decision_drivers", []) if isinstance(ar.get("decision_drivers", []), list) else [ar.get("decision_drivers", "")]) if str(x)],
+        "recommended_actions": [str(x) for x in (ar.get("recommended_actions", []) if isinstance(ar.get("recommended_actions", []), list) else [ar.get("recommended_actions", "")]) if str(x)],
+    }
     ch = out.get("competing_hypotheses", [])
     if isinstance(ch, dict):
         ch = [ch]
     if not isinstance(ch, list):
         ch = []
     out["competing_hypotheses"] = ch
+    out["evidence_vs_inference"] = _coerce_evidence_vs_inference(out.get("evidence_vs_inference", {}))
+    out["ioc_extraction"] = _coerce_ioc_extraction(out.get("ioc_extraction", {}))
+    out["ttp_analysis"] = _coerce_ttp_analysis(out.get("ttp_analysis", []))
     return out
 
 
@@ -594,10 +607,11 @@ SECURITY ALERT INPUT:
             
         Returns:
             Dict containing:
-                - ttp_analysis: List of scored, validated TTPs (normalized shape)
-                - ioc_extraction: Extracted IOCs
-                - evidence_vs_inference: Evidence breakdown
+                - alert_reconciliation: Verdict, confidence, summary, and recommended actions
                 - competing_hypotheses: Hypotheses & pivots
+                - evidence_vs_inference: Evidence breakdown
+                - ioc_extraction: Extracted IOCs
+                - ttp_analysis: List of scored, validated TTPs (normalized shape)
                 - raw_response: Original LLM response text
                 - metadata: Processing metadata
         """
