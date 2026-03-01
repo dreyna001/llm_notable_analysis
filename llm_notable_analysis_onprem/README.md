@@ -167,6 +167,16 @@ sudo journalctl -u notable-analyzer -f
 
 ## Usage
 
+## Automated Tests
+
+Run the on-prem unittest suite from repo root:
+
+```bash
+python -m unittest discover -s llm_notable_analysis_onprem/tests -p "test*.py" -v
+```
+
+Coverage details live in `TESTING.md`.
+
 ### File Drop Mode (Default)
 
 Drop JSON or text files into `/var/notables/incoming`:

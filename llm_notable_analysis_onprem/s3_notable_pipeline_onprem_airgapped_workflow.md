@@ -626,6 +626,16 @@ sudo chmod 440 /opt/notable-analyzer/data/enterprise_attack_v17.1_ids.json
 
 ## Testing and Validation
 
+### Automated test suite
+
+For the current on-prem automated `unittest` coverage and test catalog, see `TESTING.md`.
+
+Run from repository root:
+
+```bash
+python -m unittest discover -s llm_notable_analysis_onprem/tests -p "test*.py" -v
+```
+
 ### Acceptance Checklist
 
 - [ ] **Ingest test:** Can receive a test notable via chosen ingest mode

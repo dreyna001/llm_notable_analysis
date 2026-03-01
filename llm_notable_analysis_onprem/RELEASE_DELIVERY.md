@@ -7,6 +7,14 @@ Scope:
 - Ends at: `sudo bash install.sh`
 - Does **not** document what `install.sh` does internally (see `INSTALL.md`)
 
+## Pre-release validation (recommended)
+
+Before publishing delivery artifacts, run the on-prem automated tests from repo root:
+
+```bash
+python -m unittest discover -s llm_notable_analysis_onprem/tests -p "test*.py" -v
+```
+
 ## What is delivered
 
 Deliver artifacts:
