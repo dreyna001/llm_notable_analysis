@@ -51,6 +51,13 @@ readonly MIN_PYTHON_MINOR=10
 err() { echo "ERROR: $*" >&2; exit 1; }
 warn() { echo "WARN: $*" >&2; }
 info() { echo "  $*"; }
+NON_FATAL_ISSUES=()
+
+record_issue() {
+    local msg="$1"
+    NON_FATAL_ISSUES+=("$msg")
+    warn "$msg"
+}
 
 strip_crlf_in_file_best_effort() {
     # Best-effort: strip Windows CRLF from a file if present; never fail install.
@@ -158,6 +165,72 @@ PY
         fi
         sleep 2
     done
+}
+
+smoke_test_inference_best_effort() {
+    # Best-effort canned inference run. Never fails install.
+    local config_file="$CONFIG_DIR/config.env"
+    local timeout_s="${SMOKE_TEST_TIMEOUT_SECONDS:-90}"
+    local poll_s=2
+    local default_incoming="$DATA_DIR/incoming"
+    local default_reports="$DATA_DIR/reports"
+    local incoming_dir="$default_incoming"
+    local report_dir="$default_reports"
+    local smoke_id="install-smoke-$(date +%s)"
+    local payload_file
+    local report_file
+
+    if [[ ! -f "$config_file" ]]; then
+        record_issue "Smoke test skipped: missing config file at $config_file"
+        return 0
+    fi
+
+    # shellcheck disable=SC1090
+    source "$config_file" 2>/dev/null || true
+    incoming_dir="${INCOMING_DIR:-$default_incoming}"
+    report_dir="${REPORT_DIR:-$default_reports}"
+    payload_file="$incoming_dir/${smoke_id}.json"
+    report_file="$report_dir/${smoke_id}.md"
+
+    if ! systemctl is-active --quiet vllm; then
+        record_issue "Smoke test skipped: vllm.service is not active"
+        return 0
+    fi
+    if ! systemctl is-active --quiet notable-analyzer; then
+        record_issue "Smoke test skipped: notable-analyzer.service is not active"
+        return 0
+    fi
+    if [[ ! -d "$incoming_dir" ]]; then
+        record_issue "Smoke test skipped: INCOMING_DIR does not exist: $incoming_dir"
+        return 0
+    fi
+    if [[ ! -d "$report_dir" ]]; then
+        record_issue "Smoke test skipped: REPORT_DIR does not exist: $report_dir"
+        return 0
+    fi
+
+    cat > "$payload_file" <<EOF
+{"notable_id":"$smoke_id","summary":"Suspicious login from unusual IP","ip_address":"203.0.113.45","user":"admin"}
+EOF
+
+    if [[ ! -f "$payload_file" ]]; then
+        record_issue "Smoke test failed: could not write payload to $payload_file"
+        return 0
+    fi
+
+    info "Smoke test submitted: $payload_file"
+    local elapsed=0
+    while (( elapsed < timeout_s )); do
+        if [[ -f "$report_file" ]]; then
+            info "Smoke test passed: report created at $report_file"
+            return 0
+        fi
+        sleep "$poll_s"
+        elapsed=$((elapsed + poll_s))
+    done
+
+    record_issue "Smoke test timed out after ${timeout_s}s (expected report: $report_file)"
+    return 0
 }
 
 check_root() {
@@ -528,6 +601,34 @@ if [[ ! -f "$SSH_DIR/authorized_keys" ]]; then
     info "Created $SSH_DIR/authorized_keys (add SOAR public key here)"
 fi
 
+# Best-effort auto-start (enabled by default)
+if [[ "${AUTO_START_SERVICES:-true}" == "true" ]]; then
+    echo ""
+    info "AUTO_START_SERVICES=true: attempting to start services (best-effort)"
+    if [[ ! -f "$VLLM_MODEL_PATH/config.json" ]]; then
+        record_issue "Model not present at $VLLM_MODEL_PATH (missing config.json); skipping auto-start of vLLM"
+    else
+        # Use restart (not start) so re-running install.sh applies updated unit files/venvs cleanly.
+        systemctl enable vllm 2>/dev/null || true
+        systemctl restart vllm 2>/dev/null || systemctl start vllm 2>/dev/null || record_issue "Could not start/restart vllm.service (check systemctl/journalctl)"
+        if wait_for_http_200_best_effort "http://127.0.0.1:8000/health" 240; then
+            info "vLLM health check OK"
+        else
+            record_issue "vLLM health check timed out; check: sudo journalctl -u vllm -n 200 --no-pager"
+        fi
+        systemctl enable notable-analyzer 2>/dev/null || true
+        systemctl restart notable-analyzer 2>/dev/null || systemctl start notable-analyzer 2>/dev/null || record_issue "Could not start/restart notable-analyzer.service (check systemctl/journalctl)"
+        if [[ "${RUN_SMOKE_TEST:-true}" == "true" ]]; then
+            info "RUN_SMOKE_TEST=true: running canned inference smoke test (best-effort)"
+            smoke_test_inference_best_effort
+        else
+            info "RUN_SMOKE_TEST=false: skipping canned inference smoke test"
+        fi
+    fi
+else
+    info "AUTO_START_SERVICES=false: skipping service start and canned smoke test"
+fi
+
 #------------------------------------------------------------------------------
 # Summary
 #------------------------------------------------------------------------------
@@ -571,25 +672,20 @@ echo "      sudo VLLM_SMOKE_TEST=true bash install.sh"
 echo "  - Download model non-interactively (requires internet + HF token):"
 echo "      sudo MODEL_DOWNLOAD=true HF_TOKEN=... bash install.sh"
 echo "      # optional: MODEL_REPO=openai/gpt-oss-20b"
-echo "  - Auto-start services after install (best-effort):"
+echo "  - Auto-start services after install (best-effort, default true):"
 echo "      sudo AUTO_START_SERVICES=true bash install.sh"
+echo "  - Skip post-install service start:"
+echo "      sudo AUTO_START_SERVICES=false bash install.sh"
+echo "  - Run/skip canned smoke inference (best-effort, default true):"
+echo "      sudo RUN_SMOKE_TEST=true bash install.sh"
+echo "      sudo RUN_SMOKE_TEST=false bash install.sh"
 
-# Best-effort auto-start (disabled by default)
-if [[ "${AUTO_START_SERVICES:-false}" == "true" ]]; then
-    echo ""
-    info "AUTO_START_SERVICES=true: attempting to start services (best-effort)"
-    if [[ ! -f "$VLLM_MODEL_PATH/config.json" ]]; then
-        warn "Model not present at $VLLM_MODEL_PATH (missing config.json); skipping auto-start of vLLM"
-    else
-        # Use restart (not start) so re-running install.sh applies updated unit files/venvs cleanly.
-        systemctl enable vllm 2>/dev/null || true
-        systemctl restart vllm 2>/dev/null || systemctl start vllm 2>/dev/null || warn "Could not start/restart vllm.service (check systemctl/journalctl)"
-        if wait_for_http_200_best_effort "http://127.0.0.1:8000/health" 240; then
-            info "vLLM health check OK"
-        else
-            warn "vLLM health check timed out; check: sudo journalctl -u vllm -n 200 --no-pager"
-        fi
-        systemctl enable notable-analyzer 2>/dev/null || true
-        systemctl restart notable-analyzer 2>/dev/null || systemctl start notable-analyzer 2>/dev/null || warn "Could not start/restart notable-analyzer.service (check systemctl/journalctl)"
-    fi
+echo ""
+if [[ ${#NON_FATAL_ISSUES[@]} -gt 0 ]]; then
+    echo "Non-fatal issues encountered:"
+    for issue in "${NON_FATAL_ISSUES[@]}"; do
+        echo "  - $issue"
+    done
+else
+    echo "No non-fatal issues recorded."
 fi

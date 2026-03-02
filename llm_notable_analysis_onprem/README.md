@@ -103,7 +103,20 @@ Note: During vLLM installation, the installer may appear idle for several minute
 - **Download model weights (non-interactive)**: `sudo MODEL_DOWNLOAD=true HF_TOKEN=... bash install.sh`
   - Optional: `MODEL_REPO=openai/gpt-oss-20b`
   - Notes: best-effort; uses `huggingface_hub` HTTP downloads (no `git lfs` required)
-- **Auto-start services after install (best-effort)**: `sudo AUTO_START_SERVICES=true bash install.sh`
+- **Auto-start services after install (best-effort, default true)**: `sudo AUTO_START_SERVICES=true bash install.sh`
+- **Skip post-install service start**: `sudo AUTO_START_SERVICES=false bash install.sh`
+- **Run canned inference smoke test after auto-start (best-effort, default true)**: `sudo RUN_SMOKE_TEST=true bash install.sh`
+- **Skip canned inference smoke test**: `sudo RUN_SMOKE_TEST=false bash install.sh`
+
+### Manual Inputs Still Required
+
+Even with one-command install, these items remain environment-specific:
+
+- Confirm model weights are present at `/opt/models/gpt-oss-20b` (or set your chosen path in `vllm.service`).
+- Set `LLM_API_TOKEN` only if your vLLM command includes `--api-key`.
+- Set `SPLUNK_BASE_URL` / `SPLUNK_API_TOKEN` only when `SPLUNK_SINK_ENABLED=true`.
+- Add SOAR public key(s) to `/var/sftp/soar/.ssh/authorized_keys` only if using SOAR SFTP ingest.
+- Review the final `install.sh` "Non-fatal issues encountered" summary and resolve items before production.
 
 ## Compliance / Gov-ready: generating a dependency manifest (what was installed)
 

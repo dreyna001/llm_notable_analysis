@@ -25,7 +25,21 @@ cd /path/to/llm_notable_analysis_onprem
 
 # Run installer as root
 sudo bash install.sh
+
+# install.sh will also attempt post-install service start and a canned
+# inference smoke test (best-effort, non-fatal). To skip:
+# sudo AUTO_START_SERVICES=false RUN_SMOKE_TEST=false bash install.sh
 ```
+
+## Manual Inputs Still Required
+
+After install completes, these may still require operator input:
+
+- Ensure model weights exist at `/opt/models/gpt-oss-20b` (unless your service points to a different model path).
+- Set `LLM_API_TOKEN` only if vLLM is configured with `--api-key`.
+- Set `SPLUNK_BASE_URL` / `SPLUNK_API_TOKEN` only if Splunk writeback is enabled.
+- Add SOAR key(s) to `/var/sftp/soar/.ssh/authorized_keys` only for SOAR SFTP ingest.
+- Review and clear any post-install non-fatal issues reported by `install.sh`.
 
 ## What install.sh Does
 
@@ -39,6 +53,7 @@ sudo bash install.sh
 | 6 | Install config template to `/etc/notable-analyzer/config.env` | Skips if exists |
 | 7 | Install systemd units | Fails if unit file missing |
 | 8 | Configure SFTP chroot in `/etc/ssh/sshd_config` | Skips if already present |
+| 9 | Post-install auto-start + canned inference smoke test | Best-effort (non-fatal) |
 
 ---
 
