@@ -170,7 +170,7 @@ PY
 smoke_test_inference_best_effort() {
     # Best-effort canned inference run. Never fails install.
     local config_file="$CONFIG_DIR/config.env"
-    local timeout_s="${SMOKE_TEST_TIMEOUT_SECONDS:-90}"
+    local timeout_s="${SMOKE_TEST_TIMEOUT_SECONDS:-240}"
     local poll_s=2
     local default_incoming="$DATA_DIR/incoming"
     local default_reports="$DATA_DIR/reports"
@@ -679,6 +679,8 @@ echo "      sudo AUTO_START_SERVICES=false bash install.sh"
 echo "  - Run/skip canned smoke inference (best-effort, default true):"
 echo "      sudo RUN_SMOKE_TEST=true bash install.sh"
 echo "      sudo RUN_SMOKE_TEST=false bash install.sh"
+echo "  - Override smoke test timeout seconds (default: 240):"
+echo "      sudo SMOKE_TEST_TIMEOUT_SECONDS=240 bash install.sh"
 
 echo ""
 if [[ ${#NON_FATAL_ISSUES[@]} -gt 0 ]]; then
