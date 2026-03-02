@@ -107,8 +107,9 @@ def process_notable(
         
         # Optional: Update Splunk notable via REST API
         if config.SPLUNK_SINK_ENABLED:
+            finding_id = file_path.stem
             splunk_result = update_splunk_notable(
-                notable_id, markdown, normalized.get("raw_log", {}), config
+                notable_id, markdown, finding_id, config
             )
             logger.info(f"Splunk update result: {splunk_result.get('status')}")
         

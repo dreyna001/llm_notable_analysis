@@ -173,14 +173,14 @@ class TestIntegrationMocks(unittest.TestCase):
         result = update_splunk_notable(
             notable_id="n1",
             markdown="# Report",
-            original_notable={"notable_id": "rule-123"},
+            finding_id="rule-123",
             config=config,
         )
 
         self.assertEqual(result["status"], "success")
         _, kwargs = mock_post.call_args
         self.assertEqual(kwargs["verify"], "/tmp/ca.pem")
-        self.assertEqual(kwargs["data"]["ruleUIDs"], "rule-123")
+        self.assertEqual(kwargs["data"]["finding_id"], "rule-123")
         self.assertEqual(kwargs["data"]["status"], "2")
         self.assertEqual(kwargs["data"]["comment"], "# Report")
 
@@ -188,13 +188,13 @@ class TestIntegrationMocks(unittest.TestCase):
         result = update_splunk_notable(
             notable_id="n1",
             markdown="# Report",
-            original_notable={"notable_id": "rule-123"},
+            finding_id="rule-123",
             config=Config(SPLUNK_SINK_ENABLED=False),
         )
         self.assertEqual(result["status"], "skipped")
 
     @patch("llm_notable_analysis_onprem.onprem_service.sinks.requests.post")
-    def test_update_splunk_notable_uses_search_name_when_no_id(
+    def test_update_splunk_notable_uses_finding_id_only(
         self, mock_post: MagicMock
     ) -> None:
         response = MagicMock()
@@ -212,14 +212,15 @@ class TestIntegrationMocks(unittest.TestCase):
         result = update_splunk_notable(
             notable_id="n1",
             markdown="# Report",
-            original_notable={"search_name": "Suspicious Authentication Pattern"},
+            finding_id="finding-42",
             config=config,
         )
 
         self.assertEqual(result["status"], "success")
         _, kwargs = mock_post.call_args
-        self.assertEqual(kwargs["data"]["search_name"], "Suspicious Authentication Pattern")
+        self.assertEqual(kwargs["data"]["finding_id"], "finding-42")
         self.assertNotIn("ruleUIDs", kwargs["data"])
+        self.assertNotIn("search_name", kwargs["data"])
 
     @patch(
         "llm_notable_analysis_onprem.onprem_service.sinks.requests.post",
@@ -236,7 +237,7 @@ class TestIntegrationMocks(unittest.TestCase):
         result = update_splunk_notable(
             notable_id="n1",
             markdown="# Report",
-            original_notable={"notable_id": "rule-123"},
+            finding_id="rule-123",
             config=config,
         )
         self.assertEqual(result["status"], "error")

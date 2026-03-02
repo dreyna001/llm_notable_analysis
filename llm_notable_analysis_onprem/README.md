@@ -244,6 +244,7 @@ When enabled, the analyzer updates Splunk ES notables with the generated markdow
 SPLUNK_SINK_ENABLED=true
 SPLUNK_BASE_URL=https://splunk.internal:8089
 SPLUNK_API_TOKEN=your_token_here
+SPLUNK_NOTABLE_UPDATE_PATH=/services/notable_update
 # SPLUNK_CA_BUNDLE=/path/to/internal-ca.pem  # If using internal CA (see Security Notes)
 ```
 
@@ -251,16 +252,16 @@ SPLUNK_API_TOKEN=your_token_here
 
 | Setting | Value |
 |---------|-------|
-| Endpoint | `POST {SPLUNK_BASE_URL}/services/notable_update` |
+| Endpoint | `POST {SPLUNK_BASE_URL}{SPLUNK_NOTABLE_UPDATE_PATH}` |
 | Auth | `Authorization: Bearer {SPLUNK_API_TOKEN}` |
 | Content-Type | `application/x-www-form-urlencoded` |
-| Payload | `ruleUIDs={notable_id}&comment={markdown}&status=2` |
+| Payload | `finding_id={filename_stem}&comment={markdown}&status=2` |
 
-> **Note:** The endpoint and payload are placeholders. Confirm with your Splunk ES admin that `/services/notable_update` is the correct endpoint for your environment. The `status=2` value corresponds to "In Progress" in default ES configurations.
+> **Note:** Splunk ES deployments can differ by customer. Confirm endpoint path and identifier contract with the customer's Splunk team before go-live.
 
-**Required fields from notable:**
-- `notable_id` or `event_id` — Used as `ruleUIDs` parameter
-- Falls back to `search_name` if no ID is present
+**Current writeback identifier behavior:**
+- The service derives `finding_id` from the dropped filename stem (for example, `/incoming/abc-123.json` -> `finding_id=abc-123`).
+- This mirrors the current cloud pipeline behavior for identifier correlation.
 
 ---
 
@@ -312,11 +313,11 @@ sudo systemctl restart sshd
 - Port: `22`
 - User: `soar-uploader`
 - Auth: SSH key (recommended) or password
-- Remote path: `/incoming/<notable_id>.json`
+- Remote path: `/incoming/<finding_id>.json`
 
 **Avoid partial reads (recommended):**
-- Upload to a temporary filename that does **not** match `*.json` / `*.txt` (example: `/incoming/<notable_id>.json.tmp`)
-- Atomically rename to `/incoming/<notable_id>.json` after the upload completes
+- Upload to a temporary filename that does **not** match `*.json` / `*.txt` (example: `/incoming/<finding_id>.json.tmp`)
+- Atomically rename to `/incoming/<finding_id>.json` after the upload completes
 
 **Hardening checklist:**
 - Key-based auth only (disable password in `sshd_config` for this user)
@@ -364,9 +365,10 @@ The analyzer processes files matching `*.json` or `*.txt` in `INCOMING_DIR`.
 - `summary` (string): short description of the notable
 
 **Strongly recommended (for correlation + writeback):**
-- `notable_id` (string): stable ID (preferred for writeback)
+- `notable_id` (string): stable notable identifier (retained for context/audit)
 - `event_id` (string): if available
 - `search_name` (string): detection rule name / correlation search name
+- `finding_id` (string): SOAR correlation ID; should match filename stem used for writeback
 - `risk_score` (number or string)
 - `threat_category` (string)
 - `alert_time` (string): ISO-8601 preferred

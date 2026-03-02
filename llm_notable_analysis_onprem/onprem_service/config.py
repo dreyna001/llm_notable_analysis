@@ -37,6 +37,7 @@ class Config:
     # Splunk integration (optional)
     SPLUNK_BASE_URL: str = ""
     SPLUNK_API_TOKEN: str = ""
+    SPLUNK_NOTABLE_UPDATE_PATH: str = "/services/notable_update"
     SPLUNK_SINK_ENABLED: bool = False
     SPLUNK_CA_BUNDLE: str = ""  # Path to PEM CA bundle for Splunk TLS; empty = system trust store
     
@@ -84,6 +85,7 @@ def load_config() -> Config:
         LLM_TIMEOUT=int(os.getenv("LLM_TIMEOUT", "120")),
         SPLUNK_BASE_URL=os.getenv("SPLUNK_BASE_URL", ""),
         SPLUNK_API_TOKEN=os.getenv("SPLUNK_API_TOKEN", ""),
+        SPLUNK_NOTABLE_UPDATE_PATH=os.getenv("SPLUNK_NOTABLE_UPDATE_PATH", "/services/notable_update"),
         SPLUNK_SINK_ENABLED=os.getenv("SPLUNK_SINK_ENABLED", "false").lower() in ("true", "1", "yes"),
         SPLUNK_CA_BUNDLE=os.getenv("SPLUNK_CA_BUNDLE", ""),
         MITRE_IDS_PATH=Path(os.getenv("MITRE_IDS_PATH", str(Path(__file__).parent / "enterprise_attack_v17.1_ids.json"))),
