@@ -44,6 +44,7 @@ RestartSec=30
 Environment="CUDA_VISIBLE_DEVICES=0"
 # Keep torch distributed rendezvous local on single-node deployments.
 Environment="VLLM_HOST_IP=127.0.0.1"
+Environment="MASTER_ADDR=127.0.0.1"
 Environment="NCCL_SOCKET_IFNAME=lo"
 Environment="GLOO_SOCKET_IFNAME=lo"
 Environment="NCCL_IB_DISABLE=1"
@@ -59,7 +60,9 @@ ProtectKernelLogs=no
 RestrictNamespaces=no
 SystemCallArchitectures=native
 LockPersonality=yes
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# Do not enforce RestrictAddressFamilies for vLLM: Gloo/NCCL bootstrap may fail
+# on some virtualized hosts with "Address family not supported by protocol" when
+# systemd applies address-family restrictions to this service.
 UMask=0077
 ProtectHome=yes
 PrivateTmp=yes

@@ -91,6 +91,7 @@ The analyzer expects a local OpenAI-compatible vLLM endpoint. The included `vllm
 
 If you use `install.sh`, it will create `/opt/vllm/venv` and install vLLM by default (using `python3.12` unless overridden; set `VLLM_SKIP_INSTALL=true` to skip).
 If you install vLLM elsewhere, set `VLLM_INSTALL_DIR` and `VLLM_VENV_DIR` when running `install.sh`; the installer patches the installed `/etc/systemd/system/vllm.service` `WorkingDirectory` and `ExecStart` automatically.
+Single-node loopback rendezvous settings (`VLLM_HOST_IP`, `MASTER_ADDR`, NCCL/Gloo loopback interface vars) are included directly in `systemd/vllm.service`; no extra drop-in is required for normal installs.
 
 Examples:
 
@@ -121,6 +122,7 @@ Note: During vLLM installation, the installer may appear idle for several minute
 - **Skip canned inference smoke test**: `sudo RUN_SMOKE_TEST=false bash install.sh`
 - **Override vLLM health timeout (default: 420s)**: `sudo VLLM_HEALTH_TIMEOUT_SECONDS=420 bash install.sh`
 - **Override smoke test timeout (default: 240s)**: `sudo SMOKE_TEST_TIMEOUT_SECONDS=240 bash install.sh`
+- **Reset existing vLLM systemd drop-ins (recommended when standardizing)**: `sudo VLLM_RESET_OVERRIDES=true bash install.sh`
 
 ### Manual Inputs Still Required
 

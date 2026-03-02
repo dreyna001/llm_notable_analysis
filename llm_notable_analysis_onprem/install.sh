@@ -147,6 +147,29 @@ patch_vllm_systemd_unit() {
         || err "Failed to patch ExecStart in $unit_file"
 }
 
+handle_vllm_systemd_overrides() {
+    # Existing drop-ins can silently override newly installed unit settings.
+    # By default we warn; optionally clear them for deterministic installs.
+    local dropin_dir="/etc/systemd/system/vllm.service.d"
+    if [[ ! -d "$dropin_dir" ]]; then
+        return 0
+    fi
+
+    local conf_files=("$dropin_dir"/*.conf)
+    if [[ ! -e "${conf_files[0]}" ]]; then
+        return 0
+    fi
+
+    if [[ "${VLLM_RESET_OVERRIDES:-false}" == "true" ]]; then
+        rm -f "$dropin_dir"/*.conf \
+            || err "Failed to remove existing vLLM drop-ins from $dropin_dir"
+        info "Cleared existing vLLM systemd drop-ins from $dropin_dir (VLLM_RESET_OVERRIDES=true)"
+    else
+        warn "Detected existing vLLM systemd drop-ins in $dropin_dir; these may override installed unit settings."
+        warn "Set VLLM_RESET_OVERRIDES=true to clear drop-ins during install."
+    fi
+}
+
 wait_for_http_200_best_effort() {
     # Best-effort health poll. Never fails install.
     # Usage: wait_for_http_200_best_effort "http://127.0.0.1:8000/health" 180
@@ -582,6 +605,8 @@ if [[ "${INSTALL_SYSTEMD_UNITS:-true}" == "true" ]]; then
         info "Installed: $unit"
     done
 
+    handle_vllm_systemd_overrides
+
     systemctl daemon-reload || err "Failed to reload systemd"
 else
     warn "INSTALL_SYSTEMD_UNITS=false; skipping systemd unit installation and daemon-reload"
@@ -708,6 +733,8 @@ echo "      sudo RUN_SMOKE_TEST=true bash install.sh"
 echo "      sudo RUN_SMOKE_TEST=false bash install.sh"
 echo "  - Override vLLM health timeout seconds (default: 420):"
 echo "      sudo VLLM_HEALTH_TIMEOUT_SECONDS=420 bash install.sh"
+echo "  - Reset existing vLLM systemd drop-ins (recommended when standardizing unit behavior):"
+echo "      sudo VLLM_RESET_OVERRIDES=true bash install.sh"
 echo "  - Override smoke test timeout seconds (default: 240):"
 echo "      sudo SMOKE_TEST_TIMEOUT_SECONDS=240 bash install.sh"
 

@@ -55,7 +55,8 @@ The systemd units enable multiple hardening directives:
   - `SystemCallArchitectures=native`
   - `LockPersonality=yes`
 - **Address families**
-  - `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6`
+  - Analyzer services (`notable-analyzer*`) use `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6`
+  - `vllm.service` intentionally does **not** enforce `RestrictAddressFamilies` due to known Gloo bootstrap failures on some virtualized hosts
 - **File creation defaults**
   - `UMask=0077`
 - **Filesystem protections**
@@ -70,9 +71,11 @@ The systemd units enable multiple hardening directives:
 
 Additional note:
 
-- The `vllm.service` unit applies **network egress hardening** (local-only service):
-  - `IPAddressDeny=any`
-  - `IPAddressAllow=127.0.0.1`
+- The `vllm.service` unit is configured for **local-only rendezvous** with:
+  - `VLLM_HOST_IP=127.0.0.1`
+  - `MASTER_ADDR=127.0.0.1`
+  - `NCCL_SOCKET_IFNAME=lo`
+  - `GLOO_SOCKET_IFNAME=lo`
 
 ## Secure file ingestion (SFTP chroot)
 

@@ -157,6 +157,7 @@ If you need a different path (for example, Python 3.12 side-by-side), set:
 - `VLLM_VENV_DIR` (default: `$VLLM_INSTALL_DIR/venv`)
 
 `install.sh` now patches the installed `/etc/systemd/system/vllm.service` `WorkingDirectory` and `ExecStart` to match these values automatically.
+Single-node loopback rendezvous settings are already embedded in the base `vllm.service`; an additional `override.conf` is not required for normal deployments.
 
 If you need to skip vLLM install (common in air-gapped environments where you pre-stage wheels), run:
 
@@ -175,6 +176,12 @@ Update `vllm.service` if using a different path:
 sudo vi /etc/systemd/system/vllm.service
 # Edit --model parameter
 sudo systemctl daemon-reload
+```
+
+If prior host-local drop-ins exist and you want deterministic behavior from the repo unit, rerun installer with:
+
+```bash
+sudo VLLM_RESET_OVERRIDES=true bash install.sh
 ```
 
 ### 4. Add SOAR SSH Key
