@@ -460,6 +460,11 @@ MAX_QUEUE_DEPTH=32       # A100 + gpt-oss-20b on Xeon Gold (use 48 for Xeon Plat
 Recommended profiles for A100 + gpt-oss-20b:
 - Xeon Gold: `MAX_WORKERS=4`, `MAX_QUEUE_DEPTH=32`
 - Xeon Platinum: `MAX_WORKERS=6`, `MAX_QUEUE_DEPTH=48`
+- AMD EPYC 7J13 VM (KVM, 30 vCPU observed): start with Gold profile `4/32`
+
+Intel comparison note for the EPYC profile:
+- Treat this EPYC VM baseline as closer to a **Xeon Gold tuning tier** for this service.
+- Use the Xeon Platinum profile only after validating sustained CPU headroom and queue behavior in production-like load tests.
 
 **How it works (multithreading):**
 - Discovered files are dispatched to a ThreadPoolExecutor

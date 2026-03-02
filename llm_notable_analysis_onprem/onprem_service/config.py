@@ -56,6 +56,8 @@ class Config:
     # A100 + gpt-oss-20b baseline profile:
     # - Xeon Gold: MAX_WORKERS=4, MAX_QUEUE_DEPTH=32 (default below)
     # - Xeon Platinum: MAX_WORKERS=6, MAX_QUEUE_DEPTH=48 (override in config.env)
+    # - AMD EPYC 7J13 VM (KVM, ~30 vCPU observed): start with Gold profile (4/32),
+    #   then increase only after validating CPU headroom and queue latency.
     CONCURRENCY_ENABLED: bool = False  # Sequential by default
     MAX_WORKERS: int = 4               # Thread pool size when enabled (A100 + Xeon Gold baseline)
     MAX_QUEUE_DEPTH: int = 32          # Backpressure limit (A100 + Xeon Gold baseline)

@@ -385,6 +385,8 @@ MAX_QUEUE_DEPTH=32
 # Xeon Platinum profile:
 # MAX_WORKERS=6
 # MAX_QUEUE_DEPTH=48
+# AMD EPYC 7J13 VM on KVM (30 vCPU):
+# Start with Gold profile (4/32), then tune upward only with measured headroom.
 ```
 
 ### Config Loading (Python)
