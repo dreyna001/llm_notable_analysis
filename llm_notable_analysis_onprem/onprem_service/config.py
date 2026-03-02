@@ -53,9 +53,12 @@ class Config:
     RETENTION_RUN_INTERVAL_SECONDS: int = 86400
     
     # Concurrency (optional)
+    # A100 + gpt-oss-20b baseline profile:
+    # - Xeon Gold: MAX_WORKERS=4, MAX_QUEUE_DEPTH=32 (default below)
+    # - Xeon Platinum: MAX_WORKERS=6, MAX_QUEUE_DEPTH=48 (override in config.env)
     CONCURRENCY_ENABLED: bool = False  # Sequential by default
-    MAX_WORKERS: int = 2               # Thread pool size when enabled
-    MAX_QUEUE_DEPTH: int = 20          # Backpressure: skip new files if queue full
+    MAX_WORKERS: int = 4               # Thread pool size when enabled (A100 + Xeon Gold baseline)
+    MAX_QUEUE_DEPTH: int = 32          # Backpressure limit (A100 + Xeon Gold baseline)
 
 
 def load_config() -> Config:
@@ -87,7 +90,7 @@ def load_config() -> Config:
         ARCHIVE_RETENTION_DAYS=int(os.getenv("ARCHIVE_RETENTION_DAYS", "14")),
         RETENTION_RUN_INTERVAL_SECONDS=int(os.getenv("RETENTION_RUN_INTERVAL_SECONDS", "86400")),
         CONCURRENCY_ENABLED=os.getenv("CONCURRENCY_ENABLED", "false").lower() in ("true", "1", "yes"),
-        MAX_WORKERS=int(os.getenv("MAX_WORKERS", "2")),
-        MAX_QUEUE_DEPTH=int(os.getenv("MAX_QUEUE_DEPTH", "20")),
+        MAX_WORKERS=int(os.getenv("MAX_WORKERS", "4")),
+        MAX_QUEUE_DEPTH=int(os.getenv("MAX_QUEUE_DEPTH", "32")),
     )
 

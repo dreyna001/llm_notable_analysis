@@ -375,6 +375,16 @@ REPORT_RETENTION_DAYS=7
 ARCHIVE_DIR=/var/notables/archive
 ARCHIVE_RETENTION_DAYS=14
 RETENTION_RUN_INTERVAL_SECONDS=86400
+
+# === Concurrency (optional) ===
+# Python multithreading via ThreadPoolExecutor (not asyncio)
+CONCURRENCY_ENABLED=false
+# A100 + gpt-oss-20b profile for Xeon Gold:
+MAX_WORKERS=4
+MAX_QUEUE_DEPTH=32
+# Xeon Platinum profile:
+# MAX_WORKERS=6
+# MAX_QUEUE_DEPTH=48
 ```
 
 ### Config Loading (Python)

@@ -409,16 +409,20 @@ By default, retention runs **inside the analyzer service** (simplest setup). If 
 
 ## Concurrency (Optional)
 
-By default the service processes one notable at a time (sequential mode). To enable bounded concurrent processing:
+By default the service processes one notable at a time (sequential mode). To enable bounded concurrent processing (Python multithreading via `ThreadPoolExecutor`):
 
 ```bash
 # In /etc/notable-analyzer/config.env
 CONCURRENCY_ENABLED=true
-MAX_WORKERS=2            # Thread pool size (keep small: 2-4)
-MAX_QUEUE_DEPTH=20       # Backpressure limit
+MAX_WORKERS=4            # A100 + gpt-oss-20b on Xeon Gold (use 6 for Xeon Platinum)
+MAX_QUEUE_DEPTH=32       # A100 + gpt-oss-20b on Xeon Gold (use 48 for Xeon Platinum)
 ```
 
-**How it works:**
+Recommended profiles for A100 + gpt-oss-20b:
+- Xeon Gold: `MAX_WORKERS=4`, `MAX_QUEUE_DEPTH=32`
+- Xeon Platinum: `MAX_WORKERS=6`, `MAX_QUEUE_DEPTH=48`
+
+**How it works (multithreading):**
 - Discovered files are dispatched to a ThreadPoolExecutor
 - If in-flight jobs reach `MAX_QUEUE_DEPTH`, new files wait until next poll cycle (backpressure)
 - Each job maintains its own correlation ID in logs
