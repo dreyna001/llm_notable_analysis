@@ -14,9 +14,9 @@ readonly INSTALL_DIR="/opt/notable-analyzer"
 readonly CONFIG_DIR="/etc/notable-analyzer"
 readonly DATA_DIR="/var/notables"
 readonly SFTP_CHROOT="/var/sftp/soar"
-readonly VLLM_MODEL_PATH="/opt/models/gpt-oss-20b"
-readonly VLLM_INSTALL_DIR="/opt/vllm"
-readonly VLLM_VENV_DIR="/opt/vllm/venv"
+readonly VLLM_MODEL_PATH="${VLLM_MODEL_PATH:-/opt/models/gpt-oss-20b}"
+readonly VLLM_INSTALL_DIR="${VLLM_INSTALL_DIR:-/opt/vllm}"
+readonly VLLM_VENV_DIR="${VLLM_VENV_DIR:-$VLLM_INSTALL_DIR/venv}"
 
 # vLLM install pinning (supply chain / reproducibility)
 # - Default pins to a known-good version.
@@ -127,6 +127,24 @@ PY
     else
         warn "Model download step did not produce $model_dir/config.json (continuing)"
     fi
+}
+
+patch_vllm_systemd_unit() {
+    # Update vLLM unit paths to match installer-selected install/venv locations.
+    # This keeps runtime systemd config consistent when VLLM_INSTALL_DIR/VLLM_VENV_DIR
+    # are overridden (for example, running a Python 3.12 canary side-by-side).
+    local unit_file="$1"
+    [[ -f "$unit_file" ]] || err "vLLM unit not found for patching: $unit_file"
+
+    local vllm_python="$VLLM_VENV_DIR/bin/python"
+    local escaped_install_dir escaped_python
+    escaped_install_dir="$(printf '%s' "$VLLM_INSTALL_DIR" | sed 's/[&|]/\\&/g')"
+    escaped_python="$(printf '%s' "$vllm_python" | sed 's/[&|]/\\&/g')"
+
+    sed -i -E "s|^WorkingDirectory=.*$|WorkingDirectory=${escaped_install_dir}|" "$unit_file" \
+        || err "Failed to patch WorkingDirectory in $unit_file"
+    sed -i -E "s|^ExecStart=.*-m vllm\\.entrypoints\\.openai\\.api_server[[:space:]]*\\\\$|ExecStart=${escaped_python} -m vllm.entrypoints.openai.api_server \\\\|" "$unit_file" \
+        || err "Failed to patch ExecStart in $unit_file"
 }
 
 wait_for_http_200_best_effort() {
@@ -329,7 +347,7 @@ echo ""
 echo "[1/8] Creating system users..."
 
 create_user_if_missing "$SVC_USER" "$INSTALL_DIR"
-create_user_if_missing "$VLLM_USER" "/opt/vllm"
+create_user_if_missing "$VLLM_USER" "$VLLM_INSTALL_DIR"
 create_user_if_missing "$SFTP_USER" "$SFTP_CHROOT"
 
 # Add SFTP user to service group for shared write access
@@ -558,6 +576,9 @@ if [[ "${INSTALL_SYSTEMD_UNITS:-true}" == "true" ]]; then
         strip_crlf_in_file_best_effort "$src"
         cp "$src" /etc/systemd/system/ || err "Failed to copy $unit"
         strip_crlf_in_file_best_effort "/etc/systemd/system/$unit"
+        if [[ "$unit" == "vllm.service" ]]; then
+            patch_vllm_systemd_unit "/etc/systemd/system/$unit"
+        fi
         info "Installed: $unit"
     done
 
@@ -664,7 +685,8 @@ echo "      sudo -u $VLLM_USER $VLLM_VENV_DIR/bin/python -m vllm.entrypoints.ope
 echo "        --model $VLLM_MODEL_PATH \\"
 echo "        --served-model-name gpt-oss-20b \\"
 echo "        --host 127.0.0.1 --port 8000 \\"
-echo "        --gpu-memory-utilization 0.9 --max-model-len 131072 --dtype auto"
+echo "        --gpu-memory-utilization 0.9 --max-model-len 131072 --dtype auto \\"
+echo "        --distributed-executor-backend mp"
 echo "  - If the error mentions trust_remote_code, consider enabling it explicitly (security tradeoff):"
 echo "      sudo vi /etc/systemd/system/vllm.service  # add --trust-remote-code"
 echo "      sudo systemctl daemon-reload && sudo systemctl restart vllm"

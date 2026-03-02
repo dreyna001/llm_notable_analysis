@@ -16,6 +16,7 @@
 - **Minimum:** Python 3.10+ is required; the installer fails if the chosen interpreter is older.
 - **3.12+:** If the interpreter is 3.12 or newer, the installer only warns (does not fail). If vLLM later fails to start, use Python 3.10 or 3.11 for the vLLM venv.
 - **Pinning (regulated envs):** For reproducible installs, pin both venvs to a specific interpreter, e.g. `sudo ANALYZER_PYTHON_BIN=python3.11 VLLM_PYTHON_BIN=python3.11 bash install.sh`. See README "Reproducibility: pinning Python".
+- **Debian/Ubuntu headers:** Ensure Python dev headers match the vLLM interpreter (for Triton/Inductor runtime compile), e.g. `python3.11-dev` for `python3.11`, `python3.12-dev` for `python3.12`.
 
 ## Quick Install
 
@@ -150,13 +151,20 @@ The analyzer talks to an OpenAI-compatible local endpoint (vLLM). The included `
 
 If you ran `install.sh` without overrides, it will create this venv and install vLLM automatically.
 
+If you need a different path (for example, Python 3.12 side-by-side), set:
+
+- `VLLM_INSTALL_DIR` (default: `/opt/vllm`)
+- `VLLM_VENV_DIR` (default: `$VLLM_INSTALL_DIR/venv`)
+
+`install.sh` now patches the installed `/etc/systemd/system/vllm.service` `WorkingDirectory` and `ExecStart` to match these values automatically.
+
 If you need to skip vLLM install (common in air-gapped environments where you pre-stage wheels), run:
 
 ```bash
 sudo VLLM_SKIP_INSTALL=true bash install.sh
 ```
 
-Then install vLLM yourself into `/opt/vllm/venv` (or update `vllm.service` to point to your chosen interpreter).
+Then install vLLM yourself into your chosen venv path (or update `vllm.service` to point to your chosen interpreter).
 
 ### 3. Download Model Weights
 

@@ -87,8 +87,20 @@ The analyzer expects a local OpenAI-compatible vLLM endpoint. The included `vllm
 
 - Interpreter: `/opt/vllm/venv/bin/python`
 - Model path: `/opt/models/gpt-oss-20b`
+- Executor backend: `--distributed-executor-backend mp`
 
-If you use `install.sh`, it will create `/opt/vllm/venv` and install vLLM by default (set `VLLM_SKIP_INSTALL=true` to skip). If you install vLLM elsewhere, update `systemd/vllm.service` accordingly.
+If you use `install.sh`, it will create `/opt/vllm/venv` and install vLLM by default (set `VLLM_SKIP_INSTALL=true` to skip).
+If you install vLLM elsewhere, set `VLLM_INSTALL_DIR` and `VLLM_VENV_DIR` when running `install.sh`; the installer patches the installed `/etc/systemd/system/vllm.service` `WorkingDirectory` and `ExecStart` automatically.
+
+Examples:
+
+```bash
+# Default layout
+sudo bash install.sh
+
+# Python 3.12 canary layout (side-by-side path)
+sudo VLLM_INSTALL_DIR=/opt/vllm312 VLLM_VENV_DIR=/opt/vllm312/venv VLLM_PYTHON_BIN=python3.12 bash install.sh
+```
 
 Note: During vLLM installation, the installer may appear idle for several minutes after creating `/opt/vllm/venv` while `pip` resolves/builds dependencies. This is expected on some hosts.
 
