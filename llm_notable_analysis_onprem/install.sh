@@ -608,19 +608,24 @@ if [[ "${AUTO_START_SERVICES:-true}" == "true" ]]; then
     if [[ ! -f "$VLLM_MODEL_PATH/config.json" ]]; then
         record_issue "Model not present at $VLLM_MODEL_PATH (missing config.json); skipping auto-start of vLLM"
     else
+        local_vllm_ready="false"
+        vllm_health_timeout_s="${VLLM_HEALTH_TIMEOUT_SECONDS:-420}"
         # Use restart (not start) so re-running install.sh applies updated unit files/venvs cleanly.
         systemctl enable vllm 2>/dev/null || true
         systemctl restart vllm 2>/dev/null || systemctl start vllm 2>/dev/null || record_issue "Could not start/restart vllm.service (check systemctl/journalctl)"
-        if wait_for_http_200_best_effort "http://127.0.0.1:8000/health" 240; then
+        if wait_for_http_200_best_effort "http://127.0.0.1:8000/health" "$vllm_health_timeout_s"; then
             info "vLLM health check OK"
+            local_vllm_ready="true"
         else
             record_issue "vLLM health check timed out; check: sudo journalctl -u vllm -n 200 --no-pager"
         fi
         systemctl enable notable-analyzer 2>/dev/null || true
         systemctl restart notable-analyzer 2>/dev/null || systemctl start notable-analyzer 2>/dev/null || record_issue "Could not start/restart notable-analyzer.service (check systemctl/journalctl)"
-        if [[ "${RUN_SMOKE_TEST:-true}" == "true" ]]; then
+        if [[ "${RUN_SMOKE_TEST:-true}" == "true" && "$local_vllm_ready" == "true" ]]; then
             info "RUN_SMOKE_TEST=true: running canned inference smoke test (best-effort)"
             smoke_test_inference_best_effort
+        elif [[ "${RUN_SMOKE_TEST:-true}" == "true" ]]; then
+            record_issue "Skipping canned smoke test because vLLM was not healthy during post-install checks"
         else
             info "RUN_SMOKE_TEST=false: skipping canned inference smoke test"
         fi
@@ -679,6 +684,8 @@ echo "      sudo AUTO_START_SERVICES=false bash install.sh"
 echo "  - Run/skip canned smoke inference (best-effort, default true):"
 echo "      sudo RUN_SMOKE_TEST=true bash install.sh"
 echo "      sudo RUN_SMOKE_TEST=false bash install.sh"
+echo "  - Override vLLM health timeout seconds (default: 420):"
+echo "      sudo VLLM_HEALTH_TIMEOUT_SECONDS=420 bash install.sh"
 echo "  - Override smoke test timeout seconds (default: 240):"
 echo "      sudo SMOKE_TEST_TIMEOUT_SECONDS=240 bash install.sh"
 

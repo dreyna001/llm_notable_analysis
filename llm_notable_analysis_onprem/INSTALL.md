@@ -29,6 +29,8 @@ sudo bash install.sh
 # install.sh will also attempt post-install service start and a canned
 # inference smoke test (best-effort, non-fatal). To skip:
 # sudo AUTO_START_SERVICES=false RUN_SMOKE_TEST=false bash install.sh
+# Tune readiness windows if model startup is slow:
+# sudo VLLM_HEALTH_TIMEOUT_SECONDS=420 SMOKE_TEST_TIMEOUT_SECONDS=240 bash install.sh
 ```
 
 ## Manual Inputs Still Required

@@ -107,6 +107,7 @@ Note: During vLLM installation, the installer may appear idle for several minute
 - **Skip post-install service start**: `sudo AUTO_START_SERVICES=false bash install.sh`
 - **Run canned inference smoke test after auto-start (best-effort, default true)**: `sudo RUN_SMOKE_TEST=true bash install.sh`
 - **Skip canned inference smoke test**: `sudo RUN_SMOKE_TEST=false bash install.sh`
+- **Override vLLM health timeout (default: 420s)**: `sudo VLLM_HEALTH_TIMEOUT_SECONDS=420 bash install.sh`
 - **Override smoke test timeout (default: 240s)**: `sudo SMOKE_TEST_TIMEOUT_SECONDS=240 bash install.sh`
 
 ### Manual Inputs Still Required

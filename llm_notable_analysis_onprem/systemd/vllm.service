@@ -41,16 +41,21 @@ RestartSec=30
 
 # Environment for CUDA
 Environment="CUDA_VISIBLE_DEVICES=0"
+# Keep torch distributed rendezvous local on single-node deployments.
+Environment="VLLM_HOST_IP=127.0.0.1"
+Environment="NCCL_SOCKET_IFNAME=lo"
+Environment="GLOO_SOCKET_IFNAME=lo"
+Environment="NCCL_IB_DISABLE=1"
 
 # Security hardening
 NoNewPrivileges=yes
 CapabilityBoundingSet=
 AmbientCapabilities=
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectControlGroups=yes
-ProtectKernelLogs=yes
-RestrictNamespaces=yes
+ProtectKernelTunables=no
+ProtectKernelModules=no
+ProtectControlGroups=no
+ProtectKernelLogs=no
+RestrictNamespaces=no
 SystemCallArchitectures=native
 LockPersonality=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
@@ -58,9 +63,8 @@ UMask=0077
 ProtectHome=yes
 PrivateTmp=yes
 
-# Network hardening: vLLM is local-only and should not need off-host egress.
-IPAddressDeny=any
-IPAddressAllow=127.0.0.1
+# Do not apply systemd IP sandboxing here. vLLM/torch initializes local
+# distributed primitives that can select non-loopback host interfaces.
 
 # Resource limits
 LimitNOFILE=65535
