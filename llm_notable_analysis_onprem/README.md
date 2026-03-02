@@ -90,6 +90,8 @@ The analyzer expects a local OpenAI-compatible vLLM endpoint. The included `vllm
 
 If you use `install.sh`, it will create `/opt/vllm/venv` and install vLLM by default (set `VLLM_SKIP_INSTALL=true` to skip). If you install vLLM elsewhere, update `systemd/vllm.service` accordingly.
 
+Note: During vLLM installation, the installer may appear idle for several minutes after creating `/opt/vllm/venv` while `pip` resolves/builds dependencies. This is expected on some hosts.
+
 ### Note on model weights directory
 
 `install.sh` will also **best-effort** create `/opt/models` (and `/opt/models/gpt-oss-20b`) and attempt to `chown` it to the invoking sudo user to make it easier to download/copy model weights. If this fails due to permissions, the install continues and you can create/chown the directory manually.
