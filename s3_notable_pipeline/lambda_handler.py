@@ -10,7 +10,8 @@ import os
 import logging
 import time
 import boto3
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from urllib.parse import unquote_plus
 from typing import Dict, Any
 
 from ttp_analyzer import BedrockAnalyzer
@@ -95,6 +96,22 @@ def normalize_notable(content: str, content_type: str = 'text') -> Dict[str, Any
         "risk_index": risk_index,
         "raw_log": raw_log
     }
+
+
+def extract_finding_id_from_s3_key(source_key: str) -> str:
+    """Derive finding_id from S3 object filename (without extension).
+
+    Args:
+        source_key: S3 object key (may be URL-encoded in event payload).
+
+    Returns:
+        Filename stem used as finding_id. Returns empty string if no basename.
+    """
+    decoded_key = unquote_plus(source_key or "")
+    filename = PurePosixPath(decoded_key).name
+    if not filename:
+        return ""
+    return Path(filename).stem
 
 
 def write_to_s3_sink(source_key: str, markdown: str, analysis_result: Dict[str, Any]) -> Dict[str, Any]:
@@ -197,12 +214,12 @@ def write_to_splunk_hec(analysis_result: Dict[str, Any], original_notable: Dict[
         return {"status": "error", "message": str(e)}
 
 
-def write_to_splunk_rest(analysis_result: Dict[str, Any], original_notable: Dict[str, Any]) -> Dict[str, Any]:
-    """Update notable via Splunk REST API /services/notable_update.
+def write_to_splunk_rest(analysis_result: Dict[str, Any], source_key: str) -> Dict[str, Any]:
+    """Update notable comment via Splunk REST API using finding_id.
     
     Args:
         analysis_result: Full analysis result including markdown and TTPs.
-        original_notable: Original notable data from S3 (should contain notable_id or search_name).
+        source_key: Original S3 key; filename stem is used as finding_id.
         
     Returns:
         Dict with sink operation status.
@@ -216,35 +233,31 @@ def write_to_splunk_rest(analysis_result: Dict[str, Any], original_notable: Dict
         if not splunk_base_url or not splunk_api_token:
             logger.error("SPLUNK_BASE_URL or SPLUNK_API_TOKEN not set")
             return {"status": "error", "message": "Splunk REST credentials not configured"}
-        
-        # Extract notable identifier (assume it's in the original notable data)
-        notable_id = original_notable.get('notable_id') or original_notable.get('event_id')
-        search_name = original_notable.get('search_name')
-        
-        if not notable_id and not search_name:
-            logger.warning("No notable_id or search_name found in original notable")
-            return {"status": "error", "message": "Cannot identify notable to update"}
+
+        finding_id = extract_finding_id_from_s3_key(source_key)
+        if not finding_id:
+            logger.warning(f"Could not derive finding_id from source key: {source_key!r}")
+            return {"status": "error", "message": "Cannot derive finding_id from source key"}
         
         # Use the full markdown report as the comment
         comment = analysis_result["markdown"]
         
         # Build REST API request
-        rest_url = f"{splunk_base_url}/services/notable_update"
+        endpoint_path = os.environ.get('SPLUNK_NOTABLE_UPDATE_PATH', '/services/notable_update')
+        if not endpoint_path.startswith('/'):
+            endpoint_path = f"/{endpoint_path}"
+        rest_url = f"{splunk_base_url.rstrip('/')}{endpoint_path}"
         headers = {
             "Authorization": f"Bearer {splunk_api_token}",
             "Content-Type": "application/x-www-form-urlencoded"
         }
         
         data = {
+            "finding_id": finding_id,
             "comment": comment,
             "status": "2"  # In Progress (adjust as needed)
         }
-        
-        if notable_id:
-            data["ruleUIDs"] = notable_id
-        elif search_name:
-            data["search_name"] = search_name
-        
+
         response = requests.post(rest_url, data=data, headers=headers, timeout=30, verify=True)
         response.raise_for_status()
         
@@ -254,7 +267,7 @@ def write_to_splunk_rest(analysis_result: Dict[str, Any], original_notable: Dict
             "status": "success",
             "rest_response": response.text,
             "status_code": response.status_code,
-            "notable_id": notable_id or search_name
+            "finding_id": finding_id
         }
         
     except Exception as e:
@@ -357,7 +370,7 @@ def handler(event, context):
             elif sink_mode == 'hec':
                 sink_result = write_to_splunk_hec(analysis_result, alert_obj.get('raw_log', {}))
             elif sink_mode == 'notable_rest':
-                sink_result = write_to_splunk_rest(analysis_result, alert_obj.get('raw_log', {}))
+                sink_result = write_to_splunk_rest(analysis_result, key)
             else:
                 logger.error(f"Unknown sink mode: {sink_mode}")
                 sink_result = {"sink": sink_mode, "status": "error", "message": "Unknown sink mode"}

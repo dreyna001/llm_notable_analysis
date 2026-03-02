@@ -236,9 +236,18 @@ aws bedrock list-foundation-models --region us-east-1
 
 ### Production Mode - REST (`SPLUNK_SINK_MODE=notable_rest`)
 - **Use case:** Update existing notable comments with full analysis
-- **Input:** Notables from S3 (must include `notable_id` or `search_name`)
-- **Output:** Update notable comment via `/services/notable_update` REST API with full markdown report
+- **Input:** Notables from S3 (filename stem is used as `finding_id`, e.g. `incoming/abc-123.json` -> `finding_id=abc-123`)
+- **Output:** Update notable comment via Splunk REST API with full markdown report and `finding_id`
 - **Required env vars:** `SPLUNK_BASE_URL`, `SPLUNK_API_TOKEN`
+- **Optional env vars:** `SPLUNK_NOTABLE_UPDATE_PATH` (default: `/services/notable_update`)
+
+**Compatibility note (important):**
+- Splunk ES deployments are not always configured identically across customers.
+- The standard Splunk ES `/services/notable_update` API commonly expects `ruleUIDs` (or `searchID`) for updates.
+- **Current implementation in this repo** sends `finding_id` (derived from the S3 filename stem) to the configured update endpoint.
+- In this integration model, SOAR `finding_id` is treated as the same correlation value as Splunk notable `event_id` in customer workflows.
+- Integration requirement: customer SOAR playbooks must capture the notable correlation ID and preserve it as `finding_id` for this pipeline's writeback path.
+- If a customer environment does not accept `finding_id` at that endpoint, adapt the request payload to that customer's expected identifier contract.
 
 ---
 
@@ -342,6 +351,7 @@ sam deploy \
    - `SPLUNK_HEC_TOKEN` = `your-hec-token` (if using HEC mode)
    - `SPLUNK_BASE_URL` = `https://your-splunk:8089` (if using REST mode)
    - `SPLUNK_API_TOKEN` = `your-api-token` (if using REST mode)
+   - `SPLUNK_NOTABLE_UPDATE_PATH` = `/services/notable_update` (optional; if your endpoint differs)
 4. Click **Save**
 
 **Option B: AWS CLI**
@@ -578,6 +588,13 @@ aws logs tail /aws/lambda/$LAMBDA_NAME --follow
 #### Splunk REST Sink
 - `SPLUNK_BASE_URL` - Splunk base URL (e.g., `https://splunk:8089`)
 - `SPLUNK_API_TOKEN` - API token for REST authentication
+- `SPLUNK_NOTABLE_UPDATE_PATH` - REST path for notable updates (default: `/services/notable_update`)
+
+#### Customer-specific identifier mapping
+- **Current repo behavior:** `finding_id` from S3 filename stem (for example, `incoming/12345.json` -> `finding_id=12345`)
+- **Common Splunk ES behavior:** update by `ruleUIDs` (or `searchID`) at `/services/notable_update`
+- **SOAR mapping requirement:** map Splunk notable correlation ID (often surfaced as `event_id`) into SOAR `finding_id` so writeback targets the same notable
+- **Operational guidance:** validate required identifier field(s) with each customer's Splunk team before go-live
 
 ---
 
@@ -627,7 +644,7 @@ sam deploy \
     SplunkApiToken=your-api-token-here
 ```
 
-**Important:** Ensure your notables include `notable_id` or `search_name` fields when using REST mode.
+**Important:** Ensure the S3 object filename stem matches the Splunk `finding_id` used for correlation.
 
 ---
 
@@ -682,7 +699,8 @@ aws logs tail /aws/lambda/notable-analyzer-s3 --since 1h
 
 **Splunk REST errors:**
 - Verify REST API URL and token
-- Check notables include `notable_id` or `search_name`
+- Ensure uploaded filename stem matches a valid `finding_id` in Splunk
+- If endpoint rejects `finding_id`, confirm whether the customer expects `ruleUIDs`/`searchID` instead
 - Ensure Lambda can reach Splunk (VPC/network config)
 
 **Lambda logs "Skipping" or "Read 0 characters":**

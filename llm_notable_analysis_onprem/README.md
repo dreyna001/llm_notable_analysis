@@ -372,6 +372,11 @@ The analyzer processes files matching `*.json` or `*.txt` in `INCOMING_DIR`.
 - `alert_time` (string): ISO-8601 preferred
 - `raw_event` (string): optional full notable JSON serialized as a string (so it appears in the prompt)
 
+**SOAR/Splunk ID mapping note (customer integration):**
+- In many customer workflows, SOAR uses `finding_id` while Splunk notable workflows refer to the same correlation value as `event_id`.
+- During integration, ensure the SOAR playbook preserves and forwards that correlation ID consistently so writeback targets the same notable.
+- Confirm exact field naming with the customer's Splunk team before go-live (`finding_id`, `event_id`, or another contract-specific field).
+
 Example payload:
 
 ```json
