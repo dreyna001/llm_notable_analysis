@@ -172,7 +172,22 @@ ls -la /var/sftp/soar/.ssh/
 sudo systemctl restart sshd
 ```
 
-### 6. Start Services
+### 6. Run Unit Tests (Preflight)
+
+Run tests from repo root before first service start:
+
+```bash
+cd ~/llm_notable_analysis
+PYTHONPATH=llm_notable_analysis_onprem /opt/notable-analyzer/venv/bin/python -m unittest discover -s llm_notable_analysis_onprem/tests -p "test*.py" -v
+```
+
+Expected result:
+- `Ran ... tests`
+- `OK`
+
+Unit tests do not require `vllm` or `notable-analyzer` to be running.
+
+### 7. Start Services
 
 ```bash
 # Start vLLM first (analyzer depends on it)

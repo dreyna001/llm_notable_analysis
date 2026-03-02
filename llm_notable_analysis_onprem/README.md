@@ -177,6 +177,16 @@ Run the on-prem unittest suite from repo root:
 python -m unittest discover -s llm_notable_analysis_onprem/tests -p "test*.py" -v
 ```
 
+Preflight recommendation before first service start:
+
+```bash
+cd ~/llm_notable_analysis
+PYTHONPATH=llm_notable_analysis_onprem /opt/notable-analyzer/venv/bin/python -m unittest discover -s llm_notable_analysis_onprem/tests -p "test*.py" -v
+```
+
+- Unit tests do not require `vllm` or `notable-analyzer` to be running.
+- Proceed to service startup only after a clean `OK` test result.
+
 Coverage details live in `TESTING.md`.
 
 ### File Drop Mode (Default)
