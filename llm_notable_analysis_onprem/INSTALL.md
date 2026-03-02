@@ -12,10 +12,10 @@
 
 ### Python version
 
-- **Default:** The installer uses whatever `python3` points to on the host for both the analyzer and vLLM venvs. Override with `ANALYZER_PYTHON_BIN` and `VLLM_PYTHON_BIN` (e.g. `python3.11`).
+- **Default:** The installer defaults both analyzer and vLLM venvs to `python3.12`. Override with `ANALYZER_PYTHON_BIN` and `VLLM_PYTHON_BIN` if needed.
 - **Minimum:** Python 3.10+ is required; the installer fails if the chosen interpreter is older.
-- **3.12+:** If the interpreter is 3.12 or newer, the installer only warns (does not fail). If vLLM later fails to start, use Python 3.10 or 3.11 for the vLLM venv.
-- **Pinning (regulated envs):** For reproducible installs, pin both venvs to a specific interpreter, e.g. `sudo ANALYZER_PYTHON_BIN=python3.11 VLLM_PYTHON_BIN=python3.11 bash install.sh`. See README "Reproducibility: pinning Python".
+- **3.13+:** If the interpreter is 3.13 or newer, the installer warns (does not fail). If vLLM later fails to start, pin to Python 3.12.
+- **Pinning (regulated envs):** For reproducible installs, pin both venvs to a specific interpreter, e.g. `sudo ANALYZER_PYTHON_BIN=python3.12 VLLM_PYTHON_BIN=python3.12 bash install.sh`. See README "Reproducibility: pinning Python".
 - **Debian/Ubuntu headers:** Ensure Python dev headers match the vLLM interpreter (for Triton/Inductor runtime compile), e.g. `python3.11-dev` for `python3.11`, `python3.12-dev` for `python3.12`.
 
 ## Quick Install

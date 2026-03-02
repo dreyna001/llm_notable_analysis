@@ -28,13 +28,13 @@ readonly VLLM_PIP_SPEC="${VLLM_PIP_SPEC:-vllm==0.14.1}"
 
 # Python interpreter selection (pinning / reproducibility)
 #
-# For regulated environments, prefer pinning vLLM to a specific Python (commonly 3.11).
+# For regulated environments, prefer pinning vLLM to a specific Python (commonly 3.12).
 # Example:
-#   sudo ANALYZER_PYTHON_BIN=python3.11 VLLM_PYTHON_BIN=python3.11 bash install.sh
+#   sudo ANALYZER_PYTHON_BIN=python3.12 VLLM_PYTHON_BIN=python3.12 bash install.sh
 #
 # If these are set and missing/unusable, the installer will fail early.
-readonly ANALYZER_PYTHON_BIN="${ANALYZER_PYTHON_BIN:-python3}"
-readonly VLLM_PYTHON_BIN="${VLLM_PYTHON_BIN:-python3}"
+readonly ANALYZER_PYTHON_BIN="${ANALYZER_PYTHON_BIN:-python3.12}"
+readonly VLLM_PYTHON_BIN="${VLLM_PYTHON_BIN:-python3.12}"
 
 # Users
 readonly SVC_USER="notable-analyzer"
@@ -290,10 +290,10 @@ check_python_version() {
 
     info "$label Python version: $ver ($pybin)"
 
-    # vLLM compatibility varies by platform/Python; warn early if we're on a very new Python.
+    # vLLM compatibility varies by platform/Python; warn early only on very new versions.
     # (Do not fail install: some environments ship newer Pythons by default.)
-    if [[ "$major" -eq 3 && "$minor" -ge 12 ]]; then
-        warn "Detected $label Python $ver. If vLLM fails to start, try using Python 3.10/3.11 for the vLLM venv."
+    if [[ "$major" -eq 3 && "$minor" -ge 13 ]]; then
+        warn "Detected $label Python $ver. If vLLM fails to start, try pinning to Python 3.12."
     fi
 }
 

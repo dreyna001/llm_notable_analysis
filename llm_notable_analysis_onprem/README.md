@@ -89,7 +89,7 @@ The analyzer expects a local OpenAI-compatible vLLM endpoint. The included `vllm
 - Model path: `/opt/models/gpt-oss-20b`
 - Executor backend: `--distributed-executor-backend mp`
 
-If you use `install.sh`, it will create `/opt/vllm/venv` and install vLLM by default (set `VLLM_SKIP_INSTALL=true` to skip).
+If you use `install.sh`, it will create `/opt/vllm/venv` and install vLLM by default (using `python3.12` unless overridden; set `VLLM_SKIP_INSTALL=true` to skip).
 If you install vLLM elsewhere, set `VLLM_INSTALL_DIR` and `VLLM_VENV_DIR` when running `install.sh`; the installer patches the installed `/etc/systemd/system/vllm.service` `WorkingDirectory` and `ExecStart` automatically.
 
 Examples:
@@ -98,7 +98,7 @@ Examples:
 # Default layout
 sudo bash install.sh
 
-# Python 3.12 canary layout (side-by-side path)
+# Custom side-by-side vLLM path (optional)
 sudo VLLM_INSTALL_DIR=/opt/vllm312 VLLM_VENV_DIR=/opt/vllm312/venv VLLM_PYTHON_BIN=python3.12 bash install.sh
 ```
 
@@ -155,12 +155,12 @@ This is generally more accurate than a hand-written list because it reflects the
 
 For the highest-confidence installs over time, pin the Python interpreter used for each virtualenv.
 
-Recommended maximum (broadly safe across many environments): **Python 3.11**.
+Recommended baseline: **Python 3.12**.
 
-Example (pin both venvs to Python 3.11):
+Example (pin both venvs to Python 3.12):
 
 ```bash
-sudo ANALYZER_PYTHON_BIN=python3.11 VLLM_PYTHON_BIN=python3.11 bash install.sh
+sudo ANALYZER_PYTHON_BIN=python3.12 VLLM_PYTHON_BIN=python3.12 bash install.sh
 ```
 
 If the specified interpreter is not present on the host, `install.sh` will fail early (so you don’t end up with a partially working deployment).
