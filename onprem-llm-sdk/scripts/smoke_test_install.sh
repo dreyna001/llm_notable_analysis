@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Smoke test for post-install validation.
+# Usage:
+#   bash scripts/smoke_test_install.sh [VENV_DIR]
+# Optional:
+#   RUN_ENDPOINT_CHECK=true bash scripts/smoke_test_install.sh
 set -euo pipefail
 
 VENV_DIR="${1:-/opt/venvs/myapp}"

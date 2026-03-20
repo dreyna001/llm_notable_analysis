@@ -21,9 +21,11 @@ print(result.text)
 
 ## Documentation
 
+- `docs/HIGH_LEVEL_OVERVIEW.md`
 - `docs/ARCHITECTURE.md`
 - `docs/LLM_CLIENT_CONTRACT.md`
 - `docs/PACKAGING_RATIONALE.md`
 - `docs/AIRGAP_DISTRIBUTION.md`
 - `docs/DEPLOY_AND_CONSUME.md`
+- `docs/SCRIPTS_REFERENCE.md`
 

@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Install SDK from a local wheelhouse bundle (offline mode).
+# Usage:
+#   bash scripts/install_from_bundle.sh [BUNDLE_DIR] [VENV_DIR] [VERSION]
+# Optional:
+#   PYTHON_BIN=python3.12 bash scripts/install_from_bundle.sh ...
 set -euo pipefail
 
 BUNDLE_DIR="${1:-/opt/artifacts/onprem_llm_sdk}"

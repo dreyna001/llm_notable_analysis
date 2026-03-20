@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Build a self-contained air-gapped SDK bundle.
+# Usage:
+#   bash scripts/build_offline_bundle.sh
+# Optional:
+#   PYTHON_BIN=python3.12 bash scripts/build_offline_bundle.sh
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

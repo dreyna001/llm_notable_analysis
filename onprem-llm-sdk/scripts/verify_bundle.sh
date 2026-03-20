@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Verify extracted bundle integrity before install.
+# Usage:
+#   bash scripts/verify_bundle.sh [BUNDLE_DIR]
 set -euo pipefail
 
 BUNDLE_DIR="${1:-/opt/artifacts/onprem_llm_sdk}"

@@ -9,19 +9,21 @@ This document defines the required runtime contract for any project using `onpre
 
 ## Environment keys
 
-| Key | Required | Default | Purpose |
-|---|---|---|---|
-| `LLM_API_URL` | yes | `http://127.0.0.1:8000/v1/completions` | vLLM API endpoint |
-| `LLM_MODEL_NAME` | yes | `gpt-oss-20b` | `model` field sent per request |
-| `LLM_API_TOKEN` | no | empty | Bearer token when vLLM auth is enabled |
-| `LLM_APP_NAME` | yes | `unknown-app` | Caller identity in logs/headers/metrics |
-| `LLM_MAX_TOKENS_DEFAULT` | yes | `2048` | Default response token budget |
-| `LLM_CONNECT_TIMEOUT_SEC` | yes | `5` | TCP/connect timeout |
-| `LLM_READ_TIMEOUT_SEC` | yes | `120` | Response read timeout |
-| `LLM_MAX_RETRIES` | yes | `3` | Retry count (total attempts = retries + 1) |
-| `LLM_RETRY_BACKOFF_SEC` | yes | `1.0` | Base exponential backoff delay |
-| `LLM_MAX_INFLIGHT` | yes | `2` | Per-process semaphore limit |
-| `LLM_VERIFY_TLS` | yes | `true` | TLS certificate verification behavior |
+
+| Key                       | Required | Default                                | Purpose                                    |
+| ------------------------- | -------- | -------------------------------------- | ------------------------------------------ |
+| `LLM_API_URL`             | yes      | `http://127.0.0.1:8000/v1/completions` | vLLM API endpoint                          |
+| `LLM_MODEL_NAME`          | yes      | `gpt-oss-20b`                          | `model` field sent per request             |
+| `LLM_API_TOKEN`           | no       | empty                                  | Bearer token when vLLM auth is enabled     |
+| `LLM_APP_NAME`            | yes      | `unknown-app`                          | Caller identity in logs/headers/metrics    |
+| `LLM_MAX_TOKENS_DEFAULT`  | yes      | `2048`                                 | Default response token budget              |
+| `LLM_CONNECT_TIMEOUT_SEC` | yes      | `5`                                    | TCP/connect timeout                        |
+| `LLM_READ_TIMEOUT_SEC`    | yes      | `120`                                  | Response read timeout                      |
+| `LLM_MAX_RETRIES`         | yes      | `3`                                    | Retry count (total attempts = retries + 1) |
+| `LLM_RETRY_BACKOFF_SEC`   | yes      | `1.0`                                  | Base exponential backoff delay             |
+| `LLM_MAX_INFLIGHT`        | yes      | `2`                                    | Per-process semaphore limit                |
+| `LLM_VERIFY_TLS`          | yes      | `true`                                 | TLS certificate verification behavior      |
+
 
 ## Behavioral guarantees
 
