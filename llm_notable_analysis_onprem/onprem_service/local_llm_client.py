@@ -12,10 +12,47 @@ import ast
 from typing import List, Dict, Any, Optional, Tuple
 import requests
 
+from onprem_llm_sdk import SDKConfig, VLLMClient
+from onprem_llm_sdk.errors import (
+    ClientRequestError,
+    RateLimitError,
+    RequestTimeoutError,
+    ResponseFormatError,
+    ServerError,
+    TransportError,
+)
+
 from .config import Config
 from .ttp_validator import TTPValidator
 
 logger = logging.getLogger(__name__)
+
+
+class _RequestsPostSession:
+    """Session adapter preserving existing test hooks on requests.post.
+
+    Tests in this repo patch `local_llm_client.requests.post`; this adapter keeps
+    that patch point intact while routing calls through the shared SDK client.
+    """
+
+    def post(self, *args, **kwargs):
+        response = requests.post(*args, **kwargs)
+
+        # Some unit tests use MagicMock responses without status_code; default to
+        # success when raise_for_status() doesn't raise.
+        status_code = getattr(response, "status_code", None)
+        if not isinstance(status_code, int):
+            try:
+                response.raise_for_status()
+                response.status_code = 200
+            except requests.exceptions.HTTPError as exc:
+                err_resp = getattr(exc, "response", None)
+                response.status_code = getattr(err_resp, "status_code", 500)
+
+        if not isinstance(getattr(response, "text", ""), str):
+            response.text = str(getattr(response, "text", ""))
+
+        return response
 
 
 # =============================================================================
@@ -525,6 +562,26 @@ class LocalLLMClient:
         """
         self.config = config
         self.ttp_validator = ttp_validator
+        # Preserve existing behavior by keeping retry control in this class:
+        # SDK transport retries are disabled for this caller.
+        self._sdk_client = VLLMClient(
+            SDKConfig.from_env(
+                overrides={
+                    "llm_api_url": self.config.LLM_API_URL,
+                    "llm_model_name": self.config.LLM_MODEL_NAME,
+                    "llm_api_token": self.config.LLM_API_TOKEN,
+                    "llm_app_name": "notable-analyzer",
+                    "llm_max_tokens_default": self.config.LLM_MAX_TOKENS,
+                    "llm_connect_timeout_sec": float(self.config.LLM_TIMEOUT),
+                    "llm_read_timeout_sec": float(self.config.LLM_TIMEOUT),
+                    "llm_max_retries": 0,
+                    "llm_retry_backoff_sec": 0.0,
+                    "llm_max_inflight": max(1, int(getattr(self.config, "MAX_WORKERS", 1))),
+                    "llm_verify_tls": self.config.LLM_API_URL.lower().startswith("https://"),
+                }
+            ),
+            session=_RequestsPostSession(),
+        )
     
     def _build_prompt(self, alert_text: str, alert_time: Optional[str] = None) -> str:
         """Build the analysis prompt.
@@ -621,38 +678,15 @@ SECURITY ALERT INPUT:
         
         prompt = self._build_prompt(alert_text, alert_time)
 
-        headers = {"Content-Type": "application/json"}
-        if self.config.LLM_API_TOKEN:
-            headers["Authorization"] = f"Bearer {self.config.LLM_API_TOKEN}"
-
-        def _extract_choice_text(response_json: Dict[str, Any]) -> str:
-            if "choices" in response_json and len(response_json["choices"]) > 0:
-                choice0 = response_json["choices"][0]
-                if "text" in choice0:
-                    return choice0["text"]
-                if "message" in choice0 and isinstance(choice0["message"], dict):
-                    return choice0["message"].get("content", "")
-                raise ValueError("Unexpected response format from LLM choices[0]")
-            raise ValueError("No choices in LLM response")
-
         def _call_llm(prompt_text: str) -> Tuple[str, float]:
-            request_body = {
-                "model": self.config.LLM_MODEL_NAME,
-                "prompt": prompt_text,
-                "max_tokens": self.config.LLM_MAX_TOKENS,
-                "temperature": 0.0,
-            }
-            start_time = time.time()
-            response = requests.post(
-                self.config.LLM_API_URL,
-                json=request_body,
-                headers=headers,
-                timeout=self.config.LLM_TIMEOUT,
+            result = self._sdk_client.complete(
+                prompt_text,
+                max_tokens=self.config.LLM_MAX_TOKENS,
+                temperature=0.0,
+                connect_timeout_sec=float(self.config.LLM_TIMEOUT),
+                read_timeout_sec=float(self.config.LLM_TIMEOUT),
             )
-            response.raise_for_status()
-            elapsed = time.time() - start_time
-            response_json = response.json()
-            return _extract_choice_text(response_json), elapsed
+            return result.text, result.latency_seconds
 
         def _validate_and_postprocess(parsed: Dict[str, Any], *, raw_text: str) -> Tuple[bool, Optional[str], Dict[str, Any]]:
             parsed = _normalize_llm_result_shape(parsed)
@@ -747,7 +781,7 @@ SECURITY ALERT INPUT:
                 logger.error(f"Repair attempt failed: {last_error}")
                 return {"error": f"Response validation error: {last_error}", "ttp_analysis": []}
 
-            except requests.exceptions.Timeout:
+            except RequestTimeoutError:
                 logger.warning(f"LLM API timeout on attempt {attempt + 1}")
                 last_error = "LLM API timeout"
                 if attempt < max_retries - 1:
@@ -756,7 +790,7 @@ SECURITY ALERT INPUT:
                 else:
                     return {"error": "LLM API timeout after retries", "ttp_analysis": []}
 
-            except requests.exceptions.RequestException as e:
+            except (TransportError, RateLimitError, ServerError, ClientRequestError) as e:
                 logger.error(f"LLM API request error: {e}")
                 last_error = f"LLM API error: {e}"
                 if attempt < max_retries - 1:
@@ -765,7 +799,7 @@ SECURITY ALERT INPUT:
                 else:
                     return {"error": f"LLM API error: {e}", "ttp_analysis": []}
 
-            except (json.JSONDecodeError, ValueError) as e:
+            except (json.JSONDecodeError, ValueError, ResponseFormatError) as e:
                 logger.error(f"LLM response parsing error: {e}")
                 return {"error": f"Response parsing error: {e}", "ttp_analysis": []}
 

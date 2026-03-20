@@ -4,3 +4,6 @@
 # HTTP client for LLM API calls
 requests==2.32.5
 
+# Shared local vLLM transport/runtime contract
+onprem-llm-sdk==0.1.0
+

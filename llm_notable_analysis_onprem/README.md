@@ -1,6 +1,6 @@
 # On-Prem/Air-Gapped Notable Analysis Service Architecture
 
-Air-gapped, single-host deployment for security notable analysis using local LLM inference (vLLM + gpt-oss-20b) and MITRE ATT&CK TTP validation. We don't assume the customer has any of the hardware/software resources; keep that in mind when looking at cost & setup.
+Air-gapped, single-host deployment for security notable analysis using local LLM inference (vLLM + gpt-oss-120b) and MITRE ATT&CK TTP validation. We don't assume the customer has any of the hardware/software resources; keep that in mind when looking at cost & setup.
 
 ## Notes / Clarifications
 
@@ -21,7 +21,7 @@ Air-gapped, single-host deployment for security notable analysis using local LLM
 │                               ▼                                 │
 │                      ┌────────────────┐                         │
 │                      │  vLLM Server   │                         │
-│                      │  (gpt-oss-20b) │                         │
+│                      │ (gpt-oss-120b) │                         │
 │                      └────────────────┘                         │
 │                               │                                 │
 │                      ┌────────────────┐                         │
@@ -83,11 +83,13 @@ sudo systemctl start notable-analyzer
 
 ### Note on vLLM installation
 
-The analyzer expects a local OpenAI-compatible vLLM endpoint. The included `vllm.service` uses:
+The analyzer expects a local OpenAI-compatible vLLM endpoint. For a `gpt-oss-120b` deployment on RTX PRO 6000 (96 GB), use:
 
 - Interpreter: `/opt/vllm/venv/bin/python`
-- Model path: `/opt/models/gpt-oss-20b`
+- Model path: `/opt/models/gpt-oss-120b`
 - Executor backend: `--distributed-executor-backend mp`
+
+Note: the repo's base `systemd/vllm.service` still defaults to `gpt-oss-20b`; update `--model` and `--served-model-name` for `gpt-oss-120b`.
 
 If you use `install.sh`, it will create `/opt/vllm/venv` and install vLLM by default (using `python3.12` unless overridden; set `VLLM_SKIP_INSTALL=true` to skip).
 If you install vLLM elsewhere, set `VLLM_INSTALL_DIR` and `VLLM_VENV_DIR` when running `install.sh`; the installer patches the installed `/etc/systemd/system/vllm.service` `WorkingDirectory` and `ExecStart` automatically.
@@ -107,14 +109,14 @@ Note: During vLLM installation, the installer may appear idle for several minute
 
 ### Note on model weights directory
 
-`install.sh` will also **best-effort** create `/opt/models` (and `/opt/models/gpt-oss-20b`) and attempt to `chown` it to the invoking sudo user to make it easier to download/copy model weights. If this fails due to permissions, the install continues and you can create/chown the directory manually.
+`install.sh` will also **best-effort** create `/opt/models` (and the configured model path) and attempt to `chown` it to the invoking sudo user to make it easier to download/copy model weights. If this fails due to permissions, the install continues and you can create/chown the directory manually.
 
 ### Optional install.sh flags (quality-of-life)
 
 - **Skip vLLM install**: `sudo VLLM_SKIP_INSTALL=true bash install.sh` (useful for air-gapped hosts where you pre-stage wheels)
 - **Enable extra vLLM smoke checks**: `sudo VLLM_SMOKE_TEST=true bash install.sh` (non-fatal checks like `nvidia-smi` + model path presence)
 - **Download model weights (non-interactive)**: `sudo MODEL_DOWNLOAD=true HF_TOKEN=... bash install.sh`
-  - Optional: `MODEL_REPO=openai/gpt-oss-20b`
+  - Optional: `MODEL_REPO=openai/gpt-oss-120b`
   - Notes: best-effort; uses `huggingface_hub` HTTP downloads (no `git lfs` required)
 - **Auto-start services after install (best-effort, default true)**: `sudo AUTO_START_SERVICES=true bash install.sh`
 - **Skip post-install service start**: `sudo AUTO_START_SERVICES=false bash install.sh`
@@ -128,7 +130,7 @@ Note: During vLLM installation, the installer may appear idle for several minute
 
 Even with one-command install, these items remain environment-specific:
 
-- Confirm model weights are present at `/opt/models/gpt-oss-20b` (or set your chosen path in `vllm.service`).
+- Confirm model weights are present at `/opt/models/gpt-oss-120b` (or set your chosen path in `vllm.service`).
 - Set `LLM_API_TOKEN` only if your vLLM command includes `--api-key`.
 - Set `SPLUNK_BASE_URL` / `SPLUNK_API_TOKEN` only when `SPLUNK_SINK_ENABLED=true`.
 - Add SOAR public key(s) to `/var/sftp/soar/.ssh/authorized_keys` only if using SOAR SFTP ingest.
@@ -149,7 +151,7 @@ This produces a timestamped folder (example: `dependency_manifest_20260117_03300
 - System package inventory (RPM or DPKG, depending on distro)
 - Python venv inventories (`pip freeze`) for `/opt/notable-analyzer/venv` and `/opt/vllm/venv`
 - systemd unit file copies + hashes
-- Model directory inventory + SHA256 hashes (if present at `/opt/models/gpt-oss-20b`)
+- Model directory inventory + SHA256 hashes (if present at your configured model path, for example `/opt/models/gpt-oss-120b`)
 
 This is generally more accurate than a hand-written list because it reflects the *actual* host state after install.
 
@@ -462,20 +464,27 @@ By default the service processes one notable at a time (sequential mode). To ena
 ```bash
 # In /etc/notable-analyzer/config.env
 CONCURRENCY_ENABLED=true
-MAX_WORKERS=4            # A100 + gpt-oss-20b on Xeon Gold (use 6 for Xeon Platinum)
-MAX_QUEUE_DEPTH=32       # A100 + gpt-oss-20b on Xeon Gold (use 48 for Xeon Platinum)
+MAX_WORKERS=1            # RTX PRO 6000 (96 GB) + gpt-oss-120b conservative start
+MAX_QUEUE_DEPTH=8        # RTX PRO 6000 (96 GB) + gpt-oss-120b conservative start
 ```
 
-Recommended profiles for A100 + gpt-oss-20b:
-- Xeon Gold: `MAX_WORKERS=4`, `MAX_QUEUE_DEPTH=32`
-- Xeon Platinum: `MAX_WORKERS=6`, `MAX_QUEUE_DEPTH=48`
-- AMD EPYC 7J13 VM (KVM, 30 vCPU observed): start with Gold profile `4/32`
+Recommended starting profiles (concise):
+- **RTX PRO 6000 (96 GB) + gpt-oss-120b**: start `1/8`; if sustained headroom, try `2/12`.
+- **RTX PRO 6000 (96 GB) + gpt-oss-20b**: start `3/24`; if sustained headroom, try `4/32`.
+- **L40S (48 GB) + gpt-oss-20b**: start `2/16`; if sustained headroom, try `3/24`.
+- **L40S + gpt-oss-120b**: single-GPU viability is environment-dependent (quantization/model build/VRAM fit). Treat as **unknown** until validated in your environment; if it loads, start conservative at `1/8`.
 
 Intel comparison note for the EPYC profile:
-- Treat this EPYC VM baseline as closer to a **Xeon Gold tuning tier** for this service.
-- Use the Xeon Platinum profile only after validating sustained CPU headroom and queue behavior in production-like load tests.
+- Treat this EPYC VM baseline as a conservative starting tier for this service.
+- Increase toward the higher profile only after validating sustained CPU headroom and queue behavior in production-like load tests.
 
-**How it works (multithreading):**
+**SDK/App setting precedence for this service:**
+- `MAX_WORKERS` and `MAX_QUEUE_DEPTH` in `/etc/notable-analyzer/config.env` are the effective concurrency controls for this app.
+- The app maps `MAX_WORKERS` into SDK inflight capacity internally for each worker.
+- SDK transport retries are intentionally disabled for this app (`llm_max_retries=0`) so legacy app retry/backoff semantics are preserved.
+- SDK env vars such as `LLM_MAX_INFLIGHT` and `LLM_MAX_RETRIES` are not the source of truth for this service's runtime behavior.
+
+                                         **How it works (multithreading):**
 - Discovered files are dispatched to a ThreadPoolExecutor
 - If in-flight jobs reach `MAX_QUEUE_DEPTH`, new files wait until next poll cycle (backpressure)
 - Each job maintains its own correlation ID in logs
@@ -574,6 +583,10 @@ SPLUNK_CA_BUNDLE=/path/to/internal-ca.pem
 ---
 
 ## Troubleshooting
+
+Recovery and restart semantics (including power-cut/reboot behavior and SDK-vs-app responsibilities) are documented in:
+
+- `RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`
 
 ### Service won't start
 
