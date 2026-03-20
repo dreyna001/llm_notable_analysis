@@ -1,0 +1,84 @@
+[Unit]
+Description=vLLM Inference Server (gpt-oss-20b)
+Documentation=https://docs.vllm.ai/
+After=network.target
+
+[Service]
+Type=simple
+User=vllm
+Group=vllm
+
+# Working directory for model cache
+WorkingDirectory=/opt/vllm
+
+# vLLM server command
+# Adjust --model path to local model directory
+# Adjust --gpu-memory-utilization as needed (0.9 = 90% of GPU memory)
+#
+# SECURITY NOTE: --trust-remote-code is DISABLED by default for hardening.
+# This flag allows executing arbitrary Python code bundled with model artifacts.
+# Only enable if your model requires custom architecture code AND you have
+# verified model artifacts via checksum from a trusted offline import process.
+# To enable: add --trust-remote-code to ExecStart below.
+#
+ExecStart=/opt/vllm/venv/bin/python -m vllm.entrypoints.openai.api_server \
+    --model /opt/models/gpt-oss-20b \
+    --served-model-name gpt-oss-20b \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --gpu-memory-utilization 0.9 \
+    --max-model-len 131072 \
+    --dtype auto \
+    --distributed-executor-backend mp
+
+# Graceful shutdown
+TimeoutStopSec=60
+KillMode=mixed
+KillSignal=SIGTERM
+
+# Restart policy
+Restart=on-failure
+RestartSec=30
+
+# Environment for CUDA
+Environment="CUDA_VISIBLE_DEVICES=0"
+# Keep torch distributed rendezvous local on single-node deployments.
+Environment="VLLM_HOST_IP=127.0.0.1"
+Environment="MASTER_ADDR=127.0.0.1"
+Environment="NCCL_SOCKET_IFNAME=lo"
+Environment="GLOO_SOCKET_IFNAME=lo"
+Environment="NCCL_IB_DISABLE=1"
+
+# Security hardening
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=no
+ProtectKernelModules=no
+ProtectControlGroups=no
+ProtectKernelLogs=no
+RestrictNamespaces=no
+SystemCallArchitectures=native
+LockPersonality=yes
+# Do not enforce RestrictAddressFamilies for vLLM: Gloo/NCCL bootstrap may fail
+# on some virtualized hosts with "Address family not supported by protocol" when
+# systemd applies address-family restrictions to this service.
+UMask=0077
+ProtectHome=yes
+PrivateTmp=yes
+
+# Do not apply systemd IP sandboxing here. vLLM/torch initializes local
+# distributed primitives that can select non-loopback host interfaces.
+
+# Resource limits
+LimitNOFILE=65535
+LimitMEMLOCK=infinity
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vllm
+
+[Install]
+WantedBy=multi-user.target
+
