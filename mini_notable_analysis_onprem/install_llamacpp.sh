@@ -228,9 +228,20 @@ download_model_if_needed() {
 
     info "Downloading pinned model artifact..."
     local tmp_file
+    local -a curl_args
     tmp_file="${LLAMA_MODEL_PATH}.part"
     rm -f "$tmp_file"
-    curl -fL --retry 3 --retry-delay 3 --retry-all-errors "$LLAMA_MODEL_URL" -o "$tmp_file" \
+
+    curl_args=(-fL --retry 3 --retry-delay 3)
+    # curl < 7.71 does not support --retry-all-errors (e.g., Ubuntu 20.04 ships 7.68).
+    # Use it when available, otherwise fall back to portable retry flags.
+    if curl --help all 2>/dev/null | grep -q -- "--retry-all-errors"; then
+        curl_args+=(--retry-all-errors)
+    else
+        warn "curl does not support --retry-all-errors; using compatibility retry mode"
+    fi
+
+    curl "${curl_args[@]}" "$LLAMA_MODEL_URL" -o "$tmp_file" \
         || err "Model download failed: $LLAMA_MODEL_URL"
     mv "$tmp_file" "$LLAMA_MODEL_PATH" || err "Failed to finalize downloaded model file"
 
