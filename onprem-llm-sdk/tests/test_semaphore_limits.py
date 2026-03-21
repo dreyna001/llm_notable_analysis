@@ -1,3 +1,9 @@
+"""Concurrency guard unit tests.
+
+Run this module directly:
+  PYTHONPATH=src python -m unittest tests.test_semaphore_limits -v
+"""
+
 from __future__ import annotations
 
 import threading
@@ -65,4 +71,3 @@ class TestSemaphoreLimits(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

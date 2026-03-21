@@ -1,3 +1,9 @@
+"""Contract parser compatibility unit tests.
+
+Run this module directly:
+  PYTHONPATH=src python -m unittest tests.test_contract_compat -v
+"""
+
 from __future__ import annotations
 
 import unittest
@@ -27,4 +33,3 @@ class TestContractCompatibility(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

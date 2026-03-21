@@ -31,6 +31,7 @@ This document defines the required runtime contract for any project using `onpre
 - No retries for non-`429` `4xx`.
 - A process-local semaphore limits concurrent in-flight calls.
 - Structured logs include `app_name` and `correlation_id`.
+- Canonical observability fields and metric conventions are defined in `docs/OBSERVABILITY_CONTRACT.md`.
 - Response parsing supports:
   - `choices[0].text`
   - `choices[0].message.content`

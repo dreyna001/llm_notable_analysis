@@ -21,6 +21,8 @@ print(result.text)
 
 ## Documentation
 
+- `docs/API_REFERENCE.md`
+- `docs/OBSERVABILITY_CONTRACT.md`
 - `docs/HIGH_LEVEL_OVERVIEW.md`
 - `docs/ARCHITECTURE.md`
 - `docs/LLM_CLIENT_CONTRACT.md`
@@ -28,4 +30,5 @@ print(result.text)
 - `docs/AIRGAP_DISTRIBUTION.md`
 - `docs/DEPLOY_AND_CONSUME.md`
 - `docs/SCRIPTS_REFERENCE.md`
+- `docs/TESTING_AND_CI.md`
 

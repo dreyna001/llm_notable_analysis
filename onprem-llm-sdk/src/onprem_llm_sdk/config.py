@@ -10,11 +10,33 @@ from .errors import ConfigError
 
 
 def _get_env(key: str, default: str) -> str:
+    """Return an environment value with fallback.
+
+    Args:
+        key: Environment variable name to read.
+        default: Fallback value when the variable is unset.
+
+    Returns:
+        The environment value if present; otherwise `default`.
+    """
     value = os.getenv(key)
     return default if value is None else value
 
 
 def _parse_int(raw: str, *, key: str, minimum: int) -> int:
+    """Parse and validate an integer configuration value.
+
+    Args:
+        raw: Raw string value to parse.
+        key: Configuration key name for error messages.
+        minimum: Minimum accepted value.
+
+    Returns:
+        Parsed integer value.
+
+    Raises:
+        ConfigError: If parsing fails or value is below `minimum`.
+    """
     try:
         parsed = int(raw)
     except ValueError as exc:
@@ -25,6 +47,19 @@ def _parse_int(raw: str, *, key: str, minimum: int) -> int:
 
 
 def _parse_float(raw: str, *, key: str, minimum: float) -> float:
+    """Parse and validate a float configuration value.
+
+    Args:
+        raw: Raw string value to parse.
+        key: Configuration key name for error messages.
+        minimum: Minimum accepted value.
+
+    Returns:
+        Parsed float value.
+
+    Raises:
+        ConfigError: If parsing fails or value is below `minimum`.
+    """
     try:
         parsed = float(raw)
     except ValueError as exc:
@@ -35,6 +70,18 @@ def _parse_float(raw: str, *, key: str, minimum: float) -> float:
 
 
 def _parse_bool(raw: str, *, key: str) -> bool:
+    """Parse a normalized boolean string.
+
+    Args:
+        raw: Raw string value to parse.
+        key: Configuration key name for error messages.
+
+    Returns:
+        Parsed boolean value.
+
+    Raises:
+        ConfigError: If value is not one of the accepted boolean strings.
+    """
     norm = raw.strip().lower()
     if norm in {"1", "true", "yes", "on"}:
         return True
@@ -45,7 +92,21 @@ def _parse_bool(raw: str, *, key: str) -> bool:
 
 @dataclass(frozen=True)
 class SDKConfig:
-    """Runtime contract for SDK behavior and endpoint usage."""
+    """Runtime contract for SDK behavior and endpoint usage.
+
+    Attributes:
+        llm_api_url: Full vLLM completion endpoint URL.
+        llm_model_name: Model name sent in request payloads.
+        llm_api_token: Optional bearer token for endpoint auth.
+        llm_app_name: Caller identity value used in headers/metrics.
+        llm_max_tokens_default: Default completion token budget.
+        llm_connect_timeout_sec: Connect timeout in seconds.
+        llm_read_timeout_sec: Read timeout in seconds.
+        llm_max_retries: SDK transport retries (total attempts = retries + 1).
+        llm_retry_backoff_sec: Base delay for exponential backoff.
+        llm_max_inflight: Per-process inflight request limit.
+        llm_verify_tls: Whether TLS certificates are verified.
+    """
 
     llm_api_url: str = "http://127.0.0.1:8000/v1/completions"
     llm_model_name: str = "gpt-oss-20b"
@@ -61,7 +122,18 @@ class SDKConfig:
 
     @classmethod
     def from_env(cls, *, overrides: Optional[Mapping[str, Any]] = None) -> "SDKConfig":
-        """Load config from environment, then apply explicit overrides."""
+        """Load configuration from environment and optional explicit overrides.
+
+        Args:
+            overrides: Optional mapping of explicit field overrides that take
+                precedence over environment-derived values.
+
+        Returns:
+            A validated `SDKConfig` instance.
+
+        Raises:
+            ConfigError: If a value is invalid or an unknown override key is provided.
+        """
         cfg = cls(
             llm_api_url=_get_env("LLM_API_URL", cls.llm_api_url),
             llm_model_name=_get_env("LLM_MODEL_NAME", cls.llm_model_name),
@@ -115,6 +187,14 @@ class SDKConfig:
         return replace(cfg, **sanitized)._validate()
 
     def _validate(self) -> "SDKConfig":
+        """Validate required fields and numeric constraints.
+
+        Returns:
+            `self` when validation succeeds.
+
+        Raises:
+            ConfigError: If any required field is missing or invalid.
+        """
         if not self.llm_api_url:
             raise ConfigError("LLM_API_URL must not be empty")
         if not self.llm_model_name:
@@ -126,4 +206,3 @@ class SDKConfig:
         if self.llm_max_inflight <= 0:
             raise ConfigError("LLM_MAX_INFLIGHT must be > 0")
         return self
-

@@ -1,3 +1,9 @@
+"""Core client behavior unit tests.
+
+Run this module directly:
+  PYTHONPATH=src python -m unittest tests.test_client -v
+"""
+
 from __future__ import annotations
 
 import unittest
@@ -85,4 +91,3 @@ class TestVLLMClient(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -1,3 +1,9 @@
+"""Config behavior unit tests.
+
+Run this module directly:
+  PYTHONPATH=src python -m unittest tests.test_config -v
+"""
+
 from __future__ import annotations
 
 import os
@@ -41,4 +47,3 @@ class TestSDKConfig(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

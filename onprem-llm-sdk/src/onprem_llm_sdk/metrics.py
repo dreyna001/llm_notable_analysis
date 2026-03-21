@@ -11,7 +11,12 @@ class MetricsSink(Protocol):
     """Pluggable metrics sink interface."""
 
     def record_inflight(self, *, app_name: str, inflight: int) -> None:
-        """Record current inflight count."""
+        """Record current inflight count.
+
+        Args:
+            app_name: Application identity label.
+            inflight: Current inflight request count.
+        """
 
     def record_request_result(
         self,
@@ -23,13 +28,28 @@ class MetricsSink(Protocol):
         latency_seconds: float,
         error_type: str = "",
     ) -> None:
-        """Record request completion metrics."""
+        """Record request completion metrics.
+
+        Args:
+            app_name: Application identity label.
+            success: Whether request completed successfully.
+            status_code: HTTP status code or sentinel value.
+            attempts: Number of attempts used.
+            latency_seconds: End-to-end latency in seconds.
+            error_type: Optional normalized error type string.
+        """
 
 
 class NoOpMetricsSink:
     """Default sink when metrics are not configured by the host app."""
 
     def record_inflight(self, *, app_name: str, inflight: int) -> None:
+        """No-op inflight metric implementation.
+
+        Args:
+            app_name: Application identity label.
+            inflight: Current inflight request count.
+        """
         return None
 
     def record_request_result(
@@ -42,6 +62,16 @@ class NoOpMetricsSink:
         latency_seconds: float,
         error_type: str = "",
     ) -> None:
+        """No-op request completion metric implementation.
+
+        Args:
+            app_name: Application identity label.
+            success: Whether request completed successfully.
+            status_code: HTTP status code or sentinel value.
+            attempts: Number of attempts used.
+            latency_seconds: End-to-end latency in seconds.
+            error_type: Optional normalized error type string.
+        """
         return None
 
 
@@ -62,6 +92,12 @@ class InMemoryMetricsSink:
     _lock: Lock = field(default_factory=Lock)
 
     def record_inflight(self, *, app_name: str, inflight: int) -> None:
+        """Update in-memory inflight counters.
+
+        Args:
+            app_name: Application identity label (unused in this sink).
+            inflight: Current inflight request count.
+        """
         del app_name
         with self._lock:
             self.current_inflight = inflight
@@ -78,6 +114,16 @@ class InMemoryMetricsSink:
         latency_seconds: float,
         error_type: str = "",
     ) -> None:
+        """Update in-memory request result counters.
+
+        Args:
+            app_name: Application identity label (unused in this sink).
+            success: Whether request completed successfully.
+            status_code: HTTP status code or sentinel value.
+            attempts: Number of attempts used.
+            latency_seconds: End-to-end latency in seconds.
+            error_type: Optional normalized error type string.
+        """
         del app_name
         with self._lock:
             self.request_count += 1
@@ -89,4 +135,3 @@ class InMemoryMetricsSink:
             self.last_attempts = attempts
             self.last_latency_seconds = latency_seconds
             self.last_error_type = error_type
-

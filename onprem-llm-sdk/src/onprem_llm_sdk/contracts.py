@@ -10,7 +10,14 @@ from .errors import ResponseFormatError
 
 @dataclass(frozen=True)
 class CompletionRequest:
-    """Normalized request contract for completions endpoint."""
+    """Normalized request contract for completions endpoint.
+
+    Attributes:
+        model: Model name to target on the endpoint.
+        prompt: Prompt text submitted to the model.
+        max_tokens: Maximum number of response tokens to generate.
+        temperature: Sampling temperature.
+    """
 
     model: str
     prompt: str
@@ -18,6 +25,11 @@ class CompletionRequest:
     temperature: float = 0.0
 
     def to_payload(self) -> Dict[str, Any]:
+        """Serialize request fields into API payload format.
+
+        Returns:
+            JSON-serializable payload dictionary.
+        """
         return {
             "model": self.model,
             "prompt": self.prompt,
@@ -28,7 +40,16 @@ class CompletionRequest:
 
 @dataclass(frozen=True)
 class CompletionResult:
-    """Normalized SDK return payload for callers."""
+    """Normalized SDK return payload for callers.
+
+    Attributes:
+        text: Extracted completion text.
+        raw_response: Parsed response payload from the endpoint.
+        latency_seconds: End-to-end request latency in seconds.
+        attempts: Number of attempts used.
+        correlation_id: Correlation identifier applied to the request.
+        status_code: Final HTTP status code.
+    """
 
     text: str
     raw_response: Dict[str, Any]
@@ -39,7 +60,17 @@ class CompletionResult:
 
 
 def parse_completion_text(response_json: Dict[str, Any]) -> str:
-    """Extract completion text from OpenAI-compatible response shape."""
+    """Extract completion text from OpenAI-compatible response shape.
+
+    Args:
+        response_json: Parsed JSON response from completion API.
+
+    Returns:
+        Extracted completion text.
+
+    Raises:
+        ResponseFormatError: If expected completion fields are missing or invalid.
+    """
     choices = response_json.get("choices")
     if not isinstance(choices, list) or not choices:
         raise ResponseFormatError("Expected non-empty choices[] in completion response")
@@ -62,7 +93,14 @@ def parse_completion_text(response_json: Dict[str, Any]) -> str:
 
 
 def parse_retry_after_seconds(headers: Optional[Dict[str, str]]) -> Optional[float]:
-    """Parse Retry-After header when present."""
+    """Parse Retry-After header when present.
+
+    Args:
+        headers: Optional response headers dictionary.
+
+    Returns:
+        Parsed retry delay in seconds, or `None` when missing/invalid.
+    """
     if not headers:
         return None
     value = headers.get("Retry-After") or headers.get("retry-after")
@@ -75,4 +113,3 @@ def parse_retry_after_seconds(headers: Optional[Dict[str, str]]) -> Optional[flo
     if parsed < 0:
         return None
     return parsed
-
