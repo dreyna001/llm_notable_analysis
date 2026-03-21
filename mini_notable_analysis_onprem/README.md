@@ -66,6 +66,39 @@ curl -sf http://127.0.0.1:8080/metrics
 sudo journalctl -u llamacpp -n 100 --no-pager
 ```
 
+## Reasoning control (`/no_think`)
+
+For Qwen3 chat templates, add `/no_think` in the system instruction to suppress
+reasoning traces and reduce latency/token usage. Remove it to allow reasoning.
+
+```bash
+# No reasoning (recommended for PoC JSON workflows)
+curl -sS http://127.0.0.1:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model":"Qwen3-4B-Q4_K_M.gguf",
+    "temperature":0,
+    "messages":[
+      {"role":"system","content":"Return only valid JSON. /no_think"},
+      {"role":"user","content":"Summarize this alert in JSON: failed logins then success from same src_ip."}
+    ]
+  }'
+
+# With reasoning (remove /no_think)
+curl -sS http://127.0.0.1:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model":"Qwen3-4B-Q4_K_M.gguf",
+    "temperature":0,
+    "messages":[
+      {"role":"system","content":"Return only valid JSON."},
+      {"role":"user","content":"Summarize this alert in JSON: failed logins then success from same src_ip."}
+    ]
+  }'
+```
+
+Note: `/no_think` is model/template-specific behavior, not a generic OpenAI API standard.
+
 ## PoC tests (3 files)
 
 ```bash
