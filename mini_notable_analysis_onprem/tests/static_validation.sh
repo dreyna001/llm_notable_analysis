@@ -18,7 +18,7 @@ require_file() {
 require_contains() {
     local path="$1"
     local pattern="$2"
-    if ! grep -Eq "$pattern" "$path"; then
+    if ! grep -Eq -- "$pattern" "$path"; then
         fail "Expected pattern '$pattern' not found in $path"
     fi
 }
