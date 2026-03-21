@@ -35,7 +35,7 @@ readonly LLAMA_ENV_FILE="${LLAMA_ENV_FILE:-$LLAMA_ENV_DIR/llamacpp.env}"
 readonly LLAMA_SERVER_BIN="${LLAMA_SERVER_BIN:-/usr/local/bin/llama-server}"
 
 readonly LLAMA_HOST="${LLAMA_HOST:-127.0.0.1}"
-readonly LLAMA_PORT="${LLAMA_PORT:-8080}"
+readonly LLAMA_PORT="${LLAMA_PORT:-8000}"
 readonly LLAMA_THREADS="${LLAMA_THREADS:-10}"
 readonly LLAMA_THREADS_BATCH="${LLAMA_THREADS_BATCH:-12}"
 readonly LLAMA_PARALLEL="${LLAMA_PARALLEL:-1}"

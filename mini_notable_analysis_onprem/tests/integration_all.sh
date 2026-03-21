@@ -10,9 +10,9 @@ EXPECTED_SHA="7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5"
 EXPECTED_SIZE="2497280256"
 
 MODEL_PATH_DEFAULT="/opt/llamacpp/models/Qwen3-4B-Q4_K_M.gguf"
-HEALTH_URL="http://127.0.0.1:8080/health"
-METRICS_URL="http://127.0.0.1:8080/metrics"
-CHAT_URL="http://127.0.0.1:8080/v1/chat/completions"
+HEALTH_URL="http://127.0.0.1:8000/health"
+METRICS_URL="http://127.0.0.1:8000/metrics"
+CHAT_URL="http://127.0.0.1:8000/v1/chat/completions"
 
 fail() {
     echo "FAIL: $*" >&2

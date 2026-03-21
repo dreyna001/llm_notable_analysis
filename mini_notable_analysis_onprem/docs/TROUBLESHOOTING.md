@@ -7,8 +7,8 @@ This guide is for the standalone `mini_notable_analysis_onprem` package (`instal
 ```bash
 sudo systemctl status llamacpp
 sudo journalctl -u llamacpp -n 200 --no-pager
-curl -sf http://127.0.0.1:8080/health
-curl -sf http://127.0.0.1:8080/metrics
+curl -sf http://127.0.0.1:8000/health
+curl -sf http://127.0.0.1:8000/metrics
 ```
 
 ## Common symptoms
@@ -19,7 +19,7 @@ curl -sf http://127.0.0.1:8080/metrics
 | Health endpoint times out | Model still loading | `sudo journalctl -u llamacpp -f` | Wait for load, or increase `LLAMA_HEALTH_TIMEOUT_SECONDS` and restart |
 | Model download fails | Network/connectivity issue | Installer output around model download step | Re-run install, verify outbound access to Hugging Face |
 | SHA256 mismatch | Corrupted/incomplete model file | `sha256sum /opt/llamacpp/models/Qwen3-4B-Q4_K_M.gguf` | Delete file and rerun installer |
-| Port conflict on 8080 | Another process bound to port | `sudo ss -lntp | rg :8080` | Set `LLAMA_PORT` and rerun installer or stop conflicting process |
+| Port conflict on 8000 | Another process bound to port | `sudo ss -lntp | rg :8000` | Set `LLAMA_PORT` and rerun installer or stop conflicting process |
 | `/metrics` unreachable | Service not fully started or mis-bound | Unit and env host/port values | Verify `LLAMA_HOST`/`LLAMA_PORT`, restart and re-check |
 
 ## Focused checks

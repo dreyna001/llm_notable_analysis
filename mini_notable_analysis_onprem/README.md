@@ -46,7 +46,7 @@ sudo LLAMA_SKIP_SYSTEMD=true bash install_llamacpp.sh
 ## Runtime defaults
 
 - Service name: `llamacpp`
-- Host/port: `127.0.0.1:8080`
+- Host/port: `127.0.0.1:8000`
 - Model path: `/opt/llamacpp/models/Qwen3-4B-Q4_K_M.gguf`
 - Threads: `10`
 - Threads batch: `12`
@@ -78,8 +78,8 @@ pkill -f "/usr/local/bin/llama-server"
 
 ```bash
 sudo systemctl status llamacpp
-curl -sf http://127.0.0.1:8080/health
-curl -sf http://127.0.0.1:8080/metrics
+curl -sf http://127.0.0.1:8000/health
+curl -sf http://127.0.0.1:8000/metrics
 sudo journalctl -u llamacpp -n 100 --no-pager
 ```
 
@@ -90,7 +90,7 @@ reasoning traces and reduce latency/token usage. Remove it to allow reasoning.
 
 ```bash
 # No reasoning (recommended for PoC JSON workflows)
-curl -sS http://127.0.0.1:8080/v1/chat/completions \
+curl -sS http://127.0.0.1:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model":"Qwen3-4B-Q4_K_M.gguf",
@@ -102,7 +102,7 @@ curl -sS http://127.0.0.1:8080/v1/chat/completions \
   }'
 
 # With reasoning (remove /no_think)
-curl -sS http://127.0.0.1:8080/v1/chat/completions \
+curl -sS http://127.0.0.1:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model":"Qwen3-4B-Q4_K_M.gguf",
