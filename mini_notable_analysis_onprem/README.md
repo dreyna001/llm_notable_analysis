@@ -38,6 +38,9 @@ sudo LLAMA_SKIP_MODEL_DOWNLOAD=true bash install_llamacpp.sh
 
 # Install only (no service auto-start)
 sudo AUTO_START_LLAMACPP=false bash install_llamacpp.sh
+
+# Container/non-systemd environments (Runpod, Docker): skip systemd setup
+sudo LLAMA_SKIP_SYSTEMD=true bash install_llamacpp.sh
 ```
 
 ## Runtime defaults

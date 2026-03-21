@@ -60,6 +60,7 @@ readonly LLAMA_INSTALL_DEPS="${LLAMA_INSTALL_DEPS:-true}"
 readonly LLAMA_FORCE_MODEL_REDOWNLOAD="${LLAMA_FORCE_MODEL_REDOWNLOAD:-false}"
 readonly LLAMA_HEALTH_TIMEOUT_SECONDS="${LLAMA_HEALTH_TIMEOUT_SECONDS:-900}"
 readonly LLAMA_RESET_OVERRIDES="${LLAMA_RESET_OVERRIDES:-false}"
+readonly LLAMA_SKIP_SYSTEMD="${LLAMA_SKIP_SYSTEMD:-false}"
 
 readonly LLAMA_MODEL_URL="https://huggingface.co/${LLAMA_MODEL_REPO}/resolve/${LLAMA_MODEL_REVISION}/${LLAMA_MODEL_FILENAME}?download=true"
 
@@ -85,6 +86,15 @@ check_command() {
     command -v "$1" >/dev/null 2>&1 || err "Required command not found: $1"
 }
 
+has_systemd_runtime() {
+    command -v systemctl >/dev/null 2>&1 || return 1
+    [[ -d /run/systemd/system ]] || return 1
+    [[ -r /proc/1/comm ]] || return 1
+    local init_name
+    init_name="$(tr -d '\n' </proc/1/comm 2>/dev/null || true)"
+    [[ "$init_name" == "systemd" ]]
+}
+
 validate_positive_int() {
     local name="$1"
     local value="$2"
@@ -98,6 +108,7 @@ validate_config() {
     is_bool "$LLAMA_INSTALL_DEPS" || err "LLAMA_INSTALL_DEPS must be true/false"
     is_bool "$LLAMA_FORCE_MODEL_REDOWNLOAD" || err "LLAMA_FORCE_MODEL_REDOWNLOAD must be true/false"
     is_bool "$LLAMA_RESET_OVERRIDES" || err "LLAMA_RESET_OVERRIDES must be true/false"
+    is_bool "$LLAMA_SKIP_SYSTEMD" || err "LLAMA_SKIP_SYSTEMD must be true/false"
     is_bool "$LLAMA_CONT_BATCHING" || err "LLAMA_CONT_BATCHING must be true/false"
     is_bool "$LLAMA_MMAP" || err "LLAMA_MMAP must be true/false"
     is_bool "$LLAMA_MLOCK" || err "LLAMA_MLOCK must be true/false"
@@ -358,7 +369,6 @@ check_command make
 check_command curl
 check_command sed
 check_command sha256sum
-check_command systemctl
 
 echo "[1/7] Creating service account..."
 create_user_if_missing
@@ -385,29 +395,47 @@ download_model_if_needed
 echo "[5/7] Writing runtime environment..."
 write_runtime_env_file
 
+SYSTEMD_READY="false"
 echo "[6/7] Installing systemd unit..."
-install_unit
-handle_unit_dropins
-systemctl daemon-reload || err "Failed to reload systemd"
+if [[ "$LLAMA_SKIP_SYSTEMD" == "true" ]]; then
+    warn "LLAMA_SKIP_SYSTEMD=true; skipping systemd unit installation"
+elif has_systemd_runtime; then
+    install_unit
+    handle_unit_dropins
+    systemctl daemon-reload || err "Failed to reload systemd"
+    SYSTEMD_READY="true"
+else
+    warn "systemd is unavailable (PID 1 is not systemd); skipping systemd unit installation"
+fi
 
 echo "[7/7] Enabling/starting service..."
-if [[ "$AUTO_START_LLAMACPP" == "true" ]]; then
-    systemctl enable "$LLAMA_SERVICE_NAME" || true
-    systemctl restart "$LLAMA_SERVICE_NAME" || systemctl start "$LLAMA_SERVICE_NAME" || err "Failed to start $LLAMA_SERVICE_NAME"
-    if wait_for_http_200 "http://${LLAMA_HOST}:${LLAMA_PORT}/health" "$LLAMA_HEALTH_TIMEOUT_SECONDS"; then
-        info "Health endpoint is ready"
+if [[ "$SYSTEMD_READY" == "true" ]]; then
+    if [[ "$AUTO_START_LLAMACPP" == "true" ]]; then
+        systemctl enable "$LLAMA_SERVICE_NAME" || true
+        systemctl restart "$LLAMA_SERVICE_NAME" || systemctl start "$LLAMA_SERVICE_NAME" || err "Failed to start $LLAMA_SERVICE_NAME"
+        if wait_for_http_200 "http://${LLAMA_HOST}:${LLAMA_PORT}/health" "$LLAMA_HEALTH_TIMEOUT_SECONDS"; then
+            info "Health endpoint is ready"
+        else
+            warn "Health check timed out after ${LLAMA_HEALTH_TIMEOUT_SECONDS}s"
+            warn "Inspect logs: sudo journalctl -u $LLAMA_SERVICE_NAME -n 200 --no-pager"
+        fi
     else
-        warn "Health check timed out after ${LLAMA_HEALTH_TIMEOUT_SECONDS}s"
-        warn "Inspect logs: sudo journalctl -u $LLAMA_SERVICE_NAME -n 200 --no-pager"
+        info "AUTO_START_LLAMACPP=false; install complete without starting service"
     fi
 else
-    info "AUTO_START_LLAMACPP=false; install complete without starting service"
+    info "Skipping enable/start because systemd is unavailable or disabled"
+    info "To run manually in this environment:"
+    info "  /usr/local/bin/llama-server --model \"$LLAMA_MODEL_PATH\" --host \"$LLAMA_HOST\" --port \"$LLAMA_PORT\" --threads \"$LLAMA_THREADS\" --threads-batch \"$LLAMA_THREADS_BATCH\" --parallel \"$LLAMA_PARALLEL\" --ctx-size \"$LLAMA_CTX_SIZE\" --cache-type-k \"$LLAMA_CACHE_TYPE_K\" --cache-type-v \"$LLAMA_CACHE_TYPE_V\" --metrics --no-webui"
 fi
 
 echo ""
 echo "=== llama.cpp PoC install complete ==="
 echo "Service name:           $LLAMA_SERVICE_NAME"
-echo "Systemd unit:           /etc/systemd/system/${LLAMA_SERVICE_NAME}.service"
+if [[ "$SYSTEMD_READY" == "true" ]]; then
+    echo "Systemd unit:           /etc/systemd/system/${LLAMA_SERVICE_NAME}.service"
+else
+    echo "Systemd unit:           skipped (systemd unavailable/disabled)"
+fi
 echo "Runtime env file:       $LLAMA_ENV_FILE"
 echo "llama-server binary:    $LLAMA_SERVER_BIN"
 echo "Model path:             $LLAMA_MODEL_PATH"
@@ -415,7 +443,11 @@ echo "Pinned runtime:         $LLAMA_RUNTIME_TAG / $LLAMA_RUNTIME_COMMIT"
 echo "Pinned model SHA256:    $LLAMA_MODEL_SHA256"
 echo ""
 echo "Useful commands:"
-echo "  sudo systemctl status $LLAMA_SERVICE_NAME"
-echo "  sudo journalctl -u $LLAMA_SERVICE_NAME -f"
+if [[ "$SYSTEMD_READY" == "true" ]]; then
+    echo "  sudo systemctl status $LLAMA_SERVICE_NAME"
+    echo "  sudo journalctl -u $LLAMA_SERVICE_NAME -f"
+else
+    echo "  /usr/local/bin/llama-server --model \"$LLAMA_MODEL_PATH\" --host \"$LLAMA_HOST\" --port \"$LLAMA_PORT\" --threads \"$LLAMA_THREADS\" --threads-batch \"$LLAMA_THREADS_BATCH\" --parallel \"$LLAMA_PARALLEL\" --ctx-size \"$LLAMA_CTX_SIZE\" --cache-type-k \"$LLAMA_CACHE_TYPE_K\" --cache-type-v \"$LLAMA_CACHE_TYPE_V\" --metrics --no-webui"
+fi
 echo "  curl -sf http://${LLAMA_HOST}:${LLAMA_PORT}/health"
 echo "  curl -sf http://${LLAMA_HOST}:${LLAMA_PORT}/metrics"
