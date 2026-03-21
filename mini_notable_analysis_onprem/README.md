@@ -52,6 +52,8 @@ sudo LLAMA_SKIP_SYSTEMD=true bash install_llamacpp.sh
 - Threads batch: `12`
 - Parallel slots: `1`
 - Context size: `8192`
+- Default output token limit: `8192` (`--n-predict`)
+- Hard output token ceiling (policy): `8192`
 - Metrics: enabled
 - Web UI: disabled
 

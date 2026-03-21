@@ -41,8 +41,8 @@ readonly LLAMA_THREADS_BATCH="${LLAMA_THREADS_BATCH:-12}"
 readonly LLAMA_PARALLEL="${LLAMA_PARALLEL:-1}"
 readonly LLAMA_CTX_SIZE="${LLAMA_CTX_SIZE:-8192}"
 readonly LLAMA_MAX_INPUT_TOKENS="${LLAMA_MAX_INPUT_TOKENS:-3072}"
-readonly LLAMA_DEFAULT_MAX_TOKENS="${LLAMA_DEFAULT_MAX_TOKENS:-384}"
-readonly LLAMA_HARD_MAX_TOKENS="${LLAMA_HARD_MAX_TOKENS:-512}"
+readonly LLAMA_DEFAULT_MAX_TOKENS="${LLAMA_DEFAULT_MAX_TOKENS:-$LLAMA_CTX_SIZE}"
+readonly LLAMA_HARD_MAX_TOKENS="${LLAMA_HARD_MAX_TOKENS:-$LLAMA_CTX_SIZE}"
 readonly LLAMA_INFERENCE_TIMEOUT_SECONDS="${LLAMA_INFERENCE_TIMEOUT_SECONDS:-120}"
 readonly LLAMA_HTTP_TIMEOUT_SECONDS="${LLAMA_HTTP_TIMEOUT_SECONDS:-180}"
 readonly LLAMA_CACHE_TYPE_K="${LLAMA_CACHE_TYPE_K:-q8_0}"
@@ -126,6 +126,8 @@ validate_config() {
     validate_positive_int "LLAMA_HEALTH_TIMEOUT_SECONDS" "$LLAMA_HEALTH_TIMEOUT_SECONDS"
 
     [[ "$LLAMA_HARD_MAX_TOKENS" -ge "$LLAMA_DEFAULT_MAX_TOKENS" ]] || err "LLAMA_HARD_MAX_TOKENS must be >= LLAMA_DEFAULT_MAX_TOKENS"
+    [[ "$LLAMA_DEFAULT_MAX_TOKENS" -le "$LLAMA_CTX_SIZE" ]] || err "LLAMA_DEFAULT_MAX_TOKENS must be <= LLAMA_CTX_SIZE"
+    [[ "$LLAMA_HARD_MAX_TOKENS" -le "$LLAMA_CTX_SIZE" ]] || err "LLAMA_HARD_MAX_TOKENS must be <= LLAMA_CTX_SIZE"
     [[ "$LLAMA_MODEL_PATH" = /* ]] || err "LLAMA_MODEL_PATH must be an absolute path"
 }
 
@@ -425,7 +427,7 @@ if [[ "$SYSTEMD_READY" == "true" ]]; then
 else
     info "Skipping enable/start because systemd is unavailable or disabled"
     info "To run manually in this environment:"
-    info "  /usr/local/bin/llama-server --model \"$LLAMA_MODEL_PATH\" --host \"$LLAMA_HOST\" --port \"$LLAMA_PORT\" --threads \"$LLAMA_THREADS\" --threads-batch \"$LLAMA_THREADS_BATCH\" --parallel \"$LLAMA_PARALLEL\" --ctx-size \"$LLAMA_CTX_SIZE\" --cache-type-k \"$LLAMA_CACHE_TYPE_K\" --cache-type-v \"$LLAMA_CACHE_TYPE_V\" --metrics --no-webui"
+    info "  /usr/local/bin/llama-server --model \"$LLAMA_MODEL_PATH\" --host \"$LLAMA_HOST\" --port \"$LLAMA_PORT\" --threads \"$LLAMA_THREADS\" --threads-batch \"$LLAMA_THREADS_BATCH\" --parallel \"$LLAMA_PARALLEL\" --ctx-size \"$LLAMA_CTX_SIZE\" --n-predict \"$LLAMA_DEFAULT_MAX_TOKENS\" --cache-type-k \"$LLAMA_CACHE_TYPE_K\" --cache-type-v \"$LLAMA_CACHE_TYPE_V\" --metrics --no-webui"
 fi
 
 echo ""
@@ -447,7 +449,7 @@ if [[ "$SYSTEMD_READY" == "true" ]]; then
     echo "  sudo systemctl status $LLAMA_SERVICE_NAME"
     echo "  sudo journalctl -u $LLAMA_SERVICE_NAME -f"
 else
-    echo "  /usr/local/bin/llama-server --model \"$LLAMA_MODEL_PATH\" --host \"$LLAMA_HOST\" --port \"$LLAMA_PORT\" --threads \"$LLAMA_THREADS\" --threads-batch \"$LLAMA_THREADS_BATCH\" --parallel \"$LLAMA_PARALLEL\" --ctx-size \"$LLAMA_CTX_SIZE\" --cache-type-k \"$LLAMA_CACHE_TYPE_K\" --cache-type-v \"$LLAMA_CACHE_TYPE_V\" --metrics --no-webui"
+    echo "  /usr/local/bin/llama-server --model \"$LLAMA_MODEL_PATH\" --host \"$LLAMA_HOST\" --port \"$LLAMA_PORT\" --threads \"$LLAMA_THREADS\" --threads-batch \"$LLAMA_THREADS_BATCH\" --parallel \"$LLAMA_PARALLEL\" --ctx-size \"$LLAMA_CTX_SIZE\" --n-predict \"$LLAMA_DEFAULT_MAX_TOKENS\" --cache-type-k \"$LLAMA_CACHE_TYPE_K\" --cache-type-v \"$LLAMA_CACHE_TYPE_V\" --metrics --no-webui"
 fi
 echo "  curl -sf http://${LLAMA_HOST}:${LLAMA_PORT}/health"
 echo "  curl -sf http://${LLAMA_HOST}:${LLAMA_PORT}/metrics"
