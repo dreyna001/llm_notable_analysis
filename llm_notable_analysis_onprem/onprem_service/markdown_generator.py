@@ -1,8 +1,6 @@
-"""
-Markdown report generator for TTP analysis results.
+"""Generate markdown reports for TTP analysis results.
 
-This module generates markdown-formatted reports from TTP analysis results,
-mirroring `s3_testing/markdown_generator.py`.
+This module mirrors the report structure used in `s3_testing/markdown_generator.py`.
 """
 
 from typing import Dict, Any, List
@@ -53,16 +51,24 @@ def generate_markdown_report(
         lines.append("### Competing Hypotheses & Pivots\n\n")
         for i, hyp in enumerate(ch, 1):
             hyp_type = hyp.get("hypothesis_type", "unknown").capitalize()
-            lines.append(f"**Hypothesis {i} ({hyp_type}):** {hyp.get('hypothesis', 'N/A')}\n")
+            lines.append(
+                f"**Hypothesis {i} ({hyp_type}):** {hyp.get('hypothesis', 'N/A')}\n"
+            )
             if hyp.get("evidence_support"):
-                lines.append(f"  - **Evidence support:** {', '.join(hyp['evidence_support'])}\n")
+                lines.append(
+                    f"  - **Evidence support:** {', '.join(hyp['evidence_support'])}\n"
+                )
             if hyp.get("evidence_gaps"):
-                lines.append(f"  - **Evidence gaps:** {', '.join(hyp['evidence_gaps'])}\n")
+                lines.append(
+                    f"  - **Evidence gaps:** {', '.join(hyp['evidence_gaps'])}\n"
+                )
             if hyp.get("best_pivots"):
                 lines.append("  - **Best pivots:**\n")
                 for pivot in hyp["best_pivots"]:
                     if isinstance(pivot, dict):
-                        lines.append(f"    - {pivot.get('log_source', 'N/A')}: {pivot.get('key_fields', 'N/A')}\n")
+                        lines.append(
+                            f"    - {pivot.get('log_source', 'N/A')}: {pivot.get('key_fields', 'N/A')}\n"
+                        )
                     else:
                         lines.append(f"    - {pivot}\n")
             lines.append("\n")
@@ -121,31 +127,42 @@ def generate_markdown_report(
         if high_conf:
             lines.append("#### High Confidence (>=0.80)\n\n")
             for ttp in high_conf:
-                lines.append(f"**{ttp['ttp_id']}** - {ttp.get('ttp_name', 'N/A')}: **{ttp['score']:.3f}**\n")
+                lines.append(
+                    f"**{ttp['ttp_id']}** - {ttp.get('ttp_name', 'N/A')}: **{ttp['score']:.3f}**\n"
+                )
                 lines.append(f"  - **Explanation:** {ttp.get('explanation', 'N/A')}\n")
                 if ttp.get("evidence_fields"):
-                    lines.append(f"  - **Evidence Fields:** {', '.join(ttp['evidence_fields'])}\n")
+                    lines.append(
+                        f"  - **Evidence Fields:** {', '.join(ttp['evidence_fields'])}\n"
+                    )
                 lines.append("\n")
 
         if med_conf:
             lines.append("#### Medium Confidence (0.50-0.79)\n\n")
             for ttp in med_conf:
-                lines.append(f"**{ttp['ttp_id']}** - {ttp.get('ttp_name', 'N/A')}: **{ttp['score']:.3f}**\n")
+                lines.append(
+                    f"**{ttp['ttp_id']}** - {ttp.get('ttp_name', 'N/A')}: **{ttp['score']:.3f}**\n"
+                )
                 lines.append(f"  - **Explanation:** {ttp.get('explanation', 'N/A')}\n")
                 if ttp.get("evidence_fields"):
-                    lines.append(f"  - **Evidence Fields:** {', '.join(ttp['evidence_fields'])}\n")
+                    lines.append(
+                        f"  - **Evidence Fields:** {', '.join(ttp['evidence_fields'])}\n"
+                    )
                 lines.append("\n")
 
         if low_conf:
             lines.append("#### Low Confidence (<0.50)\n\n")
             for ttp in low_conf:
-                lines.append(f"**{ttp['ttp_id']}** - {ttp.get('ttp_name', 'N/A')}: **{ttp['score']:.3f}**\n")
+                lines.append(
+                    f"**{ttp['ttp_id']}** - {ttp.get('ttp_name', 'N/A')}: **{ttp['score']:.3f}**\n"
+                )
                 lines.append(f"  - **Explanation:** {ttp.get('explanation', 'N/A')}\n")
                 if ttp.get("evidence_fields"):
-                    lines.append(f"  - **Evidence Fields:** {', '.join(ttp['evidence_fields'])}\n")
+                    lines.append(
+                        f"  - **Evidence Fields:** {', '.join(ttp['evidence_fields'])}\n"
+                    )
                 lines.append("\n")
     else:
         lines.append("No TTPs scored\n\n")
 
     return "".join(lines)
-

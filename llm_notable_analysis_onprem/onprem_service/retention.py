@@ -13,7 +13,7 @@ import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional, Tuple
+from typing import Iterable, Optional
 
 from .config import Config
 
@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class RetentionStats:
+    """Aggregate retention operation counts."""
+
     moved: int = 0
     deleted: int = 0
     errors: int = 0
@@ -29,10 +31,10 @@ class RetentionStats:
 
 def _iter_files(directory: Path) -> Iterable[Path]:
     """Iterate over files in a directory (non-recursive).
-    
+
     Args:
         directory: Directory path to scan.
-        
+
     Returns:
         Iterable of file paths. Empty if directory doesn't exist.
     """
@@ -43,11 +45,11 @@ def _iter_files(directory: Path) -> Iterable[Path]:
 
 def _is_older_than(path: Path, cutoff_epoch_seconds: float) -> bool:
     """Check if a file's mtime is older than the cutoff.
-    
+
     Args:
         path: File path to check.
         cutoff_epoch_seconds: Epoch timestamp cutoff.
-        
+
     Returns:
         True if file mtime is older than cutoff, False otherwise.
     """
@@ -59,11 +61,11 @@ def _is_older_than(path: Path, cutoff_epoch_seconds: float) -> bool:
 
 def _unique_dest_path(dest_dir: Path, filename: str) -> Path:
     """Generate a unique destination path, appending suffix if collision.
-    
+
     Args:
         dest_dir: Destination directory.
         filename: Original filename.
-        
+
     Returns:
         Unique path in dest_dir (creates dir if needed).
     """
@@ -93,14 +95,14 @@ def move_older_than_days(
 
     If reset_mtime_on_archive is True, the moved file's mtime is set to "now"
     so archive retention represents "time spent in archive", not "time since creation".
-    
+
     Args:
         src_dir: Source directory to scan.
         dest_dir: Destination directory for archived files.
         days: Age threshold in days.
         reset_mtime_on_archive: If True, reset mtime to now after move.
         now_epoch_seconds: Current time (for testing); defaults to time.time().
-        
+
     Returns:
         RetentionStats with counts of moved/deleted/errors.
     """
@@ -138,12 +140,12 @@ def delete_older_than_days(
     now_epoch_seconds: Optional[float] = None,
 ) -> RetentionStats:
     """Delete files older than N days from target_dir.
-    
+
     Args:
         target_dir: Directory to scan for old files.
         days: Age threshold in days.
         now_epoch_seconds: Current time (for testing); defaults to time.time().
-        
+
     Returns:
         RetentionStats with counts of moved/deleted/errors.
     """
@@ -169,13 +171,13 @@ def delete_older_than_days(
 
 def run_retention(config: Config) -> RetentionStats:
     """Run retention housekeeping for processed/quarantine/reports + archive delete.
-    
+
     Stage 1: Move old files from live dirs to archive subdirs.
     Stage 2: Delete files from archive after additional retention window.
-    
+
     Args:
         config: Service configuration with retention settings.
-        
+
     Returns:
         RetentionStats with aggregate counts across all operations.
     """
@@ -188,14 +190,35 @@ def run_retention(config: Config) -> RetentionStats:
     archive_reports = config.ARCHIVE_DIR / "reports"
 
     # Stage 1: move into archive
-    s1a = move_older_than_days(config.PROCESSED_DIR, archive_processed, config.INPUT_RETENTION_DAYS, now_epoch_seconds=now)
-    s1b = move_older_than_days(config.QUARANTINE_DIR, archive_quarantine, config.INPUT_RETENTION_DAYS, now_epoch_seconds=now)
-    s1c = move_older_than_days(config.REPORT_DIR, archive_reports, config.REPORT_RETENTION_DAYS, now_epoch_seconds=now)
+    s1a = move_older_than_days(
+        config.PROCESSED_DIR,
+        archive_processed,
+        config.INPUT_RETENTION_DAYS,
+        now_epoch_seconds=now,
+    )
+    s1b = move_older_than_days(
+        config.QUARANTINE_DIR,
+        archive_quarantine,
+        config.INPUT_RETENTION_DAYS,
+        now_epoch_seconds=now,
+    )
+    s1c = move_older_than_days(
+        config.REPORT_DIR,
+        archive_reports,
+        config.REPORT_RETENTION_DAYS,
+        now_epoch_seconds=now,
+    )
 
     # Stage 2: delete from archive after days-in-archive
-    s2a = delete_older_than_days(archive_processed, config.ARCHIVE_RETENTION_DAYS, now_epoch_seconds=now)
-    s2b = delete_older_than_days(archive_quarantine, config.ARCHIVE_RETENTION_DAYS, now_epoch_seconds=now)
-    s2c = delete_older_than_days(archive_reports, config.ARCHIVE_RETENTION_DAYS, now_epoch_seconds=now)
+    s2a = delete_older_than_days(
+        archive_processed, config.ARCHIVE_RETENTION_DAYS, now_epoch_seconds=now
+    )
+    s2b = delete_older_than_days(
+        archive_quarantine, config.ARCHIVE_RETENTION_DAYS, now_epoch_seconds=now
+    )
+    s2c = delete_older_than_days(
+        archive_reports, config.ARCHIVE_RETENTION_DAYS, now_epoch_seconds=now
+    )
 
     for s in (s1a, s1b, s1c, s2a, s2b, s2c):
         total_moved += s.moved
@@ -203,5 +226,3 @@ def run_retention(config: Config) -> RetentionStats:
         total_errors += s.errors
 
     return RetentionStats(moved=total_moved, deleted=total_deleted, errors=total_errors)
-
-

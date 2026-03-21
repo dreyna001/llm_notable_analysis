@@ -12,7 +12,13 @@ from pathlib import Path
 
 from .config import load_config, Config
 from .logging_utils import setup_logging, get_logger, set_correlation_id
-from .ingest import discover_files, normalize_notable, get_notable_id, move_to_processed, move_to_quarantine
+from .ingest import (
+    discover_files,
+    normalize_notable,
+    get_notable_id,
+    move_to_processed,
+    move_to_quarantine,
+)
 from .sinks import write_markdown_to_file
 from .retention import run_retention
 from .freeform_llm_client import FreeformLLMClient
@@ -22,6 +28,12 @@ _shutdown_requested = False
 
 
 def signal_handler(signum, frame):
+    """Handle SIGTERM/SIGINT and request a graceful shutdown.
+
+    Args:
+        signum: Signal number received.
+        frame: Current stack frame (unused).
+    """
     global _shutdown_requested
     logger = get_logger(__name__)
     logger.info(f"Received signal {signum}, initiating graceful shutdown...")
@@ -32,10 +44,27 @@ def _format_alert_for_llm(normalized: dict) -> str:
     # Reuse the existing formatter from onprem_main to keep inputs consistent.
     # Imported lazily to avoid circular imports.
     from .onprem_main import _format_alert_for_llm as _fmt
+
     return _fmt(normalized)
 
 
-def process_notable_freeform(file_path: Path, config: Config, llm_client: FreeformLLMClient, logger: logging.Logger) -> bool:
+def process_notable_freeform(
+    file_path: Path,
+    config: Config,
+    llm_client: FreeformLLMClient,
+    logger: logging.Logger,
+) -> bool:
+    """Process one notable and write a freeform markdown report.
+
+    Args:
+        file_path: Path to the incoming notable file.
+        config: Service configuration.
+        llm_client: Freeform local LLM client.
+        logger: Logger instance for lifecycle events.
+
+    Returns:
+        True when processing succeeds; otherwise False.
+    """
     set_correlation_id()
     logger.info(f"Processing notable (freeform): {file_path.name}")
 
@@ -63,7 +92,9 @@ def process_notable_freeform(file_path: Path, config: Config, llm_client: Freefo
             return False
 
         # Write as .md but with plain paragraphs (no headings/lists).
-        report_path = write_markdown_to_file(f"{notable_id}_freeform", analysis_text + "\n", config)
+        report_path = write_markdown_to_file(
+            f"{notable_id}_freeform", analysis_text + "\n", config
+        )
         logger.info(f"Wrote freeform report: {report_path}")
 
         move_to_processed(file_path, config)
@@ -80,6 +111,7 @@ def process_notable_freeform(file_path: Path, config: Config, llm_client: Freefo
 
 
 def run_service():
+    """Run the freeform service loop until shutdown is requested."""
     global _shutdown_requested
 
     setup_logging()
@@ -103,7 +135,9 @@ def run_service():
             now = time.time()
             if (now - last_retention_run) >= config.RETENTION_RUN_INTERVAL_SECONDS:
                 stats = run_retention(config)
-                logger.info(f"Retention: moved={stats.moved} deleted={stats.deleted} errors={stats.errors}")
+                logger.info(
+                    f"Retention: moved={stats.moved} deleted={stats.deleted} errors={stats.errors}"
+                )
                 last_retention_run = now
 
             files = discover_files(config)
@@ -123,13 +157,15 @@ def run_service():
             logger.exception(f"Error in main loop (freeform): {e}")
             time.sleep(config.POLL_INTERVAL)
 
-    logger.info(f"Service shutting down (freeform). Processed: {processed_count}, Errors: {error_count}")
+    logger.info(
+        f"Service shutting down (freeform). Processed: {processed_count}, Errors: {error_count}"
+    )
 
 
 def main():
+    """CLI entry point for the freeform service."""
     run_service()
 
 
 if __name__ == "__main__":
     main()
-

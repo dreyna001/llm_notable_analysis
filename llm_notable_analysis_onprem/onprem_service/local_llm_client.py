@@ -84,9 +84,11 @@ def _normalize_llm_result_shape(result: Any) -> Any:
             return v
 
     if len(result) == 1:
-        (only_key, only_val), = result.items()
+        ((only_key, only_val),) = result.items()
         if isinstance(only_val, dict):
-            logger.warning(f"Unwrapping singleton LLM result container key: {only_key!r}")
+            logger.warning(
+                f"Unwrapping singleton LLM result container key: {only_key!r}"
+            )
             return only_val
 
     return result
@@ -195,6 +197,15 @@ Return ONLY a single valid JSON object matching the schema and constraints. Do n
 
 
 def validate_response_schema(result: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """Validate required top-level keys and value container types.
+
+    Args:
+        result: Parsed LLM response object.
+
+    Returns:
+        Tuple of `(is_valid, error_message)`. `error_message` is `None` when
+        validation succeeds.
+    """
     if not isinstance(result, dict):
         return False, f"Expected dict, got {type(result).__name__}"
 
@@ -202,12 +213,17 @@ def validate_response_schema(result: Dict[str, Any]) -> Tuple[bool, Optional[str
         if key not in result:
             return False, f"Missing required key: {key}"
         if not isinstance(result[key], expected_type):
-            return False, f"Key '{key}' must be {expected_type.__name__}, got {type(result[key]).__name__}"
+            return (
+                False,
+                f"Key '{key}' must be {expected_type.__name__}, got {type(result[key]).__name__}",
+            )
 
     return True, None
 
 
-def validate_competing_hypotheses_balance(result: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+def validate_competing_hypotheses_balance(
+    result: Dict[str, Any],
+) -> Tuple[bool, Optional[str]]:
     """Validate competing_hypotheses shape.
 
     Historically this enforced EXACTLY 3 benign + 3 adversary hypotheses (6 total).
@@ -282,8 +298,12 @@ def _coerce_evidence_vs_inference(value: Any) -> Dict[str, Any]:
     if isinstance(value, dict):
         ev = value.get("evidence", [])
         inf = value.get("inferences", [])
-        base["evidence"] = [str(x) for x in (ev if isinstance(ev, list) else [ev]) if str(x)]
-        base["inferences"] = [str(x) for x in (inf if isinstance(inf, list) else [inf]) if str(x)]
+        base["evidence"] = [
+            str(x) for x in (ev if isinstance(ev, list) else [ev]) if str(x)
+        ]
+        base["inferences"] = [
+            str(x) for x in (inf if isinstance(inf, list) else [inf]) if str(x)
+        ]
         return base
     if isinstance(value, list):
         base["evidence"] = [str(x) for x in value if str(x)]
@@ -344,16 +364,27 @@ def _coerce_ttp_analysis(value: Any) -> List[Dict[str, Any]]:
             )
             ttp_id = _coerce_ttp_id(raw_id)
             if not ttp_id:
-                ttp_id = _coerce_ttp_id(item.get("ttp_name")) or _coerce_ttp_id(item.get("explanation")) or _coerce_ttp_id(item.get("rationale"))
+                ttp_id = (
+                    _coerce_ttp_id(item.get("ttp_name"))
+                    or _coerce_ttp_id(item.get("explanation"))
+                    or _coerce_ttp_id(item.get("rationale"))
+                )
 
             out.append(
                 {
                     **item,
                     "ttp_id": ttp_id,
-                    "ttp_name": item.get("ttp_name", item.get("technique_name", item.get("name", ""))),
-                    "confidence_score": item.get("confidence_score", item.get("score", item.get("confidence", 0.5))),
+                    "ttp_name": item.get(
+                        "ttp_name", item.get("technique_name", item.get("name", ""))
+                    ),
+                    "confidence_score": item.get(
+                        "confidence_score",
+                        item.get("score", item.get("confidence", 0.5)),
+                    ),
                     "explanation": item.get("explanation", item.get("rationale", "")),
-                    "evidence_fields": item.get("evidence_fields", item.get("evidence", [])),
+                    "evidence_fields": item.get(
+                        "evidence_fields", item.get("evidence", [])
+                    ),
                 }
             )
             continue
@@ -387,10 +418,30 @@ def _normalize_and_fill_defaults(parsed: Dict[str, Any]) -> Dict[str, Any]:
         ar = {}
     out["alert_reconciliation"] = {
         "verdict": str(ar.get("verdict", "")) if ar.get("verdict") is not None else "",
-        "confidence": str(ar.get("confidence", "")) if ar.get("confidence") is not None else "",
-        "one_sentence_summary": str(ar.get("one_sentence_summary", "")) if ar.get("one_sentence_summary") is not None else "",
-        "decision_drivers": [str(x) for x in (ar.get("decision_drivers", []) if isinstance(ar.get("decision_drivers", []), list) else [ar.get("decision_drivers", "")]) if str(x)],
-        "recommended_actions": [str(x) for x in (ar.get("recommended_actions", []) if isinstance(ar.get("recommended_actions", []), list) else [ar.get("recommended_actions", "")]) if str(x)],
+        "confidence": str(ar.get("confidence", ""))
+        if ar.get("confidence") is not None
+        else "",
+        "one_sentence_summary": str(ar.get("one_sentence_summary", ""))
+        if ar.get("one_sentence_summary") is not None
+        else "",
+        "decision_drivers": [
+            str(x)
+            for x in (
+                ar.get("decision_drivers", [])
+                if isinstance(ar.get("decision_drivers", []), list)
+                else [ar.get("decision_drivers", "")]
+            )
+            if str(x)
+        ],
+        "recommended_actions": [
+            str(x)
+            for x in (
+                ar.get("recommended_actions", [])
+                if isinstance(ar.get("recommended_actions", []), list)
+                else [ar.get("recommended_actions", "")]
+            )
+            if str(x)
+        ],
     }
     ch = out.get("competing_hypotheses", [])
     if isinstance(ch, dict):
@@ -398,7 +449,9 @@ def _normalize_and_fill_defaults(parsed: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(ch, list):
         ch = []
     out["competing_hypotheses"] = ch
-    out["evidence_vs_inference"] = _coerce_evidence_vs_inference(out.get("evidence_vs_inference", {}))
+    out["evidence_vs_inference"] = _coerce_evidence_vs_inference(
+        out.get("evidence_vs_inference", {})
+    )
     out["ioc_extraction"] = _coerce_ioc_extraction(out.get("ioc_extraction", {}))
     out["ttp_analysis"] = _coerce_ttp_analysis(out.get("ttp_analysis", []))
     return out
@@ -428,7 +481,7 @@ def validate_content_policies(result: Dict[str, Any]) -> Tuple[bool, Optional[st
             return False, f"Disallowed placeholder domain in {p}"
         if "placeholder" in s_lower:
             return False, f"Disallowed PLACEHOLDER token in {p}"
-        if ("http://" in s_lower or "https://" in s_lower):
+        if "http://" in s_lower or "https://" in s_lower:
             if not p.startswith("ioc_extraction.urls["):
                 return False, f"Disallowed URL outside ioc_extraction.urls: {p}"
     return True, None
@@ -466,7 +519,12 @@ def extract_scored_ttps(result: Dict[str, Any]) -> List[Dict[str, Any]]:
             {
                 "ttp_id": ttp_id,
                 "ttp_name": item.get("ttp_name", ""),
-                "score": _safe_float(item.get("confidence_score", item.get("score", item.get("confidence", 0.0)))),
+                "score": _safe_float(
+                    item.get(
+                        "confidence_score",
+                        item.get("score", item.get("confidence", 0.0)),
+                    )
+                ),
                 "explanation": item.get("explanation", ""),
                 "evidence_fields": item.get("evidence_fields", []),
             }
@@ -552,10 +610,10 @@ def extract_json_object(raw_text: str) -> Tuple[str, Optional[str]]:
 
 class LocalLLMClient:
     """Client for local LLM inference via vLLM/OpenAI-compatible endpoint."""
-    
+
     def __init__(self, config: Config, ttp_validator: TTPValidator):
         """Initialize the local LLM client.
-        
+
         Args:
             config: Service configuration.
             ttp_validator: TTPValidator instance for filtering invalid TTPs.
@@ -576,22 +634,26 @@ class LocalLLMClient:
                     "llm_read_timeout_sec": float(self.config.LLM_TIMEOUT),
                     "llm_max_retries": 0,
                     "llm_retry_backoff_sec": 0.0,
-                    "llm_max_inflight": max(1, int(getattr(self.config, "MAX_WORKERS", 1))),
-                    "llm_verify_tls": self.config.LLM_API_URL.lower().startswith("https://"),
+                    "llm_max_inflight": max(
+                        1, int(getattr(self.config, "MAX_WORKERS", 1))
+                    ),
+                    "llm_verify_tls": self.config.LLM_API_URL.lower().startswith(
+                        "https://"
+                    ),
                 }
             ),
             session=_RequestsPostSession(),
         )
-    
+
     def _build_prompt(self, alert_text: str, alert_time: Optional[str] = None) -> str:
         """Build the analysis prompt.
-        
+
         Ported from s3_notable_pipeline/ttp_analyzer.py format_alert_input().
-        
+
         Args:
             alert_text: The alert content to analyze.
             alert_time: Optional timestamp for time window references.
-            
+
         Returns:
             Formatted prompt string.
         """
@@ -624,16 +686,16 @@ SECURITY ALERT INPUT:
 
 {RULES}
 """
-    
+
     def _parse_llm_response(self, response_text: str) -> Dict[str, Any]:
         """Parse LLM response text into structured JSON.
-        
+
         Args:
             response_text: Raw text from LLM.
-            
+
         Returns:
             Parsed JSON dict.
-            
+
         Raises:
             json.JSONDecodeError: If response is not valid JSON.
         """
@@ -648,20 +710,20 @@ SECURITY ALERT INPUT:
             parsed = ast.literal_eval(candidate)
         parsed = _normalize_llm_result_shape(parsed)
         if not isinstance(parsed, dict):
-            raise ValueError(f"Expected top-level JSON object, got {type(parsed).__name__}")
+            raise ValueError(
+                f"Expected top-level JSON object, got {type(parsed).__name__}"
+            )
         return parsed
-    
+
     def analyze_alert(
-        self,
-        alert_text: str,
-        alert_time: Optional[str] = None
+        self, alert_text: str, alert_time: Optional[str] = None
     ) -> Dict[str, Any]:
         """Analyze an alert and return structured TTP analysis.
-        
+
         Args:
             alert_text: The alert content to analyze.
             alert_time: Optional timestamp for time window references.
-            
+
         Returns:
             Dict containing:
                 - alert_reconciliation: Verdict, confidence, summary, and recommended actions
@@ -675,7 +737,7 @@ SECURITY ALERT INPUT:
         if not alert_text or not alert_text.strip():
             logger.error("Alert text is empty or whitespace only")
             return {"error": "Empty alert text", "ttp_analysis": []}
-        
+
         prompt = self._build_prompt(alert_text, alert_time)
 
         def _call_llm(prompt_text: str) -> Tuple[str, float]:
@@ -688,10 +750,16 @@ SECURITY ALERT INPUT:
             )
             return result.text, result.latency_seconds
 
-        def _validate_and_postprocess(parsed: Dict[str, Any], *, raw_text: str) -> Tuple[bool, Optional[str], Dict[str, Any]]:
+        def _validate_and_postprocess(
+            parsed: Dict[str, Any], *, raw_text: str
+        ) -> Tuple[bool, Optional[str], Dict[str, Any]]:
             parsed = _normalize_llm_result_shape(parsed)
             if not isinstance(parsed, dict):
-                return False, f"Expected dict after normalization, got {type(parsed).__name__}", {}
+                return (
+                    False,
+                    f"Expected dict after normalization, got {type(parsed).__name__}",
+                    {},
+                )
 
             # Make schema a bit more resilient for local inference (best-effort coercion).
             parsed = _normalize_and_fill_defaults(parsed)
@@ -744,7 +812,9 @@ SECURITY ALERT INPUT:
                 llm_text, elapsed = _call_llm(prompt)
 
                 parsed = self._parse_llm_response(llm_text)
-                ok, err, final_obj = _validate_and_postprocess(parsed, raw_text=llm_text)
+                ok, err, final_obj = _validate_and_postprocess(
+                    parsed, raw_text=llm_text
+                )
                 if ok:
                     final_obj["metadata"] = {
                         "model": self.config.LLM_MODEL_NAME,
@@ -757,14 +827,20 @@ SECURITY ALERT INPUT:
                     return final_obj
 
                 last_error = err or "Unknown validation error"
-                logger.warning(f"LLM output invalid, attempting single repair: {last_error}")
+                logger.warning(
+                    f"LLM output invalid, attempting single repair: {last_error}"
+                )
 
                 prior = (llm_text or "")[:4000]
-                repair_prompt = REPAIR_PROMPT_TEMPLATE_RAW_JSON.format(error=last_error, prior_output=prior)
+                repair_prompt = REPAIR_PROMPT_TEMPLATE_RAW_JSON.format(
+                    error=last_error, prior_output=prior
+                )
                 llm_text2, elapsed2 = _call_llm(repair_prompt)
 
                 parsed2 = self._parse_llm_response(llm_text2)
-                ok2, err2, final_obj2 = _validate_and_postprocess(parsed2, raw_text=llm_text2)
+                ok2, err2, final_obj2 = _validate_and_postprocess(
+                    parsed2, raw_text=llm_text2
+                )
                 if ok2:
                     final_obj2["metadata"] = {
                         "model": self.config.LLM_MODEL_NAME,
@@ -779,7 +855,10 @@ SECURITY ALERT INPUT:
 
                 last_error = err2 or "Unknown validation error after repair"
                 logger.error(f"Repair attempt failed: {last_error}")
-                return {"error": f"Response validation error: {last_error}", "ttp_analysis": []}
+                return {
+                    "error": f"Response validation error: {last_error}",
+                    "ttp_analysis": [],
+                }
 
             except RequestTimeoutError:
                 logger.warning(f"LLM API timeout on attempt {attempt + 1}")
@@ -788,9 +867,17 @@ SECURITY ALERT INPUT:
                     time.sleep(retry_delay)
                     retry_delay *= 2
                 else:
-                    return {"error": "LLM API timeout after retries", "ttp_analysis": []}
+                    return {
+                        "error": "LLM API timeout after retries",
+                        "ttp_analysis": [],
+                    }
 
-            except (TransportError, RateLimitError, ServerError, ClientRequestError) as e:
+            except (
+                TransportError,
+                RateLimitError,
+                ServerError,
+                ClientRequestError,
+            ) as e:
                 logger.error(f"LLM API request error: {e}")
                 last_error = f"LLM API error: {e}"
                 if attempt < max_retries - 1:
@@ -803,5 +890,7 @@ SECURITY ALERT INPUT:
                 logger.error(f"LLM response parsing error: {e}")
                 return {"error": f"Response parsing error: {e}", "ttp_analysis": []}
 
-        return {"error": f"Max retries exceeded ({last_error or 'unknown'})", "ttp_analysis": []}
-
+        return {
+            "error": f"Max retries exceeded ({last_error or 'unknown'})",
+            "ttp_analysis": [],
+        }

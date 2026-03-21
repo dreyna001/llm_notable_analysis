@@ -5,45 +5,52 @@ All paths default to RHEL-standard locations.
 """
 
 import os
-from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Optional
+from pathlib import Path
 
 
 @dataclass
 class Config:
     """Service configuration container."""
-    
+
     # Ingest mode: file_drop (SOAR pushes via SFTP to INCOMING_DIR)
     INGEST_MODE: str = "file_drop"
-    
+
     # Directories (for file_drop mode)
     INCOMING_DIR: Path = field(default_factory=lambda: Path("/var/notables/incoming"))
     PROCESSED_DIR: Path = field(default_factory=lambda: Path("/var/notables/processed"))
-    QUARANTINE_DIR: Path = field(default_factory=lambda: Path("/var/notables/quarantine"))
+    QUARANTINE_DIR: Path = field(
+        default_factory=lambda: Path("/var/notables/quarantine")
+    )
     REPORT_DIR: Path = field(default_factory=lambda: Path("/var/notables/reports"))
     ARCHIVE_DIR: Path = field(default_factory=lambda: Path("/var/notables/archive"))
-    
+
     # Polling interval (seconds) for file_drop mode
     POLL_INTERVAL: int = 5
-    
+
     # Local LLM (vLLM)
     LLM_API_URL: str = "http://127.0.0.1:8000/v1/completions"
     LLM_API_TOKEN: str = ""
     LLM_MODEL_NAME: str = "gpt-oss-20b"
     LLM_MAX_TOKENS: int = 4096
     LLM_TIMEOUT: int = 120  # seconds
-    
+
     # Splunk integration (optional)
     SPLUNK_BASE_URL: str = ""
     SPLUNK_API_TOKEN: str = ""
     SPLUNK_NOTABLE_UPDATE_PATH: str = "/services/notable_update"
     SPLUNK_SINK_ENABLED: bool = False
-    SPLUNK_CA_BUNDLE: str = ""  # Path to PEM CA bundle for Splunk TLS; empty = system trust store
-    
+    SPLUNK_CA_BUNDLE: str = (
+        ""  # Path to PEM CA bundle for Splunk TLS; empty = system trust store
+    )
+
     # MITRE ATT&CK data
-    MITRE_IDS_PATH: Path = field(default_factory=lambda: Path(__file__).parent / "enterprise_attack_v17.1_ids.json")
-    
+    MITRE_IDS_PATH: Path = field(
+        default_factory=lambda: (
+            Path(__file__).parent / "enterprise_attack_v17.1_ids.json"
+        )
+    )
+
     # Retention (days)
     # Stage 1: Move old processed/quarantine/report files into ARCHIVE_DIR
     INPUT_RETENTION_DAYS: int = 2
@@ -52,7 +59,7 @@ class Config:
     ARCHIVE_RETENTION_DAYS: int = 14
     # How often to run retention housekeeping (seconds)
     RETENTION_RUN_INTERVAL_SECONDS: int = 86400
-    
+
     # Concurrency (optional)
     # A100 + gpt-oss-20b baseline profile:
     # - Xeon Gold: MAX_WORKERS=4, MAX_QUEUE_DEPTH=32 (default below)
@@ -60,13 +67,13 @@ class Config:
     # - AMD EPYC 7J13 VM (KVM, ~30 vCPU observed): start with Gold profile (4/32),
     #   then increase only after validating CPU headroom and queue latency.
     CONCURRENCY_ENABLED: bool = False  # Sequential by default
-    MAX_WORKERS: int = 4               # Thread pool size when enabled (A100 + Xeon Gold baseline)
-    MAX_QUEUE_DEPTH: int = 32          # Backpressure limit (A100 + Xeon Gold baseline)
+    MAX_WORKERS: int = 4  # Thread pool size when enabled (A100 + Xeon Gold baseline)
+    MAX_QUEUE_DEPTH: int = 32  # Backpressure limit (A100 + Xeon Gold baseline)
 
 
 def load_config() -> Config:
     """Load configuration from environment variables.
-    
+
     Returns:
         Populated Config dataclass.
     """
@@ -85,16 +92,26 @@ def load_config() -> Config:
         LLM_TIMEOUT=int(os.getenv("LLM_TIMEOUT", "120")),
         SPLUNK_BASE_URL=os.getenv("SPLUNK_BASE_URL", ""),
         SPLUNK_API_TOKEN=os.getenv("SPLUNK_API_TOKEN", ""),
-        SPLUNK_NOTABLE_UPDATE_PATH=os.getenv("SPLUNK_NOTABLE_UPDATE_PATH", "/services/notable_update"),
-        SPLUNK_SINK_ENABLED=os.getenv("SPLUNK_SINK_ENABLED", "false").lower() in ("true", "1", "yes"),
+        SPLUNK_NOTABLE_UPDATE_PATH=os.getenv(
+            "SPLUNK_NOTABLE_UPDATE_PATH", "/services/notable_update"
+        ),
+        SPLUNK_SINK_ENABLED=os.getenv("SPLUNK_SINK_ENABLED", "false").lower()
+        in ("true", "1", "yes"),
         SPLUNK_CA_BUNDLE=os.getenv("SPLUNK_CA_BUNDLE", ""),
-        MITRE_IDS_PATH=Path(os.getenv("MITRE_IDS_PATH", str(Path(__file__).parent / "enterprise_attack_v17.1_ids.json"))),
+        MITRE_IDS_PATH=Path(
+            os.getenv(
+                "MITRE_IDS_PATH",
+                str(Path(__file__).parent / "enterprise_attack_v17.1_ids.json"),
+            )
+        ),
         INPUT_RETENTION_DAYS=int(os.getenv("INPUT_RETENTION_DAYS", "2")),
         REPORT_RETENTION_DAYS=int(os.getenv("REPORT_RETENTION_DAYS", "7")),
         ARCHIVE_RETENTION_DAYS=int(os.getenv("ARCHIVE_RETENTION_DAYS", "14")),
-        RETENTION_RUN_INTERVAL_SECONDS=int(os.getenv("RETENTION_RUN_INTERVAL_SECONDS", "86400")),
-        CONCURRENCY_ENABLED=os.getenv("CONCURRENCY_ENABLED", "false").lower() in ("true", "1", "yes"),
+        RETENTION_RUN_INTERVAL_SECONDS=int(
+            os.getenv("RETENTION_RUN_INTERVAL_SECONDS", "86400")
+        ),
+        CONCURRENCY_ENABLED=os.getenv("CONCURRENCY_ENABLED", "false").lower()
+        in ("true", "1", "yes"),
         MAX_WORKERS=int(os.getenv("MAX_WORKERS", "4")),
         MAX_QUEUE_DEPTH=int(os.getenv("MAX_QUEUE_DEPTH", "32")),
     )
-

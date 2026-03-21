@@ -57,7 +57,7 @@ class TestIntegrationMocks(unittest.TestCase):
         response.json.return_value = {"choices": [{"text": json.dumps(payload)}]}
         mock_post.return_value = response
 
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory():
             config = Config(LLM_API_URL="http://127.0.0.1:8000/v1/completions")
             client = LocalLLMClient(config=config, ttp_validator=_DummyValidator())
             result = client.analyze_alert("alert_text", "2026-01-01T00:00:00Z")
@@ -90,7 +90,9 @@ class TestIntegrationMocks(unittest.TestCase):
         }
         invalid_response = MagicMock()
         invalid_response.raise_for_status.return_value = None
-        invalid_response.json.return_value = {"choices": [{"text": json.dumps(invalid_payload)}]}
+        invalid_response.json.return_value = {
+            "choices": [{"text": json.dumps(invalid_payload)}]
+        }
 
         repaired_payload = {
             "alert_reconciliation": {
@@ -125,7 +127,9 @@ class TestIntegrationMocks(unittest.TestCase):
         }
         repaired_response = MagicMock()
         repaired_response.raise_for_status.return_value = None
-        repaired_response.json.return_value = {"choices": [{"text": json.dumps(repaired_payload)}]}
+        repaired_response.json.return_value = {
+            "choices": [{"text": json.dumps(repaired_payload)}]
+        }
         mock_post.side_effect = [invalid_response, repaired_response]
 
         config = Config(LLM_API_URL="http://127.0.0.1:8000/v1/completions")
@@ -136,7 +140,10 @@ class TestIntegrationMocks(unittest.TestCase):
         self.assertTrue(result["metadata"]["repair_attempted"])
         self.assertEqual(mock_post.call_count, 2)
 
-    @patch("llm_notable_analysis_onprem.onprem_service.local_llm_client.time.sleep", return_value=None)
+    @patch(
+        "llm_notable_analysis_onprem.onprem_service.local_llm_client.time.sleep",
+        return_value=None,
+    )
     @patch(
         "llm_notable_analysis_onprem.onprem_service.local_llm_client.requests.post",
         side_effect=requests.exceptions.Timeout,
@@ -144,7 +151,9 @@ class TestIntegrationMocks(unittest.TestCase):
     def test_analyze_alert_timeout_returns_error(
         self, mock_post: MagicMock, _mock_sleep: MagicMock
     ) -> None:
-        config = Config(LLM_API_URL="http://127.0.0.1:8000/v1/completions", LLM_TIMEOUT=1)
+        config = Config(
+            LLM_API_URL="http://127.0.0.1:8000/v1/completions", LLM_TIMEOUT=1
+        )
         client = LocalLLMClient(config=config, ttp_validator=_DummyValidator())
 
         result = client.analyze_alert("alert_text")

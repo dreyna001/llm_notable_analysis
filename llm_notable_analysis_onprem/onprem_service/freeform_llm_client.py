@@ -64,6 +64,11 @@ class FreeformLLMClient:
     """Client for local LLM inference via vLLM/OpenAI-compatible endpoint (freeform output)."""
 
     def __init__(self, config: Config):
+        """Initialize the freeform client.
+
+        Args:
+            config: Service configuration with local endpoint settings.
+        """
         self.config = config
 
     def _call_llm(self, prompt_text: str) -> Tuple[str, float]:
@@ -95,9 +100,20 @@ class FreeformLLMClient:
                 return choice0["text"], elapsed
             if "message" in choice0 and isinstance(choice0["message"], dict):
                 return choice0["message"].get("content", ""), elapsed
-        raise ValueError("Unexpected response format from LLM (no choices[0].text/message.content)")
+        raise ValueError(
+            "Unexpected response format from LLM (no choices[0].text/message.content)"
+        )
 
     def analyze_alert_freeform(self, alert_text: str) -> Dict[str, Any]:
+        """Analyze one alert and return a paragraph-style narrative response.
+
+        Args:
+            alert_text: Normalized alert content to analyze.
+
+        Returns:
+            A dictionary containing either `analysis_text` and metadata or an
+            `error` field when retries are exhausted.
+        """
         if not alert_text or not alert_text.strip():
             return {"error": "Empty alert text", "analysis_text": ""}
 
@@ -110,7 +126,9 @@ class FreeformLLMClient:
 
         for attempt in range(max_retries):
             try:
-                logger.info(f"LLM API call attempt {attempt + 1}/{max_retries} (freeform)")
+                logger.info(
+                    f"LLM API call attempt {attempt + 1}/{max_retries} (freeform)"
+                )
                 text, elapsed = self._call_llm(prompt)
                 return {
                     "analysis_text": (text or "").strip(),
@@ -132,5 +150,7 @@ class FreeformLLMClient:
                 time.sleep(delay)
                 delay *= 2
 
-        return {"error": f"Max retries exceeded ({last_err or 'unknown'})", "analysis_text": ""}
-
+        return {
+            "error": f"Max retries exceeded ({last_err or 'unknown'})",
+            "analysis_text": "",
+        }

@@ -35,9 +35,9 @@ class TestLocalLlmClientContract(unittest.TestCase):
         self.assertTrue(is_valid, msg=err)
 
     def test_extract_json_object_from_preamble_and_trailing_text(self) -> None:
-        raw = "model preamble {\"k\": 1, \"nested\": {\"v\": 2}} trailing"
+        raw = 'model preamble {"k": 1, "nested": {"v": 2}} trailing'
         extracted, note = extract_json_object(raw)
-        self.assertEqual(extracted, "{\"k\": 1, \"nested\": {\"v\": 2}}")
+        self.assertEqual(extracted, '{"k": 1, "nested": {"v": 2}}')
         self.assertIsNotNone(note)
 
     def test_validate_content_policies_rejects_url_outside_ioc_urls(self) -> None:

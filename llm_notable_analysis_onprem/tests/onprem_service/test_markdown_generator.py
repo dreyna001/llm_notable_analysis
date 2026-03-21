@@ -22,7 +22,9 @@ class TestMarkdownGenerator(unittest.TestCase):
                     "hypothesis": "Password spraying",
                     "evidence_support": ["user=admin"],
                     "evidence_gaps": ["missing MFA logs"],
-                    "best_pivots": [{"log_source": "auth", "key_fields": ["user", "src_ip"]}],
+                    "best_pivots": [
+                        {"log_source": "auth", "key_fields": ["user", "src_ip"]}
+                    ],
                 }
             ],
             "evidence_vs_inference": {
@@ -90,10 +92,21 @@ class TestMarkdownGenerator(unittest.TestCase):
                 "urls": [],
             },
         }
-        scored_ttps = [{"ttp_id": "T1110", "ttp_name": "Brute Force", "score": 0.6, "explanation": "x"}]
+        scored_ttps = [
+            {
+                "ttp_id": "T1110",
+                "ttp_name": "Brute Force",
+                "score": 0.6,
+                "explanation": "x",
+            }
+        ]
 
-        out1 = generate_markdown_report("alert", deepcopy(llm_response), deepcopy(scored_ttps))
-        out2 = generate_markdown_report("alert", deepcopy(llm_response), deepcopy(scored_ttps))
+        out1 = generate_markdown_report(
+            "alert", deepcopy(llm_response), deepcopy(scored_ttps)
+        )
+        out2 = generate_markdown_report(
+            "alert", deepcopy(llm_response), deepcopy(scored_ttps)
+        )
 
         self.assertEqual(out1, out2)
 

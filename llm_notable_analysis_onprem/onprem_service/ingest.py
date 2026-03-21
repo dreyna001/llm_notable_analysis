@@ -17,12 +17,12 @@ logger = logging.getLogger(__name__)
 
 def discover_files(config: Config) -> List[Path]:
     """Discover unprocessed notable files in INCOMING_DIR.
-    
+
     Looks for .json and .txt files. Does not recurse into subdirectories.
-    
+
     Args:
         config: Service configuration.
-        
+
     Returns:
         List of file paths to process (sorted by modification time, oldest first).
     """
@@ -30,7 +30,7 @@ def discover_files(config: Config) -> List[Path]:
     if not incoming.exists():
         logger.warning(f"INCOMING_DIR does not exist: {incoming}")
         return []
-    
+
     files = list(incoming.glob("*.json")) + list(incoming.glob("*.txt"))
     # Sort by modification time (oldest first for FIFO processing)
     files.sort(key=lambda f: f.stat().st_mtime)
@@ -39,13 +39,13 @@ def discover_files(config: Config) -> List[Path]:
 
 def normalize_notable(content: str, content_type: str = "text") -> Dict[str, Any]:
     """Normalize notable content into internal alert structure.
-    
+
     Mirrors the normalize_notable() function from lambda_handler.py.
-    
+
     Args:
         content: Raw content from file (JSON string or plain text).
         content_type: Type hint for content ('json' or 'text').
-        
+
     Returns:
         Dict with normalized alert containing summary, risk_index, and raw_log.
     """
@@ -53,10 +53,10 @@ def normalize_notable(content: str, content_type: str = "text") -> Dict[str, Any
     risk_index = {
         "risk_score": "N/A",
         "source_product": "OnPrem_Pipeline",
-        "threat_category": "N/A"
+        "threat_category": "N/A",
     }
     raw_log: Dict[str, Any] = {}
-    
+
     # Try to parse as JSON first
     if content_type == "json" or content.strip().startswith("{"):
         try:
@@ -81,32 +81,28 @@ def normalize_notable(content: str, content_type: str = "text") -> Dict[str, Any
     else:
         summary = content[:400] if len(content) > 400 else content
         raw_log = {"raw_event": content}
-    
-    return {
-        "summary": summary,
-        "risk_index": risk_index,
-        "raw_log": raw_log
-    }
+
+    return {"summary": summary, "risk_index": risk_index, "raw_log": raw_log}
 
 
 def get_notable_id(raw_log: Dict[str, Any], file_path: Path) -> str:
     """Extract or generate a notable ID for output file naming.
-    
+
     Args:
         raw_log: Parsed notable data (may contain notable_id, event_id, etc.).
         file_path: Original file path (used as fallback).
-        
+
     Returns:
         Sanitized notable ID string (safe for filenames).
     """
     # Priority: notable_id > event_id > search_name > file stem
     raw_id = (
-        raw_log.get("notable_id") or
-        raw_log.get("event_id") or
-        raw_log.get("search_name", "")[:50].replace(" ", "_") or
-        file_path.stem
+        raw_log.get("notable_id")
+        or raw_log.get("event_id")
+        or raw_log.get("search_name", "")[:50].replace(" ", "_")
+        or file_path.stem
     )
-    
+
     # Sanitize for filename safety (no path traversal, no special chars)
     sanitized = "".join(c if c.isalnum() or c in "-_" else "_" for c in str(raw_id))
     return sanitized[:100] or "unknown"
@@ -114,11 +110,11 @@ def get_notable_id(raw_log: Dict[str, Any], file_path: Path) -> str:
 
 def move_to_processed(file_path: Path, config: Config) -> Path:
     """Move a successfully processed file to PROCESSED_DIR.
-    
+
     Args:
         file_path: Original file path.
         config: Service configuration.
-        
+
     Returns:
         New path in PROCESSED_DIR.
     """
@@ -137,14 +133,16 @@ def move_to_processed(file_path: Path, config: Config) -> Path:
     return dest
 
 
-def move_to_quarantine(file_path: Path, config: Config, reason: Optional[str] = None) -> Path:
+def move_to_quarantine(
+    file_path: Path, config: Config, reason: Optional[str] = None
+) -> Path:
     """Move a failed file to QUARANTINE_DIR.
-    
+
     Args:
         file_path: Original file path.
         config: Service configuration.
         reason: Optional reason for quarantine (logged).
-        
+
     Returns:
         New path in QUARANTINE_DIR.
     """
@@ -161,4 +159,3 @@ def move_to_quarantine(file_path: Path, config: Config, reason: Optional[str] = 
     shutil.move(str(file_path), str(dest))
     logger.warning(f"Quarantined file to {dest}" + (f": {reason}" if reason else ""))
     return dest
-
