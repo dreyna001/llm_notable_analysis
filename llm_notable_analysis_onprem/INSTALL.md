@@ -139,7 +139,7 @@ sudo vi /etc/notable-analyzer/config.env
 ```
 
 Required settings:
-- `LLM_API_URL` — vLLM endpoint (default: `http://127.0.0.1:8000/v1/completions`)
+- `LLM_API_URL` — vLLM endpoint (default: `http://127.0.0.1:8000/v1/chat/completions`)
 - `LLM_MODEL_NAME` — Model name matching vLLM `--served-model-name`
 - `SPLUNK_BASE_URL` / `SPLUNK_API_TOKEN` — If Splunk writeback enabled
 

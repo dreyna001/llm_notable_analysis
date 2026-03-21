@@ -35,6 +35,7 @@ sudo AUTO_START_VLLM=false bash install_vllm.sh
 - Model path: `/opt/models/gpt-oss-20b`
 - Served model name: `gpt-oss-20b`
 - GPU utilization target: `0.9`
+- Primary inference API: `POST /v1/chat/completions`
 
 ## Operations documentation
 
@@ -49,5 +50,21 @@ sudo AUTO_START_VLLM=false bash install_vllm.sh
 sudo systemctl status vllm
 curl -sf http://127.0.0.1:8000/health
 sudo journalctl -u vllm -n 100 --no-pager
+```
+
+## Quick inference smoke check
+
+```bash
+curl -sS http://127.0.0.1:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model":"gpt-oss-20b",
+    "messages":[
+      {"role":"system","content":"You are concise."},
+      {"role":"user","content":"Reply with exactly OK."}
+    ],
+    "temperature":0,
+    "max_tokens":16
+  }'
 ```
 

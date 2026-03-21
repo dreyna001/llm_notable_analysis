@@ -31,12 +31,16 @@ sudo systemctl status vllm
 sudo systemctl restart vllm
 sudo journalctl -u vllm -f
 curl -sf http://127.0.0.1:8000/health
+curl -sS http://127.0.0.1:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-oss-20b","messages":[{"role":"user","content":"Reply with exactly OK."}],"temperature":0,"max_tokens":16}'
 ```
 
 ## Post-install verification checklist
 
 - `systemctl status vllm` shows `active (running)`.
 - `/health` returns HTTP 200.
+- A minimal `POST /v1/chat/completions` request returns HTTP 2xx.
 - Model path exists and has `config.json`.
 - Unit `ExecStart` points to expected venv python and model path.
 - `--served-model-name` matches client-side model string.
@@ -71,7 +75,7 @@ sudo VLLM_GPU_MEMORY_UTILIZATION=0.8 bash install_vllm.sh
 1. Choose target artifact/version in `VLLM_PIP_SPEC`.
 2. Re-run installer with same runtime flags used by current deployment.
 3. Validate `systemctl status`, `journalctl`, and `/health`.
-4. Validate at least one real completion request from a consumer service.
+4. Validate at least one real `POST /v1/chat/completions` request from a consumer service.
 
 Example:
 

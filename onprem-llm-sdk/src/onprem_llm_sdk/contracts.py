@@ -1,4 +1,4 @@
-"""Request/response contract helpers for OpenAI-compatible completion APIs."""
+"""Request/response contract helpers for OpenAI-compatible chat APIs."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from .errors import ResponseFormatError
 
 @dataclass(frozen=True)
 class CompletionRequest:
-    """Normalized request contract for completions endpoint.
+    """Normalized request contract for chat-completions endpoint.
 
     Attributes:
         model: Model name to target on the endpoint.
@@ -25,14 +25,19 @@ class CompletionRequest:
     temperature: float = 0.0
 
     def to_payload(self) -> Dict[str, Any]:
-        """Serialize request fields into API payload format.
+        """Serialize request fields into chat-completions payload format.
 
         Returns:
             JSON-serializable payload dictionary.
         """
         return {
             "model": self.model,
-            "prompt": self.prompt,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": self.prompt,
+                }
+            ],
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
         }

@@ -190,7 +190,9 @@ These are **rough order-of-magnitude estimates** for a single-host deployment ru
    ```json
    {
      "model": "gpt-oss-20b",
-     "prompt": "<formatted_alert_text>",
+     "messages": [
+       {"role": "user", "content": "<formatted_alert_text>"}
+     ],
      "max_tokens": 4096,
      "temperature": 0.0
    }
@@ -199,7 +201,7 @@ These are **rough order-of-magnitude estimates** for a single-host deployment ru
 4. The service parses response into scored TTPs
 
 **Local LLM Requirements:**
-- **API contract:** vLLM OpenAI-compatible `/v1/completions`; model output contains JSON with TTP analysis
+- **API contract:** vLLM OpenAI-compatible `POST /v1/chat/completions`; model output contains JSON with TTP analysis
 - **Auth:** Bearer token (vLLM `--api-key`), if enabled
 - **Network:** Localhost-only endpoint (127.0.0.1); no outbound routes
 - **Performance:** Response time < 30 seconds for typical notables
@@ -231,7 +233,7 @@ For this use case (security alert analysis, MITRE ATT&CK TTP identification, str
 
 **vLLM exposes an OpenAI-compatible API**, so your service calls:
 ```bash
-POST http://localhost:8000/v1/completions
+POST http://localhost:8000/v1/chat/completions
 # or
 POST http://localhost:8000/v1/chat/completions
 ```
@@ -353,7 +355,7 @@ PROCESSED_DIR=/var/notables/processed
 QUARANTINE_DIR=/var/notables/quarantine
 
 # === Local LLM ===
-LLM_API_URL=http://127.0.0.1:8000/v1/completions
+LLM_API_URL=http://127.0.0.1:8000/v1/chat/completions
 LLM_API_TOKEN=<secret>
 
 # === Splunk Integration ===
@@ -595,13 +597,13 @@ For production, create a systemd service for vLLM (similar to the analyzer servi
 
 #### Test connectivity
 ```bash
-curl -X POST http://127.0.0.1:8000/v1/completions \
+curl -X POST http://127.0.0.1:8000/v1/chat/completions \
   -H "Authorization: Bearer <your-api-key>" \
   -H "Content-Type: application/json" \
-  -d '{"model": "gpt-oss-20b", "prompt": "Test prompt", "max_tokens": 100}'
+  -d '{"model":"gpt-oss-20b","messages":[{"role":"user","content":"Test prompt"}],"max_tokens":100}'
 ```
 
-**Note:** vLLM exposes an **OpenAI-compatible API** at `/v1/completions` and `/v1/chat/completions`. The analyzer service should call this endpoint.
+**Note:** vLLM exposes an **OpenAI-compatible API** at `/v1/chat/completions` (primary). The analyzer service should call this endpoint.
 
 ### 4. Configure Splunk Integration (Optional)
 
@@ -822,7 +824,7 @@ Save as `test-notable.json` and:
 |--------|-------------------|----------------------|
 | **Trigger** | S3 ObjectCreated event | Splunk push/poll or file watch |
 | **Compute** | Lambda (serverless) | Long-running service or cron job |
-| **LLM** | AWS Bedrock Nova Pro | vLLM on localhost (`/v1/completions`) |
+| **LLM** | AWS Bedrock Nova Pro | vLLM on localhost (`/v1/chat/completions`) |
 | **Input Storage** | S3 bucket | Filesystem directory |
 | **Output Storage** | S3 bucket | Filesystem directory |
 | **Splunk Integration** | REST API | REST API |

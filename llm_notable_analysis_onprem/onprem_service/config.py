@@ -29,7 +29,7 @@ class Config:
     POLL_INTERVAL: int = 5
 
     # Local LLM (vLLM)
-    LLM_API_URL: str = "http://127.0.0.1:8000/v1/completions"
+    LLM_API_URL: str = "http://127.0.0.1:8000/v1/chat/completions"
     LLM_API_TOKEN: str = ""
     LLM_MODEL_NAME: str = "gpt-oss-20b"
     LLM_MAX_TOKENS: int = 4096
@@ -85,7 +85,9 @@ def load_config() -> Config:
         REPORT_DIR=Path(os.getenv("REPORT_DIR", "/var/notables/reports")),
         ARCHIVE_DIR=Path(os.getenv("ARCHIVE_DIR", "/var/notables/archive")),
         POLL_INTERVAL=int(os.getenv("POLL_INTERVAL", "5")),
-        LLM_API_URL=os.getenv("LLM_API_URL", "http://127.0.0.1:8000/v1/completions"),
+        LLM_API_URL=os.getenv(
+            "LLM_API_URL", "http://127.0.0.1:8000/v1/chat/completions"
+        ),
         LLM_API_TOKEN=os.getenv("LLM_API_TOKEN", ""),
         LLM_MODEL_NAME=os.getenv("LLM_MODEL_NAME", "gpt-oss-20b"),
         LLM_MAX_TOKENS=int(os.getenv("LLM_MAX_TOKENS", "4096")),

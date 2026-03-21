@@ -22,6 +22,7 @@ curl -sf http://127.0.0.1:8000/health
 | Port conflict on `8000` | Another process bound to port | `sudo ss -lntp \| grep :8000` | Set `VLLM_PORT` at install time or stop conflicting process |
 | Unexpected runtime flags after install | Existing systemd drop-ins overriding repo unit | `sudo ls /etc/systemd/system/vllm.service.d` | Re-run install with `VLLM_RESET_OVERRIDES=true` |
 | `/health` fails but service active | Bind mismatch (`host`/`port`) or startup partial failure | `systemctl cat vllm`, `journalctl -u vllm` | Verify `--host` and `--port` in unit and query correct URL |
+| `/health` is OK but inference fails | Request shape/model mismatch | test `POST /v1/chat/completions` with expected `model` name | Verify `--served-model-name` and request payload fields |
 
 ## Focused checks
 
@@ -54,6 +55,14 @@ ls -la /opt/models/gpt-oss-20b
 ```
 
 The `vllm` service user must be able to read model files.
+
+### Verify chat inference endpoint
+
+```bash
+curl -sS http://127.0.0.1:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-oss-20b","messages":[{"role":"user","content":"Reply with exactly OK."}],"temperature":0,"max_tokens":16}'
+```
 
 ## Recovery actions
 

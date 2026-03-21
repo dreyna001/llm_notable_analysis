@@ -78,7 +78,12 @@ class FreeformLLMClient:
 
         request_body: Dict[str, Any] = {
             "model": self.config.LLM_MODEL_NAME,
-            "prompt": prompt_text,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt_text,
+                }
+            ],
             "max_tokens": self.config.LLM_MAX_TOKENS,
             "temperature": 0.1,
         }

@@ -95,7 +95,7 @@ class SDKConfig:
     """Runtime contract for SDK behavior and endpoint usage.
 
     Attributes:
-        llm_api_url: Full vLLM completion endpoint URL.
+        llm_api_url: Full vLLM chat-completions endpoint URL.
         llm_model_name: Model name sent in request payloads.
         llm_api_token: Optional bearer token for endpoint auth.
         llm_app_name: Caller identity value used in headers/metrics.
@@ -108,7 +108,7 @@ class SDKConfig:
         llm_verify_tls: Whether TLS certificates are verified.
     """
 
-    llm_api_url: str = "http://127.0.0.1:8000/v1/completions"
+    llm_api_url: str = "http://127.0.0.1:8000/v1/chat/completions"
     llm_model_name: str = "gpt-oss-20b"
     llm_api_token: str = ""
     llm_app_name: str = "unknown-app"

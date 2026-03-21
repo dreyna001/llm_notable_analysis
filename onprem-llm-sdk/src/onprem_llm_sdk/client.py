@@ -31,10 +31,10 @@ from .metrics import MetricsSink, NoOpMetricsSink
 
 
 class VLLMClient:
-    """Reusable client for local OpenAI-compatible vLLM completions endpoint.
+    """Reusable client for local OpenAI-compatible vLLM chat endpoint.
 
     The client enforces bounded in-flight concurrency, structured logging, metrics
-    callbacks, and typed error mapping on top of OpenAI-compatible completion APIs.
+    callbacks, and typed error mapping on top of OpenAI-compatible chat APIs.
     """
 
     def __init__(

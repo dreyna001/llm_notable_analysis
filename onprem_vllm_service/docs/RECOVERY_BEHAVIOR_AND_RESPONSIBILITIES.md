@@ -6,7 +6,7 @@ This document defines expected recovery behavior for the standalone `vllm` syste
 
 - Service runtime: `systemd/vllm.service`
 - Installation lifecycle: `install_vllm.sh`
-- Endpoint: local OpenAI-compatible HTTP server on configured host/port
+- Endpoint: local OpenAI-compatible HTTP server on configured host/port (primary inference path: `POST /v1/chat/completions`)
 
 ## Recovery behavior matrix
 

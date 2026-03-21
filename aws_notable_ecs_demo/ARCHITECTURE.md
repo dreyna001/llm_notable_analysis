@@ -94,9 +94,14 @@ Alert Text/JSON
 [ECS Backend]
     ↓ (Bedrock API)
 {
-  "model": "amazon.nova-pro-v1:0",
-  "prompt": "Analyze this alert...",
-  "schema": {...}
+  "modelId": "amazon.nova-pro-v1:0",
+  "messages": [
+    {
+      "role": "user",
+      "content": [{"text": "Analyze this alert..."}]
+    }
+  ],
+  "inferenceConfig": {...}
 }
     ↓
 [Bedrock Nova Pro]

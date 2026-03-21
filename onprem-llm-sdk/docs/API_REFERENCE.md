@@ -30,7 +30,7 @@ Frozen dataclass containing runtime configuration.
 
 ### Fields
 
-- `llm_api_url: str` (default: `http://127.0.0.1:8000/v1/completions`)
+- `llm_api_url: str` (default: `http://127.0.0.1:8000/v1/chat/completions`)
 - `llm_model_name: str` (default: `gpt-oss-20b`)
 - `llm_api_token: str` (default: empty string)
 - `llm_app_name: str` (default: `unknown-app`)
@@ -79,7 +79,7 @@ Raises:
 
 ## `VLLMClient`
 
-Synchronous client for a local OpenAI-compatible completions endpoint.
+Synchronous client for a local OpenAI-compatible chat-completions endpoint.
 
 ### Constructor
 
@@ -97,12 +97,12 @@ Parameters:
 
 #### `complete(prompt: str, *, max_tokens: Optional[int] = None, temperature: float = 0.0, correlation_id: Optional[str] = None, connect_timeout_sec: Optional[float] = None, read_timeout_sec: Optional[float] = None) -> CompletionResult`
 
-Sends one completion request with retry/backoff and error mapping.
+Sends one chat-completions request with retry/backoff and error mapping.
 
 Request payload fields sent to endpoint:
 
 - `model` from `SDKConfig.llm_model_name`
-- `prompt` from method argument
+- `messages` with a single `{"role":"user","content":<prompt>}` entry
 - `max_tokens` from method argument or `SDKConfig.llm_max_tokens_default`
 - `temperature` from method argument
 
@@ -208,7 +208,7 @@ Exception hierarchy:
 
 - Streaming responses.
 - Async client API (`async`/`await` usage).
-- Dedicated Chat Completions API surface.
+- Dedicated Chat Completions API surface (beyond `complete(prompt=...)`).
 - Embeddings API surface.
 - Responses API surface.
 - Batch API surface.
@@ -238,7 +238,7 @@ Exception hierarchy:
 
 ### vLLM / OpenAI-Compat Guarantees
 
-- SDK expects an OpenAI-compatible completions endpoint URL (default `/v1/completions`).
+- SDK expects an OpenAI-compatible chat-completions endpoint URL (default `/v1/chat/completions`).
 - SDK contract guarantees parsing support only for:
   - `choices[0].text`
   - `choices[0].message.content`

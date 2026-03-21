@@ -18,7 +18,7 @@ class TestSDKConfig(unittest.TestCase):
     def test_loads_defaults(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             cfg = SDKConfig.from_env()
-        self.assertEqual(cfg.llm_api_url, "http://127.0.0.1:8000/v1/completions")
+        self.assertEqual(cfg.llm_api_url, "http://127.0.0.1:8000/v1/chat/completions")
         self.assertEqual(cfg.llm_max_inflight, 2)
 
     def test_env_overrides_defaults(self) -> None:

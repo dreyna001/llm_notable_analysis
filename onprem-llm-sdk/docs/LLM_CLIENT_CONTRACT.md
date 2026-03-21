@@ -5,14 +5,14 @@ This document defines the required runtime contract for any project using `onpre
 ## Supported deployment model
 
 - Same-host consumers only.
-- Endpoint default: `http://127.0.0.1:8000/v1/completions`.
+- Endpoint default: `http://127.0.0.1:8000/v1/chat/completions`.
 
 ## Environment keys
 
 
 | Key                       | Required | Default                                | Purpose                                    |
 | ------------------------- | -------- | -------------------------------------- | ------------------------------------------ |
-| `LLM_API_URL`             | yes      | `http://127.0.0.1:8000/v1/completions` | vLLM API endpoint                          |
+| `LLM_API_URL`             | yes      | `http://127.0.0.1:8000/v1/chat/completions` | vLLM API endpoint                     |
 | `LLM_MODEL_NAME`          | yes      | `gpt-oss-20b`                          | `model` field sent per request             |
 | `LLM_API_TOKEN`           | no       | empty                                  | Bearer token when vLLM auth is enabled     |
 | `LLM_APP_NAME`            | yes      | `unknown-app`                          | Caller identity in logs/headers/metrics    |

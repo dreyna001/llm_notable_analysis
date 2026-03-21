@@ -31,7 +31,7 @@ class TestVLLMClient(unittest.TestCase):
 
     def test_success_on_first_attempt(self) -> None:
         session = FakeSession(
-            responses=[FakeResponse(200, {"choices": [{"text": "ok"}]})],
+            responses=[FakeResponse(200, {"choices": [{"message": {"content": "ok"}}]})],
         )
         metrics = InMemoryMetricsSink()
         client = VLLMClient(self._cfg(), session=session, metrics_sink=metrics)
@@ -41,6 +41,12 @@ class TestVLLMClient(unittest.TestCase):
         self.assertEqual(result.text, "ok")
         self.assertEqual(result.attempts, 1)
         self.assertEqual(metrics.success_count, 1)
+        first_json = session.post_calls[0]["kwargs"]["json"]
+        self.assertEqual(
+            first_json["messages"],
+            [{"role": "user", "content": "hello"}],
+        )
+        self.assertNotIn("prompt", first_json)
 
     def test_retry_on_500_then_success(self) -> None:
         session = FakeSession(

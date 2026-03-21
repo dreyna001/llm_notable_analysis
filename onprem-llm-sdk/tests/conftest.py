@@ -36,6 +36,7 @@ class FakeSession:
     responses: List[FakeResponse] = field(default_factory=list)
     exceptions: List[Exception] = field(default_factory=list)
     call_count: int = 0
+    post_calls: List[Dict[str, Any]] = field(default_factory=list)
 
     def post(self, *args, **kwargs) -> FakeResponse:
         """Return queued fake response or raise queued exception.
@@ -51,7 +52,7 @@ class FakeSession:
             Exception: Next queued exception when configured.
             RuntimeError: If neither responses nor exceptions are queued.
         """
-        del args, kwargs
+        self.post_calls.append({"args": args, "kwargs": kwargs})
         self.call_count += 1
         if self.exceptions:
             raise self.exceptions.pop(0)

@@ -30,7 +30,7 @@ python -c "import onprem_llm_sdk; print(onprem_llm_sdk.__version__)"
 Example env file (`/etc/myapp/llm-client.env`):
 
 ```bash
-LLM_API_URL=http://127.0.0.1:8000/v1/completions
+LLM_API_URL=http://127.0.0.1:8000/v1/chat/completions
 LLM_MODEL_NAME=gpt-oss-20b
 LLM_APP_NAME=myapp-analyzer
 LLM_MAX_INFLIGHT=2

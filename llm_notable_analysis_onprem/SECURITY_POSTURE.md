@@ -31,7 +31,7 @@ Notes:
 
 - **vLLM binds to loopback only** (`127.0.0.1:8000`), preventing remote access unless the unit is modified:
   - `--host 127.0.0.1`
-  - default client URL: `LLM_API_URL=http://127.0.0.1:8000/v1/completions`
+  - default client URL: `LLM_API_URL=http://127.0.0.1:8000/v1/chat/completions`
 
 - The analyzer only makes outbound HTTP calls to:
   - **local vLLM** (loopback) by default
