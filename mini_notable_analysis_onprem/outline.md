@@ -1,208 +1,214 @@
-# Mini Notable Analysis On-Prem Requirements (CPU-Only)
+# On-Prem `llama.cpp` Endpoint Service Requirements (CPU-Only, PoC)
 
 ## 1) Goal
 
-Deliver a production-usable, single-host, on-prem LLM inference path for cybersecurity triage on hardware with:
+Define requirements for a standalone on-prem endpoint service package, analogous to `onprem_vllm_service`, implemented with `llama.cpp` (`llama-server`) for CPU-only deployment.
 
-- 12 vCPU
-- 48 GB RAM
-- 1 TB SSD
-- no GPU
+This package is for a proof of concept and provides one shared local endpoint for a single local consumer service on the same host.
 
-The service must provide deterministic-enough, schema-valid JSON outputs for downstream automation while remaining simple to operate.
-
-## 2) Facts, Inferences, and Unknowns
-
-### Facts (direct evidence)
-
-- Host has no GPU.
-- Current design target is a local inference service with OpenAI-compatible API semantics.
-- Workload is cyber incident/log triage with structured outputs.
-
-### Inferences (design choices)
-
-- `llama.cpp` is preferred over `vLLM` for this CPU-only profile.
-- Concurrency must remain low to control tail latency.
-- Context size must be bounded to avoid memory and latency blowups.
-
-### Unknowns (must be resolved for production)
-
-- Required p95 latency SLO for priority use-cases.
-- Required monthly availability target.
-- Final retention period for prompt/response audit records.
-- Whether remote callers are ever allowed (vs local-only forever).
-
-## 3) Architecture Decision
-
-### ADR-001 Runtime
-
-- **MUST** run a single local `llama-server` process (`llama.cpp`) on the host.
-- **MUST** expose OpenAI-compatible chat completions endpoint for application integration.
-- **MUST** keep model artifacts on local SSD.
-
-Rationale: smallest operational surface for a CPU-only deployment.
-
-## 4) Scope
+## 2) Scope
 
 ### In Scope
 
-- Local inference service lifecycle (install, run, restart, observe).
-- Structured prompt/response flow for cyber triage.
-- Security baseline for local endpoint usage.
-- Operational runbook requirements.
+- `llama.cpp` runtime installation and lifecycle management.
+- Service account, systemd unit, startup, and restart behavior.
+- Local endpoint exposure and baseline hardening for loopback-only operation.
+- Runtime configuration through install-time variables or environment.
+- Operations documentation for install, startup, troubleshooting, and recovery expectations.
+- Health and metrics requirements for endpoint operations.
 
 ### Out of Scope
 
-- Multi-node inference clustering.
-- GPU scheduling/tuning.
-- Exactly-once request completion guarantees.
-- Full SIEM pipeline design and data normalization internals.
+- Application-specific prompts and business logic.
+- Application-specific response schemas and downstream workflows.
+- SIEM internals, enrichment logic, and storage design.
+- Multi-host distributed inference or cluster scheduling.
+- Remote endpoint exposure, TLS termination, reverse proxies, and external auth layers.
+- Multi-model serving.
+- Multi-consumer fairness or quality-of-service guarantees.
 
-## 5) Functional Requirements
+## 3) Service Model
 
-### API and Request/Response Contract
+- **SM-001**: Deployment model **MUST** be single-host.
+- **SM-002**: Endpoint **MUST** default to local-only access (`127.0.0.1`).
+- **SM-003**: Package **MUST** support one local consumer service on the same host.
+- **SM-004**: Runtime **MUST** be `llama.cpp` (`llama-server`).
+- **SM-005**: Service instance **MUST** load and serve exactly one configured GGUF model artifact.
+- **SM-006**: Model path **MUST** default to the pinned GGUF artifact in this document and **MAY** be overridden via `LLAMA_MODEL_PATH` for controlled PoC testing.
+- **SM-007**: Endpoint compatibility scope **MUST** be OpenAI-compatible `POST /v1/chat/completions` only for inference.
 
-- **FR-001**: Service **MUST** expose `POST /v1/chat/completions`.
-- **FR-002**: Service **MUST** expose readiness endpoint `GET /health`.
-- **FR-003**: Service **MUST** expose metrics endpoint `GET /metrics`.
-- **FR-004**: Service **MUST** expose slot/queue visibility endpoint `GET /slots`.
-- **FR-005**: Inference calls **MUST** use JSON schema constrained output (`response_format` + schema).
-- **FR-006**: Application **MUST** reject model output that fails JSON schema validation.
+## 4) Functional Requirements
 
-### Prompting and Inference Behavior
+### Installation and Packaging
 
-- **FR-007**: System prompt **MUST** require "JSON only" responses.
-- **FR-008**: Requests **MUST** set bounded generation (`max_tokens`) and low randomness defaults.
-- **FR-009**: Input payload **MUST** be pre-normalized and compacted before model invocation into a canonical incident bundle containing at minimum: alert metadata, top contributing events, extracted entities, compact timeline, counts/stats/notable fields, and optional candidate ATT&CK techniques.
+- **FR-001**: Package **MUST** provide an installer script for install and re-install.
+- **FR-002**: Installer **MUST** create or validate a dedicated non-login service account.
+- **FR-003**: Installer **MUST** install or update a systemd unit for `llama-server`.
+- **FR-004**: Installer **MUST** support install-only mode (no auto-start).
+- **FR-005**: Installer **MUST** support idempotent re-runs for configuration changes and re-installation.
+- **FR-006**: Installer or startup preflight **MUST** validate critical configuration inputs and fail with actionable errors when invalid.
 
-### Error Handling
+### Endpoint Contract
 
-- **FR-010**: Caller **MUST** implement bounded retries with backoff for transient inference failures.
-- **FR-011**: Caller **MUST** use per-request timeout and classify timeout as retryable failure.
-- **FR-012**: On final failure, system **MUST** emit structured failure record with reason code.
+- **FR-007**: Service **MUST** expose `POST /v1/chat/completions`.
+- **FR-008**: Service **MUST** expose `GET /health`.
+- **FR-009**: Service **MUST** expose `GET /metrics`.
+- **FR-010**: Service **MUST** return machine-parseable errors for invalid requests and runtime failures.
 
-### Canonical Triage Output Schema
+### Runtime Behavior
 
-- **FR-013**: Canonical triage output schema **MUST** be an object with `additionalProperties: false` and required fields:
-  - `summary`: string
-  - `severity`: enum [`low`, `medium`, `high`, `critical`]
-  - `likely_disposition`: enum [`true_positive`, `false_positive`, `needs_investigation`]
-  - `confidence`: number in range [0, 1]
-  - `entities`: array of strings
-  - `mitre_attack`: array of strings
-  - `recommended_next_steps`: array of strings
+- **FR-011**: Service **MUST** serve the pinned default model artifact unless `LLAMA_MODEL_PATH` explicitly overrides it.
+- **FR-012**: Service **MUST** run under systemd with restart-on-failure policy.
+- **FR-013**: Service **MUST** emit actionable startup errors when model files, permissions, or runtime arguments are invalid.
+- **FR-014**: Service **MUST** fail fast if the configured model path is missing, unreadable, or invalid.
+- **FR-015**: Service **MUST NOT** report healthy until model load is complete and inference requests can be accepted.
 
-## 6) Non-Functional Requirements
+## 5) Non-Functional Requirements
 
-### Performance and Capacity
+### Performance and Resource Controls
 
-- **NFR-001**: Baseline concurrency target **MUST** be 2 parallel requests max.
-- **NFR-002**: Context window **MUST** default to 8192 tokens max.
-- **NFR-003**: Service **SHOULD** keep p95 latency <= 12s for standard triage requests (provisional baseline, pending final SLO sign-off and load test validation).
-- **NFR-004**: Service **SHOULD** sustain at least 2 requests/min under baseline load without restart loops.
+- **NFR-001**: Runtime **MUST** support bounded concurrency controls for CPU-only operation.
+- **NFR-002**: Runtime **MUST** support bounded context and generation limits.
+- **NFR-003**: Runtime **SHOULD** use deterministic-friendly inference defaults for automation workloads.
+- **NFR-004**: Service **MUST** avoid unbounded memory growth under sustained local traffic.
+- **NFR-005**: Service **MUST** support configurable bounds for request input size, output token generation, and inference timeout.
 
-### Resource Constraints
+### Availability and Operability
 
-- **NFR-005**: Model + runtime + cache **MUST** fit within host RAM with safety margin (no swap thrash).
-- **NFR-006**: Host CPU saturation **SHOULD** avoid sustained 100% across all cores under normal profile.
+- **NFR-006**: Service **MUST** auto-recover from crashes via systemd policy.
+- **NFR-007**: Health semantics during startup and model-load windows **MUST** be documented.
+- **NFR-008**: Startup timeout behavior **MUST** be configurable and documented.
 
-### Availability
+## 6) Security Requirements
 
-- **NFR-007**: Service **MUST** auto-restart on failure via systemd.
-- **NFR-008**: During restart/model load windows, callers **MUST** degrade gracefully via retry policy.
+- **SEC-001**: Service **MUST** bind to loopback by default.
+- **SEC-002**: Runtime process **MUST** run as a dedicated non-privileged account.
+- **SEC-003**: systemd hardening baseline **SHOULD** include no-new-privileges and dropped capabilities for PoC where it does not block startup.
 
-## 7) Security Requirements
+## 7) Observability Requirements
 
-- **SEC-001**: Service **MUST** bind to `127.0.0.1` by default.
-- **SEC-002**: Service **MUST** require API key authentication for inference endpoints even for local calls. Health probes **MAY** be unauthenticated and **MUST NOT** expose sensitive internals.
-- **SEC-003**: Web UI **MUST** be disabled.
-- **SEC-004**: Runtime process **MUST** run as dedicated non-privileged service account.
-- **SEC-005**: systemd hardening flags **MUST** be enabled (no new privileges, capability drop, home/tmp protections).
-- **SEC-006**: Prompt/response logging **MUST** redact sensitive tokens/secrets where policy requires.
-- **SEC-007**: If remote exposure is enabled, deployment **MUST** add TLS + network ACLs + auth controls.
+- **OBS-001**: Logs **MUST** support operational triage, including timestamp, level, component, message, and failure cause where available.
+- **OBS-002**: Logs **MUST** be accessible via `journalctl`.
+- **OBS-003**: Metrics endpoint **MUST** be enabled.
 
-## 8) Observability and Audit Requirements
+## 8) Recovery and Responsibilities
 
-- **OBS-001**: Logs **MUST** be structured and include request id, latency, token counts, status, and error code. The caller or service layer **MUST** generate and propagate a correlation id per request.
-- **OBS-002**: Metrics **MUST** include request count, error count, retry count, and latency histogram.
-- **OBS-003**: Audit trail **MUST** persist prompt metadata, response metadata, model id, and schema validation result.
-- **OBS-004**: Health behavior **MUST** be documented and distinguish process-up vs model-ready states during startup/restart windows when possible.
+- **REL-001**: In-flight requests may fail during restart or host reboot; this behavior **MUST** be documented.
+- **REL-002**: Package **MUST NOT** claim checkpoint, replay, or exactly-once inference semantics.
+- **REL-003**: Operators **MUST** validate health and at least one real inference after install or re-install.
+- **REL-004**: Client retry and backoff behavior is a consumer responsibility and **MUST** be documented.
 
-## 9) Recovery and Responsibility Boundaries
+## 9) Configuration Requirements
 
-- **REL-001**: In-flight requests may fail during restart; clients **MUST** retry within bounded limits.
-- **REL-002**: System **MUST NOT** claim checkpoint/replay or exactly-once inference semantics.
-- **REL-003**: Operators **MUST** verify health, logs, and one real completion after install or upgrade.
-- **REL-004**: Rollback path **MUST** support reverting to prior known-good runtime and model config.
+All operationally relevant values **MUST** be externally configurable, including:
 
-## 10) Configuration Requirements
-
-All operationally relevant values **MUST** be externally configurable (environment variables or service config), including:
-
-- model path/name
-- host/port
-- thread/thread-batch
+- install paths (service name fixed to `llamacpp` for this PoC)
+- host and port
+- threads
+- batch threads
 - parallel slots
 - context size
-- cache quantization
-- continuous batching enable/disable
-- mmap and mlock behavior
-- jinja/template mode
-- reasoning mode
-- default `temperature` and `top_p`
-- default `max_tokens`
-- API key file path
-- timeout/retry settings
+- maximum input tokens
+- default output token limit
+- hard output token ceiling
+- inference timeout
+- HTTP timeout
+- cache behavior and feature flags (`mmap`, `mlock`, KV cache type)
+- startup timeout and health wait window
 - log level
 
-Magic strings **MUST NOT** be hardcoded in application logic where config is expected.
+Environment-specific paths and magic strings **MUST NOT** be hardcoded in service logic.
 
-## 11) Baseline Runtime Profile (Initial Defaults)
+## 10) Baseline Profile (Initial Defaults)
 
-These are starting defaults, not permanent guarantees:
+These defaults are initial PoC deployment defaults and **NOT** final production commitments:
 
-- Runtime: `llama.cpp` (`llama-server`)
-- Model: `Qwen3.5-4B-Q4_K_M.gguf`
-- Host/port: `127.0.0.1:8080`
-- Threads: `10`
-- Threads batch: `12`
-- Parallel slots: `2`
-- Context size: `8192`
-- KV cache type K/V: `q8_0`
-- Continuous batching: enabled
-- mmap: enabled
-- mlock: enabled where supported by host limits/policy
-- Jinja/template mode: enabled
-- Reasoning mode: off
-- Default temperature: `0.1`
-- Default top_p: `0.9`
-- Default max_tokens: `700`
-- Web UI: disabled
-- Metrics: enabled
-- API key file: required
+- runtime: `llama.cpp` (`llama-server`)
+- pinned runtime baseline: `b8457` / `149b249`
+- deployment: single host
+- consumer model: one local consumer service
+- service name: `llamacpp`
+- bind: `127.0.0.1`
+- process manager: systemd
+- hardware target: CPU-only (Intel Xeon Gold, 12 vCPU, 48 GB RAM, no GPU)
+- model default repo: `Qwen/Qwen3-4B-GGUF`
+- model default filename: `Qwen3-4B-Q4_K_M.gguf`
+- model default revision (pinned): `a9a60d009fa7ff9606305047c2bf77ac25dbec49`
+- model default SHA256 (pinned): `7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5`
+- model default size: `2497280256` bytes
+- model source URL (pinned): `https://huggingface.co/Qwen/Qwen3-4B-GGUF/blob/a9a60d009fa7ff9606305047c2bf77ac25dbec49/Qwen3-4B-Q4_K_M.gguf`
+- model raw pointer URL (pinned): `https://huggingface.co/Qwen/Qwen3-4B-GGUF/raw/a9a60d009fa7ff9606305047c2bf77ac25dbec49/Qwen3-4B-Q4_K_M.gguf`
+- override path: `LLAMA_MODEL_PATH` (optional for controlled PoC testing)
+- authentication: none
+- observability: health checks, journal logs, metrics
+- inference surface: `POST /v1/chat/completions` only
+- threads: `10`
+- batch threads: `12`
+- parallel slots: `1`
+- context size: `8192`
+- maximum input tokens: `3072`
+- default output token limit: `384`
+- hard output token ceiling: `512`
+- inference timeout: `120s`
+- HTTP timeout: `180s`
+- KV cache type (K): `q8_0`
+- KV cache type (V): `q8_0`
+- continuous batching: enabled
+- `mmap`: enabled
+- `mlock`: disabled by default for PoC unless explicitly validated on host
 
-## 12) Acceptance Test Criteria
+## 11) Acceptance Tests
 
-- **TST-001**: Service starts under systemd and reports healthy on `GET /health`.
-- **TST-002**: Valid schema-constrained request returns schema-valid JSON.
-- **TST-003**: Invalid or malformed output path is detected and rejected by caller validator.
-- **TST-004**: Restart test confirms caller retries and eventual success or failure classification.
-- **TST-005**: Unauthorized inference call without API key is rejected.
-- **TST-006**: Metrics endpoint emits request/error/latency metrics after test traffic.
-- **TST-007**: Load test at concurrency=2 for 15 minutes completes without crash loop.
-- **TST-008**: Canonical triage schema contract test validates required fields, enums, `confidence` range, and `additionalProperties: false`.
-- **TST-009**: Health behavior test validates documented startup semantics (process-up vs model-ready) during model load and restart windows.
+- **TST-001**: Installer completes on a clean host and creates expected artifacts such as user, unit, and paths.
+- **TST-002**: Service starts and reports healthy on the configured health endpoint only after model load is complete.
+- **TST-003**: Valid `POST /v1/chat/completions` request succeeds.
+- **TST-004**: Invalid request returns a machine-parseable error response.
+- **TST-005**: Restart and reboot behavior matches documented recovery expectations.
+- **TST-006**: Metrics endpoint is reachable locally after successful startup.
 
-## 13) Non-Goals
+Nice-to-have tests (post-PoC hardening):
 
-- Running large model families that require GPU acceleration.
-- Serving arbitrary freeform chat UX traffic.
-- Exposing public internet endpoint directly from inference process.
+- Requests exceeding maximum input token bounds are rejected or bounded per documented behavior.
+- Requests exceeding output token or timeout bounds are rejected or terminated per documented behavior.
 
-## 14) Open Decisions Before Production Sign-Off
+## 12) Documentation Deliverables
 
-1. Final p95 latency SLO and error budget.
-2. Final retention policy for prompt/response artifacts.
-3. Approved model provenance and checksum workflow.
-4. Whether any remote consumer hosts are permitted.
-5. Incident severity taxonomy and confidence calibration policy.
+Package **MUST** include:
+
+- `README.md` for quick start and install options
+- `docs/TROUBLESHOOTING.md`
+
+Post-PoC docs:
+
+- `docs/OPERATIONS_RUNBOOK.md`
+- `docs/SECURITY_POSTURE.md`
+
+## 13) Implementation File Inventory (PoC)
+
+The PoC implementation **MUST** create exactly the following repository files:
+
+- `mini_notable_analysis_onprem/README.md`
+- `mini_notable_analysis_onprem/install_llamacpp.sh`
+- `mini_notable_analysis_onprem/systemd/llamacpp.service`
+- `mini_notable_analysis_onprem/config/llamacpp.env.example`
+- `mini_notable_analysis_onprem/docs/TROUBLESHOOTING.md`
+
+Optional local validation artifact (not part of package source and **MUST NOT** be committed):
+
+- `mini_notable_analysis_onprem/model_cache/Qwen3-4B-Q4_K_M.gguf`
+
+The installer/runtime **MUST** create or manage the following host artifacts:
+
+- `/etc/systemd/system/llamacpp.service`
+- `/etc/llamacpp/llamacpp.env`
+- `/usr/local/bin/llama-server` (or documented equivalent install path)
+- `/opt/llamacpp/models/` (default model directory)
+- system user and group `llamacpp`
+
+Any additional created file outside this list **MUST** be explicitly documented in this section before implementation is considered complete.
+
+## 14) Open Decisions Before Implementation Lock
+
+No blocking open decisions remain for PoC implementation.
+
+[1]: https://github.com/ggml-org/llama.cpp/releases "Releases · ggml-org/llama.cpp · GitHub"

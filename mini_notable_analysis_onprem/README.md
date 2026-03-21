@@ -1,0 +1,80 @@
+# On-Prem `llama.cpp` PoC Service Package
+
+Standalone package for deploying a local `llama.cpp` (`llama-server`) endpoint on a single CPU-only host for one local consumer service.
+
+This package follows `mini_notable_analysis_onprem/outline.md` and pins:
+
+- `llama.cpp` baseline: `b8457` / commit `149b249`
+- model repo: `Qwen/Qwen3-4B-GGUF`
+- model file: `Qwen3-4B-Q4_K_M.gguf`
+- model revision: `a9a60d009fa7ff9606305047c2bf77ac25dbec49`
+- model SHA256: `7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5`
+
+## What is included
+
+- `install_llamacpp.sh` - installer for user, runtime build, model pull, env file, and systemd unit.
+- `systemd/llamacpp.service` - baseline unit installed to `/etc/systemd/system/llamacpp.service`.
+- `config/llamacpp.env.example` - configuration surface reference.
+- `docs/TROUBLESHOOTING.md` - fast triage and recovery commands.
+
+## Quick start
+
+```bash
+cd /path/to/mini_notable_analysis_onprem
+sudo bash install_llamacpp.sh
+```
+
+## Common options
+
+```bash
+# Override model location (keeps pinned filename/revision unless also overridden)
+sudo LLAMA_MODEL_PATH=/opt/llamacpp/models/Qwen3-4B-Q4_K_M.gguf bash install_llamacpp.sh
+
+# Skip runtime build if llama-server already installed
+sudo LLAMA_SKIP_RUNTIME_BUILD=true bash install_llamacpp.sh
+
+# Skip model download step
+sudo LLAMA_SKIP_MODEL_DOWNLOAD=true bash install_llamacpp.sh
+
+# Install only (no service auto-start)
+sudo AUTO_START_LLAMACPP=false bash install_llamacpp.sh
+```
+
+## Runtime defaults
+
+- Service name: `llamacpp`
+- Host/port: `127.0.0.1:8080`
+- Model path: `/opt/llamacpp/models/Qwen3-4B-Q4_K_M.gguf`
+- Threads: `10`
+- Threads batch: `12`
+- Parallel slots: `1`
+- Context size: `8192`
+- Metrics: enabled
+- Web UI: disabled
+
+## Quick health checks
+
+```bash
+sudo systemctl status llamacpp
+curl -sf http://127.0.0.1:8080/health
+curl -sf http://127.0.0.1:8080/metrics
+sudo journalctl -u llamacpp -n 100 --no-pager
+```
+
+## PoC tests (3 files)
+
+```bash
+cd /path/to/mini_notable_analysis_onprem
+chmod +x tests/*.sh
+
+# Run all tests
+bash tests/run_poc_tests.sh all
+
+# Run static checks only
+bash tests/run_poc_tests.sh static
+
+# Run integration checks only
+bash tests/run_poc_tests.sh integration
+```
+
+The integration suite combines installer smoke, config validation, artifact integrity, service readiness, API smoke/negative checks, observability, and one end-to-end single-consumer flow.
