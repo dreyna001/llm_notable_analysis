@@ -36,3 +36,18 @@ sudo AUTO_START_VLLM=false bash install_vllm.sh
 - Served model name: `gpt-oss-20b`
 - GPU utilization target: `0.9`
 
+## Operations documentation
+
+- `docs/TROUBLESHOOTING.md`
+- `docs/OPERATIONS_RUNBOOK.md`
+- `docs/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`
+- `docs/SECURITY_POSTURE.md`
+
+## Quick health checks
+
+```bash
+sudo systemctl status vllm
+curl -sf http://127.0.0.1:8000/health
+sudo journalctl -u vllm -n 100 --no-pager
+```
+
