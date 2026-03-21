@@ -57,6 +57,23 @@ sudo LLAMA_SKIP_SYSTEMD=true bash install_llamacpp.sh
 - Metrics: enabled
 - Web UI: disabled
 
+## Run without systemd (container/etc)
+
+```bash
+# Foreground (keeps logs in current terminal)
+sudo bash -lc 'source /etc/llamacpp/llamacpp.env; /usr/local/bin/llama-server --model "$LLAMA_MODEL_PATH" --host "$LLAMA_HOST" --port "$LLAMA_PORT" --threads "$LLAMA_THREADS" --threads-batch "$LLAMA_THREADS_BATCH" --parallel "$LLAMA_PARALLEL" --ctx-size "$LLAMA_CTX_SIZE" --n-predict "$LLAMA_DEFAULT_MAX_TOKENS" --cache-type-k "$LLAMA_CACHE_TYPE_K" --cache-type-v "$LLAMA_CACHE_TYPE_V" ${LLAMA_CONT_BATCHING_FLAG:-} ${LLAMA_MMAP_FLAG:-} ${LLAMA_MLOCK_FLAG:-} --metrics --no-webui ${LLAMA_EXTRA_ARGS:-}'
+
+# Background (returns shell immediately; logs -> /tmp/llama-server.log)
+sudo bash -lc 'source /etc/llamacpp/llamacpp.env; nohup /usr/local/bin/llama-server --model "$LLAMA_MODEL_PATH" --host "$LLAMA_HOST" --port "$LLAMA_PORT" --threads "$LLAMA_THREADS" --threads-batch "$LLAMA_THREADS_BATCH" --parallel "$LLAMA_PARALLEL" --ctx-size "$LLAMA_CTX_SIZE" --n-predict "$LLAMA_DEFAULT_MAX_TOKENS" --cache-type-k "$LLAMA_CACHE_TYPE_K" --cache-type-v "$LLAMA_CACHE_TYPE_V" ${LLAMA_CONT_BATCHING_FLAG:-} ${LLAMA_MMAP_FLAG:-} ${LLAMA_MLOCK_FLAG:-} --metrics --no-webui ${LLAMA_EXTRA_ARGS:-} >/tmp/llama-server.log 2>&1 &'
+
+# Check process/logs
+pgrep -af llama-server
+tail -n 100 /tmp/llama-server.log
+
+# Stop manual process
+pkill -f "/usr/local/bin/llama-server"
+```
+
 ## Quick health checks
 
 ```bash
