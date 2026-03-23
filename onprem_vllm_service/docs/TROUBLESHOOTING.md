@@ -51,7 +51,7 @@ If you installed to a custom path, replace `/opt/vllm/venv`.
 
 ```bash
 ls -la /opt/models
-ls -la /opt/models/gpt-oss-20b
+ls -la /opt/models/gpt-oss-120b
 ```
 
 The `vllm` service user must be able to read model files.
@@ -61,7 +61,7 @@ The `vllm` service user must be able to read model files.
 ```bash
 curl -sS http://127.0.0.1:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"gpt-oss-20b","messages":[{"role":"user","content":"Reply with exactly OK."}],"temperature":0,"max_tokens":16}'
+  -d '{"model":"gpt-oss-120b","messages":[{"role":"user","content":"Reply with exactly OK."}],"temperature":0,"max_tokens":16}'
 ```
 
 ## Recovery actions

@@ -32,8 +32,8 @@ sudo AUTO_START_VLLM=false bash install_vllm.sh
 ## Runtime defaults
 
 - Host/port: `127.0.0.1:8000`
-- Model path: `/opt/models/gpt-oss-20b`
-- Served model name: `gpt-oss-20b`
+- Model path: `/opt/models/gpt-oss-120b`
+- Served model name: `gpt-oss-120b`
 - GPU utilization target: `0.9`
 - Primary inference API: `POST /v1/chat/completions`
 
@@ -58,7 +58,7 @@ sudo journalctl -u vllm -n 100 --no-pager
 curl -sS http://127.0.0.1:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model":"gpt-oss-20b",
+    "model":"gpt-oss-120b",
     "messages":[
       {"role":"system","content":"You are concise."},
       {"role":"user","content":"Reply with exactly OK."}

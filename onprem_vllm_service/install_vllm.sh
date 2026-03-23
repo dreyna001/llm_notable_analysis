@@ -9,7 +9,7 @@ trap 'echo "ERROR: Failed at line ${LINENO}: ${BASH_COMMAND}" >&2; exit 1' ERR
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-readonly VLLM_MODEL_PATH="${VLLM_MODEL_PATH:-/opt/models/gpt-oss-20b}"
+readonly VLLM_MODEL_PATH="${VLLM_MODEL_PATH:-/opt/models/gpt-oss-120b}"
 readonly VLLM_INSTALL_DIR="${VLLM_INSTALL_DIR:-/opt/vllm}"
 readonly VLLM_VENV_DIR="${VLLM_VENV_DIR:-$VLLM_INSTALL_DIR/venv}"
 readonly VLLM_PIP_SPEC="${VLLM_PIP_SPEC:-vllm==0.14.1}"
@@ -17,7 +17,7 @@ readonly VLLM_PYTHON_BIN="${VLLM_PYTHON_BIN:-python3.12}"
 readonly VLLM_USER="${VLLM_USER:-vllm}"
 readonly VLLM_GROUP="${VLLM_GROUP:-$VLLM_USER}"
 readonly VLLM_SERVICE_NAME="vllm"
-readonly VLLM_SERVED_MODEL_NAME="${VLLM_SERVED_MODEL_NAME:-gpt-oss-20b}"
+readonly VLLM_SERVED_MODEL_NAME="${VLLM_SERVED_MODEL_NAME:-gpt-oss-120b}"
 readonly VLLM_HOST="${VLLM_HOST:-127.0.0.1}"
 readonly VLLM_PORT="${VLLM_PORT:-8000}"
 readonly VLLM_GPU_MEMORY_UTILIZATION="${VLLM_GPU_MEMORY_UTILIZATION:-0.9}"
@@ -254,5 +254,5 @@ echo "Optional flags:"
 echo "  sudo VLLM_SKIP_INSTALL=true bash install_vllm.sh"
 echo "  sudo VLLM_PIP_SPEC='/mnt/media/wheels/vllm-0.14.1-*.whl' bash install_vllm.sh"
 echo "  sudo VLLM_INSTALL_DIR=/opt/vllm312 VLLM_VENV_DIR=/opt/vllm312/venv bash install_vllm.sh"
-echo "  sudo VLLM_MODEL_PATH=/opt/models/gpt-oss-20b VLLM_GPU_MEMORY_UTILIZATION=0.9 bash install_vllm.sh"
+echo "  sudo VLLM_MODEL_PATH=/opt/models/gpt-oss-120b VLLM_GPU_MEMORY_UTILIZATION=0.9 bash install_vllm.sh"
 

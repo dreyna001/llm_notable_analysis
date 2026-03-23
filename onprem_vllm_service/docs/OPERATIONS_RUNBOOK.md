@@ -33,7 +33,7 @@ sudo journalctl -u vllm -f
 curl -sf http://127.0.0.1:8000/health
 curl -sS http://127.0.0.1:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"gpt-oss-20b","messages":[{"role":"user","content":"Reply with exactly OK."}],"temperature":0,"max_tokens":16}'
+  -d '{"model":"gpt-oss-120b","messages":[{"role":"user","content":"Reply with exactly OK."}],"temperature":0,"max_tokens":16}'
 ```
 
 ## Post-install verification checklist
