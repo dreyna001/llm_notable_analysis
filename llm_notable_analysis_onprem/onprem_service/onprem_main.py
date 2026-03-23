@@ -97,6 +97,11 @@ def process_notable(
             move_to_quarantine(file_path, config, f"LLM error: {llm_response['error']}")
             return False
 
+        if llm_response.get("poc_unstructured_output"):
+            logger.warning(
+                "PoC fallback: markdown report includes raw LLM output (schema not validated)"
+            )
+
         # Extract scored TTPs
         scored_ttps = llm_response.get("ttp_analysis", [])
         logger.info(f"Identified {len(scored_ttps)} valid TTPs")

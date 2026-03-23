@@ -140,6 +140,46 @@ class TestIntegrationMocks(unittest.TestCase):
         self.assertTrue(result["metadata"]["repair_attempted"])
         self.assertEqual(mock_post.call_count, 2)
 
+    @patch("llm_notable_analysis_onprem.onprem_service.local_llm_client.requests.post")
+    def test_analyze_alert_poc_fallback_when_repair_still_invalid(
+        self, mock_post: MagicMock
+    ) -> None:
+        """Primary + repair both fail content policy → PoC raw fallback (no quarantine)."""
+        policy_bad = {
+            "alert_reconciliation": {
+                "verdict": "unknown",
+                "confidence": "0.2",
+                "one_sentence_summary": "N/A",
+                "decision_drivers": [],
+                "recommended_actions": [],
+            },
+            "competing_hypotheses": [],
+            "evidence_vs_inference": {
+                "evidence": ["see https://bad.example/path"],
+                "inferences": [],
+            },
+            "ioc_extraction": {"urls": []},
+            "ttp_analysis": [],
+        }
+
+        def _resp(text: str) -> MagicMock:
+            m = MagicMock()
+            m.raise_for_status.return_value = None
+            m.json.return_value = {"choices": [{"text": text}]}
+            return m
+
+        body = json.dumps(policy_bad)
+        mock_post.side_effect = [_resp(body), _resp(body)]
+        config = Config(LLM_API_URL="http://127.0.0.1:8000/v1/chat/completions")
+        client = LocalLLMClient(config=config, ttp_validator=_DummyValidator())
+        result = client.analyze_alert("alert_text")
+
+        self.assertNotIn("error", result)
+        self.assertTrue(result.get("poc_unstructured_output"))
+        self.assertIn("raw_response", result)
+        self.assertIn("ttp_analysis", result)
+        self.assertEqual(mock_post.call_count, 2)
+
     @patch(
         "llm_notable_analysis_onprem.onprem_service.local_llm_client.time.sleep",
         return_value=None,

@@ -110,6 +110,30 @@ class TestMarkdownGenerator(unittest.TestCase):
 
         self.assertEqual(out1, out2)
 
+    def test_poc_unstructured_output_renders_raw_block_first(self) -> None:
+        llm_response = {
+            "poc_unstructured_output": True,
+            "poc_fallback_reason": "schema test",
+            "raw_response": '{"partial": true}',
+            "alert_reconciliation": {
+                "verdict": "poc_raw_output_only",
+                "confidence": "n/a",
+                "one_sentence_summary": "stub",
+                "decision_drivers": [],
+                "recommended_actions": [],
+            },
+            "competing_hypotheses": [],
+            "evidence_vs_inference": {"evidence": [], "inferences": []},
+            "ioc_extraction": {},
+        }
+        md = generate_markdown_report("alert text", llm_response, [])
+        pos_poc = md.find("## PoC: raw model output")
+        pos_ar = md.find("### Alert Reconciliation")
+        self.assertGreaterEqual(pos_poc, 0)
+        self.assertGreater(pos_ar, pos_poc)
+        self.assertIn("~~~text", md)
+        self.assertIn('{"partial": true}', md)
+
 
 if __name__ == "__main__":
     unittest.main()

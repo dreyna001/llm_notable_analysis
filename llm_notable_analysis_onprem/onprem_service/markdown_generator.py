@@ -22,6 +22,23 @@ def generate_markdown_report(
     """
     lines: List[str] = []
 
+    if llm_response.get("poc_unstructured_output"):
+        reason = str(llm_response.get("poc_fallback_reason", "unknown"))
+        raw = llm_response.get("raw_response") or ""
+        lines.append("## PoC: raw model output\n\n")
+        lines.append(
+            "Structured JSON validation did not succeed. The block below preserves the "
+            "model text for analyst review (proof-of-concept).\n\n"
+        )
+        lines.append(f"**Fallback reason:** {reason}\n\n")
+        safe = raw.replace("~~~", "~\\~~\\~~")
+        lines.append("~~~text\n")
+        lines.append(safe)
+        if safe and not safe.endswith("\n"):
+            lines.append("\n")
+        lines.append("~~~\n\n")
+        lines.append("---\n\n")
+
     # Alert Reconciliation (direct disposition guidance)
     if "alert_reconciliation" in llm_response:
         ar = llm_response["alert_reconciliation"]

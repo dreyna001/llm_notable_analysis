@@ -1,9 +1,11 @@
 import unittest
 
+from llm_notable_analysis_onprem.onprem_service import local_llm_client as llm_client_module
 from llm_notable_analysis_onprem.onprem_service.local_llm_client import (
     _normalize_and_fill_defaults,
     extract_json_object,
     extract_scored_ttps,
+    strip_llm_thinking_preamble,
     validate_content_policies,
     validate_response_schema,
 )
@@ -39,6 +41,15 @@ class TestLocalLlmClientContract(unittest.TestCase):
         extracted, note = extract_json_object(raw)
         self.assertEqual(extracted, '{"k": 1, "nested": {"v": 2}}')
         self.assertIsNotNone(note)
+
+    def test_strip_llm_thinking_preamble_keeps_tail_after_marker(self) -> None:
+        mark = llm_client_module._QWEN_THINK_END
+        raw = "preamble" + mark + '{"a": 1}'
+        self.assertEqual(strip_llm_thinking_preamble(raw), '{"a": 1}')
+
+    def test_strip_llm_thinking_preamble_no_marker_unchanged(self) -> None:
+        raw = '{"b": 2}'
+        self.assertEqual(strip_llm_thinking_preamble(raw), '{"b": 2}')
 
     def test_validate_content_policies_rejects_url_outside_ioc_urls(self) -> None:
         payload = {

@@ -27,6 +27,25 @@ from .ttp_validator import TTPValidator
 
 logger = logging.getLogger(__name__)
 
+# Qwen3 chat templates may emit a "thinking" trace before the visible answer.
+# When present, the final user-facing segment usually follows this marker.
+_QWEN_THINK_END = "</think>"
+
+
+def strip_llm_thinking_preamble(text: str) -> str:
+    """Drop Qwen-style thinking trace; return the tail after the last think closer.
+
+    If no marker is present, returns ``text`` unchanged (aside from outer strip).
+    """
+    if not text or _QWEN_THINK_END not in text:
+        return text.strip() if text else text
+    tail = text.split(_QWEN_THINK_END)[-1].strip()
+    return tail if tail else text.strip()
+
+
+def _model_name_suggests_qwen(model_name: str) -> bool:
+    return "qwen" in (model_name or "").lower()
+
 
 class _RequestsPostSession:
     """Session adapter preserving existing test hooks on requests.post.
@@ -608,6 +627,61 @@ def extract_json_object(raw_text: str) -> Tuple[str, Optional[str]]:
     return text, ("; ".join(notes) if notes else None)
 
 
+def build_poc_fallback_llm_payload(
+    *,
+    primary_text: str,
+    repair_text: Optional[str],
+    reason: str,
+    model_name: str,
+    attempt: int,
+    elapsed_primary: float,
+    elapsed_repair: Optional[float],
+) -> Dict[str, Any]:
+    """When strict JSON/schema validation fails, preserve model text for PoC review."""
+    primary_text = (primary_text or "").strip()
+    repair_text = (repair_text or "").strip()
+    combined = primary_text
+    if repair_text:
+        combined += (
+            "\n\n---\n\n### Secondary call (schema repair attempt) — raw output\n\n"
+            + repair_text
+        )
+    if not combined:
+        combined = "(empty model response)"
+
+    return {
+        "poc_unstructured_output": True,
+        "poc_fallback_reason": reason,
+        "raw_response": combined,
+        "alert_reconciliation": {
+            "verdict": "poc_raw_output_only",
+            "confidence": "n/a",
+            "one_sentence_summary": (
+                "Structured output was not applied; the model's raw text is preserved "
+                "in the PoC section for human review."
+            ),
+            "decision_drivers": [reason[:800]],
+            "recommended_actions": [
+                "Review the PoC raw output section in this report.",
+            ],
+        },
+        "competing_hypotheses": [],
+        "evidence_vs_inference": {"evidence": [], "inferences": []},
+        "ioc_extraction": {},
+        "ttp_analysis": [],
+        "metadata": {
+            "model": model_name,
+            "poc_fallback": True,
+            "attempt": attempt,
+            "inference_time_seconds": (
+                (elapsed_repair or 0.0) + elapsed_primary
+                if repair_text
+                else elapsed_primary
+            ),
+        },
+    }
+
+
 class LocalLLMClient:
     """Client for local LLM inference via vLLM/OpenAI-compatible endpoint."""
 
@@ -659,7 +733,14 @@ class LocalLLMClient:
         """
         alert_time_str = f"\n**ALERT_TIME:** {alert_time}\n" if alert_time else ""
 
-        return f"""You are a cybersecurity expert mapping MITRE ATT&CK techniques from a single alert.
+        qwen_json_hint = ""
+        if _model_name_suggests_qwen(self.config.LLM_MODEL_NAME):
+            qwen_json_hint = (
+                "Output policy: Respond with a single JSON object only—no markdown fences, "
+                "no text before or after the object. /no_think\n\n"
+            )
+
+        return f"""{qwen_json_hint}You are a cybersecurity expert mapping MITRE ATT&CK techniques from a single alert.
 {alert_time_str}
 ---
 
@@ -697,17 +778,33 @@ SECURITY ALERT INPUT:
             Parsed JSON dict.
 
         Raises:
-            json.JSONDecodeError: If response is not valid JSON.
+            ValueError: If response is empty or not parseable.
         """
-        candidate, note = extract_json_object(response_text)
+        cleaned = strip_llm_thinking_preamble(response_text or "")
+        if not cleaned.strip():
+            raise ValueError("Empty LLM response after stripping thinking preamble")
+
+        candidate, note = extract_json_object(cleaned)
         if note:
             logger.info(f"LLM JSON extraction: {note}")
+
+        if not (candidate or "").strip():
+            raise ValueError("No JSON object found in LLM response")
 
         try:
             parsed = json.loads(candidate)
         except json.JSONDecodeError:
             # Some models return Python-like dicts (single quotes). Try a safe parse.
-            parsed = ast.literal_eval(candidate)
+            try:
+                parsed = ast.literal_eval(candidate)
+            except (SyntaxError, ValueError) as exc:
+                preview = (candidate or "")[:800]
+                logger.error(
+                    "LLM output not valid JSON or Python literal; preview=%r", preview
+                )
+                raise ValueError(
+                    f"LLM response not parseable (len={len(candidate)}): {exc}"
+                ) from exc
         parsed = _normalize_llm_result_shape(parsed)
         if not isinstance(parsed, dict):
             raise ValueError(
@@ -807,6 +904,8 @@ SECURITY ALERT INPUT:
         last_error: Optional[str] = None
 
         for attempt in range(max_retries):
+            llm_text2: Optional[str] = None
+            elapsed2: Optional[float] = None
             try:
                 logger.info(f"LLM API call attempt {attempt + 1}/{max_retries}")
                 llm_text, elapsed = _call_llm(prompt)
@@ -855,10 +954,18 @@ SECURITY ALERT INPUT:
 
                 last_error = err2 or "Unknown validation error after repair"
                 logger.error(f"Repair attempt failed: {last_error}")
-                return {
-                    "error": f"Response validation error: {last_error}",
-                    "ttp_analysis": [],
-                }
+                logger.warning(
+                    "PoC fallback: returning raw model output (schema/repair failed)"
+                )
+                return build_poc_fallback_llm_payload(
+                    primary_text=llm_text,
+                    repair_text=llm_text2,
+                    reason=f"Response validation error: {last_error}",
+                    model_name=self.config.LLM_MODEL_NAME,
+                    attempt=attempt + 1,
+                    elapsed_primary=elapsed,
+                    elapsed_repair=elapsed2,
+                )
 
             except RequestTimeoutError:
                 logger.warning(f"LLM API timeout on attempt {attempt + 1}")
@@ -886,9 +993,25 @@ SECURITY ALERT INPUT:
                 else:
                     return {"error": f"LLM API error: {e}", "ttp_analysis": []}
 
-            except (json.JSONDecodeError, ValueError, ResponseFormatError) as e:
+            except (
+                json.JSONDecodeError,
+                ValueError,
+                SyntaxError,
+                ResponseFormatError,
+            ) as e:
                 logger.error(f"LLM response parsing error: {e}")
-                return {"error": f"Response parsing error: {e}", "ttp_analysis": []}
+                logger.warning(
+                    "PoC fallback: returning raw model output (JSON parse failed)"
+                )
+                return build_poc_fallback_llm_payload(
+                    primary_text=llm_text,
+                    repair_text=llm_text2,
+                    reason=f"Response parsing error: {e}",
+                    model_name=self.config.LLM_MODEL_NAME,
+                    attempt=attempt + 1,
+                    elapsed_primary=elapsed,
+                    elapsed_repair=elapsed2,
+                )
 
         return {
             "error": f"Max retries exceeded ({last_error or 'unknown'})",
