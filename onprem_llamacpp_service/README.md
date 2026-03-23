@@ -2,7 +2,7 @@
 
 Standalone package for deploying a local `llama.cpp` (`llama-server`) endpoint on a single CPU-only host for one local consumer service.
 
-This package follows `mini_notable_analysis_onprem/outline.md` and pins:
+This package follows `onprem_llamacpp_service/outline.md` and pins:
 
 - `llama.cpp` baseline: `b8457` / commit `149b249`
 - model repo: `Qwen/Qwen3-4B-GGUF`
@@ -20,7 +20,7 @@ This package follows `mini_notable_analysis_onprem/outline.md` and pins:
 ## Quick start
 
 ```bash
-cd /path/to/mini_notable_analysis_onprem
+cd /path/to/onprem_llamacpp_service
 sudo bash install_llamacpp.sh
 ```
 
@@ -119,7 +119,7 @@ Note: `/no_think` is model/template-specific behavior, not a generic OpenAI API 
 ## PoC tests (3 files)
 
 ```bash
-cd /path/to/mini_notable_analysis_onprem
+cd /path/to/onprem_llamacpp_service
 chmod +x tests/*.sh
 
 # Run all tests
@@ -133,3 +133,7 @@ bash tests/run_poc_tests.sh integration
 ```
 
 The integration suite combines installer smoke, config validation, artifact integrity, service readiness, API smoke/negative checks, observability, and one end-to-end single-consumer flow.
+
+## VM walkthrough (mini + notable analyzer client)
+
+End-to-end steps from an **unpacked** directory on a Linux VM through a running `llama-server` and **`llm_notable_analysis_onprem`** client: [`docs/VM_WALKTHROUGH_UNPACKED_TO_RUNNING.md`](docs/VM_WALKTHROUGH_UNPACKED_TO_RUNNING.md).

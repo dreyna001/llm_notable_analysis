@@ -31,6 +31,36 @@ Air-gapped, single-host deployment for security notable analysis using local LLM
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+## VM walkthrough (unpacked tree → running with `onprem_llamacpp_service`)
+
+For a **single markdown** path from “code is on the VM” through `llama-server` on loopback **8000** and this service as client, see [`onprem_llamacpp_service/docs/VM_WALKTHROUGH_UNPACKED_TO_RUNNING.md`](../onprem_llamacpp_service/docs/VM_WALKTHROUGH_UNPACKED_TO_RUNNING.md).
+
+## Mini/Qwen CPU client one-command install
+
+If your inference layer is already provided by `onprem_llamacpp_service`, install this package in **client mode** (no vLLM/GPU setup) with:
+
+```bash
+cd /path/to/llm_notable_analysis_onprem
+sudo bash install_mini_qwen_cpu_client.sh
+```
+
+What this script does:
+
+- Installs `onprem_service` into `/opt/notable-analyzer`.
+- Creates `/opt/notable-analyzer/venv` and installs dependencies.
+- Installs the local SDK from `../onprem-llm-sdk` by default.
+- Creates/updates `/etc/notable-analyzer/config.env` for mini defaults:
+  - `LLM_API_URL=http://127.0.0.1:8000/v1/chat/completions`
+  - `LLM_MODEL_NAME=Qwen3-4B-Q4_K_M.gguf`
+- Creates `/usr/local/bin/notable-analyzer-mini-run` launcher.
+- Optionally installs a `systemd` unit when runtime support is available.
+
+If your SDK is not at `../onprem-llm-sdk`, set:
+
+```bash
+sudo SDK_SOURCE_DIR=/path/to/onprem-llm-sdk bash install_mini_qwen_cpu_client.sh
+```
+
 ## Quick Start
 
 ### 1. Install Dependencies
@@ -507,6 +537,7 @@ llm_notable_analysis_onprem/
 ├── README.md                    # This file
 ├── INSTALL.md                   # Detailed installation guide
 ├── install.sh                   # Automated installer (run as root)
+├── install_mini_qwen_cpu_client.sh  # Mini/Qwen CPU client-mode installer
 ├── requirements.txt             # Python dependencies
 ├── config.env.example           # Configuration template
 ├── systemd/

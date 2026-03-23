@@ -1,0 +1,13 @@
+# https://editorconfig.org — keeps Linux-targeted scripts LF-safe on Windows dev machines.
+root = true
+
+[*]
+charset = utf-8
+insert_final_newline = true
+
+# Shell/systemd/env: must be LF for Linux VMs (avoid `set: pipefail` / `invalid option` after SCP)
+[*.{sh,service}]
+end_of_line = lf
+
+[*.env*]
+end_of_line = lf

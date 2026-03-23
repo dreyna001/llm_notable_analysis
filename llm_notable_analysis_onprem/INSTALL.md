@@ -34,6 +34,38 @@ sudo bash install.sh
 # sudo VLLM_HEALTH_TIMEOUT_SECONDS=420 SMOKE_TEST_TIMEOUT_SECONDS=240 bash install.sh
 ```
 
+## Mini/Qwen CPU client-mode install (with mini llama.cpp service)
+
+Use this when your inference service is already running from `onprem_llamacpp_service` on `127.0.0.1:8000` and you only need the notable-analysis client setup.
+
+```bash
+# Expected sibling layout:
+#   /path/to/llm_notable_analysis_onprem
+#   /path/to/onprem-llm-sdk
+cd /path/to/llm_notable_analysis_onprem
+sudo bash install_mini_qwen_cpu_client.sh
+```
+
+Behavior highlights:
+
+- No vLLM install/GPU setup.
+- Installs analyzer runtime into `/opt/notable-analyzer`.
+- Installs local SDK from `../onprem-llm-sdk` (override with `SDK_SOURCE_DIR=...`).
+- Writes/updates `/etc/notable-analyzer/config.env` for:
+  - `LLM_API_URL=http://127.0.0.1:8000/v1/chat/completions`
+  - `LLM_MODEL_NAME=Qwen3-4B-Q4_K_M.gguf`
+- Creates launcher: `/usr/local/bin/notable-analyzer-mini-run`
+
+Optional flags:
+
+```bash
+# Explicit SDK path
+sudo SDK_SOURCE_DIR=/opt/notable-analyzer-src/onprem-llm-sdk bash install_mini_qwen_cpu_client.sh
+
+# Install/start systemd unit when available
+sudo INSTALL_SYSTEMD_UNIT=true AUTO_START_ANALYZER=true bash install_mini_qwen_cpu_client.sh
+```
+
 ## Manual Inputs Still Required
 
 After install completes, these may still require operator input:

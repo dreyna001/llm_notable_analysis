@@ -187,15 +187,15 @@ Post-PoC docs:
 
 The PoC implementation **MUST** create exactly the following repository files:
 
-- `mini_notable_analysis_onprem/README.md`
-- `mini_notable_analysis_onprem/install_llamacpp.sh`
-- `mini_notable_analysis_onprem/systemd/llamacpp.service`
-- `mini_notable_analysis_onprem/config/llamacpp.env.example`
-- `mini_notable_analysis_onprem/docs/TROUBLESHOOTING.md`
+- `onprem_llamacpp_service/README.md`
+- `onprem_llamacpp_service/install_llamacpp.sh`
+- `onprem_llamacpp_service/systemd/llamacpp.service`
+- `onprem_llamacpp_service/config/llamacpp.env.example`
+- `onprem_llamacpp_service/docs/TROUBLESHOOTING.md`
 
 Optional local validation artifact (not part of package source and **MUST NOT** be committed):
 
-- `mini_notable_analysis_onprem/model_cache/Qwen3-4B-Q4_K_M.gguf`
+- `onprem_llamacpp_service/model_cache/Qwen3-4B-Q4_K_M.gguf`
 
 The installer/runtime **MUST** create or manage the following host artifacts:
 
