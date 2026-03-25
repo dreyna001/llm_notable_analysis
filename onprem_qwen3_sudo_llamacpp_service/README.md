@@ -2,7 +2,7 @@
 
 Standalone package for deploying a local `llama.cpp` (`llama-server`) endpoint on a single CPU-only host for one local consumer service.
 
-This package follows `onprem_llamacpp_service/outline.md` and pins:
+This package follows `onprem_qwen3_sudo_llamacpp_service/outline.md` and pins:
 
 - `llama.cpp` baseline: `b8457` / commit `149b249`
 - model repo: `Qwen/Qwen3-4B-GGUF`
@@ -20,7 +20,7 @@ This package follows `onprem_llamacpp_service/outline.md` and pins:
 ## Quick start
 
 ```bash
-cd /path/to/onprem_llamacpp_service
+cd /path/to/onprem_qwen3_sudo_llamacpp_service
 sudo bash install_llamacpp.sh
 ```
 
@@ -119,7 +119,7 @@ Note: `/no_think` is model/template-specific behavior, not a generic OpenAI API 
 ## PoC tests (3 files)
 
 ```bash
-cd /path/to/onprem_llamacpp_service
+cd /path/to/onprem_qwen3_sudo_llamacpp_service
 chmod +x tests/*.sh
 
 # Run all tests

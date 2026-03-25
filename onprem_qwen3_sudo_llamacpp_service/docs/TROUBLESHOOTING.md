@@ -1,6 +1,6 @@
 # `llamacpp` PoC Troubleshooting
 
-This guide is for the standalone `onprem_llamacpp_service` package (`install_llamacpp.sh` + `systemd/llamacpp.service`).
+This guide is for the standalone `onprem_qwen3_sudo_llamacpp_service` package (`install_llamacpp.sh` + `systemd/llamacpp.service`).
 
 ## Fast triage commands
 
@@ -60,6 +60,6 @@ sudo journalctl -u llamacpp -n 100 --no-pager
 ### Re-apply canonical package configuration
 
 ```bash
-cd /path/to/onprem_llamacpp_service
+cd /path/to/onprem_qwen3_sudo_llamacpp_service
 sudo bash install_llamacpp.sh
 ```

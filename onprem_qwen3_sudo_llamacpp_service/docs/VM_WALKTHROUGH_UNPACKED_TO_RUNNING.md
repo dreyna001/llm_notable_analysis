@@ -2,14 +2,14 @@
 
 This document is a **single end-to-end path** from “the code is already on the Linux VM” (archive unpacked or repo copied) through a **working** stack:
 
-1. **`onprem_llamacpp_service`** — local `llama.cpp` (`llama-server`) on loopback  
+1. **`onprem_qwen3_sudo_llamacpp_service`** — local `llama.cpp` (`llama-server`) on loopback  
 2. **`llm_notable_analysis_onprem`** — notable analysis **client** that calls that endpoint  
 3. **`onprem-llm-sdk`** — Python dependency of the client (install from the **same** tree)
 
 For deeper reference, see:
 
-- `onprem_llamacpp_service/README.md` — installer flags, `/no_think`, health checks  
-- `onprem_llamacpp_service/docs/TROUBLESHOOTING.md` — `llama-server` triage  
+- `onprem_qwen3_sudo_llamacpp_service/README.md` — installer flags, `/no_think`, health checks  
+- `onprem_qwen3_sudo_llamacpp_service/docs/TROUBLESHOOTING.md` — `llama-server` triage  
 - `llm_notable_analysis_onprem/README.md` — architecture, Splunk, systemd-oriented install  
 - `llm_notable_analysis_onprem/INSTALL.md` — full `install.sh` (RHEL + vLLM) when you are **not** using this mini stack  
 
@@ -30,7 +30,7 @@ For deeper reference, see:
 Pick a single parent directory for sources (this doc uses **`/opt/notable-analyzer-src`**). After unpack you should have **all three** of:
 
 ```text
-/opt/notable-analyzer-src/onprem_llamacpp_service/
+/opt/notable-analyzer-src/onprem_qwen3_sudo_llamacpp_service/
 /opt/notable-analyzer-src/llm_notable_analysis_onprem/
 /opt/notable-analyzer-src/onprem-llm-sdk/
 ```
@@ -38,7 +38,7 @@ Pick a single parent directory for sources (this doc uses **`/opt/notable-analyz
 Quick check:
 
 ```bash
-ls -la /opt/notable-analyzer-src/onprem_llamacpp_service/install_llamacpp.sh
+ls -la /opt/notable-analyzer-src/onprem_qwen3_sudo_llamacpp_service/install_llamacpp.sh
 ls -la /opt/notable-analyzer-src/llm_notable_analysis_onprem/onprem_service/onprem_main.py
 ls -la /opt/notable-analyzer-src/onprem-llm-sdk/pyproject.toml
 ```
@@ -52,10 +52,10 @@ If `onprem-llm-sdk` is missing, the client **cannot** run as shipped (`llm_notab
 If scripts were copied from Windows without LF normalization, bash may error (`set: pipefail` / `invalid option`).
 
 ```bash
-find /opt/notable-analyzer-src/onprem_llamacpp_service -name "*.sh" -print0 \
+find /opt/notable-analyzer-src/onprem_qwen3_sudo_llamacpp_service -name "*.sh" -print0 \
   | xargs -0 sed -i 's/\r$//' 2>/dev/null || true
 
-bash -n /opt/notable-analyzer-src/onprem_llamacpp_service/install_llamacpp.sh && echo "install_llamacpp.sh: OK"
+bash -n /opt/notable-analyzer-src/onprem_qwen3_sudo_llamacpp_service/install_llamacpp.sh && echo "install_llamacpp.sh: OK"
 ```
 
 The repo root **`.gitattributes`** helps keep LF in git; use `git archive` for transfers when possible.
@@ -67,7 +67,7 @@ The repo root **`.gitattributes`** helps keep LF in git; use `git archive` for t
 From the mini package:
 
 ```bash
-cd /opt/notable-analyzer-src/onprem_llamacpp_service
+cd /opt/notable-analyzer-src/onprem_qwen3_sudo_llamacpp_service
 sudo LLAMA_SKIP_SYSTEMD=true bash install_llamacpp.sh
 ```
 
@@ -91,7 +91,7 @@ Use the **foreground** command first so you see load errors; when stable, use **
 sudo bash -lc 'source /etc/llamacpp/llamacpp.env; /usr/local/bin/llama-server --model "$LLAMA_MODEL_PATH" --host "$LLAMA_HOST" --port "$LLAMA_PORT" --threads "$LLAMA_THREADS" --threads-batch "$LLAMA_THREADS_BATCH" --parallel "$LLAMA_PARALLEL" --ctx-size "$LLAMA_CTX_SIZE" --n-predict "$LLAMA_DEFAULT_MAX_TOKENS" --cache-type-k "$LLAMA_CACHE_TYPE_K" --cache-type-v "$LLAMA_CACHE_TYPE_V" ${LLAMA_CONT_BATCHING_FLAG:-} ${LLAMA_MMAP_FLAG:-} ${LLAMA_MLOCK_FLAG:-} --metrics --no-webui ${LLAMA_EXTRA_ARGS:-}'
 ```
 
-**Background** (same as `onprem_llamacpp_service/README.md`):
+**Background** (same as `onprem_qwen3_sudo_llamacpp_service/README.md`):
 
 ```bash
 sudo bash -lc 'source /etc/llamacpp/llamacpp.env; nohup /usr/local/bin/llama-server --model "$LLAMA_MODEL_PATH" --host "$LLAMA_HOST" --port "$LLAMA_PORT" --threads "$LLAMA_THREADS" --threads-batch "$LLAMA_THREADS_BATCH" --parallel "$LLAMA_PARALLEL" --ctx-size "$LLAMA_CTX_SIZE" --n-predict "$LLAMA_DEFAULT_MAX_TOKENS" --cache-type-k "$LLAMA_CACHE_TYPE_K" --cache-type-v "$LLAMA_CACHE_TYPE_V" ${LLAMA_CONT_BATCHING_FLAG:-} ${LLAMA_MMAP_FLAG:-} ${LLAMA_MLOCK_FLAG:-} --metrics --no-webui ${LLAMA_EXTRA_ARGS:-} >/tmp/llama-server.log 2>&1 &'
@@ -302,7 +302,7 @@ pkill -f "/usr/local/bin/llama-server"
 
 | Goal | Command / location |
 |------|---------------------|
-| Mini installer | `sudo LLAMA_SKIP_SYSTEMD=true bash install_llamacpp.sh` in `onprem_llamacpp_service/` |
+| Mini installer | `sudo LLAMA_SKIP_SYSTEMD=true bash install_llamacpp.sh` in `onprem_qwen3_sudo_llamacpp_service/` |
 | Mini env file | `/etc/llamacpp/llamacpp.env` |
 | Analyzer config | `/etc/notable-analyzer/config.env` |
 | Analyzer entry (structured) | `python -m onprem_service.onprem_main` from `llm_notable_analysis_onprem/` |
@@ -314,5 +314,5 @@ pkill -f "/usr/local/bin/llama-server"
 ## Operational notes
 
 - **Port:** Inference is standardized on **`127.0.0.1:8000`** in-tree; the analyzer does **not** bind that port—it **calls** it.  
-- **Qwen3 reasoning:** For JSON-heavy prompts, use **`/no_think`** in the system message (see `onprem_llamacpp_service/README.md`).  
+- **Qwen3 reasoning:** For JSON-heavy prompts, use **`/no_think`** in the system message (see `onprem_qwen3_sudo_llamacpp_service/README.md`).  
 - **Full production install** (users, vLLM, SELinux, systemd units): follow `llm_notable_analysis_onprem/install.sh` + `INSTALL.md`—different from this PoC path.

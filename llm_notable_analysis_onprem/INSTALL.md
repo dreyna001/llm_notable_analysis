@@ -36,7 +36,7 @@ sudo bash install.sh
 
 ## Mini/Qwen CPU client-mode install (with mini llama.cpp service)
 
-Use this when your inference service is already running from `onprem_llamacpp_service` on `127.0.0.1:8000` and you only need the notable-analysis client setup.
+Use this when your inference service is already running from `onprem_qwen3_sudo_llamacpp_service` on `127.0.0.1:8000` and you only need the notable-analysis client setup.
 
 ```bash
 # Expected sibling layout:

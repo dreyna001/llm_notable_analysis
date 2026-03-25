@@ -31,13 +31,13 @@ Air-gapped, single-host deployment for security notable analysis using local LLM
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## VM walkthrough (unpacked tree → running with `onprem_llamacpp_service`)
+## VM walkthrough (unpacked tree → running with `onprem_qwen3_sudo_llamacpp_service`)
 
-For a **single markdown** path from “code is on the VM” through `llama-server` on loopback **8000** and this service as client, see [`onprem_llamacpp_service/docs/VM_WALKTHROUGH_UNPACKED_TO_RUNNING.md`](../onprem_llamacpp_service/docs/VM_WALKTHROUGH_UNPACKED_TO_RUNNING.md).
+For a **single markdown** path from “code is on the VM” through `llama-server` on loopback **8000** and this service as client, see [`onprem_qwen3_sudo_llamacpp_service/docs/VM_WALKTHROUGH_UNPACKED_TO_RUNNING.md`](../onprem_qwen3_sudo_llamacpp_service/docs/VM_WALKTHROUGH_UNPACKED_TO_RUNNING.md).
 
 ## Mini/Qwen CPU client one-command install
 
-If your inference layer is already provided by `onprem_llamacpp_service`, install this package in **client mode** (no vLLM/GPU setup) with:
+If your inference layer is already provided by `onprem_qwen3_sudo_llamacpp_service`, install this package in **client mode** (no vLLM/GPU setup) with:
 
 ```bash
 cd /path/to/llm_notable_analysis_onprem
