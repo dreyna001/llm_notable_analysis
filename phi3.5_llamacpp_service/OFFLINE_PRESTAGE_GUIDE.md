@@ -2,6 +2,8 @@
 
 Purpose: run `llama-server` with Phi-3.5 GGUF on an airgapped host with **no web pulls** from installer/runtime.
 
+**Host OS packages (e.g. brand-new RHEL minimal):** see [`RHEL_SOFTWARE_DEPENDENCIES.md`](RHEL_SOFTWARE_DEPENDENCIES.md) for a full software dependency list.
+
 ## 1) Pull artifacts on an internet-connected machine
 
 - `llama.cpp` source snapshot at pinned commit:
