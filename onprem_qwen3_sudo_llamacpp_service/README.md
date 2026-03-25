@@ -15,6 +15,8 @@ This package follows `onprem_qwen3_sudo_llamacpp_service/outline.md` and pins:
 - `install_llamacpp.sh` - installer for user, runtime build, model pull, env file, and systemd unit.
 - `systemd/llamacpp.service` - baseline unit installed to `/etc/systemd/system/llamacpp.service`.
 - `config/llamacpp.env.example` - configuration surface reference.
+- `OFFLINE_PRESTAGE_GUIDE.md` - airgapped/pre-staged install flow and required skip flags.
+- `RHEL_SOFTWARE_DEPENDENCIES.md` - package/dependency checklist for fresh RHEL-class hosts.
 - `docs/TROUBLESHOOTING.md` - fast triage and recovery commands.
 
 ## Quick start
