@@ -3,3 +3,10 @@ __pycache__/
 *.py[cod]
 
 ai_use_case_delivery_framework/AI_USE_CASE_DELIVERY_PROCESS.md
+
+# Local secrets / environment (never commit)
+llm_notable_analysis_onprem/config.env
+llm_notable_analysis_onprem/wsl-notable-data/
+
+# WSL-local Python venv (Linux paths; keep out of repo)
+.venv-wsl/
