@@ -35,6 +35,8 @@ Air-gapped, single-host deployment for security notable analysis using local LLM
 
 For a **single markdown** path from “code is on the VM” through `llama-server` on loopback **8000** and this service as client, see [`onprem_qwen3_sudo_llamacpp_service/docs/VM_WALKTHROUGH_UNPACKED_TO_RUNNING.md`](../onprem_qwen3_sudo_llamacpp_service/docs/VM_WALKTHROUGH_UNPACKED_TO_RUNNING.md).
 
+For a concise "what to download first" checklist for offline setup, see [`OFFLINE_PRESTAGE_GUIDE.md`](OFFLINE_PRESTAGE_GUIDE.md).
+
 ## Mini/Qwen CPU client one-command install
 
 If your inference layer is already provided by `onprem_qwen3_sudo_llamacpp_service`, install this package in **client mode** (no vLLM/GPU setup) with:
