@@ -16,7 +16,7 @@ readonly PHI_RUNTIME_BUILD_DIR="${PHI_RUNTIME_BUILD_DIR:-$PHI_RUNTIME_SRC_DIR/bu
 readonly PHI_SERVER_BIN="${PHI_SERVER_BIN:-$HOME/.local/bin/llama-server}"
 
 readonly PHI_MODEL_DIR="${PHI_MODEL_DIR:-$PHI_INSTALL_DIR/models}"
-readonly PHI_MODEL_FILENAME="${PHI_MODEL_FILENAME:-Phi-3.5-mini-instruct-q4_k_m.gguf}"
+readonly PHI_MODEL_FILENAME="${PHI_MODEL_FILENAME:-Phi-3.5-mini-instruct-Q4_K_M.gguf}"
 readonly PHI_MODEL_PATH="${PHI_MODEL_PATH:-$PHI_MODEL_DIR/$PHI_MODEL_FILENAME}"
 readonly PHI_MODEL_SHA256="${PHI_MODEL_SHA256:-}"
 

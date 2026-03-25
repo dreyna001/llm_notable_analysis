@@ -8,11 +8,14 @@ Purpose: run `llama-server` with Phi-3.5 GGUF on an airgapped host with **no web
   - repo: `https://github.com/ggml-org/llama.cpp.git`
   - commit: `149b249` (baseline used by current package family)
   - create an archive directory that contains `CMakeLists.txt` at top level.
-- Phi-3.5 mini instruct GGUF Q4_K_M model artifact:
-  - source registry (example): Hugging Face model distribution for Phi-3.5 mini instruct GGUF.
-  - exact filename can vary by publisher; capture the exact filename you download.
-- (Recommended) SHA256 for the GGUF file:
-  - record into your deployment notes for `PHI_MODEL_SHA256`.
+- Phi-3.5 mini instruct GGUF Q4_K_M model artifact (pinned baseline):
+  - repo: `https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF`
+  - revision/commit: `b1693692c4758ac83f0d0e65aff9b4f945f29941`
+  - filename: `Phi-3.5-mini-instruct-Q4_K_M.gguf`
+  - SHA256 (LFS OID): `e4165e3a71af97f1b4820da61079826d8752a2088e313af0c7d346796c38eff5`
+  - direct immutable download pattern:
+    - `https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/b1693692c4758ac83f0d0e65aff9b4f945f29941/Phi-3.5-mini-instruct-Q4_K_M.gguf`
+  - if you intentionally choose a different publisher/revision, record that exact source + revision + SHA256 in deployment notes.
 
 ## 2) Transfer artifacts into the airgapped VM
 
@@ -30,7 +33,7 @@ From `phi3.5_llamacpp_service/config/phi35.env.example`, set at least:
 
 - `PHI_RUNTIME_SRC_DIR` to your local runtime source path.
 - `PHI_MODEL_PATH` to your local GGUF file path.
-- `PHI_MODEL_SHA256` to the recorded hash (recommended).
+- `PHI_MODEL_SHA256` to the exact pinned hash (recommended for integrity, required for strict reproducibility).
 
 ## 4) Run offline installer/launcher (non-root)
 
