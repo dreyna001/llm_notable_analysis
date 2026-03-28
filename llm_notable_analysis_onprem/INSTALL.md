@@ -220,6 +220,11 @@ sudo VLLM_RESET_OVERRIDES=true bash install.sh
 
 `authorized_keys` is the standard OpenSSH file that lists the **public keys** allowed to log in as that user. The installer creates `/var/sftp/soar/.ssh/authorized_keys`; add the SOAR appliance's public key(s) there so SOAR can authenticate via key (no password) when uploading notables via SFTP.
 
+For a simple Phantom playbook template that builds one notable JSON payload (including supporting events) and uploads it to `/incoming`, see:
+
+- `SOAR_PLAYBOOK_PHANTOM.md`
+- `soar_playbook/phantom_notable_to_analyzer.py`
+
 ```bash
 # Get public key from SOAR appliance
 # Paste into:

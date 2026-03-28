@@ -303,6 +303,11 @@ SPLUNK_NOTABLE_UPDATE_PATH=/services/notable_update
 
 The recommended pattern mirrors the cloud S3 workflow: **SOAR pulls notables from Splunk ES and pushes them to the analyzer's incoming directory**. This keeps Splunk credentials in SOAR (not the analyzer) and preserves the existing operational model.
 
+Phantom/SOAR template assets in this repo:
+
+- Guide: [`SOAR_PLAYBOOK_PHANTOM.md`](SOAR_PLAYBOOK_PHANTOM.md)
+- Playbook template: [`soar_playbook/phantom_notable_to_analyzer.py`](soar_playbook/phantom_notable_to_analyzer.py)
+
 ### Transport Options
 
 #### SFTP (Recommended)
