@@ -1,7 +1,7 @@
 """Local LLM client for vLLM/OpenAI-compatible inference.
 
 Replaces BedrockAnalyzer from the cloud pipeline with local HTTP calls
-to vLLM server running gpt-oss-20b.
+to vLLM server running gpt-oss-20b/120b.
 """
 
 import json
