@@ -78,6 +78,13 @@ The generated file is `s3_notable_pipeline/TODOS.md`.
 - Scales automatically with notable volume
 - Automatic cleanup: Input notables and output reports are ephemeral, auto-deleted after configurable retention periods (default: 2 days for input, 7 days for output)
 
+### SOAR (Phantom) playbook template
+
+If you want SOAR to push notables directly to the S3 `incoming/` prefix, use:
+
+- Guide: [`SOAR_PLAYBOOK_PHANTOM.md`](SOAR_PLAYBOOK_PHANTOM.md)
+- Template: [`soar_playbook/phantom_notable_to_s3.py`](soar_playbook/phantom_notable_to_s3.py)
+
 ---
 
 ## Installation Requirements
