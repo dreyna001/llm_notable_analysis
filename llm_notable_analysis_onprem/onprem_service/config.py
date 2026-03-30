@@ -38,6 +38,7 @@ class Config:
         SPLUNK_API_TOKEN: Splunk token for REST sink authentication.
         SPLUNK_NOTABLE_UPDATE_PATH: Splunk notable update endpoint path.
         SPLUNK_SINK_ENABLED: Enables Splunk writeback sink.
+        SPL_QUERY_GENERATION_ENABLED: Enables per-hypothesis SPL query generation.
         SPLUNK_CA_BUNDLE: Optional CA bundle for TLS verification.
         MITRE_IDS_PATH: Path to ATT&CK technique ID allowlist JSON.
         INPUT_RETENTION_DAYS: Retention window for processed/quarantine inputs.
@@ -94,6 +95,7 @@ class Config:
     SPLUNK_API_TOKEN: str = ""
     SPLUNK_NOTABLE_UPDATE_PATH: str = "/services/notable_update"
     SPLUNK_SINK_ENABLED: bool = False
+    SPL_QUERY_GENERATION_ENABLED: bool = False
     SPLUNK_CA_BUNDLE: str = (
         ""  # Path to PEM CA bundle for Splunk TLS; empty = system trust store
     )
@@ -176,6 +178,10 @@ def load_config() -> Config:
             "SPLUNK_NOTABLE_UPDATE_PATH", "/services/notable_update"
         ),
         SPLUNK_SINK_ENABLED=os.getenv("SPLUNK_SINK_ENABLED", "false").lower()
+        in ("true", "1", "yes"),
+        SPL_QUERY_GENERATION_ENABLED=os.getenv(
+            "SPL_QUERY_GENERATION_ENABLED", "false"
+        ).lower()
         in ("true", "1", "yes"),
         SPLUNK_CA_BUNDLE=os.getenv("SPLUNK_CA_BUNDLE", ""),
         MITRE_IDS_PATH=Path(

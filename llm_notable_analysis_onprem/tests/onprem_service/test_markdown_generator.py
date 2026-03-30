@@ -134,6 +134,77 @@ class TestMarkdownGenerator(unittest.TestCase):
         self.assertIn("~~~text", md)
         self.assertIn('{"partial": true}', md)
 
+    def test_hypothesis_spl_renders_when_enabled(self) -> None:
+        llm_response = {
+            "metadata": {"spl_query_generation_enabled": True},
+            "alert_reconciliation": {"verdict": "uncertain"},
+            "competing_hypotheses": [
+                {
+                    "hypothesis_type": "benign",
+                    "hypothesis": "expected admin activity",
+                    "evidence_support": ["user=admin"],
+                    "evidence_gaps": ["missing baseline"],
+                    "best_pivots": [],
+                    "query_strategy": "resolve_unknown",
+                    "primary_spl_query": "search user=admin host=wkstn-22 earliest=-7d",
+                    "why_this_query": "tests historical frequency",
+                    "supports_if": "pattern repeats",
+                    "weakens_if": "pattern is first-seen",
+                }
+            ],
+            "evidence_vs_inference": {"evidence": [], "inferences": []},
+            "ioc_extraction": {},
+            "ttp_analysis": [],
+        }
+        markdown = generate_markdown_report("alert", llm_response, [])
+        self.assertIn("**Query strategy:** resolve_unknown", markdown)
+        self.assertIn("**Primary SPL query:**", markdown)
+        self.assertIn("```spl", markdown)
+        self.assertIn("supports hypothesis if", markdown.lower())
+
+    def test_hypothesis_spl_not_rendered_when_disabled(self) -> None:
+        llm_response = {
+            "metadata": {"spl_query_generation_enabled": False},
+            "alert_reconciliation": {"verdict": "uncertain"},
+            "competing_hypotheses": [
+                {
+                    "hypothesis_type": "benign",
+                    "hypothesis": "expected admin activity",
+                    "query_strategy": "resolve_unknown",
+                    "primary_spl_query": "search user=admin",
+                    "why_this_query": "x",
+                    "supports_if": "y",
+                    "weakens_if": "z",
+                }
+            ],
+            "evidence_vs_inference": {"evidence": [], "inferences": []},
+            "ioc_extraction": {},
+            "ttp_analysis": [],
+        }
+        markdown = generate_markdown_report("alert", llm_response, [])
+        self.assertNotIn("**Primary SPL query:**", markdown)
+        self.assertNotIn("```spl", markdown)
+
+    def test_hypothesis_spl_unavailable_note_renders(self) -> None:
+        llm_response = {
+            "metadata": {
+                "spl_query_generation_enabled": True,
+                "spl_query_generation_unavailable": True,
+                "spl_query_generation_unavailable_reason": "contract validation failed",
+            },
+            "alert_reconciliation": {"verdict": "uncertain"},
+            "competing_hypotheses": [
+                {"hypothesis_type": "benign", "hypothesis": "expected admin activity"}
+            ],
+            "evidence_vs_inference": {"evidence": [], "inferences": []},
+            "ioc_extraction": {},
+            "ttp_analysis": [],
+        }
+        markdown = generate_markdown_report("alert", llm_response, [])
+        self.assertIn("SPL query generation was enabled but unavailable", markdown)
+        self.assertIn("contract validation failed", markdown)
+        self.assertNotIn("**Primary SPL query:**", markdown)
+
 
 if __name__ == "__main__":
     unittest.main()

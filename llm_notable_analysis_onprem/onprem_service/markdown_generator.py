@@ -6,6 +6,31 @@ This module mirrors the report structure used in `s3_testing/markdown_generator.
 from typing import Dict, Any, List
 
 
+def _render_hypothesis_spl_block(lines: List[str], hypothesis: Dict[str, Any]) -> None:
+    """Render per-hypothesis SPL details when generation is enabled."""
+    strategy = str(hypothesis.get("query_strategy", "")).strip()
+    primary_query = str(hypothesis.get("primary_spl_query", "")).strip()
+    why_this_query = str(hypothesis.get("why_this_query", "")).strip()
+    supports_if = str(hypothesis.get("supports_if", "")).strip()
+    weakens_if = str(hypothesis.get("weakens_if", "")).strip()
+
+    if strategy:
+        lines.append(f"  - **Query strategy:** {strategy}\n")
+    if primary_query:
+        lines.append("  - **Primary SPL query:**\n")
+        lines.append("```spl\n")
+        lines.append(primary_query)
+        if not primary_query.endswith("\n"):
+            lines.append("\n")
+        lines.append("```\n")
+    if why_this_query:
+        lines.append(f"  - **Why this query:** {why_this_query}\n")
+    if supports_if:
+        lines.append(f"  - **Supports hypothesis if:** {supports_if}\n")
+    if weakens_if:
+        lines.append(f"  - **Weakens hypothesis if:** {weakens_if}\n")
+
+
 def generate_markdown_report(
     alert_text: str,
     llm_response: Dict[str, Any],
@@ -22,6 +47,14 @@ def generate_markdown_report(
         Markdown report string.
     """
     lines: List[str] = []
+    metadata = llm_response.get("metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    spl_enabled = bool(metadata.get("spl_query_generation_enabled", False))
+    spl_unavailable = bool(metadata.get("spl_query_generation_unavailable", False))
+    spl_unavailable_reason = str(
+        metadata.get("spl_query_generation_unavailable_reason", "")
+    ).strip()
 
     if llm_response.get("poc_unstructured_output"):
         reason = str(llm_response.get("poc_fallback_reason", "unknown"))
@@ -67,6 +100,16 @@ def generate_markdown_report(
     if "competing_hypotheses" in llm_response:
         ch = llm_response["competing_hypotheses"]
         lines.append("### Competing Hypotheses & Pivots\n\n")
+        if spl_enabled and spl_unavailable:
+            note = (
+                "SPL query generation was enabled but unavailable for this alert."
+                if not spl_unavailable_reason
+                else (
+                    "SPL query generation was enabled but unavailable for this alert: "
+                    f"{spl_unavailable_reason}"
+                )
+            )
+            lines.append(f"**Note:** {note}\n\n")
         for i, hyp in enumerate(ch, 1):
             hyp_type = hyp.get("hypothesis_type", "unknown").capitalize()
             lines.append(
@@ -89,6 +132,8 @@ def generate_markdown_report(
                         )
                     else:
                         lines.append(f"    - {pivot}\n")
+            if spl_enabled and not spl_unavailable and isinstance(hyp, dict):
+                _render_hypothesis_spl_block(lines, hyp)
             lines.append("\n")
 
     # Evidence vs Inference

@@ -165,6 +165,7 @@ Even with one-command install, these items remain environment-specific:
 - Confirm model weights are present at `/opt/models/gpt-oss-120b` (or set your chosen path in `vllm.service`).
 - Set `LLM_API_TOKEN` only if your vLLM command includes `--api-key`.
 - Set `SPLUNK_BASE_URL` / `SPLUNK_API_TOKEN` only when `SPLUNK_SINK_ENABLED=true`.
+- Set `SPL_QUERY_GENERATION_ENABLED=true` only when you want per-hypothesis SPL query generation in reports.
 - Add SOAR public key(s) to `/var/sftp/soar/.ssh/authorized_keys` only if using SOAR SFTP ingest.
 - Review the final `install.sh` "Non-fatal issues encountered" summary and resolve items before production.
 
@@ -231,6 +232,12 @@ sudo journalctl -u notable-analyzer -f
 ```
 
 ## Usage
+
+### Hypothesis SPL Query Generation (Optional)
+
+When `SPL_QUERY_GENERATION_ENABLED=true`, the structured analyzer attempts to add one
+primary SPL query per hypothesis in the "Competing Hypotheses & Pivots" report
+section. When disabled, no SPL query fields are requested or rendered.
 
 ## Knowledge Base Ingestion (RAG)
 

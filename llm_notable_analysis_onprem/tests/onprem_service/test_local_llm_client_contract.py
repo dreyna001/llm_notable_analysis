@@ -5,9 +5,11 @@ from llm_notable_analysis_onprem.onprem_service.config import Config
 from llm_notable_analysis_onprem.onprem_service.local_llm_client import (
     LocalLLMClient,
     _normalize_and_fill_defaults,
+    _validate_spl_query_contract,
     extract_json_object,
     extract_scored_ttps,
     strip_llm_thinking_preamble,
+    validate_competing_hypotheses_balance,
     validate_content_policies,
     validate_response_schema,
 )
@@ -153,6 +155,137 @@ class TestLocalLlmClientContract(unittest.TestCase):
         )
         self.assertIn("SOC CONTEXT RULES", prompt)
         self.assertIn("SOC_OPERATIONAL_CONTEXT", prompt)
+        self.assertNotIn("SPL QUERY GENERATION (Enabled)", prompt)
+
+    def test_build_prompt_includes_spl_rules_when_enabled(self) -> None:
+        client = LocalLLMClient(
+            config=Config(SPL_QUERY_GENERATION_ENABLED=True),
+            ttp_validator=_DummyValidator(),
+        )
+        prompt = client._build_prompt("alert text")
+        self.assertIn("SPL QUERY GENERATION (Enabled)", prompt)
+
+    def test_normalize_defaults_strips_spl_fields_when_disabled(self) -> None:
+        parsed = {
+            "alert_reconciliation": {},
+            "competing_hypotheses": [
+                {
+                    "hypothesis_type": "benign",
+                    "hypothesis": "normal admin action",
+                    "query_strategy": "resolve_unknown",
+                    "primary_spl_query": "search user=admin",
+                    "why_this_query": "test",
+                    "supports_if": "test",
+                    "weakens_if": "test",
+                }
+            ],
+            "evidence_vs_inference": {},
+            "ioc_extraction": {},
+            "ttp_analysis": [],
+        }
+        out = _normalize_and_fill_defaults(parsed, spl_query_enabled=False)
+        self.assertEqual(len(out["competing_hypotheses"]), 1)
+        hyp = out["competing_hypotheses"][0]
+        self.assertNotIn("query_strategy", hyp)
+        self.assertNotIn("primary_spl_query", hyp)
+
+    def test_normalize_defaults_keeps_spl_fields_when_enabled(self) -> None:
+        parsed = {
+            "alert_reconciliation": {},
+            "competing_hypotheses": [
+                {
+                    "hypothesis_type": "benign",
+                    "hypothesis": "normal admin action",
+                    "query_strategy": "Resolve_Unknown",
+                    "primary_spl_query": " search user=admin ",
+                    "why_this_query": " test ",
+                    "supports_if": " yes ",
+                    "weakens_if": " no ",
+                }
+            ],
+            "evidence_vs_inference": {},
+            "ioc_extraction": {},
+            "ttp_analysis": [],
+        }
+        out = _normalize_and_fill_defaults(parsed, spl_query_enabled=True)
+        hyp = out["competing_hypotheses"][0]
+        self.assertEqual(hyp["query_strategy"], "resolve_unknown")
+        self.assertEqual(hyp["primary_spl_query"], "search user=admin")
+        self.assertEqual(hyp["why_this_query"], "test")
+
+    def test_validate_competing_hypotheses_strict_requires_three_and_three(self) -> None:
+        payload = {
+            "competing_hypotheses": [
+                {"hypothesis_type": "benign"},
+                {"hypothesis_type": "benign"},
+                {"hypothesis_type": "benign"},
+                {"hypothesis_type": "adversary"},
+                {"hypothesis_type": "adversary"},
+                {"hypothesis_type": "unknown"},
+            ]
+        }
+        ok, err = validate_competing_hypotheses_balance(payload, strict=True)
+        self.assertFalse(ok)
+        self.assertIn("hypothesis_type", err or "")
+
+    def test_validate_spl_query_contract_rejects_placeholder_and_pseudo(self) -> None:
+        payload = {
+            "competing_hypotheses": [
+                {
+                    "hypothesis_type": "benign",
+                    "query_strategy": "resolve_unknown",
+                    "primary_spl_query": "search index=<INDEX> ...",
+                    "why_this_query": "a",
+                    "supports_if": "b",
+                    "weakens_if": "c",
+                },
+                {
+                    "hypothesis_type": "benign",
+                    "query_strategy": "resolve_unknown",
+                    "primary_spl_query": "search user=foo",
+                    "why_this_query": "a",
+                    "supports_if": "b",
+                    "weakens_if": "c",
+                },
+                {
+                    "hypothesis_type": "benign",
+                    "query_strategy": "resolve_unknown",
+                    "primary_spl_query": "search user=bar",
+                    "why_this_query": "a",
+                    "supports_if": "b",
+                    "weakens_if": "c",
+                },
+                {
+                    "hypothesis_type": "adversary",
+                    "query_strategy": "check_contradiction",
+                    "primary_spl_query": "search user=baz",
+                    "why_this_query": "a",
+                    "supports_if": "b",
+                    "weakens_if": "c",
+                },
+                {
+                    "hypothesis_type": "adversary",
+                    "query_strategy": "check_contradiction",
+                    "primary_spl_query": "search user=qux",
+                    "why_this_query": "a",
+                    "supports_if": "b",
+                    "weakens_if": "c",
+                },
+                {
+                    "hypothesis_type": "adversary",
+                    "query_strategy": "check_contradiction",
+                    "primary_spl_query": "search user=zzz",
+                    "why_this_query": "a",
+                    "supports_if": "b",
+                    "weakens_if": "c",
+                },
+            ]
+        }
+        ok, err = _validate_spl_query_contract(payload)
+        self.assertFalse(ok)
+        self.assertTrue(
+            "placeholder token" in (err or "") or "pseudo-query" in (err or "")
+        )
 
 
 if __name__ == "__main__":
