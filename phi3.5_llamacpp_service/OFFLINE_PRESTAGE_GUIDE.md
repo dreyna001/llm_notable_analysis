@@ -4,6 +4,20 @@ Purpose: run `llama-server` with Phi-3.5 GGUF on an airgapped host with **no web
 
 **Host OS packages (e.g. brand-new RHEL minimal):** see [`RHEL_SOFTWARE_DEPENDENCIES.md`](RHEL_SOFTWARE_DEPENDENCIES.md) for a full software dependency list.
 
+## 0) Install OS packages on the VM **before** `install_phi35_nonroot_offline.sh`
+
+On a **clean** image the installer will fail immediately if `cmake`, `make`, `curl`, or `sha256sum` is missing, and the compile step needs a C/C++ toolchain. The script **does not** run `dnf`/`yum` (non-root, offline-by-design). Install prerequisites **once** with sudo (or your SOE equivalent), **then** copy artifacts and run the bash installer.
+
+**Typical online RHEL / Rocky / Alma:**
+
+```bash
+sudo dnf install -y bash coreutils curl cmake make gcc gcc-c++
+```
+
+**Airgapped VM:** mirror the same RPM set (and dependencies) internally, then `dnf install` from your local repo or copied RPMs — same package list as above.
+
+Details, optional add-ons if CMake fails, and `PHI_SKIP_RUNTIME_BUILD` caveats: [`RHEL_SOFTWARE_DEPENDENCIES.md`](RHEL_SOFTWARE_DEPENDENCIES.md).
+
 ## 1) Pull artifacts on an internet-connected machine
 
 - `llama.cpp` source snapshot at pinned commit:

@@ -65,7 +65,10 @@ validate_positive_int() {
 }
 
 check_command() {
-    command -v "$1" >/dev/null 2>&1 || err "Required command not found: $1"
+    if command -v "$1" >/dev/null 2>&1; then
+        return 0
+    fi
+    err "Required command not found: $1. On a clean RHEL-class VM, install OS packages first (sudo once), then re-run this script. Example: sudo dnf install -y bash coreutils curl cmake make gcc gcc-c++. See phi3.5_llamacpp_service/RHEL_SOFTWARE_DEPENDENCIES.md"
 }
 
 ensure_dir() {
@@ -250,6 +253,7 @@ print_manual_cmd() {
 
 echo "=== Phi-3.5 llama.cpp install (offline, non-root) ==="
 echo "Running as: $(id -un) uid=$(id -u)"
+echo "Host prerequisites: cmake, make, curl, sha256sum; gcc + gcc-c++ to compile. Install with your OS package manager before this script (see RHEL_SOFTWARE_DEPENDENCIES.md)."
 echo ""
 
 validate_config

@@ -1,6 +1,6 @@
 # RHEL-class host software (`phi3.5_llamacpp_service`)
 
-Use this as a checklist for a **fresh minimal** RHEL, Rocky Linux, or AlmaLinux image before running `install_phi35_nonroot_offline.sh`. Substitute `dnf` with `microdnf` or `yum` if your image uses those.
+Use this as a checklist for a **fresh minimal** RHEL, Rocky Linux, or AlmaLinux image **before** running `install_phi35_nonroot_offline.sh`. The installer does not install RPMs for you; apply this checklist (or your SOE equivalent) first. The offline flow is summarized as step **0** in [`OFFLINE_PRESTAGE_GUIDE.md`](OFFLINE_PRESTAGE_GUIDE.md). Substitute `dnf` with `microdnf` or `yum` if your image uses those.
 
 Artifacts (llama.cpp source + GGUF) are **not** covered here; see `OFFLINE_PRESTAGE_GUIDE.md`.
 
