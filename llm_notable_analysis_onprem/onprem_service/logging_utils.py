@@ -31,7 +31,12 @@ def set_correlation_id(cid: Optional[str] = None) -> str:
 
 
 def get_correlation_id() -> str:
-    """Get the current correlation ID."""
+    """Get the current correlation ID from context-local storage.
+
+    Returns:
+        Correlation ID for the current request/work item, or an empty string
+        when no ID has been set.
+    """
     return _correlation_id.get()
 
 

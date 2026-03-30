@@ -232,6 +232,28 @@ sudo journalctl -u notable-analyzer -f
 
 ## Usage
 
+## Knowledge Base Ingestion (RAG)
+
+When `RAG_ENABLED=true`, the analyzer can inject SOC-specific operational context
+from local retrieval artifacts. Build/update those artifacts manually:
+
+```bash
+python3 -m onprem_rag.future.corpus_ingest \
+  --source-dir /opt/llm-notable-analysis/knowledge_base/source_docs \
+  --index-dir /opt/llm-notable-analysis/knowledge_base/index \
+  --embedding-model sentence-transformers/all-MiniLM-L6-v2
+```
+
+Supported source formats in `source_docs`:
+- `.docx`
+- `.txt`
+
+Generated artifacts in `index`:
+- `kb.sqlite3` (chunk metadata + FTS5)
+- `kb.faiss` (vector index)
+- `chunks.jsonl` (debug/exportable chunk corpus)
+- `ingest_report.json` (ingestion summary)
+
 ## Automated Tests
 
 Run the on-prem unittest suite from repo root:
@@ -396,9 +418,7 @@ The analyzer processes files matching `*.json` or `*.txt` in `INCOMING_DIR`.
 ### JSON (Recommended)
 
 - **File format**: UTF-8 JSON object
-- **Important limitation (current behavior)**: the current LLM prompt formatter only includes **top-level** values that are strings/numbers/booleans or lists. Nested objects may not be included in the prompt.
-  - **Future consideration**: once the customer’s notable schema is finalized, we will update the formatter (and this payload contract) to match that schema permanently.
-  - If you need to preserve the full notable today, include it as a string field (example: `raw_event`).
+- **Current behavior:** `.json` notables are passed to the LLM as raw JSON, and `.txt` notables are passed as raw text. The service does not require a fixed customer JSON schema for prompt input.
 
 **Required (minimum):**
 - `summary` (string): short description of the notable

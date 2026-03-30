@@ -72,6 +72,18 @@ class FreeformLLMClient:
         self.config = config
 
     def _call_llm(self, prompt_text: str) -> Tuple[str, float]:
+        """Send one freeform completion request to the local LLM endpoint.
+
+        Args:
+            prompt_text: Fully rendered prompt text.
+
+        Returns:
+            Tuple of `(response_text, elapsed_seconds)`.
+
+        Raises:
+            requests.exceptions.RequestException: If the HTTP call fails.
+            ValueError: If the response shape does not contain expected content.
+        """
         headers = {"Content-Type": "application/json"}
         if self.config.LLM_API_TOKEN:
             headers["Authorization"] = f"Bearer {self.config.LLM_API_TOKEN}"

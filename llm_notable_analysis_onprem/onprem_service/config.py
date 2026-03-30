@@ -11,7 +11,43 @@ from pathlib import Path
 
 @dataclass
 class Config:
-    """Service configuration container."""
+    """Service configuration container.
+
+    Attributes:
+        INGEST_MODE: Input ingestion mode (`file_drop` by default).
+        INCOMING_DIR: Directory watched for incoming notables.
+        PROCESSED_DIR: Directory for successfully processed notables.
+        QUARANTINE_DIR: Directory for failed/invalid notables.
+        REPORT_DIR: Directory for generated markdown reports.
+        ARCHIVE_DIR: Directory used by retention staging.
+        POLL_INTERVAL: Polling interval in seconds.
+        LLM_API_URL: Local vLLM/OpenAI-compatible endpoint URL.
+        LLM_API_TOKEN: Optional bearer token for LLM API authentication.
+        LLM_MODEL_NAME: Model identifier used for analysis.
+        LLM_MAX_TOKENS: Per-request generation token cap.
+        LLM_TIMEOUT: Request timeout in seconds.
+        RAG_ENABLED: Enables retrieval-augmented prompt grounding.
+        RAG_SQLITE_PATH: SQLite path for lexical retrieval index.
+        RAG_FAISS_PATH: FAISS path for vector retrieval index.
+        RAG_EMBEDDING_MODEL: Embedding model name/path.
+        RAG_MAX_SNIPPETS_120B: Max RAG snippets for 120b profile.
+        RAG_MAX_SNIPPETS_20B: Max RAG snippets for 20b profile.
+        RAG_CONTEXT_BUDGET_CHARS_120B: Context char budget for 120b profile.
+        RAG_CONTEXT_BUDGET_CHARS_20B: Context char budget for 20b profile.
+        SPLUNK_BASE_URL: Splunk base URL for notable update sink.
+        SPLUNK_API_TOKEN: Splunk token for REST sink authentication.
+        SPLUNK_NOTABLE_UPDATE_PATH: Splunk notable update endpoint path.
+        SPLUNK_SINK_ENABLED: Enables Splunk writeback sink.
+        SPLUNK_CA_BUNDLE: Optional CA bundle for TLS verification.
+        MITRE_IDS_PATH: Path to ATT&CK technique ID allowlist JSON.
+        INPUT_RETENTION_DAYS: Retention window for processed/quarantine inputs.
+        REPORT_RETENTION_DAYS: Retention window for generated reports.
+        ARCHIVE_RETENTION_DAYS: Retention window for archived files.
+        RETENTION_RUN_INTERVAL_SECONDS: Retention job interval.
+        CONCURRENCY_ENABLED: Enables threaded processing mode.
+        MAX_WORKERS: Thread-pool worker count when concurrency is enabled.
+        MAX_QUEUE_DEPTH: Queue depth limit for backpressure.
+    """
 
     # Ingest mode: file_drop (SOAR pushes via SFTP to INCOMING_DIR)
     INGEST_MODE: str = "file_drop"
@@ -34,6 +70,24 @@ class Config:
     LLM_MODEL_NAME: str = "gpt-oss-20b"
     LLM_MAX_TOKENS: int = 4096
     LLM_TIMEOUT: int = 120  # seconds
+
+    # Optional retrieval grounding (RAG)
+    RAG_ENABLED: bool = False
+    RAG_SQLITE_PATH: Path = field(
+        default_factory=lambda: Path(
+            "/opt/llm-notable-analysis/knowledge_base/index/kb.sqlite3"
+        )
+    )
+    RAG_FAISS_PATH: Path = field(
+        default_factory=lambda: Path(
+            "/opt/llm-notable-analysis/knowledge_base/index/kb.faiss"
+        )
+    )
+    RAG_EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
+    RAG_MAX_SNIPPETS_120B: int = 5
+    RAG_MAX_SNIPPETS_20B: int = 4
+    RAG_CONTEXT_BUDGET_CHARS_120B: int = 2200
+    RAG_CONTEXT_BUDGET_CHARS_20B: int = 1600
 
     # Splunk integration (optional)
     SPLUNK_BASE_URL: str = ""
@@ -92,6 +146,30 @@ def load_config() -> Config:
         LLM_MODEL_NAME=os.getenv("LLM_MODEL_NAME", "gpt-oss-20b"),
         LLM_MAX_TOKENS=int(os.getenv("LLM_MAX_TOKENS", "4096")),
         LLM_TIMEOUT=int(os.getenv("LLM_TIMEOUT", "120")),
+        RAG_ENABLED=os.getenv("RAG_ENABLED", "false").lower() in ("true", "1", "yes"),
+        RAG_SQLITE_PATH=Path(
+            os.getenv(
+                "RAG_SQLITE_PATH",
+                "/opt/llm-notable-analysis/knowledge_base/index/kb.sqlite3",
+            )
+        ),
+        RAG_FAISS_PATH=Path(
+            os.getenv(
+                "RAG_FAISS_PATH",
+                "/opt/llm-notable-analysis/knowledge_base/index/kb.faiss",
+            )
+        ),
+        RAG_EMBEDDING_MODEL=os.getenv(
+            "RAG_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
+        ),
+        RAG_MAX_SNIPPETS_120B=int(os.getenv("RAG_MAX_SNIPPETS_120B", "5")),
+        RAG_MAX_SNIPPETS_20B=int(os.getenv("RAG_MAX_SNIPPETS_20B", "4")),
+        RAG_CONTEXT_BUDGET_CHARS_120B=int(
+            os.getenv("RAG_CONTEXT_BUDGET_CHARS_120B", "2200")
+        ),
+        RAG_CONTEXT_BUDGET_CHARS_20B=int(
+            os.getenv("RAG_CONTEXT_BUDGET_CHARS_20B", "1600")
+        ),
         SPLUNK_BASE_URL=os.getenv("SPLUNK_BASE_URL", ""),
         SPLUNK_API_TOKEN=os.getenv("SPLUNK_API_TOKEN", ""),
         SPLUNK_NOTABLE_UPDATE_PATH=os.getenv(

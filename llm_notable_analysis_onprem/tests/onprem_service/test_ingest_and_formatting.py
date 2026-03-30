@@ -13,7 +13,7 @@ from llm_notable_analysis_onprem.onprem_service.onprem_main import _format_alert
 
 
 class TestIngestAndFormatting(unittest.TestCase):
-    def test_normalize_notable_json_extracts_risk_fields(self) -> None:
+    def test_normalize_notable_json_returns_parsed_payload(self) -> None:
         content = (
             '{"summary":"Suspicious login",'
             '"risk_score":85,'
@@ -24,43 +24,33 @@ class TestIngestAndFormatting(unittest.TestCase):
         out = normalize_notable(content, content_type="json")
 
         self.assertEqual(out["summary"], "Suspicious login")
-        self.assertEqual(out["risk_index"]["risk_score"], 85)
-        self.assertEqual(out["risk_index"]["source_product"], "Splunk ES")
-        self.assertEqual(out["risk_index"]["threat_category"], "Credential Access")
-        self.assertEqual(out["raw_log"]["user"], "admin")
+        self.assertEqual(out["risk_score"], 85)
+        self.assertEqual(out["source_product"], "Splunk ES")
+        self.assertEqual(out["threat_category"], "Credential Access")
+        self.assertEqual(out["user"], "admin")
 
-    def test_normalize_notable_text_uses_raw_event(self) -> None:
+    def test_normalize_notable_text_returns_raw_text(self) -> None:
         out = normalize_notable("plain alert text", content_type="text")
-        self.assertEqual(out["summary"], "plain alert text")
-        self.assertEqual(out["raw_log"], {"raw_event": "plain alert text"})
-        self.assertEqual(out["risk_index"]["source_product"], "OnPrem_Pipeline")
+        self.assertEqual(out, "plain alert text")
 
-    def test_get_notable_id_prefers_notable_id_and_sanitizes(self) -> None:
+    def test_get_notable_id_prefers_filename_stem_and_sanitizes(self) -> None:
         raw_log = {"notable_id": "abc/../def:ghi"}
         notable_id = get_notable_id(raw_log, Path("fallback.json"))
-        self.assertEqual(notable_id, "abc____def_ghi")
+        self.assertEqual(notable_id, "fallback")
 
-    def test_format_alert_for_llm_includes_primitives_and_lists_only(self) -> None:
-        normalized = {
-            "summary": "Suspicious auth event",
-            "risk_index": {
-                "risk_score": 72,
-                "source_product": "Splunk ES",
-                "threat_category": "Credential Access",
-            },
-            "raw_log": {
-                "user": "admin",
-                "src_ip": "203.0.113.45",
-                "flags": ["a", "b"],
-                "nested": {"ignored": True},
-            },
-        }
-        alert_text = _format_alert_for_llm(normalized)
-        self.assertIn("**Summary:** Suspicious auth event", alert_text)
-        self.assertIn("**Risk Score:** 72", alert_text)
-        self.assertIn("**user:** admin", alert_text)
-        self.assertIn("**flags:** a, b", alert_text)
-        self.assertNotIn("ignored", alert_text)
+    def test_format_alert_for_llm_uses_raw_json_for_json_input(self) -> None:
+        raw = '{"user":"admin","nested":{"src_ip":"203.0.113.45"}}'
+        payload = normalize_notable(raw, content_type="json")
+        alert_text = _format_alert_for_llm(
+            payload, raw_content=raw, content_type="json"
+        )
+        self.assertEqual(alert_text, raw)
+
+    def test_format_alert_for_llm_uses_raw_text_for_text_input(self) -> None:
+        alert_text = _format_alert_for_llm(
+            "plain alert text", raw_content="plain alert text", content_type="text"
+        )
+        self.assertEqual(alert_text, "plain alert text")
 
     def test_discover_files_returns_fifo_order(self) -> None:
         with tempfile.TemporaryDirectory() as td:

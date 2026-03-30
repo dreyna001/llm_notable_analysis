@@ -13,12 +13,13 @@ def generate_markdown_report(
 ) -> str:
     """Generate a markdown report from analysis results.
 
-    Sections:
-    - Alert reconciliation
-    - Competing hypotheses & pivots
-    - Evidence vs inference
-    - IOC extraction
-    - Scored TTPs (grouped by confidence)
+    Args:
+        alert_text: Original alert text sent to the model.
+        llm_response: Structured model response used for report sections.
+        scored_ttps: Validated TTP list with normalized `score` values.
+
+    Returns:
+        Markdown report string.
     """
     lines: List[str] = []
 

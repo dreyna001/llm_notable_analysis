@@ -1,7 +1,9 @@
 import unittest
 
 from llm_notable_analysis_onprem.onprem_service import local_llm_client as llm_client_module
+from llm_notable_analysis_onprem.onprem_service.config import Config
 from llm_notable_analysis_onprem.onprem_service.local_llm_client import (
+    LocalLLMClient,
     _normalize_and_fill_defaults,
     extract_json_object,
     extract_scored_ttps,
@@ -9,6 +11,11 @@ from llm_notable_analysis_onprem.onprem_service.local_llm_client import (
     validate_content_policies,
     validate_response_schema,
 )
+
+
+class _DummyValidator:
+    def filter_valid_ttps(self, scored_ttps):
+        return scored_ttps
 
 
 class TestLocalLlmClientContract(unittest.TestCase):
@@ -137,6 +144,15 @@ class TestLocalLlmClientContract(unittest.TestCase):
         ok, err = validate_content_policies(payload)
         self.assertFalse(ok)
         self.assertIn("Disallowed PLACEHOLDER token", err or "")
+
+    def test_build_prompt_includes_soc_context_rules_block(self) -> None:
+        client = LocalLLMClient(config=Config(), ttp_validator=_DummyValidator())
+        prompt = client._build_prompt(
+            "alert text",
+            soc_operational_context="SOC_OPERATIONAL_CONTEXT\n[1] [a :: b] c\n",
+        )
+        self.assertIn("SOC CONTEXT RULES", prompt)
+        self.assertIn("SOC_OPERATIONAL_CONTEXT", prompt)
 
 
 if __name__ == "__main__":

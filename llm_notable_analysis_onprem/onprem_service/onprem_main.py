@@ -9,13 +9,14 @@ Supports optional bounded concurrency via ThreadPoolExecutor (disabled by defaul
 """
 
 import logging
+import json
 import signal
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, Future
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Set
+from typing import Any, List, Optional, Set
 
 from .config import load_config, Config
 from .logging_utils import setup_logging, get_logger, set_correlation_id
@@ -78,12 +79,18 @@ def process_notable(
         # Determine content type
         content_type = "json" if file_path.suffix == ".json" else "text"
 
-        # Normalize notable
-        normalized = normalize_notable(content, content_type)
-        notable_id = get_notable_id(normalized.get("raw_log", {}), file_path)
+        # Keep the alert payload format-agnostic:
+        # - valid JSON stays JSON
+        # - text stays text
+        alert_payload = normalize_notable(content, content_type)
+        notable_id = get_notable_id(alert_payload, file_path)
 
         # Build alert text for LLM
-        alert_text = _format_alert_for_llm(normalized)
+        alert_text = _format_alert_for_llm(
+            alert_payload,
+            raw_content=content,
+            content_type=content_type,
+        )
 
         # Get current time for time window references
         alert_time = datetime.now(timezone.utc).isoformat()
@@ -135,53 +142,32 @@ def process_notable(
         return False
 
 
-def _format_alert_for_llm(normalized: dict) -> str:
-    """Format normalized notable for LLM input.
+def _format_alert_for_llm(
+    alert_payload: Any,
+    *,
+    raw_content: Optional[str] = None,
+    content_type: Optional[str] = None,
+) -> str:
+    """Format the alert payload for LLM input.
 
     Args:
-        normalized: Normalized notable dict with summary, risk_index, raw_log.
+        alert_payload: Parsed JSON payload or raw text.
+        raw_content: Original file contents, used to preserve JSON as submitted.
+        content_type: Optional source type hint ('json' or 'text').
 
     Returns:
         Formatted alert text string.
     """
-    # NOTE (future consideration): This formatter is intentionally simple today and only emits
-    # top-level primitive fields (str/int/float/bool) and lists from `raw_log`. Once the customer
-    # input schema is finalized, we should update this function (and the SOAR payload contract)
-    # to include the exact stable fields we want the LLM to see, potentially including a
-    # pretty-printed raw JSON block for nested structures. Until then, keep behavior stable.
-    lines = []
+    if isinstance(alert_payload, str):
+        return alert_payload
 
-    # Summary
-    if normalized.get("summary"):
-        lines.append(f"**Summary:** {normalized['summary']}")
+    if content_type == "json" and (raw_content or "").strip():
+        return raw_content.strip()
 
-    # Risk index fields
-    risk_index = normalized.get("risk_index", {})
-    if risk_index.get("risk_score") and risk_index["risk_score"] != "N/A":
-        lines.append(f"**Risk Score:** {risk_index['risk_score']}")
-    if risk_index.get("source_product"):
-        lines.append(f"**Source Product:** {risk_index['source_product']}")
-    if risk_index.get("threat_category") and risk_index["threat_category"] != "N/A":
-        lines.append(f"**Threat Category:** {risk_index['threat_category']}")
-
-    # Raw log fields
-    raw_log = normalized.get("raw_log", {})
-    if isinstance(raw_log, dict):
-        for key, value in raw_log.items():
-            if key not in (
-                "summary",
-                "risk_score",
-                "source_product",
-                "threat_category",
-            ):
-                if isinstance(value, (str, int, float, bool)):
-                    lines.append(f"**{key}:** {value}")
-                elif isinstance(value, list):
-                    lines.append(f"**{key}:** {', '.join(str(v) for v in value)}")
-    elif isinstance(raw_log, str):
-        lines.append(raw_log)
-
-    return "\n".join(lines)
+    try:
+        return json.dumps(alert_payload, ensure_ascii=True, separators=(",", ":"))
+    except TypeError:
+        return str(alert_payload)
 
 
 def ensure_directories(config: Config, logger: logging.Logger):

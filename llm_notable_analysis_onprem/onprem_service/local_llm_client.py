@@ -36,6 +36,12 @@ def strip_llm_thinking_preamble(text: str) -> str:
     """Drop Qwen-style thinking trace; return the tail after the last think closer.
 
     If no marker is present, returns ``text`` unchanged (aside from outer strip).
+
+    Args:
+        text: Raw model output text.
+
+    Returns:
+        Cleaned response text suitable for downstream JSON parsing.
     """
     if not text or _QWEN_THINK_END not in text:
         return text.strip() if text else text
@@ -44,6 +50,14 @@ def strip_llm_thinking_preamble(text: str) -> str:
 
 
 def _model_name_suggests_qwen(model_name: str) -> bool:
+    """Return whether model name likely refers to a Qwen-family model.
+
+    Args:
+        model_name: Configured model name.
+
+    Returns:
+        True when the model name includes `qwen` (case-insensitive).
+    """
     return "qwen" in (model_name or "").lower()
 
 
@@ -55,6 +69,15 @@ class _RequestsPostSession:
     """
 
     def post(self, *args, **kwargs):
+        """Call `requests.post` while normalizing mock/test response attributes.
+
+        Args:
+            *args: Positional arguments forwarded to `requests.post`.
+            **kwargs: Keyword arguments forwarded to `requests.post`.
+
+        Returns:
+            Response-like object with normalized `status_code` and `text` fields.
+        """
         response = requests.post(*args, **kwargs)
 
         # Some unit tests use MagicMock responses without status_code; default to
@@ -92,7 +115,15 @@ _COMMON_RESULT_WRAPPER_KEYS = (
 
 
 def _normalize_llm_result_shape(result: Any) -> Any:
-    """Normalize common wrapper shapes around the expected top-level schema."""
+    """Normalize common wrapper shapes around the expected top-level schema.
+
+    Args:
+        result: Parsed model output object.
+
+    Returns:
+        Unwrapped dict when known wrapper keys are detected; otherwise returns
+        `result` unchanged.
+    """
     if not isinstance(result, dict):
         return result
 
@@ -203,6 +234,14 @@ RULES:
 - Never output example.com or PLACEHOLDER anywhere.
 """.strip()
 
+SOC_CONTEXT_RULES = """
+SOC CONTEXT RULES:
+- The SOC_OPERATIONAL_CONTEXT block is operational guidance only.
+- Never treat SOC_OPERATIONAL_CONTEXT as direct alert evidence.
+- Never copy SOC context into evidence_vs_inference.evidence, ttp_analysis[*].evidence_fields, or ioc_extraction unless present in SECURITY ALERT INPUT.
+- If SOC context is weak, missing, or conflicting, keep guidance broad and explicitly use "unknown" where needed.
+""".strip()
+
 
 REPAIR_PROMPT_TEMPLATE_RAW_JSON = """Your previous response could not be parsed or validated.
 
@@ -249,6 +288,12 @@ def validate_competing_hypotheses_balance(
     In practice, some local models intermittently violate this constraint even when
     asked. For resilience, we only enforce "list of objects" here and treat count/
     balance as best-effort (the markdown generator can handle an empty list).
+
+    Args:
+        result: Parsed structured model output.
+
+    Returns:
+        Tuple of `(is_valid, error_message)`.
     """
     ch = result.get("competing_hypotheses")
     if ch is None:
@@ -262,7 +307,14 @@ def validate_competing_hypotheses_balance(
 
 
 def _coerce_ioc_extraction(value: Any) -> Dict[str, Any]:
-    """Coerce ioc_extraction into the dict shape expected by markdown rendering."""
+    """Coerce IOC payload into stable markdown-rendering shape.
+
+    Args:
+        value: Arbitrary model-provided IOC structure.
+
+    Returns:
+        Dict with known IOC keys mapped to lists of strings.
+    """
     base: Dict[str, Any] = {
         "ip_addresses": [],
         "domains": [],
@@ -313,6 +365,14 @@ def _coerce_ioc_extraction(value: Any) -> Dict[str, Any]:
 
 
 def _coerce_evidence_vs_inference(value: Any) -> Dict[str, Any]:
+    """Coerce evidence/inference payload into a stable dict contract.
+
+    Args:
+        value: Arbitrary model-provided evidence/inference shape.
+
+    Returns:
+        Dict with `evidence` and `inferences` lists of strings.
+    """
     base: Dict[str, Any] = {"evidence": [], "inferences": []}
     if isinstance(value, dict):
         ev = value.get("evidence", [])
@@ -477,7 +537,15 @@ def _normalize_and_fill_defaults(parsed: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _iter_strings(obj: Any, *, path: str = "") -> List[Tuple[str, str]]:
-    """Collect (path, value) for all string leaves in a nested structure."""
+    """Collect all string leaf nodes from nested dict/list structures.
+
+    Args:
+        obj: Nested object to walk.
+        path: Current JSON-like path during recursion.
+
+    Returns:
+        List of `(path, value)` string pairs.
+    """
     found: List[Tuple[str, str]] = []
     if isinstance(obj, dict):
         for k, v in obj.items():
@@ -493,7 +561,14 @@ def _iter_strings(obj: Any, *, path: str = "") -> List[Tuple[str, str]]:
 
 
 def validate_content_policies(result: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
-    """Validate policy constraints not fully expressible via JSON schema."""
+    """Validate policy constraints not fully expressible via JSON schema.
+
+    Args:
+        result: Parsed structured model output.
+
+    Returns:
+        Tuple of `(is_valid, error_message)`.
+    """
     for p, s in _iter_strings(result):
         s_lower = s.lower()
         if "example.com" in s_lower:
@@ -519,6 +594,12 @@ def extract_scored_ttps(result: Dict[str, Any]) -> List[Dict[str, Any]]:
     Mirrors the post-processing used in `s3_testing/ttp_analyzer.py`:
     - emits a stable shape used by markdown rendering
     - normalizes score from confidence_score/score/confidence
+
+    Args:
+        result: Parsed structured model output.
+
+    Returns:
+        List of normalized scored TTP dictionaries.
     """
     scored: List[Dict[str, Any]] = []
     ttp_list = result.get("ttp_analysis", [])
@@ -553,7 +634,14 @@ def extract_scored_ttps(result: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _extract_brace_balanced_object(text: str) -> Optional[str]:
-    """Extract the first complete brace-balanced JSON object from text."""
+    """Extract the first complete brace-balanced JSON object from text.
+
+    Args:
+        text: Candidate text beginning with `{`.
+
+    Returns:
+        Extracted JSON object string, or None when no balanced object exists.
+    """
     if not text or not text.startswith("{"):
         return None
 
@@ -588,7 +676,14 @@ def _extract_brace_balanced_object(text: str) -> Optional[str]:
 
 
 def extract_json_object(raw_text: str) -> Tuple[str, Optional[str]]:
-    """Extract a JSON object from text that may contain fences, preamble, or trailing content."""
+    """Extract JSON object text from a model response.
+
+    Args:
+        raw_text: Raw model response text that may include preamble or fences.
+
+    Returns:
+        Tuple of `(json_candidate, extraction_note)`.
+    """
     if not raw_text:
         return raw_text, None
 
@@ -637,7 +732,20 @@ def build_poc_fallback_llm_payload(
     elapsed_primary: float,
     elapsed_repair: Optional[float],
 ) -> Dict[str, Any]:
-    """When strict JSON/schema validation fails, preserve model text for PoC review."""
+    """Build fallback payload that preserves raw model text for PoC review.
+
+    Args:
+        primary_text: Raw text from the primary model call.
+        repair_text: Raw text from schema-repair call, if attempted.
+        reason: Short reason for fallback.
+        model_name: Model identifier used for the calls.
+        attempt: Attempt number that produced fallback.
+        elapsed_primary: Primary call duration in seconds.
+        elapsed_repair: Optional repair call duration in seconds.
+
+    Returns:
+        JSON-serializable fallback payload aligned to report rendering contract.
+    """
     primary_text = (primary_text or "").strip()
     repair_text = (repair_text or "").strip()
     combined = primary_text
@@ -718,8 +826,69 @@ class LocalLLMClient:
             ),
             session=_RequestsPostSession(),
         )
+        self._rag_provider = self._init_rag_provider()
 
-    def _build_prompt(self, alert_text: str, alert_time: Optional[str] = None) -> str:
+    def _init_rag_provider(self):
+        """Initialize optional RAG context provider (best-effort).
+
+        Returns:
+            RAG context provider instance when enabled/available, otherwise None.
+        """
+        if not bool(getattr(self.config, "RAG_ENABLED", False)):
+            return None
+        try:
+            from onprem_rag.future.rag_config import RAGConfig
+            from onprem_rag.future.retrieval import RAGContextProvider
+
+            rag_cfg = RAGConfig(
+                enabled=True,
+                sqlite_path=self.config.RAG_SQLITE_PATH,
+                faiss_path=self.config.RAG_FAISS_PATH,
+                embedding_model_name=self.config.RAG_EMBEDDING_MODEL,
+                max_snippets_120b=self.config.RAG_MAX_SNIPPETS_120B,
+                max_snippets_20b=self.config.RAG_MAX_SNIPPETS_20B,
+                context_budget_chars_120b=self.config.RAG_CONTEXT_BUDGET_CHARS_120B,
+                context_budget_chars_20b=self.config.RAG_CONTEXT_BUDGET_CHARS_20B,
+            )
+            provider = RAGContextProvider.from_config(rag_cfg)
+            if provider is None:
+                logger.warning("RAG is enabled but provider initialization was skipped.")
+            else:
+                logger.info(
+                    "RAG provider enabled with sqlite=%s faiss=%s",
+                    rag_cfg.sqlite_path,
+                    rag_cfg.faiss_path,
+                )
+            return provider
+        except Exception as exc:
+            logger.warning("Failed to initialize RAG provider; continuing without RAG: %s", exc)
+            return None
+
+    def _build_soc_operational_context(self, alert_text: str) -> str:
+        """Build SOC operational context block from retrieval layer.
+
+        Args:
+            alert_text: Prompt-formatted alert text.
+
+        Returns:
+            Rendered `SOC_OPERATIONAL_CONTEXT` block or an empty string.
+        """
+        if self._rag_provider is None:
+            return ""
+        try:
+            return self._rag_provider.build_context(
+                alert_text=alert_text, llm_model_name=self.config.LLM_MODEL_NAME
+            )
+        except Exception as exc:
+            logger.warning("RAG context build failed; continuing without context: %s", exc)
+            return ""
+
+    def _build_prompt(
+        self,
+        alert_text: str,
+        alert_time: Optional[str] = None,
+        soc_operational_context: str = "",
+    ) -> str:
         """Build the analysis prompt.
 
         Ported from s3_notable_pipeline/ttp_analyzer.py format_alert_input().
@@ -727,6 +896,7 @@ class LocalLLMClient:
         Args:
             alert_text: The alert content to analyze.
             alert_time: Optional timestamp for time window references.
+            soc_operational_context: Optional retrieval-grounded SOC context block.
 
         Returns:
             Formatted prompt string.
@@ -739,6 +909,10 @@ class LocalLLMClient:
                 "Output policy: Respond with a single JSON object only—no markdown fences, "
                 "no text before or after the object. /no_think\n\n"
             )
+
+        soc_context_block = (soc_operational_context or "").strip()
+        if not soc_context_block:
+            soc_context_block = "SOC_OPERATIONAL_CONTEXT\n(none)\n"
 
         return f"""{qwen_json_hint}You are a cybersecurity expert mapping MITRE ATT&CK techniques from a single alert.
 {alert_time_str}
@@ -758,6 +932,12 @@ Use MITRE ATT&CK v17 technique IDs (format: T#### or T####.###). If unsure, omit
 
 SECURITY ALERT INPUT:
 {alert_text}
+
+---
+
+{soc_context_block}
+
+{SOC_CONTEXT_RULES}
 
 ---
 
@@ -835,7 +1015,10 @@ SECURITY ALERT INPUT:
             logger.error("Alert text is empty or whitespace only")
             return {"error": "Empty alert text", "ttp_analysis": []}
 
-        prompt = self._build_prompt(alert_text, alert_time)
+        soc_context = self._build_soc_operational_context(alert_text)
+        prompt = self._build_prompt(
+            alert_text, alert_time, soc_operational_context=soc_context
+        )
 
         def _call_llm(prompt_text: str) -> Tuple[str, float]:
             result = self._sdk_client.complete(
@@ -921,6 +1104,8 @@ SECURITY ALERT INPUT:
                         "prompt_length": len(prompt),
                         "attempt": attempt + 1,
                         "repair_attempted": False,
+                        "soc_context_included": bool(soc_context),
+                        "soc_context_chars": len(soc_context),
                     }
                     final_obj["raw_response"] = llm_text
                     return final_obj
@@ -948,6 +1133,8 @@ SECURITY ALERT INPUT:
                         "attempt": attempt + 1,
                         "repair_attempted": True,
                         "repair_reason": last_error,
+                        "soc_context_included": bool(soc_context),
+                        "soc_context_chars": len(soc_context),
                     }
                     final_obj2["raw_response"] = llm_text2
                     return final_obj2

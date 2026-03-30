@@ -8,7 +8,7 @@ import json
 import logging
 import shutil
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any, List, Optional
 
 from .config import Config
 
@@ -37,71 +37,45 @@ def discover_files(config: Config) -> List[Path]:
     return files
 
 
-def normalize_notable(content: str, content_type: str = "text") -> Dict[str, Any]:
-    """Normalize notable content into internal alert structure.
-
-    Mirrors the normalize_notable() function from lambda_handler.py.
+def normalize_notable(content: str, content_type: str = "text") -> Any:
+    """Normalize notable content into a format-agnostic alert payload.
 
     Args:
         content: Raw content from file (JSON string or plain text).
         content_type: Type hint for content ('json' or 'text').
 
     Returns:
-        Dict with normalized alert containing summary, risk_index, and raw_log.
+        Parsed JSON object for JSON alerts when valid; otherwise raw text.
     """
-    summary = ""
-    risk_index = {
-        "risk_score": "N/A",
-        "source_product": "OnPrem_Pipeline",
-        "threat_category": "N/A",
-    }
-    raw_log: Dict[str, Any] = {}
-
-    # Try to parse as JSON first
-    if content_type == "json" or content.strip().startswith("{"):
+    stripped = (content or "").strip()
+    if content_type == "json" or stripped.startswith("{") or stripped.startswith("["):
         try:
-            parsed_json = json.loads(content)
-            if isinstance(parsed_json, dict):
-                summary = parsed_json.get("summary", "File-submitted notable")
-                # Extract risk_index fields if present
-                if "risk_score" in parsed_json:
-                    risk_index["risk_score"] = parsed_json["risk_score"]
-                if "source_product" in parsed_json:
-                    risk_index["source_product"] = parsed_json["source_product"]
-                if "threat_category" in parsed_json:
-                    risk_index["threat_category"] = parsed_json["threat_category"]
-                raw_log = parsed_json
-            else:
-                summary = content[:400] if len(content) > 400 else content
-                raw_log = {"raw_event": content}
+            return json.loads(content)
         except json.JSONDecodeError:
             logger.warning("Failed to parse content as JSON, treating as raw text")
-            summary = content[:400] if len(content) > 400 else content
-            raw_log = {"raw_event": content}
-    else:
-        summary = content[:400] if len(content) > 400 else content
-        raw_log = {"raw_event": content}
-
-    return {"summary": summary, "risk_index": risk_index, "raw_log": raw_log}
+    return content
 
 
-def get_notable_id(raw_log: Dict[str, Any], file_path: Path) -> str:
-    """Extract or generate a notable ID for output file naming.
+def get_notable_id(alert_payload: Any, file_path: Path) -> str:
+    """Extract or generate a report identifier for output file naming.
 
     Args:
-        raw_log: Parsed notable data (may contain notable_id, event_id, etc.).
-        file_path: Original file path (used as fallback).
+        alert_payload: Parsed alert object or raw text.
+        file_path: Original file path (used as primary identifier source).
 
     Returns:
-        Sanitized notable ID string (safe for filenames).
+        Sanitized identifier string (safe for filenames).
     """
-    # Priority: notable_id > event_id > search_name > file stem
-    raw_id = (
-        raw_log.get("notable_id")
-        or raw_log.get("event_id")
-        or raw_log.get("search_name", "")[:50].replace(" ", "_")
-        or file_path.stem
-    )
+    # Priority agreed for format-agnostic input path:
+    # 1) filename stem
+    # 2) common alert keys when the filename stem is unusable
+    raw_id = file_path.stem
+    if not raw_id and isinstance(alert_payload, dict):
+        raw_id = (
+            alert_payload.get("notable_id")
+            or alert_payload.get("event_id")
+            or str(alert_payload.get("search_name", ""))[:50].replace(" ", "_")
+        )
 
     # Sanitize for filename safety (no path traversal, no special chars)
     sanitized = "".join(c if c.isalnum() or c in "-_" else "_" for c in str(raw_id))

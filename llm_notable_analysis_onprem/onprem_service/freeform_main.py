@@ -40,12 +40,27 @@ def signal_handler(signum, frame):
     _shutdown_requested = True
 
 
-def _format_alert_for_llm(normalized: dict) -> str:
+def _format_alert_for_llm(
+    normalized: dict,
+    *,
+    raw_content: str = "",
+    content_type: str = "json",
+) -> str:
+    """Format normalized alert payload using the shared on-prem formatter.
+
+    Args:
+        normalized: Parsed alert payload (dict for JSON alerts or wrapper for text).
+        raw_content: Original file content before normalization.
+        content_type: Source type hint (`json` or `text`).
+
+    Returns:
+        Prompt-ready alert text.
+    """
     # Reuse the existing formatter from onprem_main to keep inputs consistent.
     # Imported lazily to avoid circular imports.
     from .onprem_main import _format_alert_for_llm as _fmt
 
-    return _fmt(normalized)
+    return _fmt(normalized, raw_content=raw_content, content_type=content_type)
 
 
 def process_notable_freeform(
@@ -75,10 +90,14 @@ def process_notable_freeform(
             return False
 
         content_type = "json" if file_path.suffix == ".json" else "text"
-        normalized = normalize_notable(content, content_type)
-        notable_id = get_notable_id(normalized.get("raw_log", {}), file_path)
+        alert_payload = normalize_notable(content, content_type)
+        notable_id = get_notable_id(alert_payload, file_path)
 
-        alert_text = _format_alert_for_llm(normalized)
+        alert_text = _format_alert_for_llm(
+            alert_payload,
+            raw_content=content,
+            content_type=content_type,
+        )
 
         logger.info("Sending to LLM for freeform analysis...")
         result = llm_client.analyze_alert_freeform(alert_text)

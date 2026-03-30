@@ -32,7 +32,11 @@ PROCESS_SEVERITIES = {"medium", "high", "critical"}  # empty set means allow all
 
 
 def on_start(container):
-    """Playbook entry point."""
+    """Playbook entry point.
+
+    Args:
+        container: Phantom container dictionary.
+    """
     phantom.debug("Starting Phantom notable->analyzer playbook")
 
     if not _should_process_container(container):
@@ -76,12 +80,25 @@ def on_start(container):
 
 
 def on_finish(container, summary):
-    """Playbook completion hook."""
+    """Playbook completion hook.
+
+    Args:
+        container: Phantom container dictionary.
+        summary: Phantom playbook summary payload.
+    """
     phantom.debug("Finished Phantom notable->analyzer playbook")
     return
 
 
 def _should_process_container(container):
+    """Apply routing gates to decide whether a container should be processed.
+
+    Args:
+        container: Phantom container dictionary.
+
+    Returns:
+        True when label/status/severity gates pass.
+    """
     label = (container.get("label") or "").lower()
     status = (container.get("status") or "").lower()
     severity = (container.get("severity") or "").lower()
@@ -97,7 +114,14 @@ def _should_process_container(container):
 
 
 def _extract_notable_fields(container):
-    """Extract common notable-level fields from the SOAR container."""
+    """Extract common notable-level fields from the SOAR container.
+
+    Args:
+        container: Phantom container dictionary.
+
+    Returns:
+        Flat notable metadata dictionary used by payload building.
+    """
     return {
         "container_id": str(container.get("id", "")),
         "name": container.get("name") or "",
@@ -111,7 +135,14 @@ def _extract_notable_fields(container):
 
 
 def _collect_supporting_events(container):
-    """Collect supporting artifact rows for context."""
+    """Collect supporting artifact rows for context.
+
+    Args:
+        container: Phantom container dictionary.
+
+    Returns:
+        Tuple of `(events, event_summaries)` built from artifact CEF records.
+    """
     rows = phantom.collect2(
         container=container,
         datapath=["artifact:*.id", "artifact:*.name", "artifact:*.cef"],
@@ -139,7 +170,17 @@ def _collect_supporting_events(container):
 
 
 def _build_payload(notable, container, supporting_events, supporting_event_summaries):
-    """Build analyzer-compatible payload."""
+    """Build analyzer-compatible payload.
+
+    Args:
+        notable: Normalized notable metadata.
+        container: Full Phantom container dictionary.
+        supporting_events: Structured supporting event records.
+        supporting_event_summaries: Compact CEF JSON summaries.
+
+    Returns:
+        JSON-serializable payload dictionary.
+    """
     now_iso = datetime.now(timezone.utc).isoformat()
 
     # Identifier selection strategy:
@@ -177,7 +218,15 @@ def _build_payload(notable, container, supporting_events, supporting_event_summa
 
 
 def _write_payload_to_temp_file(payload):
-    """Write JSON payload to local temp file; return (path, remote_name)."""
+    """Write payload JSON to local temp file.
+
+    Args:
+        payload: JSON-serializable payload dictionary.
+
+    Returns:
+        Tuple of `(local_path, remote_file_name)` on success; `(None, None)` on
+        write failure.
+    """
     finding_id = _safe_filename(payload.get("finding_id", "unknown"))
     remote_file_name = "{}.json".format(finding_id)
 
@@ -195,13 +244,32 @@ def _write_payload_to_temp_file(payload):
 
 
 def _safe_filename(value):
+    """Sanitize identifier text for safe filename usage.
+
+    Args:
+        value: Raw identifier value.
+
+    Returns:
+        ASCII-safe identifier capped to 100 characters.
+    """
     value = str(value or "unknown")
     safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in value)
     return safe[:100] or "unknown"
 
 
 def _upload_done(action, success, container, results, handle):
-    """Callback after SFTP action finishes."""
+    """Handle callback after SFTP upload action finishes.
+
+    Args:
+        action: Phantom action name.
+        success: Whether the action succeeded.
+        container: Phantom container dictionary.
+        results: Action results payload.
+        handle: Phantom callback handle.
+
+    Returns:
+        None.
+    """
     if success:
         phantom.debug("Uploaded notable payload to analyzer incoming directory")
         phantom.add_note(
