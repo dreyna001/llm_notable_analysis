@@ -9,6 +9,7 @@ import json
 import os
 import logging
 import time
+import traceback
 import boto3
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote_plus
@@ -366,7 +367,6 @@ def handler(event, context):
             
         except Exception as e:
             logger.error(f"Error processing record: {str(e)}")
-            import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             results.append({
                 "key": record.get('s3', {}).get('object', {}).get('key', 'unknown'),

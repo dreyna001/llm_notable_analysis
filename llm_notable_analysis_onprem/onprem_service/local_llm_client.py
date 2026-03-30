@@ -975,6 +975,8 @@ SECURITY ALERT INPUT:
             parsed = json.loads(candidate)
         except json.JSONDecodeError:
             # Some models return Python-like dicts (single quotes). Try a safe parse.
+            # IMPORTANT: This fallback is only for repairing model output text, not
+            # for parsing external/untrusted input payloads.
             try:
                 parsed = ast.literal_eval(candidate)
             except (SyntaxError, ValueError) as exc:
