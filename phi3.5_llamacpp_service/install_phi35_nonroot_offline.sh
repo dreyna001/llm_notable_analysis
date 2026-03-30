@@ -240,9 +240,12 @@ start_background() {
 }
 
 print_manual_cmd() {
-    cat <<EOF
-$PHI_SERVER_BIN --model "$PHI_MODEL_PATH" --host "$PHI_HOST" --port "$PHI_PORT" --threads "$PHI_THREADS" --threads-batch "$PHI_THREADS_BATCH" --parallel "$PHI_PARALLEL" --ctx-size "$PHI_CTX_SIZE" --n-predict "$PHI_N_PREDICT" --cache-type-k "$PHI_CACHE_TYPE_K" --cache-type-v "$PHI_CACHE_TYPE_V" --metrics --no-webui
-EOF
+    # Avoid a closing-EOF heredoc here: fragile when the script is copied through
+    # mail clients that drop or alter the lone "EOF" line.
+    printf '%s --model "%s" --host "%s" --port "%s" --threads "%s" --threads-batch "%s" --parallel "%s" --ctx-size "%s" --n-predict "%s" --cache-type-k "%s" --cache-type-v "%s" --metrics --no-webui\n' \
+        "$PHI_SERVER_BIN" "$PHI_MODEL_PATH" "$PHI_HOST" "$PHI_PORT" \
+        "$PHI_THREADS" "$PHI_THREADS_BATCH" "$PHI_PARALLEL" "$PHI_CTX_SIZE" \
+        "$PHI_N_PREDICT" "$PHI_CACHE_TYPE_K" "$PHI_CACHE_TYPE_V"
 }
 
 echo "=== Phi-3.5 llama.cpp install (offline, non-root) ==="
