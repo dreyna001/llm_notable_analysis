@@ -4,6 +4,9 @@ Send one notable + supporting events to s3_notable_pipeline via S3 object upload
 
 This is a baseline template with placeholder AWS/S3 values. Update constants
 and action parameter keys to match your SOAR AWS S3 app integration.
+
+Payload is intentionally format-agnostic (raw notable/container context),
+so the AWS analyzer can ingest it as generic JSON without PoC field mapping.
 """
 
 import json
@@ -42,8 +45,8 @@ def on_start(container):
         return
 
     notable = _extract_notable_fields(container)
-    supporting_events, supporting_event_summaries = _collect_supporting_events(container)
-    payload = _build_payload(notable, container, supporting_events, supporting_event_summaries)
+    supporting_events = _collect_supporting_events(container)
+    payload = _build_payload(notable, container, supporting_events)
 
     local_path, finding_id = _write_payload_to_temp_file(payload)
     if not local_path:
@@ -141,8 +144,7 @@ def _collect_supporting_events(container):
         container: Phantom container dictionary.
 
     Returns:
-        Tuple of `(events, event_summaries)` where `events` retains structured
-        artifact details and `event_summaries` stores compact JSON strings.
+        List of normalized supporting event records.
     """
     rows = phantom.collect2(
         container=container,
@@ -151,7 +153,6 @@ def _collect_supporting_events(container):
     )
 
     events = []
-    summaries = []
     for row in rows:
         artifact_id = row[0]
         artifact_name = row[1]
@@ -165,19 +166,17 @@ def _collect_supporting_events(container):
             "cef": cef,
         }
         events.append(event)
-        summaries.append(json.dumps(cef, sort_keys=True, ensure_ascii=True))
 
-    return events, summaries
+    return events
 
 
-def _build_payload(notable, container, supporting_events, supporting_event_summaries):
+def _build_payload(notable, container, supporting_events):
     """Build analyzer-compatible payload from container and artifacts.
 
     Args:
         notable: Normalized notable metadata.
         container: Full Phantom container dictionary.
         supporting_events: Structured supporting event records.
-        supporting_event_summaries: Compact JSON summaries of artifact CEF fields.
 
     Returns:
         Serialized payload dictionary expected by the AWS notable pipeline.
@@ -186,28 +185,16 @@ def _build_payload(notable, container, supporting_events, supporting_event_summa
 
     finding_id = notable["source_data_identifier"] or notable["container_id"] or "unknown"
     finding_id = _safe_filename(finding_id)
-    summary = notable["description"] or notable["name"] or "SOAR notable"
-
+    # Keep the payload format-agnostic: raw container + normalized notable metadata.
+    # The analyzer now consumes arbitrary JSON/text and does not require PoC fields.
     payload = {
-        "summary": summary,
-        "notable_id": notable["container_id"],
-        "event_id": notable["source_data_identifier"] or notable["container_id"],
         "finding_id": finding_id,
-        "search_name": notable["name"] or "SOAR notable",
-        "risk_score": notable["severity"] or "N/A",
-        "threat_category": "N/A",
-        "alert_time": notable["create_time"] or now_iso,
-        "supporting_events": supporting_event_summaries,
+        "ingest_source": "splunk_soar_phantom",
+        "captured_at": now_iso,
+        "notable": notable,
+        "container": container,
+        "supporting_events": supporting_events,
     }
-
-    payload["raw_event"] = json.dumps(
-        {
-            "container": container,
-            "supporting_events": supporting_events,
-        },
-        default=str,
-        ensure_ascii=True,
-    )
 
     return payload
 
@@ -226,7 +213,7 @@ def _write_payload_to_temp_file(payload):
     fd, tmp_path = tempfile.mkstemp(prefix="notable_", suffix=".json")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=True, indent=2)
+            json.dump(payload, handle, ensure_ascii=True, indent=2, default=str)
         return tmp_path, finding_id
     except Exception:
         try:

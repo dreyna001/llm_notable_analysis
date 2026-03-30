@@ -4,6 +4,7 @@ Send one notable + supporting events to llm_notable_analysis_onprem as JSON.
 
 This is intentionally a simple baseline:
 - Build one JSON payload per notable container
+- Keep payload format-agnostic (raw notable/container context, no PoC field mapping)
 - Upload to SFTP drop location consumed by analyzer
 
 Adjust constants and action parameter names to match your SOAR asset app.
@@ -44,8 +45,8 @@ def on_start(container):
         return
 
     notable = _extract_notable_fields(container)
-    supporting_events, supporting_event_summaries = _collect_supporting_events(container)
-    payload = _build_payload(notable, container, supporting_events, supporting_event_summaries)
+    supporting_events = _collect_supporting_events(container)
+    payload = _build_payload(notable, container, supporting_events)
 
     local_path, remote_file_name = _write_payload_to_temp_file(payload)
     if not local_path:
@@ -141,7 +142,7 @@ def _collect_supporting_events(container):
         container: Phantom container dictionary.
 
     Returns:
-        Tuple of `(events, event_summaries)` built from artifact CEF records.
+        List of normalized supporting event records.
     """
     rows = phantom.collect2(
         container=container,
@@ -150,7 +151,6 @@ def _collect_supporting_events(container):
     )
 
     events = []
-    summaries = []
     for row in rows:
         artifact_id = row[0]
         artifact_name = row[1]
@@ -164,19 +164,17 @@ def _collect_supporting_events(container):
             "cef": cef,
         }
         events.append(event)
-        summaries.append(json.dumps(cef, sort_keys=True, ensure_ascii=True))
 
-    return events, summaries
+    return events
 
 
-def _build_payload(notable, container, supporting_events, supporting_event_summaries):
+def _build_payload(notable, container, supporting_events):
     """Build analyzer-compatible payload.
 
     Args:
         notable: Normalized notable metadata.
         container: Full Phantom container dictionary.
         supporting_events: Structured supporting event records.
-        supporting_event_summaries: Compact CEF JSON summaries.
 
     Returns:
         JSON-serializable payload dictionary.
@@ -189,30 +187,16 @@ def _build_payload(notable, container, supporting_events, supporting_event_summa
     finding_id = notable["source_data_identifier"] or notable["container_id"] or "unknown"
     finding_id = _safe_filename(finding_id)
 
-    # Keep top-level fields primitive/list for current analyzer prompt formatting.
-    summary = notable["description"] or notable["name"] or "SOAR notable"
-
+    # Keep the payload format-agnostic: raw container + normalized notable metadata.
+    # The analyzer now consumes arbitrary JSON/text and does not require PoC fields.
     payload = {
-        "summary": summary,
-        "notable_id": notable["container_id"],
-        "event_id": notable["source_data_identifier"] or notable["container_id"],
         "finding_id": finding_id,
-        "search_name": notable["name"] or "SOAR notable",
-        "risk_score": notable["severity"] or "N/A",
-        "threat_category": "N/A",
-        "alert_time": notable["create_time"] or now_iso,
-        "supporting_events": supporting_event_summaries,
+        "ingest_source": "splunk_soar_phantom",
+        "captured_at": now_iso,
+        "notable": notable,
+        "container": container,
+        "supporting_events": supporting_events,
     }
-
-    # Preserve full source context for audit/replay and nested fields.
-    payload["raw_event"] = json.dumps(
-        {
-            "container": container,
-            "supporting_events": supporting_events,
-        },
-        default=str,
-        ensure_ascii=True,
-    )
 
     return payload
 
@@ -233,7 +217,7 @@ def _write_payload_to_temp_file(payload):
     fd, tmp_path = tempfile.mkstemp(prefix="notable_", suffix=".json")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=True, indent=2)
+            json.dump(payload, handle, ensure_ascii=True, indent=2, default=str)
         return tmp_path, remote_file_name
     except Exception:
         try:
