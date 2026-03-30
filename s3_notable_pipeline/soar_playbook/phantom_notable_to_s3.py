@@ -30,7 +30,11 @@ PROCESS_SEVERITIES = {"medium", "high", "critical"}  # Empty set means allow all
 
 
 def on_start(container):
-    """Playbook entry point."""
+    """Playbook entry point.
+
+    Args:
+        container: Phantom container dictionary.
+    """
     phantom.debug("Starting Phantom notable->S3 playbook")
 
     if not _should_process_container(container):
@@ -76,12 +80,25 @@ def on_start(container):
 
 
 def on_finish(container, summary):
-    """Playbook completion hook."""
+    """Playbook completion hook.
+
+    Args:
+        container: Phantom container dictionary.
+        summary: Phantom playbook summary payload.
+    """
     phantom.debug("Finished Phantom notable->S3 playbook")
     return
 
 
 def _should_process_container(container):
+    """Apply routing gates to decide whether a container should be processed.
+
+    Args:
+        container: Phantom container dictionary.
+
+    Returns:
+        True when label/status/severity gates pass.
+    """
     label = (container.get("label") or "").lower()
     status = (container.get("status") or "").lower()
     severity = (container.get("severity") or "").lower()
@@ -97,6 +114,14 @@ def _should_process_container(container):
 
 
 def _extract_notable_fields(container):
+    """Extract normalized notable fields from a Phantom container.
+
+    Args:
+        container: Phantom container dictionary.
+
+    Returns:
+        Flat notable metadata dictionary used by payload building.
+    """
     return {
         "container_id": str(container.get("id", "")),
         "name": container.get("name") or "",
@@ -110,6 +135,15 @@ def _extract_notable_fields(container):
 
 
 def _collect_supporting_events(container):
+    """Collect supporting artifact rows for additional analyst context.
+
+    Args:
+        container: Phantom container dictionary.
+
+    Returns:
+        Tuple of `(events, event_summaries)` where `events` retains structured
+        artifact details and `event_summaries` stores compact JSON strings.
+    """
     rows = phantom.collect2(
         container=container,
         datapath=["artifact:*.id", "artifact:*.name", "artifact:*.cef"],
@@ -137,6 +171,17 @@ def _collect_supporting_events(container):
 
 
 def _build_payload(notable, container, supporting_events, supporting_event_summaries):
+    """Build analyzer-compatible payload from container and artifacts.
+
+    Args:
+        notable: Normalized notable metadata.
+        container: Full Phantom container dictionary.
+        supporting_events: Structured supporting event records.
+        supporting_event_summaries: Compact JSON summaries of artifact CEF fields.
+
+    Returns:
+        Serialized payload dictionary expected by the AWS notable pipeline.
+    """
     now_iso = datetime.now(timezone.utc).isoformat()
 
     finding_id = notable["source_data_identifier"] or notable["container_id"] or "unknown"
@@ -168,6 +213,14 @@ def _build_payload(notable, container, supporting_events, supporting_event_summa
 
 
 def _write_payload_to_temp_file(payload):
+    """Write payload JSON to a temporary file.
+
+    Args:
+        payload: JSON-serializable payload dictionary.
+
+    Returns:
+        Tuple of `(tmp_path, finding_id)` on success; `(None, None)` on failure.
+    """
     finding_id = _safe_filename(payload.get("finding_id", "unknown"))
 
     fd, tmp_path = tempfile.mkstemp(prefix="notable_", suffix=".json")
@@ -184,16 +237,41 @@ def _write_payload_to_temp_file(payload):
 
 
 def _build_s3_key(finding_id):
+    """Build destination S3 object key for incoming notable payload.
+
+    Args:
+        finding_id: Sanitized correlation identifier.
+
+    Returns:
+        S3 key under the configured incoming prefix.
+    """
     return "{}/{}.json".format(INPUT_PREFIX.strip("/"), finding_id)
 
 
 def _safe_filename(value):
+    """Sanitize an arbitrary value for safe filename/key usage.
+
+    Args:
+        value: Raw identifier value.
+
+    Returns:
+        ASCII-safe identifier capped to 100 characters.
+    """
     value = str(value or "unknown")
     safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in value)
     return safe[:100] or "unknown"
 
 
 def _put_object_done(action, success, container, results, handle):
+    """Handle completion callback for the S3 upload action.
+
+    Args:
+        action: Phantom action name.
+        success: Whether the action succeeded.
+        container: Phantom container dictionary.
+        results: Action results payload.
+        handle: Phantom callback handle.
+    """
     if success:
         phantom.debug("Uploaded notable payload object to S3 incoming prefix")
         phantom.add_note(

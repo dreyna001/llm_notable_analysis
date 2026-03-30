@@ -76,6 +76,17 @@ def _iter_files(
     exclude_dirs: set[str],
     exclude_files: set[Path],
 ) -> Iterable[Path]:
+    """Yield files eligible for TODO/FIXME scanning.
+
+    Args:
+        root: Root directory to walk recursively.
+        include_exts: Allowed file extensions.
+        exclude_dirs: Directory names to prune during traversal.
+        exclude_files: Absolute file paths to skip.
+
+    Yields:
+        Paths matching extension and exclusion rules.
+    """
     for dirpath, dirnames, filenames in os.walk(root):
         # prune excluded directories in-place
         dirnames[:] = [d for d in dirnames if d not in exclude_dirs]
@@ -92,6 +103,14 @@ def _iter_files(
 
 
 def _extract_items(path: Path) -> List[Tuple[int, str]]:
+    """Extract actionable TODO/FIXME lines from one file.
+
+    Args:
+        path: File path to scan.
+
+    Returns:
+        List of `(line_number, line_text)` tuples.
+    """
     items: List[Tuple[int, str]] = []
     try:
         # utf-8 with replacement keeps the report resilient
@@ -106,6 +125,17 @@ def _extract_items(path: Path) -> List[Tuple[int, str]]:
 
 
 def build_report(root: Path, include_exts: set[str], exclude_dirs: set[str], exclude_files: set[Path]) -> str:
+    """Build a markdown report of actionable TODO/FIXME markers.
+
+    Args:
+        root: Root directory to scan.
+        include_exts: Allowed file extensions.
+        exclude_dirs: Directory names to exclude.
+        exclude_files: Absolute file paths to skip.
+
+    Returns:
+        Markdown report string grouped by relative file path.
+    """
     collected: List[Tuple[Path, int, str]] = []
     for p in sorted(_iter_files(root, include_exts, exclude_dirs, exclude_files)):
         for line_no, line in _extract_items(p):

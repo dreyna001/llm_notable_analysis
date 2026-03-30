@@ -53,49 +53,23 @@ def should_skip_object(key: str, size: int) -> tuple[bool, str]:
     return False, ""
 
 
-def normalize_notable(content: str, content_type: str = 'text') -> Dict[str, Any]:
-    """Normalize S3 notable content into internal alert structure.
-    
-    Mirrors the normalize_alert() function from backend.py, adapted for S3 objects.
-    
+def normalize_notable(content: str, content_type: str = 'text') -> Any:
+    """Normalize S3 notable content into a format-agnostic alert payload.
+
     Args:
         content: Raw content from S3 object (JSON string or plain text).
         content_type: Type hint for content ('json' or 'text').
-        
+
     Returns:
-        Dict with normalized alert containing summary, risk_index, and raw_log.
+        Parsed JSON object for JSON alerts when valid; otherwise raw text.
     """
-    summary = ""
-    risk_index = {
-        "risk_score": "N/A",
-        "source_product": "S3_Pipeline",
-        "threat_category": "N/A"
-    }
-    raw_log = {}
-    
-    # Try to parse as JSON first
-    if content_type == 'json' or content.strip().startswith('{'):
+    stripped = (content or "").strip()
+    if content_type == 'json' or stripped.startswith('{') or stripped.startswith('['):
         try:
-            parsed_json = json.loads(content)
-            if isinstance(parsed_json, dict):
-                summary = "S3-submitted notable"
-                raw_log = parsed_json
-            else:
-                summary = content[:400] if len(content) > 400 else content
-                raw_log = {"raw_event": content}
+            return json.loads(content)
         except json.JSONDecodeError:
             logger.warning("Failed to parse content as JSON, treating as raw text")
-            summary = content[:400] if len(content) > 400 else content
-            raw_log = {"raw_event": content}
-    else:
-        summary = content[:400] if len(content) > 400 else content
-        raw_log = {"raw_event": content}
-    
-    return {
-        "summary": summary,
-        "risk_index": risk_index,
-        "raw_log": raw_log
-    }
+    return content
 
 
 def extract_finding_id_from_s3_key(source_key: str) -> str:
@@ -315,8 +289,11 @@ def handler(event, context):
             
             logger.info(f"Read {len(content)} characters from S3")
             
-            # Normalize the notable
-            alert_obj = normalize_notable(content)
+            # Keep the alert payload format-agnostic:
+            # - valid JSON stays JSON
+            # - text stays text
+            content_type = 'json' if key.lower().endswith('.json') else 'text'
+            alert_payload = normalize_notable(content, content_type)
             
             # Initialize analyzer
             model_id = os.environ.get(
@@ -328,9 +305,9 @@ def handler(event, context):
             
             # Format alert text
             alert_text = analyzer.format_alert_input(
-                alert_obj['summary'],
-                alert_obj['risk_index'],
-                alert_obj['raw_log']
+                alert_payload,
+                raw_content=content,
+                content_type=content_type,
             )
             
             # Run analysis
@@ -368,7 +345,10 @@ def handler(event, context):
             if sink_mode == 's3':
                 sink_result = write_to_s3_sink(key, markdown, analysis_result)
             elif sink_mode == 'hec':
-                sink_result = write_to_splunk_hec(analysis_result, alert_obj.get('raw_log', {}))
+                sink_result = write_to_splunk_hec(
+                    analysis_result,
+                    alert_payload if isinstance(alert_payload, dict) else {},
+                )
             elif sink_mode == 'notable_rest':
                 sink_result = write_to_splunk_rest(analysis_result, key)
             else:

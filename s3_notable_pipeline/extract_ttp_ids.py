@@ -1,3 +1,10 @@
+"""Download and export ATT&CK v17.1 technique IDs to JSON.
+
+This helper script fetches the MITRE ATT&CK Enterprise techniques spreadsheet,
+extracts parent and sub-technique IDs, and writes them to
+`enterprise_attack_v17.1_ids.json`.
+"""
+
 import json
 import pandas as pd
 import requests
