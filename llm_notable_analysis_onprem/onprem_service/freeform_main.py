@@ -26,6 +26,10 @@ from .freeform_llm_client import FreeformLLMClient
 
 _shutdown_requested = False
 
+# Exceptions expected during long-running service operation that should trigger
+# retry/sleep instead of terminating the daemon.
+_RECOVERABLE_LOOP_EXCEPTIONS = (OSError, ValueError, RuntimeError, TimeoutError)
+
 
 def signal_handler(signum, frame):
     """Handle SIGTERM/SIGINT and request a graceful shutdown.
@@ -172,8 +176,12 @@ def run_service():
                         error_count += 1
 
             time.sleep(config.POLL_INTERVAL)
-        except Exception as e:
-            logger.exception(f"Error in main loop (freeform): {e}")
+        except _RECOVERABLE_LOOP_EXCEPTIONS as exc:
+            logger.error(
+                "Recoverable error in main loop (freeform): %s",
+                exc,
+                exc_info=True,
+            )
             time.sleep(config.POLL_INTERVAL)
 
     logger.info(

@@ -37,6 +37,10 @@ from .retention import run_retention
 # Graceful shutdown flag
 _shutdown_requested = False
 
+# Exceptions that are expected to occur during daemon runtime and should not
+# terminate the service loop.
+_RECOVERABLE_LOOP_EXCEPTIONS = (OSError, ValueError, RuntimeError, TimeoutError)
+
 
 def signal_handler(signum, frame):
     """Handle SIGTERM/SIGINT for graceful shutdown.
@@ -237,8 +241,8 @@ def _run_sequential(config: Config, llm_client: LocalLLMClient, logger: logging.
 
             time.sleep(config.POLL_INTERVAL)
 
-        except Exception as e:
-            logger.exception(f"Error in main loop: {e}")
+        except _RECOVERABLE_LOOP_EXCEPTIONS as exc:
+            logger.error("Recoverable error in main loop: %s", exc, exc_info=True)
             time.sleep(config.POLL_INTERVAL)
 
     return processed_count, error_count
@@ -340,8 +344,12 @@ def _run_concurrent(config: Config, llm_client: LocalLLMClient, logger: logging.
 
                 time.sleep(config.POLL_INTERVAL)
 
-            except Exception as e:
-                logger.exception(f"Error in main loop: {e}")
+            except _RECOVERABLE_LOOP_EXCEPTIONS as exc:
+                logger.error(
+                    "Recoverable error in concurrent main loop: %s",
+                    exc,
+                    exc_info=True,
+                )
                 time.sleep(config.POLL_INTERVAL)
 
         # Graceful shutdown: wait for in-flight jobs
