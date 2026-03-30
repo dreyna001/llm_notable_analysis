@@ -18,6 +18,25 @@ sudo dnf install -y bash coreutils curl cmake make gcc gcc-c++
 
 Details, optional add-ons if CMake fails, and `PHI_SKIP_RUNTIME_BUILD` caveats: [`RHEL_SOFTWARE_DEPENDENCIES.md`](RHEL_SOFTWARE_DEPENDENCIES.md).
 
+## Optional: single sudo wrapper with flags
+
+If you want one command entrypoint on a clean VM, use `install_phi35_sudo.sh`.
+
+- default behavior: installs host packages, then hands off to the non-root installer (expects pre-staged runtime/model)
+- optional network pulls:
+  - `PHI_DOWNLOAD_RUNTIME=true` to clone `llama.cpp` and checkout pinned commit
+  - `PHI_DOWNLOAD_MODEL=true` to download the pinned Phi-3.5 GGUF
+
+Examples:
+
+```bash
+# Offline-style: package prep + non-root install using pre-staged artifacts
+sudo bash install_phi35_sudo.sh
+
+# Online convenience: package prep + runtime/model pulls + non-root install
+sudo PHI_DOWNLOAD_RUNTIME=true PHI_DOWNLOAD_MODEL=true bash install_phi35_sudo.sh
+```
+
 ## 1) Pull artifacts on an internet-connected machine
 
 - `llama.cpp` source snapshot at pinned commit:
