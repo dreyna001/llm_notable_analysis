@@ -7,7 +7,7 @@
 # 1) Install host packages (cmake/make/gcc/curl/etc)
 # 2) Optionally download llama.cpp source at pinned commit
 # 3) Optionally download Phi-3.5 GGUF at pinned revision
-# 4) Invoke install_phi35_nonroot_offline.sh as target user
+# 4) Invoke install_phi35_nonroot_offline.sh as target user (or as root if PHI_RUN_INSTALLER_AS_ROOT=true)
 #
 # Examples:
 #   # Offline-style (install RPMs only + run installer with pre-staged artifacts)
@@ -15,6 +15,9 @@
 #
 #   # Full online pull + install in one shot
 #   sudo PHI_DOWNLOAD_RUNTIME=true PHI_DOWNLOAD_MODEL=true bash install_phi35_sudo.sh
+#
+#   # Run inner build/launcher as root (install under /root/.local/... unless PHI_TARGET_HOME is set)
+#   sudo PHI_RUN_INSTALLER_AS_ROOT=true bash install_phi35_sudo.sh
 set -euo pipefail
 IFS=$'\n\t'
 
@@ -29,6 +32,8 @@ PHI_INSTALL_PACKAGES="${PHI_INSTALL_PACKAGES:-true}"
 PHI_DOWNLOAD_RUNTIME="${PHI_DOWNLOAD_RUNTIME:-false}"
 PHI_DOWNLOAD_MODEL="${PHI_DOWNLOAD_MODEL:-false}"
 PHI_RUN_INSTALLER="${PHI_RUN_INSTALLER:-true}"
+# If true: run install_phi35_nonroot_offline.sh as root (no runuser/sudo -u); use root's home unless PHI_TARGET_HOME is set
+PHI_RUN_INSTALLER_AS_ROOT="${PHI_RUN_INSTALLER_AS_ROOT:-false}"
 
 # Optional package-manager override: dnf|yum|microdnf|apt-get
 PHI_PACKAGE_MANAGER="${PHI_PACKAGE_MANAGER:-}"
@@ -71,12 +76,17 @@ PHI_MMAP="${PHI_MMAP:-true}"
 PHI_MLOCK="${PHI_MLOCK:-false}"
 PHI_HEALTH_TIMEOUT_SECONDS="${PHI_HEALTH_TIMEOUT_SECONDS:-180}"
 PHI_EXTRA_ARGS="${PHI_EXTRA_ARGS:-}"
+PHI_RUNTIME_LIB_DIR="${PHI_RUNTIME_LIB_DIR:-}"
+PHI_REWRITE_RPATH="${PHI_REWRITE_RPATH:-true}"
+
 
 # Paths (computed after target home is resolved)
 PHI_INSTALL_DIR=""
 PHI_RUNTIME_SRC_DIR=""
+PHI_RUNTIME_BUILD_DIR=""
 PHI_MODEL_DIR=""
 PHI_MODEL_PATH=""
+PHI_SERVER_BIN=""
 
 info() { echo "  $*"; }
 warn() { echo "WARN: $*" >&2; }
@@ -91,6 +101,18 @@ is_bool() {
 
 check_root() {
     [[ $EUID -eq 0 ]] || err "This script must be run as root (or with sudo)."
+}
+
+# When the inner installer runs as root, install under root's home unless PHI_TARGET_HOME is already set.
+apply_installer_as_root_mode() {
+    [[ "$PHI_RUN_INSTALLER_AS_ROOT" == "true" ]] || return 0
+    PHI_TARGET_USER="root"
+    if [[ -z "$PHI_TARGET_HOME" ]]; then
+        PHI_TARGET_HOME="$(getent passwd root | cut -d: -f6 || true)"
+        [[ -n "$PHI_TARGET_HOME" ]] || PHI_TARGET_HOME="/root"
+    fi
+    [[ -d "$PHI_TARGET_HOME" ]] || err "PHI_TARGET_HOME does not exist: $PHI_TARGET_HOME"
+    info "PHI_RUN_INSTALLER_AS_ROOT=true: using HOME=$PHI_TARGET_HOME (root-owned install)"
 }
 
 check_command() {
@@ -111,8 +133,12 @@ resolve_target_home() {
 set_path_defaults() {
     PHI_INSTALL_DIR="${PHI_INSTALL_DIR:-$PHI_TARGET_HOME/.local/share/phi35_llamacpp}"
     PHI_RUNTIME_SRC_DIR="${PHI_RUNTIME_SRC_DIR:-$PHI_INSTALL_DIR/runtime/llama.cpp}"
+    PHI_RUNTIME_BUILD_DIR="${PHI_RUNTIME_BUILD_DIR:-$PHI_RUNTIME_SRC_DIR/build}"
     PHI_MODEL_DIR="${PHI_MODEL_DIR:-$PHI_INSTALL_DIR/models}"
     PHI_MODEL_PATH="${PHI_MODEL_PATH:-$PHI_MODEL_DIR/$PHI_MODEL_FILENAME}"
+    # Colocate the installed server binary with PHI_INSTALL_DIR (not ~/.local/bin) unless overridden.
+    PHI_SERVER_BIN="${PHI_SERVER_BIN:-$PHI_INSTALL_DIR/bin/llama-server}"
+    PHI_RUNTIME_LIB_DIR="${PHI_RUNTIME_LIB_DIR:-$(dirname "$PHI_SERVER_BIN")}"
 }
 
 validate_config() {
@@ -120,15 +146,20 @@ validate_config() {
     is_bool "$PHI_DOWNLOAD_RUNTIME" || err "PHI_DOWNLOAD_RUNTIME must be true/false"
     is_bool "$PHI_DOWNLOAD_MODEL" || err "PHI_DOWNLOAD_MODEL must be true/false"
     is_bool "$PHI_RUN_INSTALLER" || err "PHI_RUN_INSTALLER must be true/false"
+    is_bool "$PHI_RUN_INSTALLER_AS_ROOT" || err "PHI_RUN_INSTALLER_AS_ROOT must be true/false"
     is_bool "$PHI_SKIP_RUNTIME_BUILD" || err "PHI_SKIP_RUNTIME_BUILD must be true/false"
     is_bool "$PHI_AUTO_START" || err "PHI_AUTO_START must be true/false"
     is_bool "$PHI_STOP_EXISTING" || err "PHI_STOP_EXISTING must be true/false"
     is_bool "$PHI_CONT_BATCHING" || err "PHI_CONT_BATCHING must be true/false"
     is_bool "$PHI_MMAP" || err "PHI_MMAP must be true/false"
     is_bool "$PHI_MLOCK" || err "PHI_MLOCK must be true/false"
+    is_bool "$PHI_REWRITE_RPATH" || err "PHI_REWRITE_RPATH must be true/false"
 
     [[ "$PHI_RUNTIME_SRC_DIR" = /* ]] || err "PHI_RUNTIME_SRC_DIR must be an absolute path"
+    [[ "$PHI_RUNTIME_BUILD_DIR" = /* ]] || err "PHI_RUNTIME_BUILD_DIR must be an absolute path"
     [[ "$PHI_MODEL_PATH" = /* ]] || err "PHI_MODEL_PATH must be an absolute path"
+    [[ "$PHI_SERVER_BIN" = /* ]] || err "PHI_SERVER_BIN must be an absolute path"
+    [[ "$PHI_RUNTIME_LIB_DIR" = /* ]] || err "PHI_RUNTIME_LIB_DIR must be an absolute path"
 }
 
 detect_package_manager() {
@@ -223,6 +254,7 @@ download_model_if_requested() {
     info "Downloading model artifact to $PHI_MODEL_PATH..."
     curl -fL --retry 3 --retry-all-errors -o "$tmp_path" "$PHI_MODEL_URL" || err "Model download failed"
     mv -f "$tmp_path" "$PHI_MODEL_PATH"
+    chmod 0644 "$PHI_MODEL_PATH" || true
     verify_model_sha
 }
 
@@ -237,7 +269,12 @@ chown_if_exists() {
 }
 
 fix_ownership_for_target_user() {
+    if [[ "$PHI_RUN_INSTALLER_AS_ROOT" == "true" ]]; then
+        info "PHI_RUN_INSTALLER_AS_ROOT=true; skipping chown (install tree stays root-owned)"
+        return 0
+    fi
     chown_if_exists "$PHI_INSTALL_DIR"
+    chown_if_exists "$PHI_MODEL_PATH"
     chown_if_exists "$PHI_TARGET_HOME/.local/bin"
     chown_if_exists "$PHI_TARGET_HOME/.config/phi35_llamacpp"
 }
@@ -255,6 +292,9 @@ run_nonroot_installer() {
         "HOME=$PHI_TARGET_HOME"
         "PHI_INSTALL_DIR=$PHI_INSTALL_DIR"
         "PHI_RUNTIME_SRC_DIR=$PHI_RUNTIME_SRC_DIR"
+        "PHI_RUNTIME_BUILD_DIR=$PHI_RUNTIME_BUILD_DIR"
+        "PHI_SERVER_BIN=$PHI_SERVER_BIN"
+        "PHI_RUNTIME_LIB_DIR=$PHI_RUNTIME_LIB_DIR"
         "PHI_MODEL_PATH=$PHI_MODEL_PATH"
         "PHI_MODEL_SHA256=$PHI_MODEL_SHA256"
         "PHI_EXPECTED_RUNTIME_COMMIT=$PHI_EXPECTED_RUNTIME_COMMIT"
@@ -275,7 +315,14 @@ run_nonroot_installer() {
         "PHI_MLOCK=$PHI_MLOCK"
         "PHI_HEALTH_TIMEOUT_SECONDS=$PHI_HEALTH_TIMEOUT_SECONDS"
         "PHI_EXTRA_ARGS=$PHI_EXTRA_ARGS"
+        "PHI_REWRITE_RPATH=$PHI_REWRITE_RPATH"
     )
+
+    if [[ "$PHI_RUN_INSTALLER_AS_ROOT" == "true" ]]; then
+        info "Running installer as root (PHI_RUN_INSTALLER_AS_ROOT=true)"
+        env "${env_args[@]}" bash "$PHI_NONROOT_INSTALLER"
+        return 0
+    fi
 
     info "Running non-root installer as user: $PHI_TARGET_USER"
     if command -v runuser >/dev/null 2>&1; then
@@ -289,12 +336,21 @@ run_nonroot_installer() {
 
 echo "=== Phi-3.5 sudo installer wrapper ==="
 echo "Running as: $(id -un) uid=$(id -u)"
-echo "Target user: $PHI_TARGET_USER"
+echo "Installer as root: $PHI_RUN_INSTALLER_AS_ROOT"
 echo ""
 
 check_root
+apply_installer_as_root_mode
 resolve_target_home
 set_path_defaults
+
+echo "Target user: $PHI_TARGET_USER"
+echo "Target home: $PHI_TARGET_HOME"
+echo "Runtime build dir: $PHI_RUNTIME_BUILD_DIR"
+echo "Server binary: $PHI_SERVER_BIN"
+echo "Runtime lib dir: $PHI_RUNTIME_LIB_DIR"
+echo ""
+
 validate_config
 ensure_parent_dirs
 install_dependencies
@@ -308,8 +364,11 @@ echo "=== complete ==="
 echo "Target user:        $PHI_TARGET_USER"
 echo "Target home:        $PHI_TARGET_HOME"
 echo "Runtime source dir: $PHI_RUNTIME_SRC_DIR"
+echo "Runtime build dir:  $PHI_RUNTIME_BUILD_DIR"
+echo "Runtime lib dir:    $PHI_RUNTIME_LIB_DIR"
 echo "Model path:         $PHI_MODEL_PATH"
 echo "Downloads used:     runtime=$PHI_DOWNLOAD_RUNTIME model=$PHI_DOWNLOAD_MODEL"
 echo ""
 echo "Tip:"
 echo "  sudo PHI_DOWNLOAD_RUNTIME=true PHI_DOWNLOAD_MODEL=true bash \"$SCRIPT_DIR/install_phi35_sudo.sh\""
+echo "  sudo PHI_RUN_INSTALLER_AS_ROOT=true bash \"$SCRIPT_DIR/install_phi35_sudo.sh\"   # build/run under root home (default /root)"
