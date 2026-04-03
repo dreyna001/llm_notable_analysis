@@ -8,6 +8,7 @@
 # 2) Optionally download llama.cpp source at pinned commit
 # 3) Optionally download Phi-3.5 GGUF at pinned revision
 # 4) Invoke install_phi35_nonroot_offline.sh as target user (or as root if PHI_RUN_INSTALLER_AS_ROOT=true)
+# 5) Optionally install/manage a systemd unit for llama.cpp service
 #
 # Examples:
 #   # Offline-style (install RPMs only + run installer with pre-staged artifacts)
@@ -34,6 +35,10 @@ PHI_DOWNLOAD_MODEL="${PHI_DOWNLOAD_MODEL:-false}"
 PHI_RUN_INSTALLER="${PHI_RUN_INSTALLER:-true}"
 # If true: run install_phi35_nonroot_offline.sh as root (no runuser/sudo -u); use root's home unless PHI_TARGET_HOME is set
 PHI_RUN_INSTALLER_AS_ROOT="${PHI_RUN_INSTALLER_AS_ROOT:-false}"
+PHI_INSTALL_SYSTEMD_UNIT="${PHI_INSTALL_SYSTEMD_UNIT:-auto}"  # auto|true|false
+PHI_AUTO_START_SYSTEMD="${PHI_AUTO_START_SYSTEMD:-true}"
+PHI_SYSTEMD_UNIT_NAME="${PHI_SYSTEMD_UNIT_NAME:-llama-phi35.service}"
+readonly PHI_SYSTEMD_UNIT_TEMPLATE="${PHI_SYSTEMD_UNIT_TEMPLATE:-$SCRIPT_DIR/llama-phi35.service}"
 
 # Optional package-manager override: dnf|yum|microdnf|apt-get
 PHI_PACKAGE_MANAGER="${PHI_PACKAGE_MANAGER:-}"
@@ -87,6 +92,10 @@ PHI_RUNTIME_BUILD_DIR=""
 PHI_MODEL_DIR=""
 PHI_MODEL_PATH=""
 PHI_SERVER_BIN=""
+PHI_SYSTEMD_ENV_FILE=""
+PHI_TARGET_GROUP=""
+PHI_INSTALL_SYSTEMD_EFFECTIVE="false"
+PHI_AUTO_START_INNER="$PHI_AUTO_START"
 
 info() { echo "  $*"; }
 warn() { echo "WARN: $*" >&2; }
@@ -101,6 +110,10 @@ is_bool() {
 
 check_root() {
     [[ $EUID -eq 0 ]] || err "This script must be run as root (or with sudo)."
+}
+
+is_systemd_runtime() {
+    [[ -d /run/systemd/system ]] && command -v systemctl >/dev/null 2>&1
 }
 
 # When the inner installer runs as root, install under root's home unless PHI_TARGET_HOME is already set.
@@ -130,6 +143,11 @@ resolve_target_home() {
     [[ -d "$PHI_TARGET_HOME" ]] || err "Resolved target home does not exist: $PHI_TARGET_HOME"
 }
 
+resolve_target_group() {
+    PHI_TARGET_GROUP="$(id -gn "$PHI_TARGET_USER" 2>/dev/null || true)"
+    [[ -n "$PHI_TARGET_GROUP" ]] || err "Could not resolve primary group for PHI_TARGET_USER=$PHI_TARGET_USER"
+}
+
 set_path_defaults() {
     PHI_INSTALL_DIR="${PHI_INSTALL_DIR:-$PHI_TARGET_HOME/.local/share/phi35_llamacpp}"
     PHI_RUNTIME_SRC_DIR="${PHI_RUNTIME_SRC_DIR:-$PHI_INSTALL_DIR/runtime/llama.cpp}"
@@ -139,6 +157,7 @@ set_path_defaults() {
     # Colocate the installed server binary with PHI_INSTALL_DIR (not ~/.local/bin) unless overridden.
     PHI_SERVER_BIN="${PHI_SERVER_BIN:-$PHI_INSTALL_DIR/bin/llama-server}"
     PHI_RUNTIME_LIB_DIR="${PHI_RUNTIME_LIB_DIR:-$(dirname "$PHI_SERVER_BIN")}"
+    PHI_SYSTEMD_ENV_FILE="${PHI_SYSTEMD_ENV_FILE:-$PHI_TARGET_HOME/.config/phi35_llamacpp/phi35.env}"
 }
 
 validate_config() {
@@ -154,12 +173,46 @@ validate_config() {
     is_bool "$PHI_MMAP" || err "PHI_MMAP must be true/false"
     is_bool "$PHI_MLOCK" || err "PHI_MLOCK must be true/false"
     is_bool "$PHI_REWRITE_RPATH" || err "PHI_REWRITE_RPATH must be true/false"
+    is_bool "$PHI_AUTO_START_SYSTEMD" || err "PHI_AUTO_START_SYSTEMD must be true/false"
+
+    case "$PHI_INSTALL_SYSTEMD_UNIT" in
+        auto|true|false) ;;
+        *) err "PHI_INSTALL_SYSTEMD_UNIT must be one of: auto, true, false" ;;
+    esac
 
     [[ "$PHI_RUNTIME_SRC_DIR" = /* ]] || err "PHI_RUNTIME_SRC_DIR must be an absolute path"
     [[ "$PHI_RUNTIME_BUILD_DIR" = /* ]] || err "PHI_RUNTIME_BUILD_DIR must be an absolute path"
     [[ "$PHI_MODEL_PATH" = /* ]] || err "PHI_MODEL_PATH must be an absolute path"
     [[ "$PHI_SERVER_BIN" = /* ]] || err "PHI_SERVER_BIN must be an absolute path"
     [[ "$PHI_RUNTIME_LIB_DIR" = /* ]] || err "PHI_RUNTIME_LIB_DIR must be an absolute path"
+    [[ "$PHI_SYSTEMD_ENV_FILE" = /* ]] || err "PHI_SYSTEMD_ENV_FILE must be an absolute path"
+}
+
+decide_systemd_install() {
+    case "$PHI_INSTALL_SYSTEMD_UNIT" in
+        auto)
+            if is_systemd_runtime; then
+                PHI_INSTALL_SYSTEMD_EFFECTIVE="true"
+            else
+                PHI_INSTALL_SYSTEMD_EFFECTIVE="false"
+            fi
+            ;;
+        true)
+            is_systemd_runtime || err "PHI_INSTALL_SYSTEMD_UNIT=true but systemd runtime is unavailable"
+            PHI_INSTALL_SYSTEMD_EFFECTIVE="true"
+            ;;
+        false)
+            PHI_INSTALL_SYSTEMD_EFFECTIVE="false"
+            ;;
+    esac
+
+    # Avoid duplicate processes: when systemd service management is enabled,
+    # do not also auto-start via nohup in the non-root installer.
+    PHI_AUTO_START_INNER="$PHI_AUTO_START"
+    if [[ "$PHI_INSTALL_SYSTEMD_EFFECTIVE" == "true" ]] && [[ "$PHI_AUTO_START" == "true" ]]; then
+        PHI_AUTO_START_INNER="false"
+        info "Systemd unit enabled; forcing inner PHI_AUTO_START=false to avoid duplicate llama-server processes"
+    fi
 }
 
 detect_package_manager() {
@@ -261,11 +314,7 @@ download_model_if_requested() {
 chown_if_exists() {
     local path="$1"
     [[ -e "$path" ]] || return 0
-    # Primary group is not always named like the user (LDAP, "users", etc.); avoid user:user.
-    local grp
-    grp="$(id -gn "$PHI_TARGET_USER" 2>/dev/null || true)"
-    [[ -n "$grp" ]] || err "Could not resolve primary group for user: $PHI_TARGET_USER"
-    chown -R "$PHI_TARGET_USER:$grp" "$path" || err "Failed to chown $path"
+    chown -R "$PHI_TARGET_USER:$PHI_TARGET_GROUP" "$path" || err "Failed to chown $path"
 }
 
 fix_ownership_for_target_user() {
@@ -299,7 +348,7 @@ run_nonroot_installer() {
         "PHI_MODEL_SHA256=$PHI_MODEL_SHA256"
         "PHI_EXPECTED_RUNTIME_COMMIT=$PHI_EXPECTED_RUNTIME_COMMIT"
         "PHI_SKIP_RUNTIME_BUILD=$PHI_SKIP_RUNTIME_BUILD"
-        "PHI_AUTO_START=$PHI_AUTO_START"
+        "PHI_AUTO_START=$PHI_AUTO_START_INNER"
         "PHI_STOP_EXISTING=$PHI_STOP_EXISTING"
         "PHI_HOST=$PHI_HOST"
         "PHI_PORT=$PHI_PORT"
@@ -316,6 +365,7 @@ run_nonroot_installer() {
         "PHI_HEALTH_TIMEOUT_SECONDS=$PHI_HEALTH_TIMEOUT_SECONDS"
         "PHI_EXTRA_ARGS=$PHI_EXTRA_ARGS"
         "PHI_REWRITE_RPATH=$PHI_REWRITE_RPATH"
+        "PHI_ENV_FILE=$PHI_SYSTEMD_ENV_FILE"
     )
 
     if [[ "$PHI_RUN_INSTALLER_AS_ROOT" == "true" ]]; then
@@ -334,6 +384,78 @@ run_nonroot_installer() {
     fi
 }
 
+build_systemd_execstart() {
+    local -n out_ref=$1
+    local -a cmd=(
+        /usr/bin/env
+        "LD_LIBRARY_PATH=$PHI_RUNTIME_LIB_DIR"
+        "$PHI_SERVER_BIN"
+        --model "$PHI_MODEL_PATH"
+        --host "$PHI_HOST"
+        --port "$PHI_PORT"
+        --threads "$PHI_THREADS"
+        --threads-batch "$PHI_THREADS_BATCH"
+        --parallel "$PHI_PARALLEL"
+        --ctx-size "$PHI_CTX_SIZE"
+        --n-predict "$PHI_N_PREDICT"
+        --cache-type-k "$PHI_CACHE_TYPE_K"
+        --cache-type-v "$PHI_CACHE_TYPE_V"
+        --metrics
+        --no-webui
+    )
+    [[ "$PHI_CONT_BATCHING" == "true" ]] && cmd+=(--cont-batching)
+    [[ "$PHI_MMAP" != "true" ]] && cmd+=(--no-mmap)
+    [[ "$PHI_MLOCK" == "true" ]] && cmd+=(--mlock)
+    if [[ -n "$PHI_EXTRA_ARGS" ]]; then
+        # shellcheck disable=SC2206
+        local extra_args=( $PHI_EXTRA_ARGS )
+        cmd+=("${extra_args[@]}")
+    fi
+
+    out_ref=""
+    local token
+    for token in "${cmd[@]}"; do
+        if [[ -n "$out_ref" ]]; then
+            out_ref+=" "
+        fi
+        out_ref+="$token"
+    done
+}
+
+install_systemd_unit_if_requested() {
+    [[ "$PHI_INSTALL_SYSTEMD_EFFECTIVE" == "true" ]] || {
+        info "Systemd unit install skipped (PHI_INSTALL_SYSTEMD_UNIT=$PHI_INSTALL_SYSTEMD_UNIT)"
+        return 0
+    }
+
+    [[ -f "$PHI_SYSTEMD_UNIT_TEMPLATE" ]] || err "Missing systemd unit template: $PHI_SYSTEMD_UNIT_TEMPLATE"
+
+    local unit_dst="/etc/systemd/system/$PHI_SYSTEMD_UNIT_NAME"
+    cp "$PHI_SYSTEMD_UNIT_TEMPLATE" "$unit_dst" || err "Failed to copy systemd unit to $unit_dst"
+
+    local exec_start_line
+    build_systemd_execstart exec_start_line
+
+    sed -i -E "s|^User=.*$|User=$PHI_TARGET_USER|" "$unit_dst" || err "Failed to patch User in $unit_dst"
+    sed -i -E "s|^Group=.*$|Group=$PHI_TARGET_GROUP|" "$unit_dst" || err "Failed to patch Group in $unit_dst"
+    sed -i -E "s|^WorkingDirectory=.*$|WorkingDirectory=$PHI_INSTALL_DIR|" "$unit_dst" || err "Failed to patch WorkingDirectory in $unit_dst"
+    sed -i -E "s|^EnvironmentFile=.*$|EnvironmentFile=-$PHI_SYSTEMD_ENV_FILE|" "$unit_dst" || err "Failed to patch EnvironmentFile in $unit_dst"
+    sed -i -E "s|^ExecStart=.*$|ExecStart=$exec_start_line|" "$unit_dst" || err "Failed to patch ExecStart in $unit_dst"
+    sed -i -E "s|^SyslogIdentifier=.*$|SyslogIdentifier=${PHI_SYSTEMD_UNIT_NAME%.service}|" "$unit_dst" || err "Failed to patch SyslogIdentifier in $unit_dst"
+
+    systemctl daemon-reload || err "Failed to reload systemd"
+    systemctl enable "$PHI_SYSTEMD_UNIT_NAME" >/dev/null 2>&1 || true
+
+    if [[ "$PHI_AUTO_START_SYSTEMD" == "true" ]]; then
+        systemctl restart "$PHI_SYSTEMD_UNIT_NAME" 2>/dev/null || \
+        systemctl start "$PHI_SYSTEMD_UNIT_NAME" 2>/dev/null || \
+        err "Failed to start/restart $PHI_SYSTEMD_UNIT_NAME"
+        info "Installed + started systemd unit: $PHI_SYSTEMD_UNIT_NAME"
+    else
+        info "Installed systemd unit (not started): $PHI_SYSTEMD_UNIT_NAME"
+    fi
+}
+
 echo "=== Phi-3.5 sudo installer wrapper ==="
 echo "Running as: $(id -un) uid=$(id -u)"
 echo "Installer as root: $PHI_RUN_INSTALLER_AS_ROOT"
@@ -342,6 +464,7 @@ echo ""
 check_root
 apply_installer_as_root_mode
 resolve_target_home
+resolve_target_group
 set_path_defaults
 
 echo "Target user: $PHI_TARGET_USER"
@@ -352,12 +475,14 @@ echo "Runtime lib dir: $PHI_RUNTIME_LIB_DIR"
 echo ""
 
 validate_config
+decide_systemd_install
 ensure_parent_dirs
 install_dependencies
 download_runtime_if_requested
 download_model_if_requested
 fix_ownership_for_target_user
 run_nonroot_installer
+install_systemd_unit_if_requested
 
 echo ""
 echo "=== complete ==="
@@ -368,6 +493,8 @@ echo "Runtime build dir:  $PHI_RUNTIME_BUILD_DIR"
 echo "Runtime lib dir:    $PHI_RUNTIME_LIB_DIR"
 echo "Model path:         $PHI_MODEL_PATH"
 echo "Downloads used:     runtime=$PHI_DOWNLOAD_RUNTIME model=$PHI_DOWNLOAD_MODEL"
+echo "Systemd managed:    $PHI_INSTALL_SYSTEMD_EFFECTIVE (mode=$PHI_INSTALL_SYSTEMD_UNIT)"
+echo "Systemd unit:       $PHI_SYSTEMD_UNIT_NAME"
 echo ""
 echo "Tip:"
 echo "  sudo PHI_DOWNLOAD_RUNTIME=true PHI_DOWNLOAD_MODEL=true bash \"$SCRIPT_DIR/install_phi35_sudo.sh\""
