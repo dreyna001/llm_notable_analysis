@@ -1,0 +1,93 @@
+# Air-gapped deployment (pre-built images)
+
+Your stack uses **two** container images:
+
+| Image | Role | Typical source on an internet-connected machine |
+|--------|------|-----------------------------------------------|
+| **Analyzer** | Python app + copied `onprem_service` / `onprem_rag` | You **build** from this repo (`Dockerfile.analyzer`) |
+| **model-serving** | llama.cpp OpenAI-compatible server | Upstream **`ghcr.io/ggml-org/llama.cpp:server`** (you **mirror** or save/load) |
+
+**Pre-built images are the right default** for air-gapped servers: either push both to a registry the isolated network can reach, or transfer **`docker save`** tarballs and **`docker load`** on the target. You still need **host-mounted** `config/`, `.env`, `data/`, and especially the **GGUF under `models/`** — those are **not** inside the images.
+
+## One registry vs two
+
+- **One private registry, two repositories (or two tags)** is enough, for example:
+  - `registry.example.com/notable/analyzer:1.0.0`
+  - `registry.example.com/notable/llama-cpp:server-20250404`
+- **Two registries** (e.g. GHCR + internal Harbor) only matters for policy/redundancy; operationally you still pull **two** images.
+
+## Connected machine: build, mirror, push
+
+Replace registry names and tags with yours.
+
+```bash
+cd llm_notable_analysis_onprem_docker
+
+# 1) Analyzer (your code + Python deps baked in)
+docker compose build analyzer
+docker tag notable-analyzer-analyzer:latest YOUR_REGISTRY/notable-analyzer:1.0.0
+docker push YOUR_REGISTRY/notable-analyzer:1.0.0
+
+# 2) llama.cpp server (mirror upstream; pin digest in prod if you want reproducibility)
+docker pull ghcr.io/ggml-org/llama.cpp:server
+docker tag ghcr.io/ggml-org/llama.cpp:server YOUR_REGISTRY/llama-cpp-server:server
+docker push YOUR_REGISTRY/llama-cpp-server:server
+```
+
+Optional: save both to files for sneakernet/USB (no registry on the air-gapped side):
+
+```bash
+docker save YOUR_REGISTRY/notable-analyzer:1.0.0 YOUR_REGISTRY/llama-cpp-server:server \
+  | gzip > notable-analyzer-images.tar.gz
+```
+
+On the isolated host:
+
+```bash
+gunzip -c notable-analyzer-images.tar.gz | docker load
+```
+
+## Air-gapped host: config and compose
+
+1. Copy the **deployment directory** (or a release tarball): `compose.airgap.yaml`, `config/config.env.example`, `.env.example`, `systemd/`, `docs/`, etc. You do **not** need the full Git history to **run** if images are already loaded.
+
+2. Create `config/config.env`, `.env`, `data/*`, place **GGUF** in `models/`.
+
+3. In `.env`, set at least:
+
+   - `CONTAINER_UID` / `CONTAINER_GID`
+   - `LLM_MODEL_FILENAME` (must match the file on disk under `models/`)
+   - `LLAMA_*` tuning if needed
+   - **Air-gap image references** (if using the same `.env` for compose substitution):
+
+```env
+MODEL_SERVING_IMAGE=YOUR_REGISTRY/llama-cpp-server:server
+ANALYZER_IMAGE=YOUR_REGISTRY/notable-analyzer:1.0.0
+```
+
+4. Start **without** building:
+
+```bash
+docker compose -f compose.airgap.yaml pull   # if the host can reach your registry
+# OR docker load ... first, then skip pull
+
+docker compose -f compose.airgap.yaml up -d
+```
+
+5. Verify: `docker compose -f compose.airgap.yaml ps` and logs as in `container-deployment-quickstart.md`.
+
+## What is still not “one pull”
+
+- **Weights**: the GGUF is large and is mounted from the host; ship it separately (media, object store export, second tarball).
+- **Secrets / environment**: `config/config.env` and `.env` stay local; do not bake secrets into images.
+- **Optional RAG**: FAISS/SQLite under `kb/index/` if you enable RAG.
+
+## Reproducibility
+
+To avoid surprise upgrades when re-pulling `llama.cpp:server`, after a successful test run:
+
+```bash
+docker inspect ghcr.io/ggml-org/llama.cpp:server --format '{{.RepoDigests}}'
+```
+
+Tag and push that digest on your mirror, or document the digest in your runbook.

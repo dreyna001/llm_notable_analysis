@@ -7,6 +7,21 @@ ai_use_case_delivery_framework/AI_USE_CASE_DELIVERY_PROCESS.md
 # Local secrets / environment (never commit)
 llm_notable_analysis_onprem/config.env
 llm_notable_analysis_onprem/wsl-notable-data/
+llm_notable_analysis_onprem_docker/.env
+llm_notable_analysis_onprem_docker/config/config.env
+llm_notable_analysis_onprem_docker/models/*.gguf
+
+# File-drop runtime data (keep only .gitkeep per subdirectory)
+llm_notable_analysis_onprem_docker/data/incoming/*
+!llm_notable_analysis_onprem_docker/data/incoming/.gitkeep
+llm_notable_analysis_onprem_docker/data/processed/*
+!llm_notable_analysis_onprem_docker/data/processed/.gitkeep
+llm_notable_analysis_onprem_docker/data/quarantine/*
+!llm_notable_analysis_onprem_docker/data/quarantine/.gitkeep
+llm_notable_analysis_onprem_docker/data/reports/*
+!llm_notable_analysis_onprem_docker/data/reports/.gitkeep
+llm_notable_analysis_onprem_docker/data/archive/*
+!llm_notable_analysis_onprem_docker/data/archive/.gitkeep
 
 # WSL-local Python venv (Linux paths; keep out of repo)
 .venv-wsl/

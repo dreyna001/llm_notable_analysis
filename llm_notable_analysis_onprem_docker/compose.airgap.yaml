@@ -1,0 +1,78 @@
+# Standalone stack for air-gapped / registry-only hosts: no `build`, only pre-pushed images.
+# Keep in sync with compose.yaml (volumes, command, healthchecks) when those change.
+#
+# Set in .env (or the environment) before `docker compose -f compose.airgap.yaml up -d`:
+#   MODEL_SERVING_IMAGE=your.registry/llama-cpp-server:tag
+#   ANALYZER_IMAGE=your.registry/notable-analyzer:tag
+# Plus the same variables as compose.yaml: CONTAINER_UID, CONTAINER_GID, LLM_MODEL_FILENAME, LLAMA_*.
+
+name: notable-analyzer
+
+services:
+  model-serving:
+    image: ${MODEL_SERVING_IMAGE:?Set MODEL_SERVING_IMAGE in .env - mirrored llama.cpp server image}
+    restart: unless-stopped
+    user: "${CONTAINER_UID:-1000}:${CONTAINER_GID:-1000}"
+    command:
+      - --model
+      - /models/${LLM_MODEL_FILENAME:-Phi-3.5-mini-instruct-Q4_K_M.gguf}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --threads
+      - "${LLAMA_THREADS:-4}"
+      - --threads-batch
+      - "${LLAMA_THREADS_BATCH:-4}"
+      - --parallel
+      - "${LLAMA_PARALLEL:-1}"
+      - --ctx-size
+      - "${LLAMA_CTX_SIZE:-16384}"
+      - --n-predict
+      - "${LLAMA_N_PREDICT:-1024}"
+      - --cache-type-k
+      - "${LLAMA_CACHE_TYPE_K:-q8_0}"
+      - --cache-type-v
+      - "${LLAMA_CACHE_TYPE_V:-q8_0}"
+      - --metrics
+      - --no-webui
+      - --cont-batching
+    volumes:
+      - ./models:/models:ro
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  analyzer:
+    image: ${ANALYZER_IMAGE:?Set ANALYZER_IMAGE in .env — your pushed notable-analyzer image}
+    restart: unless-stopped
+    user: "${CONTAINER_UID:-1000}:${CONTAINER_GID:-1000}"
+    env_file:
+      - ./config/config.env
+    depends_on:
+      model-serving:
+        condition: service_healthy
+    volumes:
+      - ./data/incoming:/watch/incoming
+      - ./data/processed:/watch/processed
+      - ./data/quarantine:/watch/quarantine
+      - ./data/reports:/watch/reports
+      - ./data/archive:/watch/archive
+      - ./kb/index:/kb/index:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from pathlib import Path; import requests; requests.get('http://model-serving:8000/health', timeout=5).raise_for_status(); required = ['/watch/incoming', '/watch/processed', '/watch/quarantine', '/watch/reports', '/watch/archive']; raise SystemExit(0 if all(Path(p).exists() for p in required) else 1)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
