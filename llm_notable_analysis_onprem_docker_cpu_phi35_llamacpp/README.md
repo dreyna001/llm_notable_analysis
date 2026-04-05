@@ -20,29 +20,18 @@ The **analyzer** is packaged as **`notable-analyzer-service`** on GHCR: a **gene
 - **Role:** file-drop ingest, HTTP client to the LLM API, optional RAG, report output — **not** the vLLM or llama.cpp server.
 - **CPU vs GPU:** the analyzer process does not need a GPU to call a remote/local OpenAI-compatible API; GPU matters for the **inference** service you run separately.
 
-## Host Layout
+## Host layout
 
-The intended deployment root on a Linux host is:
+Canonical operator guide (directory tree, required files, mount map, build vs pull vs air-gap): **[docs/deployment.md](docs/deployment.md)**.
 
-`/home/<user>/apps/notable-analyzer`
-
-When deployed there, the main runtime paths are:
-
-- `./models`
-- `./data/incoming`
-- `./data/processed`
-- `./data/quarantine`
-- `./data/reports`
-- `./data/archive`
-- `./config/config.env`
-- `./kb/index`
+Typical deployment root: `/home/<user>/apps/notable-analyzer`. Runtime paths under that root: `models/`, `data/{incoming,processed,quarantine,reports,archive}/`, `config/config.env`, optional `kb/index/`.
 
 ## Key Files
 
 - `docs/canonical-repos.md`: Git repo + GHCR image URLs for this project
-- `scripts/wsl-first-up.sh`: optional first-time helper (env + dirs + optional GGUF download for known filenames + `compose up`); see `docs/container-deployment-quickstart.md`
+- `docs/deployment.md`: **single deployment guide** (host files, env, scenarios: local build, GHCR pull, air-gap)
+- `scripts/wsl-first-up.sh`: optional first-time helper (env + dirs + optional GGUF download + `compose up`); details in `docs/deployment.md`
 - `docs/ghcr-login-and-push.md`: log in to GHCR (password = your PAT) and push images
-- `docs/airgap-deployment.md`: pre-built images, registry mirror, `docker save` / `docker load`, and `compose.airgap.yaml`
 - `compose.airgap.yaml`: same stack as `compose.yaml` but **no `build`** — only `MODEL_SERVING_IMAGE` and `ANALYZER_IMAGE` from `.env`
 - `Dockerfile.analyzer`: builds the analyzer container
 - `requirements.analyzer-docker.txt`: analyzer Python dependencies
@@ -80,7 +69,7 @@ The following values must be reviewed and filled in for each unique deployment:
 
 ## Notes
 
-- **WSL / Docker Desktop:** If `docker` is missing inside WSL, enable WSL integration in Docker Desktop for that distro, or install Docker in the distro. The engine must be running before `docker compose` (see `docs/container-deployment-quickstart.md` prerequisites).
+- **WSL / Docker Desktop:** If `docker` is missing inside WSL, enable WSL integration in Docker Desktop for that distro, or install Docker in the distro. The engine must be running before `docker compose` (see `docs/deployment.md` prerequisites).
 - Incoming notables remain host data and are mounted into the analyzer container.
 - GGUF model files remain on the host and are mounted into the inference container.
 - The analyzer defaults to the non-SDK runtime path via `onprem_service.onprem_main_nonsdk`.

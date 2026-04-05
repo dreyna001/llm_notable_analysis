@@ -440,13 +440,13 @@ Scope:
 - uses container-facing paths such as `/watch/...`
 - documents required and optional analyzer settings in the new Docker layout
 
-### `docs/container-deployment-quickstart.md`
+### `docs/deployment.md` (bundle: `llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/docs/`)
 
 Scope:
 
-- operator-facing quickstart for building, loading, and running the stack
-- focuses on the container path, not the legacy host-venv path
-- includes startup, verification, and rollback basics
+- single operator-facing deployment doc: host directory layout, required files, env variables, container mount map
+- scenarios in order: local `docker compose` build, pre-built images from registry (`compose.airgap.yaml`), air-gap `docker save` / `docker load`
+- startup, verification, and optional systemd; does not cover the legacy host-venv path
 
 ### Optional file: `compose.override.example.yaml`
 
@@ -465,7 +465,7 @@ To keep the implementation simple, each generated file should have a narrow purp
 - one Docker orchestration file
 - one host `systemd` stack unit
 - one container-oriented example env file
-- one quickstart doc
+- one deployment doc (`docs/deployment.md`)
 
 Avoid generating:
 
