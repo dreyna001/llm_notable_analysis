@@ -29,7 +29,7 @@ Typical deployment root: `/home/<user>/apps/notable-analyzer`. Runtime paths und
 ## Key Files
 
 - `docs/canonical-repos.md`: Git repo + GHCR image URLs for this project
-- `docs/deployment.md`: **single deployment guide** (host files, env, scenarios: local build, GHCR pull, air-gap)
+- `docs/deployment.md`: **single deployment guide** (workflows: connected host, jump server → air-gap, optional GHCR)
 - `scripts/wsl-first-up.sh`: optional first-time helper (env + dirs + optional GGUF download + `compose up`); details in `docs/deployment.md`
 - `docs/ghcr-login-and-push.md`: pointer to the GHCR publish section in `docs/deployment.md`
 - `compose.airgap.yaml`: same stack as `compose.yaml` but **no `build`** — only `MODEL_SERVING_IMAGE` and `ANALYZER_IMAGE` from `.env`
