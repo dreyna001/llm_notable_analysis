@@ -1,6 +1,6 @@
 # Alternatives (Non-OS / Non-Python Dependencies) — On-Prem Notable Analyzer
 
-This document lists **practical alternatives** to key external components used or implied by `llm_notable_analysis_onprem/`, focused on **on‑prem / air‑gapped / regulated** deployments.
+This document lists **practical alternatives** to key external components used or implied by `llm_notable_analysis_onprem_systemd/`, focused on **on‑prem / air‑gapped / regulated** deployments.
 
 > Scope: alternatives to **LLM serving/inference**, **artifact distribution**, **ingest/transport**, **secrets**, **logging/telemetry**, and **SBOM/provenance**. (Not a recommendation; depends on enclave standards and accreditation.)
 

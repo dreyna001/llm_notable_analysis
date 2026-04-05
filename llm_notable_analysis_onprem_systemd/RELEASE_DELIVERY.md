@@ -12,7 +12,7 @@ Scope:
 Before publishing delivery artifacts, run the on-prem automated tests from repo root:
 
 ```bash
-python -m unittest discover -s llm_notable_analysis_onprem/tests -p "test*.py" -v
+python -m unittest discover -s llm_notable_analysis_onprem_systemd/tests -p "test*.py" -v
 ```
 
 ## What is delivered
@@ -86,7 +86,7 @@ On the target host:
 ```bash
 mkdir -p /opt/notable-analyzer-release
 tar -xzf /tmp/notable-analyzer-onprem-<version>.tar.gz -C /opt/notable-analyzer-release
-cd /opt/notable-analyzer-release/llm_notable_analysis_onprem
+cd /opt/notable-analyzer-release/llm_notable_analysis_onprem_systemd
 sudo bash install.sh
 ```
 

@@ -1,8 +1,8 @@
 import unittest
 
-from llm_notable_analysis_onprem.onprem_service import local_llm_client as llm_client_module
-from llm_notable_analysis_onprem.onprem_service.config import Config
-from llm_notable_analysis_onprem.onprem_service.local_llm_client import (
+from llm_notable_analysis_onprem_systemd.onprem_service import local_llm_client as llm_client_module
+from llm_notable_analysis_onprem_systemd.onprem_service.config import Config
+from llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client import (
     LocalLLMClient,
     _normalize_and_fill_defaults,
     _validate_spl_query_contract,

@@ -42,7 +42,7 @@ For a concise "what to download first" checklist for offline setup, see [`OFFLIN
 If your inference layer is already provided by `onprem_qwen3_sudo_llamacpp_service`, install this package in **client mode** (no vLLM/GPU setup) with:
 
 ```bash
-cd /path/to/llm_notable_analysis_onprem
+cd /path/to/llm_notable_analysis_onprem_systemd
 sudo bash install_mini_qwen_cpu_client.sh
 ```
 
@@ -174,7 +174,7 @@ Even with one-command install, these items remain environment-specific:
 For environments that require scanning/approving every installed component, generate an evidence-based manifest on the target host:
 
 ```bash
-cd /path/to/llm_notable_analysis_onprem
+cd /path/to/llm_notable_analysis_onprem_systemd
 sudo bash tools/generate_dependency_manifest.sh
 ```
 
@@ -266,14 +266,14 @@ Generated artifacts in `index`:
 Run the on-prem unittest suite from repo root:
 
 ```bash
-python -m unittest discover -s llm_notable_analysis_onprem/tests -p "test*.py" -v
+python -m unittest discover -s llm_notable_analysis_onprem_systemd/tests -p "test*.py" -v
 ```
 
 Preflight recommendation before first service start:
 
 ```bash
 cd ~/llm_notable_analysis
-PYTHONPATH=llm_notable_analysis_onprem /opt/notable-analyzer/venv/bin/python -m unittest discover -s llm_notable_analysis_onprem/tests -p "test*.py" -v
+PYTHONPATH=llm_notable_analysis_onprem_systemd /opt/notable-analyzer/venv/bin/python -m unittest discover -s llm_notable_analysis_onprem_systemd/tests -p "test*.py" -v
 ```
 
 - Unit tests do not require `vllm` or `notable-analyzer` to be running.
@@ -567,7 +567,7 @@ Intel comparison note for the EPYC profile:
 ## File Structure
 
 ```
-llm_notable_analysis_onprem/
+llm_notable_analysis_onprem_systemd/
 ├── README.md                    # This file
 ├── INSTALL.md                   # Detailed installation guide
 ├── install.sh                   # Automated installer (run as root)

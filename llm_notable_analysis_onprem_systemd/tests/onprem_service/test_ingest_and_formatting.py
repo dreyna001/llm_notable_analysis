@@ -3,13 +3,13 @@ from pathlib import Path
 import tempfile
 import os
 
-from llm_notable_analysis_onprem.onprem_service.ingest import (
+from llm_notable_analysis_onprem_systemd.onprem_service.ingest import (
     discover_files,
     get_notable_id,
     normalize_notable,
 )
-from llm_notable_analysis_onprem.onprem_service.config import Config
-from llm_notable_analysis_onprem.onprem_service.onprem_main import _format_alert_for_llm
+from llm_notable_analysis_onprem_systemd.onprem_service.config import Config
+from llm_notable_analysis_onprem_systemd.onprem_service.onprem_main import _format_alert_for_llm
 
 
 class TestIngestAndFormatting(unittest.TestCase):

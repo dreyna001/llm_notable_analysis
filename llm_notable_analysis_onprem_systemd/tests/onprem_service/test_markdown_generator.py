@@ -1,7 +1,7 @@
 import unittest
 from copy import deepcopy
 
-from llm_notable_analysis_onprem.onprem_service.markdown_generator import (
+from llm_notable_analysis_onprem_systemd.onprem_service.markdown_generator import (
     generate_markdown_report,
 )
 

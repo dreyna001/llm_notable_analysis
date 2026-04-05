@@ -11,7 +11,7 @@
 # - Captures model directory inventory + SHA256 hashes (if present)
 #
 # Usage:
-#   sudo bash llm_notable_analysis_onprem/tools/generate_dependency_manifest.sh
+#   sudo bash llm_notable_analysis_onprem_systemd/tools/generate_dependency_manifest.sh
 #
 # Output:
 #   ./dependency_manifest_YYYYmmdd_HHMMSS/ (created in current working directory)

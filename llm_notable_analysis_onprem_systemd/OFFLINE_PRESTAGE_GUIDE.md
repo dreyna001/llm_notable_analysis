@@ -1,10 +1,10 @@
-# Offline Pre-Stage Guide (`llm_notable_analysis_onprem`)
+# Offline Pre-Stage Guide (`llm_notable_analysis_onprem_systemd`)
 
 Goal: list exactly what to download before installing on an offline host.
 
 ## 1) Download source bundles
 
-- `llm_notable_analysis_onprem/` (this package)
+- `llm_notable_analysis_onprem_systemd/` (this package)
 - `onprem-llm-sdk/` source bundle (recommended for offline)
 
 ## 2) Download Python artifacts (wheelhouse)
@@ -72,7 +72,7 @@ For full vLLM mode, also stage:
 Install from local wheelhouse/model artifacts:
 
 ```bash
-cd /path/to/llm_notable_analysis_onprem
+cd /path/to/llm_notable_analysis_onprem_systemd
 sudo PIP_NO_INDEX=1 \
      PIP_FIND_LINKS=/mnt/media/wheelhouse \
      VLLM_PIP_SPEC="/mnt/media/wheelhouse/vllm-0.14.1-*.whl" \
@@ -88,6 +88,6 @@ sudo PIP_NO_INDEX=1 \
 No vLLM/GPU install path:
 
 ```bash
-cd /path/to/llm_notable_analysis_onprem
+cd /path/to/llm_notable_analysis_onprem_systemd
 sudo SDK_SOURCE_DIR=/path/to/onprem-llm-sdk bash install_mini_qwen_cpu_client.sh
 ```

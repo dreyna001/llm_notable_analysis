@@ -3,12 +3,12 @@
 This guide provides a minimal playbook pattern for environments where:
 
 - SOAR orchestrates notable handling.
-- `llm_notable_analysis_onprem` consumes dropped `*.json` / `*.txt` files.
+- `llm_notable_analysis_onprem_systemd` consumes dropped `*.json` / `*.txt` files.
 - The file should contain one notable plus supporting event context.
 
 The accompanying template code is in:
 
-- `llm_notable_analysis_onprem/soar_playbook/phantom_notable_to_analyzer.py`
+- `llm_notable_analysis_onprem_systemd/soar_playbook/phantom_notable_to_analyzer.py`
 
 ## 1) Trigger Timing (when to run playbook)
 

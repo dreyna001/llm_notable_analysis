@@ -30,7 +30,7 @@ RAG grounding should close that gap.
 
 This capability is for the structured on-prem analyzer path only:
 
-- in scope: `llm_notable_analysis_onprem/onprem_service/local_llm_client.py`
+- in scope: `llm_notable_analysis_onprem_systemd/onprem_service/local_llm_client.py`
 - out of scope for v1: `freeform_llm_client.py`
 
 This plan assumes the existing SPL generation feature already exists behind:
@@ -363,18 +363,18 @@ Optional later tuning:
 
 ### Core app
 
-- `llm_notable_analysis_onprem/onprem_service/config.py`
+- `llm_notable_analysis_onprem_systemd/onprem_service/config.py`
   - add `SPL_QUERY_RAG_ENABLED`
-- `llm_notable_analysis_onprem/config.env.example`
+- `llm_notable_analysis_onprem_systemd/config.env.example`
   - document the new flag
-- `llm_notable_analysis_onprem/README.md`
+- `llm_notable_analysis_onprem_systemd/README.md`
   - document the feature and how it interacts with existing RAG/SPL flags
-- `llm_notable_analysis_onprem/onprem_service/local_llm_client.py`
+- `llm_notable_analysis_onprem_systemd/onprem_service/local_llm_client.py`
   - add SPL-grounding prompt block
   - add retrieval invocation
   - add grounding-aware validation
   - add citation/ref handling
-- `llm_notable_analysis_onprem/onprem_service/markdown_generator.py`
+- `llm_notable_analysis_onprem_systemd/onprem_service/markdown_generator.py`
   - render grounding summary and refs per hypothesis
 
 ### Retrieval layer
@@ -388,8 +388,8 @@ Optional later tuning:
 
 ### Tests
 
-- `llm_notable_analysis_onprem/tests/onprem_service/test_local_llm_client_contract.py`
-- `llm_notable_analysis_onprem/tests/onprem_service/test_markdown_generator.py`
+- `llm_notable_analysis_onprem_systemd/tests/onprem_service/test_local_llm_client_contract.py`
+- `llm_notable_analysis_onprem_systemd/tests/onprem_service/test_markdown_generator.py`
 - new retrieval-focused tests under `onprem_rag/future/tests` or existing test location if available
 
 ## Suggested Implementation Phases

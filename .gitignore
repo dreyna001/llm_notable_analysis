@@ -5,8 +5,8 @@ __pycache__/
 ai_use_case_delivery_framework/AI_USE_CASE_DELIVERY_PROCESS.md
 
 # Local secrets / environment (never commit)
-llm_notable_analysis_onprem/config.env
-llm_notable_analysis_onprem/wsl-notable-data/
+llm_notable_analysis_onprem_systemd/config.env
+llm_notable_analysis_onprem_systemd/wsl-notable-data/
 llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/.env
 llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/config/config.env
 llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/models/*.gguf

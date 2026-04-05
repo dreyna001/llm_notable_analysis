@@ -9,7 +9,7 @@
 This report summarizes deployment readiness for:
 - `vllm.service` (local inference service)
 - `notable-analyzer.service` (file-drop ingest and analysis pipeline)
-- On-prem unittest suite under `llm_notable_analysis_onprem/tests`
+- On-prem unittest suite under `llm_notable_analysis_onprem_systemd/tests`
 
 ## Validation evidence
 

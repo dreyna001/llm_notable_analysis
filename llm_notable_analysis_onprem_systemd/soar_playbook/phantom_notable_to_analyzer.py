@@ -1,6 +1,6 @@
 """
 Template Splunk SOAR (Phantom) playbook:
-Send one notable + supporting events to llm_notable_analysis_onprem as JSON.
+Send one notable + supporting events to llm_notable_analysis_onprem_systemd as JSON.
 
 This is intentionally a simple baseline:
 - Build one JSON payload per notable container

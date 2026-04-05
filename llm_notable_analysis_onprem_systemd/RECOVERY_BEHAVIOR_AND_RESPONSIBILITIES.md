@@ -1,6 +1,6 @@
 # Recovery Behavior and Responsibilities
 
-This document defines restart/recovery semantics for `llm_notable_analysis_onprem` and clarifies which reliability behavior is implemented by `onprem-llm-sdk` versus the notable-analysis application layer.
+This document defines restart/recovery semantics for `llm_notable_analysis_onprem_systemd` and clarifies which reliability behavior is implemented by `onprem-llm-sdk` versus the notable-analysis application layer.
 
 ## Scope
 
@@ -76,7 +76,7 @@ SDK does **not** implement persistent checkpointing, durable queue state, or cra
 
 ## What Notable Analysis Does (and where)
 
-Implemented in `llm_notable_analysis_onprem/onprem_service/`:
+Implemented in `llm_notable_analysis_onprem_systemd/onprem_service/`:
 
 - **Outer retry policy preserved for this app:** `local_llm_client.py`
   - App-level retry loop with existing backoff semantics.

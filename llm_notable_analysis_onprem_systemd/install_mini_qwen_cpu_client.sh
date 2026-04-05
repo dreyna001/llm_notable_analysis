@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 # install_mini_qwen_cpu_client.sh
 # Purpose:
-#   Install/configure llm_notable_analysis_onprem as a client of the
+#   Install/configure llm_notable_analysis_onprem_systemd as a client of the
 #   onprem_qwen3_sudo_llamacpp_service llama.cpp CPU service (Qwen3 GGUF).
 set -euo pipefail
 IFS=$'\n\t'

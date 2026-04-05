@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document describes the target containerized deployment model for `llm_notable_analysis_onprem` while preserving the current functionality and keeping the operating model minimal, predictable, and easy to deploy across different VMs.
+This document describes the target containerized deployment model for `llm_notable_analysis_onprem_systemd` while preserving the current functionality and keeping the operating model minimal, predictable, and easy to deploy across different VMs.
 
 The goal is to remove host-level Python/runtime drift by packaging the analyzer and model-serving runtimes into separate container images, while keeping only the small amount of host infrastructure that is still useful.
 

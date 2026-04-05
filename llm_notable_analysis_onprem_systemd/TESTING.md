@@ -7,7 +7,7 @@ This project includes a minimal automated `unittest` suite for the on-prem servi
 From repository root:
 
 ```bash
-python -m unittest discover -s llm_notable_analysis_onprem/tests -p "test*.py" -v
+python -m unittest discover -s llm_notable_analysis_onprem_systemd/tests -p "test*.py" -v
 ```
 
 ## What is covered

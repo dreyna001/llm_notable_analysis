@@ -1,6 +1,6 @@
 # On-Prem Notable Analyzer — Security Posture (Hardening, Supply Chain, FIPS)
 
-This document describes the **security posture implemented in `llm_notable_analysis_onprem/`**, covering:
+This document describes the **security posture implemented in `llm_notable_analysis_onprem_systemd/`**, covering:
 
 - **Runtime hardening** (systemd, least privilege, ingress/egress, logging)
 - **Supply chain controls** (pinning, evidence/SBOM hooks, provenance guidance)
@@ -156,7 +156,7 @@ Retention intervals are configurable in `/etc/notable-analyzer/config.env` (defa
 
 #### Analyzer venv (`/opt/notable-analyzer/venv`)
 
-- `llm_notable_analysis_onprem/requirements.txt` uses **exact pins** (example: `requests==...`).
+- `llm_notable_analysis_onprem_systemd/requirements.txt` uses **exact pins** (example: `requests==...`).
 - For regulated deployments, install from an **approved internal mirror** or offline wheelhouse.
 
 #### vLLM venv (`/opt/vllm/venv`)

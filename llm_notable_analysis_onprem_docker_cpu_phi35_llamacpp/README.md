@@ -1,6 +1,6 @@
 # Dockerized On-Prem Notable Analyzer (Phi-3.5 + llama.cpp reference stack)
 
-This directory is a **reference Docker bundle**: default **Phi-3.5-mini** GGUF plus upstream **`llama.cpp`** OpenAI-compatible **model-serving** (CPU-threaded defaults in `compose.yaml`). It is a sibling of the host-venv path in `llm_notable_analysis_onprem`.
+This directory is a **reference Docker bundle**: default **Phi-3.5-mini** GGUF plus upstream **`llama.cpp`** OpenAI-compatible **model-serving** (CPU-threaded defaults in `compose.yaml`). It is a sibling of the host-venv path in `llm_notable_analysis_onprem_systemd`.
 
 The **analyzer** is packaged as **`notable-analyzer-service`** on GHCR: a **generic Python worker** that talks to whatever inference endpoint you configure in `config/config.env` (`LLM_API_URL`). The same container image does **not** imply CPU-only for your whole deployment—you can point it at **GPU / vLLM** or another OpenAI-compatible server; only the **model-serving** side changes (separate compose project or image recommended for large GPU stacks).
 
@@ -31,7 +31,7 @@ Typical deployment root: `/home/<user>/apps/notable-analyzer`. Runtime paths und
 - `docs/canonical-repos.md`: Git repo + GHCR image URLs for this project
 - `docs/deployment.md`: **single deployment guide** (host files, env, scenarios: local build, GHCR pull, air-gap)
 - `scripts/wsl-first-up.sh`: optional first-time helper (env + dirs + optional GGUF download + `compose up`); details in `docs/deployment.md`
-- `docs/ghcr-login-and-push.md`: log in to GHCR (password = your PAT) and push images
+- `docs/ghcr-login-and-push.md`: pointer to the GHCR publish section in `docs/deployment.md`
 - `compose.airgap.yaml`: same stack as `compose.yaml` but **no `build`** — only `MODEL_SERVING_IMAGE` and `ANALYZER_IMAGE` from `.env`
 - `Dockerfile.analyzer`: builds the analyzer container
 - `requirements.analyzer-docker.txt`: analyzer Python dependencies
@@ -74,5 +74,5 @@ The following values must be reviewed and filled in for each unique deployment:
 - GGUF model files remain on the host and are mounted into the inference container.
 - The analyzer defaults to the non-SDK runtime path via `onprem_service.onprem_main_nonsdk`.
 - First install/build is an explicit operator step; boot-time recovery should rely on Docker restart policies plus a lightweight `systemd` wrapper if desired.
-- **`llm_notable_analysis_onprem`** documents host-venv deployment with **vLLM**-style URLs for larger models; this folder is the **llama.cpp + default Phi-3.5** Docker reference, while the **analyzer image name** stays **`notable-analyzer-service`** for reuse.
+- **`llm_notable_analysis_onprem_systemd`** documents host-venv deployment with **vLLM**-style URLs for larger models; this folder is the **llama.cpp + default Phi-3.5** Docker reference, while the **analyzer image name** stays **`notable-analyzer-service`** for reuse.
 - If later changes prove minimal, this fork can be collapsed back into the main on-prem package.

@@ -647,7 +647,7 @@ For the current on-prem automated `unittest` coverage and test catalog, see `TES
 Run from repository root:
 
 ```bash
-python -m unittest discover -s llm_notable_analysis_onprem/tests -p "test*.py" -v
+python -m unittest discover -s llm_notable_analysis_onprem_systemd/tests -p "test*.py" -v
 ```
 
 ### Acceptance Checklist

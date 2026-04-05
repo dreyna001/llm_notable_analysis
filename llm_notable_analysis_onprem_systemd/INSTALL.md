@@ -21,8 +21,8 @@
 ## Quick Install
 
 ```bash
-# Clone or copy llm_notable_analysis_onprem/ to the host
-cd /path/to/llm_notable_analysis_onprem
+# Clone or copy llm_notable_analysis_onprem_systemd/ to the host
+cd /path/to/llm_notable_analysis_onprem_systemd
 
 # Run installer as root
 sudo bash install.sh
@@ -40,9 +40,9 @@ Use this when your inference service is already running from `onprem_qwen3_sudo_
 
 ```bash
 # Expected sibling layout:
-#   /path/to/llm_notable_analysis_onprem
+#   /path/to/llm_notable_analysis_onprem_systemd
 #   /path/to/onprem-llm-sdk
-cd /path/to/llm_notable_analysis_onprem
+cd /path/to/llm_notable_analysis_onprem_systemd
 sudo bash install_mini_qwen_cpu_client.sh
 ```
 
@@ -247,7 +247,7 @@ Run tests from repo root before first service start:
 
 ```bash
 cd ~/llm_notable_analysis
-PYTHONPATH=llm_notable_analysis_onprem /opt/notable-analyzer/venv/bin/python -m unittest discover -s llm_notable_analysis_onprem/tests -p "test*.py" -v
+PYTHONPATH=llm_notable_analysis_onprem_systemd /opt/notable-analyzer/venv/bin/python -m unittest discover -s llm_notable_analysis_onprem_systemd/tests -p "test*.py" -v
 ```
 
 Expected result:

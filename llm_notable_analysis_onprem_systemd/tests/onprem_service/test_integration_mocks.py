@@ -6,10 +6,10 @@ from unittest.mock import MagicMock, patch
 
 import requests
 
-from llm_notable_analysis_onprem.onprem_service.config import Config
-from llm_notable_analysis_onprem.onprem_service.local_llm_client import LocalLLMClient
-from llm_notable_analysis_onprem.onprem_service.sinks import update_splunk_notable
-from llm_notable_analysis_onprem.onprem_service.ttp_validator import TTPValidator
+from llm_notable_analysis_onprem_systemd.onprem_service.config import Config
+from llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client import LocalLLMClient
+from llm_notable_analysis_onprem_systemd.onprem_service.sinks import update_splunk_notable
+from llm_notable_analysis_onprem_systemd.onprem_service.ttp_validator import TTPValidator
 
 
 class _DummyValidator:
@@ -18,7 +18,7 @@ class _DummyValidator:
 
 
 class TestIntegrationMocks(unittest.TestCase):
-    @patch("llm_notable_analysis_onprem.onprem_service.local_llm_client.requests.post")
+    @patch("llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client.requests.post")
     def test_analyze_alert_success_with_mocked_llm(self, mock_post: MagicMock) -> None:
         payload = {
             "alert_reconciliation": {
@@ -68,7 +68,7 @@ class TestIntegrationMocks(unittest.TestCase):
         self.assertFalse(result["metadata"]["repair_attempted"])
         self.assertEqual(mock_post.call_count, 1)
 
-    @patch("llm_notable_analysis_onprem.onprem_service.local_llm_client.requests.post")
+    @patch("llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client.requests.post")
     def test_analyze_alert_uses_repair_flow_when_initial_response_invalid(
         self, mock_post: MagicMock
     ) -> None:
@@ -140,7 +140,7 @@ class TestIntegrationMocks(unittest.TestCase):
         self.assertTrue(result["metadata"]["repair_attempted"])
         self.assertEqual(mock_post.call_count, 2)
 
-    @patch("llm_notable_analysis_onprem.onprem_service.local_llm_client.requests.post")
+    @patch("llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client.requests.post")
     def test_analyze_alert_poc_fallback_when_repair_still_invalid(
         self, mock_post: MagicMock
     ) -> None:
@@ -181,11 +181,11 @@ class TestIntegrationMocks(unittest.TestCase):
         self.assertEqual(mock_post.call_count, 2)
 
     @patch(
-        "llm_notable_analysis_onprem.onprem_service.local_llm_client.time.sleep",
+        "llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client.time.sleep",
         return_value=None,
     )
     @patch(
-        "llm_notable_analysis_onprem.onprem_service.local_llm_client.requests.post",
+        "llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client.requests.post",
         side_effect=requests.exceptions.Timeout,
     )
     def test_analyze_alert_timeout_returns_error(
@@ -202,7 +202,7 @@ class TestIntegrationMocks(unittest.TestCase):
         self.assertIn("timeout", result["error"].lower())
         self.assertGreaterEqual(mock_post.call_count, 3)
 
-    @patch("llm_notable_analysis_onprem.onprem_service.sinks.requests.post")
+    @patch("llm_notable_analysis_onprem_systemd.onprem_service.sinks.requests.post")
     def test_update_splunk_notable_builds_expected_payload(
         self, mock_post: MagicMock
     ) -> None:
@@ -242,7 +242,7 @@ class TestIntegrationMocks(unittest.TestCase):
         )
         self.assertEqual(result["status"], "skipped")
 
-    @patch("llm_notable_analysis_onprem.onprem_service.sinks.requests.post")
+    @patch("llm_notable_analysis_onprem_systemd.onprem_service.sinks.requests.post")
     def test_update_splunk_notable_uses_finding_id_only(
         self, mock_post: MagicMock
     ) -> None:
@@ -272,7 +272,7 @@ class TestIntegrationMocks(unittest.TestCase):
         self.assertNotIn("search_name", kwargs["data"])
 
     @patch(
-        "llm_notable_analysis_onprem.onprem_service.sinks.requests.post",
+        "llm_notable_analysis_onprem_systemd.onprem_service.sinks.requests.post",
         side_effect=requests.RequestException("splunk down"),
     )
     def test_update_splunk_notable_returns_error_on_request_exception(
@@ -292,7 +292,7 @@ class TestIntegrationMocks(unittest.TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIn("splunk down", result["message"])
 
-    @patch("llm_notable_analysis_onprem.onprem_service.local_llm_client.requests.post")
+    @patch("llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client.requests.post")
     def test_analyze_alert_filters_invalid_ttps_with_real_validator(
         self, mock_post: MagicMock
     ) -> None:
