@@ -1,5 +1,7 @@
 # Chat completions response metadata (llama-server / Phi-3.5)
 
+For install/runtime setup, use `README.md` in this directory.
+
 This project runs **llama.cpp `llama-server`**, which implements an **OpenAI-compatible** `POST /v1/chat/completions` API. Responses may include both **standard OpenAI-style fields** and **llama.cpp-specific** fields. Exact keys can vary slightly by **llama.cpp build/version**; when in doubt, inspect one real JSON response from your server.
 
 **Upstream reference:** [llama.cpp `tools/server/README.md`](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md) (sections on chat completions, timings, and metrics).
