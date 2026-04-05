@@ -1,2 +1,2 @@
-"""On-prem retrieval grounding package."""
+"""On-prem retrieval grounding Python package."""
 

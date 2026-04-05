@@ -1,2 +1,2 @@
-"""Future retrieval module components."""
+"""Future retrieval components for the onprem_rag Python package."""
 
