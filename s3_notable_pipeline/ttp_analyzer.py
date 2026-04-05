@@ -308,6 +308,8 @@ Additional constraints (not enforceable in JSON schema):
 - explanation: must end with "Uncertainty: [brief statement]".
 - URLs are only allowed in ioc_extraction.urls[]; no URLs elsewhere.
 - Leave arrays empty [] when no items apply.
+- alert_reconciliation: object with verdict, confidence, one_sentence_summary, decision_drivers (list), recommended_actions (list).
+- Top-level keys (required): alert_reconciliation, competing_hypotheses, evidence_vs_inference, ioc_extraction, ttp_analysis.
 - Return ONLY the tool call; no extra text.
 """
 
@@ -318,6 +320,14 @@ Additional constraints:
 - explanation: must end with "Uncertainty: [brief statement]".
 - URLs are only allowed in ioc_extraction.urls[]; no URLs elsewhere.
 - Leave arrays empty [] when no items apply.
+- alert_reconciliation: object with verdict, confidence, one_sentence_summary, decision_drivers (list), recommended_actions (list).
+
+Top-level keys (required):
+- alert_reconciliation
+- competing_hypotheses
+- evidence_vs_inference
+- ioc_extraction
+- ttp_analysis
 """
 
 RULES = """
@@ -350,8 +360,13 @@ def validate_response_schema(result: Dict[str, Any]) -> Tuple[bool, Optional[str
     return True, None
 
 
-def validate_competing_hypotheses_balance(result: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
-    """Enforce competing_hypotheses contains EXACTLY 3 benign + 3 adversary items.
+def validate_competing_hypotheses_balance(
+    result: Dict[str, Any], *, strict: bool = False
+) -> Tuple[bool, Optional[str]]:
+    """Validate competing_hypotheses shape.
+
+    In non-strict mode, this enforces only "list of objects" for resilience.
+    In strict mode, it enforces EXACTLY 3 benign + 3 adversary hypotheses.
 
     Args:
         result: Parsed structured model output.
@@ -360,16 +375,24 @@ def validate_competing_hypotheses_balance(result: Dict[str, Any]) -> Tuple[bool,
         Tuple of `(is_valid, error_message)`.
     """
     ch = result.get("competing_hypotheses")
+    if ch is None:
+        return True, None
     if not isinstance(ch, list):
         return False, "competing_hypotheses must be a list"
+    for i, item in enumerate(ch):
+        if not isinstance(item, dict):
+            return False, f"competing_hypotheses[{i}] must be an object"
+    if not strict:
+        return True, None
     if len(ch) != 6:
-        return False, f"competing_hypotheses must contain exactly 6 items (got {len(ch)})"
+        return (
+            False,
+            f"competing_hypotheses must contain exactly 6 items (got {len(ch)})",
+        )
 
     benign = 0
     adversary = 0
     for i, item in enumerate(ch):
-        if not isinstance(item, dict):
-            return False, f"competing_hypotheses[{i}] must be an object"
         t = item.get("hypothesis_type")
         if t == "benign":
             benign += 1
@@ -512,6 +535,287 @@ def _sanitize_urls_for_content_policy(result: Dict[str, Any]) -> Tuple[Dict[str,
                     seen.add(u)
             ioc["urls"] = merged
     return result, collected
+
+
+def _coerce_ioc_extraction(value: Any) -> Dict[str, Any]:
+    """Coerce IOC payload into stable markdown-rendering shape."""
+    base: Dict[str, Any] = {
+        "ip_addresses": [],
+        "domains": [],
+        "user_accounts": [],
+        "hostnames": [],
+        "process_names": [],
+        "file_paths": [],
+        "file_hashes": [],
+        "event_ids": [],
+        "urls": [],
+    }
+    if isinstance(value, dict):
+        for k in list(base.keys()):
+            v = value.get(k, [])
+            if v is None:
+                continue
+            if isinstance(v, list):
+                base[k] = [str(x) for x in v if str(x)]
+            elif isinstance(v, str):
+                base[k] = [v]
+            else:
+                base[k] = [str(v)]
+        return base
+    if isinstance(value, list):
+        for item in value:
+            s = str(item).strip()
+            if not s:
+                continue
+            if s.startswith("http://") or s.startswith("https://"):
+                base["urls"].append(s)
+            elif re.match(r"^\d{1,3}(\.\d{1,3}){3}$", s):
+                base["ip_addresses"].append(s)
+            elif "\\" in s or "@" in s:
+                base["user_accounts"].append(s)
+            elif "/" in s or s.startswith("\\"):
+                base["file_paths"].append(s)
+            elif "." in s and " " not in s:
+                base["domains"].append(s)
+            else:
+                base["hostnames"].append(s)
+        return base
+    return base
+
+
+def _coerce_evidence_vs_inference(value: Any) -> Dict[str, Any]:
+    """Coerce evidence/inference payload into a stable dict contract."""
+    base: Dict[str, Any] = {"evidence": [], "inferences": []}
+    if isinstance(value, dict):
+        ev = value.get("evidence", [])
+        inf = value.get("inferences", [])
+        base["evidence"] = [
+            str(x) for x in (ev if isinstance(ev, list) else [ev]) if str(x)
+        ]
+        base["inferences"] = [
+            str(x) for x in (inf if isinstance(inf, list) else [inf]) if str(x)
+        ]
+        return base
+    if isinstance(value, list):
+        base["evidence"] = [str(x) for x in value if str(x)]
+        return base
+    if isinstance(value, str):
+        base["evidence"] = [value]
+        return base
+    return base
+
+
+_TTP_ID_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
+
+
+def _coerce_ttp_id(value: Any) -> Optional[str]:
+    """Extract a MITRE technique ID (T#### or T####.###) from common shapes."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        m = _TTP_ID_RE.search(value.strip())
+        return m.group(1) if m else None
+    return _coerce_ttp_id(str(value))
+
+
+def _coerce_ttp_analysis(value: Any) -> List[Dict[str, Any]]:
+    """Coerce ttp_analysis into a list of objects with at least a ttp_id field."""
+    if value is None:
+        return []
+
+    items: List[Any]
+    if isinstance(value, list):
+        items = value
+    else:
+        items = [value]
+
+    out: List[Dict[str, Any]] = []
+    for item in items:
+        if isinstance(item, str):
+            ttp_id = _coerce_ttp_id(item)
+            if ttp_id:
+                out.append(
+                    {
+                        "ttp_id": ttp_id,
+                        "ttp_name": "",
+                        "confidence_score": 0.5,
+                        "explanation": "Extracted from model output (non-schema). Uncertainty: output format drift.",
+                        "evidence_fields": [],
+                    }
+                )
+            continue
+        if isinstance(item, dict):
+            raw_id = (
+                item.get("ttp_id")
+                or item.get("technique_id")
+                or item.get("mitre_technique_id")
+                or item.get("technique")
+                or item.get("id")
+            )
+            ttp_id = _coerce_ttp_id(raw_id)
+            if not ttp_id:
+                ttp_id = (
+                    _coerce_ttp_id(item.get("ttp_name"))
+                    or _coerce_ttp_id(item.get("explanation"))
+                    or _coerce_ttp_id(item.get("rationale"))
+                )
+            out.append(
+                {
+                    **item,
+                    "ttp_id": ttp_id,
+                    "ttp_name": item.get(
+                        "ttp_name", item.get("technique_name", item.get("name", ""))
+                    ),
+                    "confidence_score": item.get(
+                        "confidence_score",
+                        item.get("score", item.get("confidence", 0.5)),
+                    ),
+                    "explanation": item.get("explanation", item.get("rationale", "")),
+                    "evidence_fields": item.get(
+                        "evidence_fields", item.get("evidence", [])
+                    ),
+                }
+            )
+    return out
+
+
+def _normalize_and_fill_defaults(parsed: Dict[str, Any]) -> Dict[str, Any]:
+    """Make parsed object robust to minor schema drift from local models."""
+    if not isinstance(parsed, dict):
+        return {}
+    out = dict(parsed)
+    ar = out.get("alert_reconciliation", {})
+    if not isinstance(ar, dict):
+        ar = {}
+    out["alert_reconciliation"] = {
+        "verdict": str(ar.get("verdict", "")) if ar.get("verdict") is not None else "",
+        "confidence": str(ar.get("confidence", ""))
+        if ar.get("confidence") is not None
+        else "",
+        "one_sentence_summary": str(ar.get("one_sentence_summary", ""))
+        if ar.get("one_sentence_summary") is not None
+        else "",
+        "decision_drivers": [
+            str(x)
+            for x in (
+                ar.get("decision_drivers", [])
+                if isinstance(ar.get("decision_drivers", []), list)
+                else [ar.get("decision_drivers", "")]
+            )
+            if str(x)
+        ],
+        "recommended_actions": [
+            str(x)
+            for x in (
+                ar.get("recommended_actions", [])
+                if isinstance(ar.get("recommended_actions", []), list)
+                else [ar.get("recommended_actions", "")]
+            )
+            if str(x)
+        ],
+    }
+    ch = out.get("competing_hypotheses", [])
+    if isinstance(ch, dict):
+        ch = [ch]
+    out["competing_hypotheses"] = [x for x in ch if isinstance(x, dict)] if isinstance(ch, list) else []
+    out["evidence_vs_inference"] = _coerce_evidence_vs_inference(
+        out.get("evidence_vs_inference", {})
+    )
+    out["ioc_extraction"] = _coerce_ioc_extraction(out.get("ioc_extraction", {}))
+    out["ttp_analysis"] = _coerce_ttp_analysis(out.get("ttp_analysis", []))
+    return out
+
+
+def _safe_float(v: Any, default: float = 0.0) -> float:
+    try:
+        return float(v)
+    except Exception:
+        return default
+
+
+def extract_scored_ttps(result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extract a normalized scored TTP list from parsed model output."""
+    scored: List[Dict[str, Any]] = []
+    ttp_list = result.get("ttp_analysis", [])
+    if not isinstance(ttp_list, list):
+        return scored
+    for i, item in enumerate(ttp_list):
+        if not isinstance(item, dict):
+            logger.warning(f"Skipping invalid TTP item at index {i}: not a dict")
+            continue
+        ttp_id = item.get("ttp_id")
+        if not ttp_id:
+            logger.warning(f"Skipping invalid TTP item at index {i}: missing ttp_id")
+            continue
+        scored.append(
+            {
+                "ttp_id": ttp_id,
+                "ttp_name": item.get("ttp_name", ""),
+                "score": _safe_float(
+                    item.get(
+                        "confidence_score",
+                        item.get("score", item.get("confidence", 0.0)),
+                    )
+                ),
+                "explanation": item.get("explanation", ""),
+                "evidence_fields": item.get("evidence_fields", []),
+            }
+        )
+    return scored
+
+
+def build_poc_fallback_llm_payload(
+    *,
+    primary_text: str,
+    repair_text: Optional[str],
+    reason: str,
+    model_name: str,
+    attempt: int,
+    elapsed_primary: float,
+    elapsed_repair: Optional[float],
+) -> Dict[str, Any]:
+    """Build fallback payload that preserves raw model text for PoC review."""
+    primary_text = (primary_text or "").strip()
+    repair_text = (repair_text or "").strip()
+    combined = primary_text
+    if repair_text:
+        combined += (
+            "\n\n---\n\n### Secondary call (schema repair attempt) - raw output\n\n"
+            + repair_text
+        )
+    if not combined:
+        combined = "(empty model response)"
+    return {
+        "poc_unstructured_output": True,
+        "poc_fallback_reason": reason,
+        "raw_response": combined,
+        "alert_reconciliation": {
+            "verdict": "poc_raw_output_only",
+            "confidence": "n/a",
+            "one_sentence_summary": (
+                "Structured output was not applied; the model raw text is preserved "
+                "in the PoC section for human review."
+            ),
+            "decision_drivers": [reason[:800]],
+            "recommended_actions": [
+                "Review the PoC raw output section in this report.",
+            ],
+        },
+        "competing_hypotheses": [],
+        "evidence_vs_inference": {"evidence": [], "inferences": []},
+        "ioc_extraction": {},
+        "ttp_analysis": [],
+        "metadata": {
+            "model": model_name,
+            "poc_fallback": True,
+            "attempt": attempt,
+            "inference_time_seconds": (
+                (elapsed_repair or 0.0) + elapsed_primary
+                if repair_text
+                else elapsed_primary
+            ),
+        },
+    }
 
 
 def extract_json_object(raw_text: str) -> Tuple[str, Optional[str]]:
@@ -789,8 +1093,6 @@ class BedrockAnalyzer:
 
 {PROCEDURE}
 
-{ALERT_RECONCILIATION}
-
 Use MITRE ATT&CK v17 technique IDs (format: T#### or T####.###). If unsure, omit; invalid IDs will be discarded.
 
 SECURITY ALERT INPUT:
@@ -968,255 +1270,177 @@ SECURITY ALERT INPUT:
             return str(alert_payload)
     
     def analyze_ttp(self, alert_text: str, alert_time: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Use LLM to analyze the alert and identify relevant MITRE ATT&CK TTPs.
-        
-        This method constructs a detailed prompt with analyst doctrine, sends it to
-        Bedrock Nova Pro, parses the structured JSON response, and filters out invalid TTPs.
-        
-        Args:
-            alert_text: Formatted alert text to analyze.
-            alert_time: Optional ISO timestamp of the alert for enrichment queries.
-            
-        Returns:
-            List of valid TTP dictionaries with scores, explanations, and metadata.
-            Returns empty list if analysis fails or no valid TTPs are found.
-        """
+        """Analyze one alert and return validated scored TTP entries."""
         logger.info("Starting TTP analysis")
         start_time = time.time()
-        
-        # Log validator stats (validation happens post-LLM via filter_valid_ttps)
         total_ttps = self.validator.get_ttp_count()
         logger.info(f"Loaded {total_ttps} valid TTPs for post-response validation")
-        
-        # Build prompt using modular sections (start in tool-use mode)
+
         prompt_tool = self._build_prompt(alert_text, alert_time, use_tool=True)
         prompt_raw = self._build_prompt(alert_text, alert_time, use_tool=False)
-        
-        # Input validation
+
         if not alert_text or not alert_text.strip():
             logger.error("Alert text is empty or whitespace only")
+            self.last_llm_response = {"error": "Empty alert text", "ttp_analysis": []}
             return []
-        
+
+        def _validate_and_postprocess(parsed: Dict[str, Any]) -> Tuple[bool, Optional[str], Dict[str, Any]]:
+            parsed = _normalize_llm_result_shape(parsed)
+            if not isinstance(parsed, dict):
+                return False, f"Expected dict after normalization, got {type(parsed).__name__}", {}
+            parsed = _normalize_and_fill_defaults(parsed)
+
+            is_valid, validation_error = validate_response_schema(parsed)
+            if not is_valid:
+                return False, f"Schema validation: {validation_error}", {}
+
+            ch_ok, ch_err = validate_competing_hypotheses_balance(parsed, strict=False)
+            if not ch_ok:
+                return False, f"Competing hypotheses validation: {ch_err}", {}
+
+            policy_ok, policy_err = validate_content_policies(parsed)
+            if not policy_ok:
+                return False, f"Content policy validation: {policy_err}", {}
+
+            parsed["ttp_analysis_raw"] = parsed.get("ttp_analysis", [])
+            extracted = extract_scored_ttps(parsed)
+            parsed["ttp_analysis"] = self.validator.filter_valid_ttps(extracted)
+            return True, None, parsed
+
         try:
-            logger.info("Making Bedrock API call...")
-            api_start_time = time.time()
-            
-            # Call Bedrock with retry logic
             max_retries = 3
             retry_delay = 5
-            
             response: Optional[Dict[str, Any]] = None
             used_tool = True
+            response_attempt = 1
+            primary_elapsed = 0.0
 
-            # Phase 1: Tool-use mode (preferred)
+            # Phase 1: tool mode
             for attempt in range(max_retries):
                 try:
                     logger.info(f"API call attempt {attempt + 1}/{max_retries} (tool_use=True)")
+                    t0 = time.time()
                     response = self._converse(prompt_tool, use_tool=True)
-                    api_end_time = time.time()
-                    logger.info(f"API call completed in {api_end_time - api_start_time:.2f} seconds")
+                    primary_elapsed = time.time() - t0
+                    response_attempt = attempt + 1
                     break
                 except ClientError as api_error:
-                    # If Bedrock reports a tool-use invalid sequence, immediately fall back to raw JSON mode.
                     if self._is_tooluse_model_error(api_error):
-                        logger.warning("Tool-use mode failed with ModelErrorException (invalid ToolUse sequence). Falling back to raw JSON mode.")
+                        logger.warning("Tool-use mode failed with ModelErrorException; falling back to raw JSON mode.")
                         used_tool = False
                         response = None
                         break
-
                     logger.warning(f"API call attempt {attempt + 1} failed: {str(api_error)}")
                     if attempt < max_retries - 1:
-                        logger.info(f"Retrying in {retry_delay} seconds...")
                         time.sleep(retry_delay)
                         retry_delay *= 2
                     else:
-                        logger.error(f"All {max_retries} API call attempts failed")
                         raise
 
-            # Phase 2: Raw JSON mode (no toolConfig), only if tool-use mode was abandoned
-            if response is None and used_tool is False:
+            # Phase 2: raw JSON mode
+            if response is None and not used_tool:
                 retry_delay = 5
                 for attempt in range(max_retries):
                     try:
                         logger.info(f"API call attempt {attempt + 1}/{max_retries} (tool_use=False)")
+                        t0 = time.time()
                         response = self._converse(prompt_raw, use_tool=False)
-                        api_end_time = time.time()
-                        logger.info(f"API call completed in {api_end_time - api_start_time:.2f} seconds")
+                        primary_elapsed = time.time() - t0
+                        response_attempt = attempt + 1
                         break
                     except ClientError as api_error:
                         logger.warning(f"Raw JSON API call attempt {attempt + 1} failed: {str(api_error)}")
                         if attempt < max_retries - 1:
-                            logger.info(f"Retrying in {retry_delay} seconds...")
                             time.sleep(retry_delay)
                             retry_delay *= 2
                         else:
-                            logger.error(f"All {max_retries} raw JSON API call attempts failed")
                             raise
 
             if response is None:
                 raise RuntimeError("Bedrock converse did not return a response")
-            
-            # Parse the response using helper method
-            logger.info("Parsing LLM response")
+
             result, error_msg, raw_content = self._parse_bedrock_response(
                 response,
                 allow_text_fallback=(used_tool is False),
             )
-            
-            # Store raw content for debugging
-            if raw_content:
-                self.last_raw_content = raw_content
-            
-            # Validate schema if parse succeeded
+            primary_raw = raw_content or ""
+            if primary_raw:
+                self.last_raw_content = primary_raw
+
+            ok = False
+            final_obj: Dict[str, Any] = {}
             if result is not None:
-                # Normalize wrapper shapes (e.g., {"ttp_analyzer": {...}}) before validation
-                result = _normalize_llm_result_shape(result)
-
-                # Log raw structure for debugging
-                logger.info(f"Parsed result keys: {list(result.keys()) if isinstance(result, dict) else type(result).__name__}")
-                logger.info(f"Required top-level keys: {REQUIRED_RESPONSE_KEYS_LIST}")
-                
-                is_valid, validation_error = validate_response_schema(result)
-                if not is_valid:
-                    logger.warning(f"Schema validation failed: {validation_error}")
-                    logger.warning(f"Got keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
-                    error_msg = f"Schema validation: {validation_error}"
-                    raw_content = raw_content or str(result)[:2000]
-                    result = None  # treat as parse failure, triggers retry
-                else:
-                    ch_ok, ch_err = validate_competing_hypotheses_balance(result)
-                    if not ch_ok:
-                        logger.warning(f"Competing hypotheses validation failed: {ch_err}")
-                        error_msg = f"Competing hypotheses: {ch_err}"
-                        raw_content = raw_content or str(result)[:2000]
-                        result = None
-                    else:
-                        # Sanitize disallowed URLs before enforcing content policies.
-                        result, moved_urls = _sanitize_urls_for_content_policy(result)
-                        if moved_urls:
-                            logger.warning(f"Sanitized {len(moved_urls)} URL(s) into ioc_extraction.urls to satisfy content policy")
-                        policy_ok, policy_err = validate_content_policies(result)
-                        if not policy_ok:
-                            logger.warning(f"Content policy validation failed: {policy_err}")
-                            error_msg = f"Content policy: {policy_err}"
-                            raw_content = raw_content or str(result)[:2000]
-                            result = None
-            
-            # Content retry: if parsing or validation failed, try once more with a repair prompt
-            if result is None and error_msg:
-                logger.warning(f"Initial parse failed: {error_msg}. Attempting content retry...")
-                
-                # Build repair prompt with truncated prior output
-                prior_output = (raw_content or "")[:2000]
-                repair_template = REPAIR_PROMPT_TEMPLATE if used_tool else REPAIR_PROMPT_TEMPLATE_RAW_JSON
-                repair_prompt = repair_template.format(
-                    error=error_msg,
-                    prior_output=prior_output
+                logger.info(
+                    f"Parsed result keys: {list(result.keys()) if isinstance(result, dict) else type(result).__name__}"
                 )
-                
-                try:
-                    logger.info("Content retry: calling Bedrock with repair prompt")
-                    retry_response = self._converse(repair_prompt, use_tool=used_tool)
-                    
-                    # Parse retry response
-                    result, retry_error, retry_raw = self._parse_bedrock_response(
-                        retry_response,
-                        allow_text_fallback=(used_tool is False),
-                    )
-                    
-                    # Validate schema if retry parse succeeded
-                    if result is not None:
-                        # Normalize wrapper shapes before validation (retry path)
-                        result = _normalize_llm_result_shape(result)
+                logger.info(f"Required top-level keys: {REQUIRED_RESPONSE_KEYS_LIST}")
+                ok, error_msg, final_obj = _validate_and_postprocess(result)
 
-                        logger.info(f"Retry parsed result keys: {list(result.keys()) if isinstance(result, dict) else type(result).__name__}")
-                        
-                        is_valid, validation_error = validate_response_schema(result)
-                        if not is_valid:
-                            logger.error(f"Retry schema validation failed: {validation_error}")
-                            logger.error(f"Retry got keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
-                            self.last_llm_response = {"raw_error": retry_raw or str(result)[:2000]}
-                            return []
-                        ch_ok, ch_err = validate_competing_hypotheses_balance(result)
-                        if not ch_ok:
-                            logger.error(f"Retry competing hypotheses validation failed: {ch_err}")
-                            self.last_llm_response = {"raw_error": retry_raw or str(result)[:2000]}
-                            return []
-                        result, moved_urls = _sanitize_urls_for_content_policy(result)
-                        if moved_urls:
-                            logger.warning(f"Retry sanitize: moved {len(moved_urls)} URL(s) into ioc_extraction.urls to satisfy content policy")
-                        policy_ok, policy_err = validate_content_policies(result)
-                        if not policy_ok:
-                            logger.error(f"Retry content policy validation failed: {policy_err}")
-                            self.last_llm_response = {"raw_error": retry_raw or str(result)[:2000]}
-                            return []
-                        logger.info("Content retry succeeded")
-                        if retry_raw:
-                            self.last_raw_content = retry_raw
-                    else:
-                        logger.error(f"Content retry also failed: {retry_error}")
-                        self.last_llm_response = {"raw_error": retry_raw or raw_content or str(error_msg)}
-                        return []
-                        
-                except ClientError as retry_error:
-                    logger.error(f"Content retry API call failed: {retry_error}")
-                    self.last_llm_response = {"raw_error": raw_content or str(error_msg)}
-                    return []
-            
-            # Final check: if still no result after retry opportunity
-            if result is None:
-                self.last_llm_response = {"raw_error": raw_content or str(error_msg)}
+            repair_raw: Optional[str] = None
+            repair_elapsed: Optional[float] = None
+            used_prompt_len = len(prompt_tool if used_tool else prompt_raw)
+            repair_attempted = False
+
+            if not ok and error_msg:
+                repair_attempted = True
+                logger.warning(f"Initial parse/validation failed: {error_msg}. Attempting one repair call.")
+                prior_output = (primary_raw or str(result) or "")[:4000]
+                repair_template = REPAIR_PROMPT_TEMPLATE if used_tool else REPAIR_PROMPT_TEMPLATE_RAW_JSON
+                repair_prompt = repair_template.format(error=error_msg, prior_output=prior_output)
+                t0 = time.time()
+                retry_response = self._converse(repair_prompt, use_tool=used_tool)
+                repair_elapsed = time.time() - t0
+                used_prompt_len = len(repair_prompt)
+                retry_result, retry_error, retry_raw = self._parse_bedrock_response(
+                    retry_response,
+                    allow_text_fallback=(used_tool is False),
+                )
+                repair_raw = retry_raw or ""
+                if repair_raw:
+                    self.last_raw_content = repair_raw
+                if retry_result is not None:
+                    ok, error_msg, final_obj = _validate_and_postprocess(retry_result)
+                else:
+                    ok = False
+                    error_msg = retry_error or error_msg
+
+            if not ok:
+                fallback = build_poc_fallback_llm_payload(
+                    primary_text=primary_raw,
+                    repair_text=repair_raw,
+                    reason=error_msg or "Response parsing/validation failed",
+                    model_name=self.model_id,
+                    attempt=response_attempt,
+                    elapsed_primary=primary_elapsed,
+                    elapsed_repair=repair_elapsed,
+                )
+                self.last_llm_response = fallback
                 return []
-            
-            logger.info(f"Parsed result type: {type(result)}")
-            
-            # Store the last LLM response for markdown generation
-            self.last_llm_response = result
-            
-            # Extract TTPs from the structured response
-            scored_ttps = []
-            
-            if not isinstance(result, dict):
-                logger.error(f"Expected dict response, got {type(result)}")
-                return []
-            
-            # Handle the structured response with ttp_analysis
-            if "ttp_analysis" in result:
-                logger.info(f"Processing structured response with ttp_analysis")
-                if not isinstance(result["ttp_analysis"], list):
-                    logger.error(f"ttp_analysis must be a list, got {type(result['ttp_analysis'])}")
-                    return []
-                
-                for i, item in enumerate(result["ttp_analysis"]):
-                    if not isinstance(item, dict):
-                        logger.warning(f"Skipping invalid TTP item at index {i}: not a dict")
-                        continue
-                    if "ttp_id" not in item:
-                        logger.warning(f"Skipping invalid TTP item at index {i}: missing ttp_id")
-                        continue
-                    
-                    scored_ttps.append({
-                        "ttp_id": item["ttp_id"],
-                        "ttp_name": item.get("ttp_name", ""),
-                        "score": float(item.get("confidence_score", item.get("score", item.get("confidence", 0)))),
-                        "explanation": item.get("explanation", ""),
-                        "evidence_fields": item.get("evidence_fields", []),
-                    })
-                logger.info(f"Extracted {len(scored_ttps)} TTPs from ttp_analysis")
-            
-            # Filter out invalid TTPs
-            logger.info("Filtering invalid TTPs")
-            valid_ttps = self.validator.filter_valid_ttps(scored_ttps)
+
+            final_obj["metadata"] = {
+                "model": self.model_id,
+                "inference_time_seconds": (
+                    (repair_elapsed or 0.0) + primary_elapsed
+                    if repair_attempted and repair_elapsed is not None
+                    else primary_elapsed
+                ),
+                "prompt_length": used_prompt_len,
+                "attempt": response_attempt,
+                "repair_attempted": repair_attempted,
+            }
+            final_obj["raw_response"] = repair_raw if repair_attempted and repair_raw else primary_raw
+            self.last_llm_response = final_obj
+
+            valid_ttps = final_obj.get("ttp_analysis", [])
             logger.info(f"Final valid TTPs: {len(valid_ttps)}")
-            
             total_time = time.time() - start_time
             logger.info(f"Total TTP analysis completed in {total_time:.2f} seconds")
-            
             return valid_ttps
-            
+
         except Exception as e:
             logger.error(f"Unexpected error calling LLM: {str(e)}")
             logger.error(f"Exception type: {type(e).__name__}")
+            self.last_llm_response = {"error": f"LLM API error: {e}", "ttp_analysis": []}
             return []
 
 
