@@ -1,6 +1,6 @@
 # Deployment (all scenarios)
 
-Single operator guide for this bundle. Image names and clone URLs: [canonical-repos.md](canonical-repos.md). Publishing to GHCR: [ghcr-login-and-push.md](ghcr-login-and-push.md).
+Single operator guide for this bundle from "we want this tool in our environment" to "the tool is running."
 
 ---
 
@@ -63,7 +63,17 @@ docker compose version
 
 ---
 
-## 3) One-time prep (every scenario)
+## 3) Choose the delivery path
+
+| If your environment is... | Use this path |
+|---------------------------|---------------|
+| Single host, internet available | **Scenario A** (`compose.yaml`, local build) |
+| Multiple hosts, registry reachable | **Scenario B** publish once, then **Scenario C** pull-only deploy |
+| Offline / air-gapped target | **Scenario B** on connected machine, then **Scenario D** (`docker save`/`load`) |
+
+---
+
+## 4) One-time prep (every run target)
 
 Run from the **deployment root** (the folder that contains `compose.yaml`).
 
@@ -77,6 +87,25 @@ Edit **`.env`** at least:
 
 - `CONTAINER_UID`, `CONTAINER_GID` (match numeric owner of `data/` and `models/` on the host)
 - `LLM_MODEL_FILENAME` (must match the GGUF filename under `models/`)
+
+Get `CONTAINER_UID` / `CONTAINER_GID` on the target Linux/WSL host:
+
+```bash
+# Current shell user
+id -u
+id -g
+
+# Or a specific service account
+id -u <user>
+id -g <user>
+```
+
+If directories already exist and you want container writes to match existing ownership:
+
+```bash
+stat -c '%u %g' data/incoming
+stat -c '%u %g' models
+```
 
 Edit **`config/config.env`** at least:
 
@@ -93,7 +122,7 @@ models/<same-as-LLM_MODEL_FILENAME>
 
 ---
 
-## 4) Scenario A — Build analyzer on this host (internet for build)
+## 5) Scenario A — Build and run on this host (internet for build)
 
 Uses **`compose.yaml`**: pulls **model-serving** image from upstream; **builds** analyzer from `Dockerfile.analyzer` (base image + `pip install` need network unless you use a private mirror).
 
@@ -124,7 +153,47 @@ bash scripts/wsl-first-up.sh
 
 ---
 
-## 5) Scenario B — Pre-built images, registry reachable (no `docker build` on host)
+## 6) Scenario B — Publish pre-built images to GHCR (one-time per version)
+
+Run this on a connected build machine (repo checked out, Docker logged in). This publishes images other hosts can pull.
+
+Create/use a GitHub PAT with:
+
+- `read:packages`
+- `write:packages`
+
+Use the PAT as the password for GHCR login:
+
+```bash
+docker logout ghcr.io
+docker login ghcr.io -u <github-username>
+```
+
+Build and push analyzer image:
+
+```bash
+cd llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp
+docker compose build analyzer
+docker tag notable-analyzer-service-analyzer:latest ghcr.io/dreyna001/notable-analyzer-service:1.0.0
+docker push ghcr.io/dreyna001/notable-analyzer-service:1.0.0
+```
+
+Mirror and push llama.cpp server image:
+
+```bash
+docker pull ghcr.io/ggml-org/llama.cpp:server
+docker tag ghcr.io/ggml-org/llama.cpp:server ghcr.io/dreyna001/llama-cpp-server-cpu-phi35-llamacpp:server
+docker push ghcr.io/dreyna001/llama-cpp-server-cpu-phi35-llamacpp:server
+```
+
+Quick checks:
+
+- `denied` usually means wrong PAT scopes or wrong username.
+- If credentials are stale, run `docker logout ghcr.io` and login again.
+
+---
+
+## 7) Scenario C — Pre-built images, registry reachable (no `docker build` on host)
 
 Uses **`compose.airgap.yaml`**. Set image references in **`.env`** (replace registry/user if not `dreyna001`):
 
@@ -150,7 +219,7 @@ Verify / stop: same as scenario A but pass `-f compose.airgap.yaml` on every `do
 
 ---
 
-## 6) Scenario C — Air-gapped or no registry (image tarball)
+## 8) Scenario D — Air-gapped or no registry (image tarball)
 
 On a **connected** machine that already has both images loaded:
 
@@ -168,7 +237,7 @@ On the **target** host:
 gunzip -c notable-analyzer-stack-images.tar.gz | docker load
 ```
 
-Complete **section 3** (dirs, `.env`, `config/config.env`, GGUF). In **`.env`**, set `ANALYZER_IMAGE` and `MODEL_SERVING_IMAGE` to the **same references** as the tags you loaded (if you retagged after load, use those names).
+Complete **section 4** (dirs, `.env`, `config/config.env`, GGUF). In **`.env`**, set `ANALYZER_IMAGE` and `MODEL_SERVING_IMAGE` to the **same references** as the tags you loaded (if you retagged after load, use those names).
 
 **Do not run `pull`** if the host has no registry access:
 
@@ -178,19 +247,19 @@ docker compose -f compose.airgap.yaml up -d
 
 ---
 
-## 7) Smoke test
+## 9) Smoke test
 
 Drop a `.json` or `.txt` file into `data/incoming/`. Expect: file moves to `data/processed/` or `data/quarantine/`, and a report under `data/reports/`.
 
 ---
 
-## 8) Optional: systemd
+## 10) Optional: systemd
 
 Edit `systemd/notable-analyzer-stack.service` (`User`, `Group`, `WorkingDirectory`, docker path), install the unit, enable on boot. The unit only runs `docker compose up` / `stop` in `WorkingDirectory`—it does not rebuild images.
 
 ---
 
-## 9) Which compose file when
+## 11) Which compose file when
 
 | Goal | Compose file |
 |------|----------------|
