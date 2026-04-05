@@ -1,5 +1,7 @@
 # Container Deployment Quickstart
 
+**Clone source and pull images:** see [canonical-repos.md](canonical-repos.md) for the GitHub repository, this folder’s path in Git, and GHCR image references (`ghcr.io/dreyna001/...`).
+
 This quickstart assumes the Dockerized project has been copied to:
 
 `/home/<user>/apps/notable-analyzer`
@@ -126,7 +128,7 @@ docker compose down
 
 ## Air-gapped or registry-only hosts
 
-For **pre-pushed** images (no `docker build` on the target), see **`docs/airgap-deployment.md`** and use **`compose.airgap.yaml`** with `MODEL_SERVING_IMAGE` and `ANALYZER_IMAGE` in `.env`.
+For **pre-pushed** images (no `docker build` on the target), see **`docs/airgap-deployment.md`** and use **`compose.airgap.yaml`** with `MODEL_SERVING_IMAGE` and `ANALYZER_IMAGE` in `.env`. **Exact Git + GHCR URLs** for this project: **`docs/canonical-repos.md`**.
 
 ## Rollback
 

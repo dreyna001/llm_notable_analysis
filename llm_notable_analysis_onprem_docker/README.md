@@ -5,6 +5,8 @@ This directory is a Docker-focused sibling fork of the on-prem notable analyzer.
 It exists so Docker deployment work can evolve without changing the existing
 `llm_notable_analysis_onprem` host-service path.
 
+**Where the code and images live:** [docs/canonical-repos.md](docs/canonical-repos.md) — GitHub repo URL, path to this folder in Git, and GHCR image names (`ghcr.io/dreyna001/...`).
+
 ## Scope
 
 - `onprem_service/` contains the analyzer runtime copied from the current on-prem package.
@@ -32,7 +34,9 @@ When deployed there, the main runtime paths are:
 
 ## Key Files
 
+- `docs/canonical-repos.md`: Git repo + GHCR image URLs for this project
 - `scripts/wsl-first-up.sh`: optional first-time helper (env + dirs + optional GGUF download for known filenames + `compose up`); see `docs/container-deployment-quickstart.md`
+- `docs/ghcr-login-and-push.md`: log in to GHCR (password = your PAT) and push images
 - `docs/airgap-deployment.md`: pre-built images, registry mirror, `docker save` / `docker load`, and `compose.airgap.yaml`
 - `compose.airgap.yaml`: same stack as `compose.yaml` but **no `build`** — only `MODEL_SERVING_IMAGE` and `ANALYZER_IMAGE` from `.env`
 - `Dockerfile.analyzer`: builds the analyzer container

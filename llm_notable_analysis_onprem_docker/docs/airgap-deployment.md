@@ -1,5 +1,7 @@
 # Air-gapped deployment (pre-built images)
 
+**This project’s Git repo and GHCR image names:** [canonical-repos.md](canonical-repos.md).
+
 Your stack uses **two** container images:
 
 | Image | Role | Typical source on an internet-connected machine |
@@ -8,6 +10,15 @@ Your stack uses **two** container images:
 | **model-serving** | llama.cpp OpenAI-compatible server | Upstream **`ghcr.io/ggml-org/llama.cpp:server`** (you **mirror** or save/load) |
 
 **Pre-built images are the right default** for air-gapped servers: either push both to a registry the isolated network can reach, or transfer **`docker save`** tarballs and **`docker load`** on the target. You still need **host-mounted** `config/`, `.env`, `data/`, and especially the **GGUF under `models/`** — those are **not** inside the images.
+
+## This repository (GHCR)
+
+Published images for **`dreyna001`** (adjust if you fork):
+
+- `ghcr.io/dreyna001/notable-analyzer` (e.g. tag `1.0.0`)
+- `ghcr.io/dreyna001/llama-cpp-server` (e.g. tag `server`, after you mirror upstream)
+
+**Packages UI:** [github.com/dreyna001?tab=packages](https://github.com/dreyna001?tab=packages)
 
 ## One registry vs two
 
@@ -61,6 +72,10 @@ gunzip -c notable-analyzer-images.tar.gz | docker load
    - **Air-gap image references** (if using the same `.env` for compose substitution):
 
 ```env
+# Example for this project on GHCR (see canonical-repos.md):
+# MODEL_SERVING_IMAGE=ghcr.io/dreyna001/llama-cpp-server:server
+# ANALYZER_IMAGE=ghcr.io/dreyna001/notable-analyzer:1.0.0
+
 MODEL_SERVING_IMAGE=YOUR_REGISTRY/llama-cpp-server:server
 ANALYZER_IMAGE=YOUR_REGISTRY/notable-analyzer:1.0.0
 ```
