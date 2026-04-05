@@ -15,8 +15,8 @@ Your stack uses **two** container images:
 
 Published images for **`dreyna001`** (adjust if you fork):
 
-- `ghcr.io/dreyna001/notable-analyzer` (e.g. tag `1.0.0`)
-- `ghcr.io/dreyna001/llama-cpp-server` (e.g. tag `server`, after you mirror upstream)
+- `ghcr.io/dreyna001/notable-analyzer-cpu-phi35-llamacpp` (e.g. tag `1.0.0`)
+- `ghcr.io/dreyna001/llama-cpp-server-cpu-phi35-llamacpp` (e.g. tag `server`, after you mirror upstream)
 
 **Packages UI:** [github.com/dreyna001?tab=packages](https://github.com/dreyna001?tab=packages)
 
@@ -32,30 +32,30 @@ Published images for **`dreyna001`** (adjust if you fork):
 Replace registry names and tags with yours.
 
 ```bash
-cd llm_notable_analysis_onprem_docker
+cd llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp
 
 # 1) Analyzer (your code + Python deps baked in)
 docker compose build analyzer
-docker tag notable-analyzer-analyzer:latest YOUR_REGISTRY/notable-analyzer:1.0.0
-docker push YOUR_REGISTRY/notable-analyzer:1.0.0
+docker tag notable-analyzer-cpu-phi35-llamacpp-analyzer:latest YOUR_REGISTRY/notable-analyzer-cpu-phi35-llamacpp:1.0.0
+docker push YOUR_REGISTRY/notable-analyzer-cpu-phi35-llamacpp:1.0.0
 
 # 2) llama.cpp server (mirror upstream; pin digest in prod if you want reproducibility)
 docker pull ghcr.io/ggml-org/llama.cpp:server
-docker tag ghcr.io/ggml-org/llama.cpp:server YOUR_REGISTRY/llama-cpp-server:server
-docker push YOUR_REGISTRY/llama-cpp-server:server
+docker tag ghcr.io/ggml-org/llama.cpp:server YOUR_REGISTRY/llama-cpp-server-cpu-phi35-llamacpp:server
+docker push YOUR_REGISTRY/llama-cpp-server-cpu-phi35-llamacpp:server
 ```
 
 Optional: save both to files for sneakernet/USB (no registry on the air-gapped side):
 
 ```bash
-docker save YOUR_REGISTRY/notable-analyzer:1.0.0 YOUR_REGISTRY/llama-cpp-server:server \
-  | gzip > notable-analyzer-images.tar.gz
+docker save YOUR_REGISTRY/notable-analyzer-cpu-phi35-llamacpp:1.0.0 YOUR_REGISTRY/llama-cpp-server-cpu-phi35-llamacpp:server \
+  | gzip > notable-analyzer-cpu-phi35-llamacpp-images.tar.gz
 ```
 
 On the isolated host:
 
 ```bash
-gunzip -c notable-analyzer-images.tar.gz | docker load
+gunzip -c notable-analyzer-cpu-phi35-llamacpp-images.tar.gz | docker load
 ```
 
 ## Air-gapped host: config and compose
@@ -73,11 +73,11 @@ gunzip -c notable-analyzer-images.tar.gz | docker load
 
 ```env
 # Example for this project on GHCR (see canonical-repos.md):
-# MODEL_SERVING_IMAGE=ghcr.io/dreyna001/llama-cpp-server:server
-# ANALYZER_IMAGE=ghcr.io/dreyna001/notable-analyzer:1.0.0
+# MODEL_SERVING_IMAGE=ghcr.io/dreyna001/llama-cpp-server-cpu-phi35-llamacpp:server
+# ANALYZER_IMAGE=ghcr.io/dreyna001/notable-analyzer-cpu-phi35-llamacpp:1.0.0
 
-MODEL_SERVING_IMAGE=YOUR_REGISTRY/llama-cpp-server:server
-ANALYZER_IMAGE=YOUR_REGISTRY/notable-analyzer:1.0.0
+MODEL_SERVING_IMAGE=YOUR_REGISTRY/llama-cpp-server-cpu-phi35-llamacpp:server
+ANALYZER_IMAGE=YOUR_REGISTRY/notable-analyzer-cpu-phi35-llamacpp:1.0.0
 ```
 
 4. Start **without** building:

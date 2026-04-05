@@ -1,4 +1,4 @@
-name: notable-analyzer
+name: notable-analyzer-cpu-phi35-llamacpp
 
 services:
   model-serving:

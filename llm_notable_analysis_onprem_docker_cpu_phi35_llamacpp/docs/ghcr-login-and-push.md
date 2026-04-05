@@ -38,12 +38,12 @@ You want to see **Login Succeeded**.
 
 ## Put **both** stack images in GHCR
 
-For **`dreyna001`** (this repo’s maintainer), the published names are `ghcr.io/dreyna001/notable-analyzer` and `ghcr.io/dreyna001/llama-cpp-server` — see [canonical-repos.md](canonical-repos.md). Below, replace `dreyna001` with **your** GitHub username if you fork or use a different account. Tags (`1.0.0`, `server`) should match what you intend to publish.
+For **`dreyna001`** (this repo’s maintainer), the published names for **this** CPU / Phi-3.5 / llama.cpp stack are `ghcr.io/dreyna001/notable-analyzer-cpu-phi35-llamacpp` and `ghcr.io/dreyna001/llama-cpp-server-cpu-phi35-llamacpp` — see [canonical-repos.md](canonical-repos.md). Below, replace `dreyna001` with **your** GitHub username if you fork or use a different account. Tags (`1.0.0`, `server`) should match what you intend to publish.
 
 1. **Go to the compose directory** (so `docker compose` finds `compose.yaml`):
 
    ```bash
-   cd llm_notable_analysis_onprem_docker
+   cd llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp
    ```
 
 2. **Log in to GHCR** (password = PAT):
@@ -56,23 +56,23 @@ For **`dreyna001`** (this repo’s maintainer), the published names are `ghcr.io
 
    ```bash
    docker compose build analyzer
-   docker tag notable-analyzer-analyzer:latest ghcr.io/dreyna001/notable-analyzer:1.0.0
-   docker push ghcr.io/dreyna001/notable-analyzer:1.0.0
+   docker tag notable-analyzer-cpu-phi35-llamacpp-analyzer:latest ghcr.io/dreyna001/notable-analyzer-cpu-phi35-llamacpp:1.0.0
+   docker push ghcr.io/dreyna001/notable-analyzer-cpu-phi35-llamacpp:1.0.0
    ```
 
 4. **llama.cpp server** (mirror upstream into your namespace — re-tag local copy or pull first, then push):
 
    ```bash
    docker pull ghcr.io/ggml-org/llama.cpp:server
-   docker tag ghcr.io/ggml-org/llama.cpp:server ghcr.io/dreyna001/llama-cpp-server:server
-   docker push ghcr.io/dreyna001/llama-cpp-server:server
+   docker tag ghcr.io/ggml-org/llama.cpp:server ghcr.io/dreyna001/llama-cpp-server-cpu-phi35-llamacpp:server
+   docker push ghcr.io/dreyna001/llama-cpp-server-cpu-phi35-llamacpp:server
    ```
 
 5. **On an air-gapped / pull-only host**, set these in `.env` when using `compose.airgap.yaml`:
 
    ```env
-   ANALYZER_IMAGE=ghcr.io/dreyna001/notable-analyzer:1.0.0
-   MODEL_SERVING_IMAGE=ghcr.io/dreyna001/llama-cpp-server:server
+   ANALYZER_IMAGE=ghcr.io/dreyna001/notable-analyzer-cpu-phi35-llamacpp:1.0.0
+   MODEL_SERVING_IMAGE=ghcr.io/dreyna001/llama-cpp-server-cpu-phi35-llamacpp:server
    ```
 
 Then: `docker compose -f compose.airgap.yaml pull` and `docker compose -f compose.airgap.yaml up -d`.

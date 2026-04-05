@@ -2,11 +2,11 @@
 # Keep in sync with compose.yaml (volumes, command, healthchecks) when those change.
 #
 # Set in .env (or the environment) before `docker compose -f compose.airgap.yaml up -d`:
-#   MODEL_SERVING_IMAGE=your.registry/llama-cpp-server:tag
-#   ANALYZER_IMAGE=your.registry/notable-analyzer:tag
+#   MODEL_SERVING_IMAGE=your.registry/llama-cpp-server-cpu-phi35-llamacpp:tag
+#   ANALYZER_IMAGE=your.registry/notable-analyzer-cpu-phi35-llamacpp:tag
 # Plus the same variables as compose.yaml: CONTAINER_UID, CONTAINER_GID, LLM_MODEL_FILENAME, LLAMA_*.
 
-name: notable-analyzer
+name: notable-analyzer-cpu-phi35-llamacpp
 
 services:
   model-serving:

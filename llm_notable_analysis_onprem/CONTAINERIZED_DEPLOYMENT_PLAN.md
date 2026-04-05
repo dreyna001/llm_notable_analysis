@@ -423,13 +423,14 @@ Scope:
 - defines the host-to-container path mappings
 - is the main runtime orchestration file for Docker
 
-### `systemd/notable-analyzer-stack.service`
+### `systemd/notable-analyzer-stack-cpu-phi35-llamacpp.service`
 
 Scope:
 
 - host-level `systemd` unit that starts and stops the Docker stack
 - replaces direct host execution of the analyzer runtime
 - does not run application logic itself
+- reference implementation in repo path `llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/` (CPU + Phi-3.5 + llama.cpp); a **separate** stack (GPU / vLLM / gpt-oss-120B, etc.) should ship its own unit name and Compose project to avoid image and container-name collisions
 
 ### `config.env.container.example`
 

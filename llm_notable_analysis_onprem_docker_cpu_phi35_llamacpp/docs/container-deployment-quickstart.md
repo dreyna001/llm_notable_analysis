@@ -28,7 +28,7 @@ Before starting the stack, review these deployment-specific values:
   - set `LLM_MODEL_FILENAME` if your GGUF filename is different
   - adjust llama.cpp tuning only if you need non-default runtime behavior
 
-- in `systemd/notable-analyzer-stack.service`
+- in `systemd/notable-analyzer-stack-cpu-phi35-llamacpp.service`
   - replace `<user>` in `User=`
   - replace `<user>` in `Group=`
   - replace `<user>` in `WorkingDirectory=`
@@ -144,6 +144,6 @@ behavior should work like this:
 
 - Docker daemon starts on boot
 - Docker restart policies bring the containers back
-- the optional `systemd/notable-analyzer-stack.service` wrapper should be treated
+- the optional `systemd/notable-analyzer-stack-cpu-phi35-llamacpp.service` wrapper should be treated
   as a lightweight control surface, not as the mechanism that rebuilds images on
   every boot
