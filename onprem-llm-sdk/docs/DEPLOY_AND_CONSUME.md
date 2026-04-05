@@ -135,3 +135,58 @@ python -c "import onprem_llm_sdk; print(onprem_llm_sdk.__version__)"
 Operational procedures (health checks, scripts, testing, troubleshooting, security controls)
 are in `docs/OPERATIONS_RUNBOOK.md`.
 
+## 8) Docker: quick path
+
+Use this decision:
+
+- Want only RAG in `llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp`:
+  - keep default entrypoint (`onprem_main_nonsdk`)
+  - set RAG values in `config/config.env`
+  - keep `kb/index` mount
+  - `onprem_rag` is a Python package used by the analyzer (not a standalone service); see `onprem_rag/README.md`
+  - SDK is not required
+- Want SDK transport:
+  - install `onprem-llm-sdk` in the image
+  - run `python -m onprem_service.onprem_main`
+  - RAG settings stay the same
+
+Build context (important):
+
+- To use `COPY onprem-llm-sdk ...`, `onprem-llm-sdk/` must be inside the folder Docker is building from.
+- Easiest path: run `docker build` from the repo root so both the app folder and `onprem-llm-sdk/` are included.
+- If `onprem-llm-sdk/` is not in that folder, Docker cannot copy it into the image.
+
+Example that works:
+
+```bash
+docker build -f llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/Dockerfile.analyzer -t notable-analyzer-service .
+```
+
+Example that does not work:
+
+```bash
+docker build -f llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/Dockerfile.analyzer -t notable-analyzer-service llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp
+```
+
+### Option A: copy SDK source (simple)
+
+```dockerfile
+COPY onprem-llm-sdk /tmp/onprem-llm-sdk
+RUN pip install /tmp/onprem-llm-sdk
+```
+
+### Option B: install pinned wheel (preferred for production/air-gap)
+
+```dockerfile
+COPY wheels /opt/artifacts/onprem_llm_sdk/wheels
+RUN pip install --no-index --find-links /opt/artifacts/onprem_llm_sdk/wheels onprem-llm-sdk==<version>
+```
+
+Note: `wheels/` must also be inside your build context.
+
+Deploy recommendation:
+
+- preferred: CI build -> push image -> targets run `docker pull`
+- valid: build on target host with repo cloned locally
+- set runtime env from section 2 and use a unique `LLM_APP_NAME` per app
+

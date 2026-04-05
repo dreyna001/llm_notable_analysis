@@ -5,7 +5,7 @@ Use this as the entry point for `onprem-llm-sdk` documentation.
 ## Read in this order
 
 1. `docs/DEPLOY_AND_CONSUME.md`
-   - install paths, environment keys, integration examples, and upgrade/rollback
+   - install paths, environment keys, integration examples, upgrade/rollback, Docker/monorepo + analyzer RAG vs SDK (§8)
 2. `docs/ARCHITECTURE.md`
    - scope, design goals, runtime flow, and component responsibilities
 3. `docs/API_REFERENCE.md`
