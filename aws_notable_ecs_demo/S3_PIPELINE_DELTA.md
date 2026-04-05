@@ -1,16 +1,22 @@
-# ECS vs S3 Pipeline - Feature Delta
+# ECS vs S3 Pipeline (Quick Delta)
 
-Features implemented in `s3_notable_pipeline/` but **not** in `aws_notable_ecs_demo/`:
+This file explains what exists in `s3_notable_pipeline` but not in this ECS demo.
 
-| Feature | S3 Pipeline | ECS | Notes |
-|---------|-------------|-----|-------|
-| Schema validation | `validate_response_schema()` | No | Validates required keys + types before proceeding |
-| Repair retry | `REPAIR_PROMPT_TEMPLATE` + retry loop | No | One retry with error context if parse/validation fails |
-| JSON extraction | `extract_json_object()` | No | Strips markdown fences, preamble from raw text fallback |
-| `last_raw_content` storage | On text fallback + repair | Partial | ECS stores on fallback only |
+## Missing safeguards in ECS demo
 
-## Why excluded
+- Schema validation of model output before processing
+- Repair retry when model output is invalid JSON
+- Aggressive JSON extraction from mixed text responses
+- Full raw-content capture across all fallback paths
 
-Per design decision: ECS uses **tool-calling only** for output enforcement. Schema validation and repair retry add complexity mainly useful for edge-case recovery—tool calling should handle the common path.
+## Why this is acceptable here
 
-If ECS encounters repeated failures, consider porting `validate_response_schema` and `REPAIR_PROMPT_TEMPLATE` from the S3 pipeline.
+The ECS demo keeps logic minimal and depends on Bedrock tool-calling for structured output.
+
+## When to add these back
+
+If you see frequent parse errors or malformed responses in production traffic, port these from `s3_notable_pipeline`:
+
+- `validate_response_schema()`
+- `REPAIR_PROMPT_TEMPLATE` + retry loop
+- `extract_json_object()`

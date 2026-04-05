@@ -1,122 +1,49 @@
-# Notable Analysis - ECS Deployment
+# Notable Analysis on ECS (Start Here)
 
-ECS-based deployment where all analysis logic runs in a single container.
+This folder deploys the full demo as one ECS container:
 
-## Architecture
+`Browser -> ALB -> ECS task (nginx + Flask) -> Amazon Bedrock`
 
-```
-Browser → ALB → ECS Container (nginx + Flask + Bedrock) → Bedrock Nova Pro
-```
+Use this doc first, then run commands from `ECS_DEPLOY.md`.
 
-## Timeouts (LLM calls can exceed 30s)
+## What this app does
 
-If you see `WORKER TIMEOUT` in logs with a traceback starting at `gunicorn/workers/sync.py`, that's gunicorn's **default 30 second timeout** killing the request while the LLM call is still running.
+- Serves the UI from nginx (`index.html`, `main.js`, `styles.css`)
+- Sends analysis requests to `POST /api/analyze`
+- Calls Bedrock model `amazon.nova-pro-v1:0` from ECS task role
+- Exposes `GET /health` for load balancer checks
 
-This container uses **nginx → gunicorn (Flask)**. You need to align timeouts across:
+## Fast path (new reader)
 
-- **gunicorn**: request execution timeout (default 30s)
-- **nginx**: `proxy_read_timeout` / `proxy_send_timeout`
-- **ALB** (if used): **idle timeout** (AWS default is often 60s)
+1. Build and push container image to ECR.
+2. Create IAM task role with `bedrock:InvokeModel`.
+3. Register ECS task definition using that role.
+4. Create ECS service + ALB target group (`/health`).
+5. Open ALB DNS name and run one test alert.
 
-### Gunicorn knobs (set via env vars)
+All copy/paste commands are in `ECS_DEPLOY.md`.
 
-`supervisord.conf` supports these environment variables:
+## Required before deploy
 
-- **`GUNICORN_TIMEOUT`**: seconds before gunicorn kills a worker handling a request (default: `300`)
-- **`GUNICORN_GRACEFUL_TIMEOUT`**: graceful shutdown window (default: `30`)
-- **`GUNICORN_WORKERS`**: number of workers (default: `2`)
-- **`GUNICORN_KEEPALIVE`**: keep-alive seconds (default: `2`)
+- Docker
+- AWS CLI authenticated to your target account
+- Bedrock model access in your region
+- Existing VPC + subnets + security groups + ECS cluster
+- ECR repository for this image
 
-Example (local docker):
+## Runtime settings
 
-```bash
-docker run --rm -p 8081:80 ^
-  -e GUNICORN_TIMEOUT=300 ^
-  -e GUNICORN_WORKERS=2 ^
-  notable-frontend
-```
+- **Default model:** `BEDROCK_MODEL_ID=amazon.nova-pro-v1:0`
+- **Request timeout:** `GUNICORN_TIMEOUT=300` (set in `supervisord.conf`)
+- **Nginx proxy timeout:** `300s` (set in `nginx.conf`)
+- **Health endpoint:** `GET /health`
 
-### Preferred production approach (beyond “just increase timeout”)
+If LLM requests are slow, align ECS/ALB/nginx/gunicorn timeouts.
 
-Increasing the timeout is fine for a demo, but a long LLM call keeps a web worker busy. For higher reliability/scale, prefer:
+## Read next
 
-- **Async job**: enqueue analysis (SQS/Celery/Step Functions), return a `job_id`, poll `/api/status/<job_id>` or push via SSE/WebSocket
-- **Streaming**: stream partial output (SSE/chunked), paired with nginx buffering off and appropriate proxy timeouts
-
-## Files
-
-- `index.html`, `styles.css`, `main.js` - Frontend UI
-- `backend.py` - Flask API that calls Bedrock
-- `ttp_analyzer.py` - TTP analysis logic
-- `markdown_generator.py` - Report generation
-- `Dockerfile` - Container build
-- `nginx.conf`, `supervisord.conf` - Container runtime
-
-## Quick Deploy
-
-See `ECS_DEPLOY.md` for full deployment instructions.
-
-### 1. Build Container
-
-```bash
-docker build -t notable-frontend .
-docker tag notable-frontend:latest YOUR_ECR_REPO/notable-frontend:latest
-docker push YOUR_ECR_REPO/notable-frontend:latest
-```
-
-### 2. Deploy to ECS
-
-Create ECS task definition, service, and ALB (see `ECS_DEPLOY.md`).
-
-### 4. Upload Static Files to S3
-
-```bash
-aws s3 cp index.html s3://YOUR-BUCKET-NAME/
-aws s3 cp styles.css s3://YOUR-BUCKET-NAME/
-aws s3 cp main.js s3://YOUR-BUCKET-NAME/
-```
-
-Replace `YOUR-BUCKET-NAME` with the `BucketName` from outputs.
-
-### 5. Open the Website
-
-Navigate to the `WebsiteURL` from outputs in your browser.
-
-Example: `http://notable-demo-ui-123456789012.s3-website-us-east-1.amazonaws.com`
-
-## Pros vs Lambda UI
-
-- Separate concerns (static assets vs API)
-- Standard web hosting pattern
-- Can use CDN (CloudFront) easily
-
-## Cons vs Lambda UI
-
-- More deployment steps (deploy + upload)
-- Public S3 bucket (website mode requires public access)
-- Need to update `main.js` manually with API URL
-- Two resources to manage (bucket + API)
-
-## Cleanup
-
-```bash
-# Delete stack
-sam delete --stack-name notable-demo-s3
-
-# Manually empty and delete bucket if needed
-aws s3 rm s3://YOUR-BUCKET-NAME --recursive
-aws s3 rb s3://YOUR-BUCKET-NAME
-```
-
-## When to Use This
-
-Use S3 static hosting if:
-- You want standard web hosting architecture
-- You plan to add CloudFront CDN
-- You prefer separate HTML/CSS/JS files
-
-Use Lambda UI (main deployment) if:
-- You want simplest deployment (1 step)
-- You want everything in one template
-- You don't need public S3 bucket
+- `ECS_DEPLOY.md` - minimal deployment commands
+- `ARCHITECTURE.md` - one-page system flow
+- `INFRA_HANDOFF.md` - infra checklist for handoff
+- `S3_PIPELINE_DELTA.md` - differences from `s3_notable_pipeline`
 
