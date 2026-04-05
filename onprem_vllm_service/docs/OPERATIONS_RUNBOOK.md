@@ -1,98 +1,81 @@
-# vLLM Operations Runbook
+# vLLM Run and Fix Guide
 
-Standalone operations guide for `onprem_vllm_service`.
+If you only read one operations page, read this one.
 
-## Scope
-
-- Service: `vllm` (`/etc/systemd/system/vllm.service`)
-- Installer: `install_vllm.sh`
-- Deployment model: single host, local endpoint (`127.0.0.1`)
-
-## Install / re-install
+## Daily commands
 
 ```bash
-cd /path/to/onprem_vllm_service
-sudo bash install_vllm.sh
-```
-
-Useful install flags:
-
-- `VLLM_PIP_SPEC` (pin or local wheel path for air-gapped installs)
-- `VLLM_INSTALL_DIR`, `VLLM_VENV_DIR` (custom path)
-- `VLLM_MODEL_PATH`, `VLLM_SERVED_MODEL_NAME`, `VLLM_PORT`
-- `VLLM_GPU_MEMORY_UTILIZATION`
-- `VLLM_RESET_OVERRIDES=true` (clear existing drop-ins)
-- `AUTO_START_VLLM=false` (install only)
-
-## Day-2 commands
-
-```bash
+# Status + health
 sudo systemctl status vllm
-sudo systemctl restart vllm
-sudo journalctl -u vllm -f
 curl -sf http://127.0.0.1:8000/health
-curl -sS http://127.0.0.1:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"gpt-oss-120b","messages":[{"role":"user","content":"Reply with exactly OK."}],"temperature":0,"max_tokens":16}'
+
+# Logs
+sudo journalctl -u vllm -n 200 --no-pager
+sudo journalctl -u vllm -f
+
+# Restart
+sudo systemctl restart vllm
 ```
 
-## Post-install verification checklist
+## Standard verify checklist
 
-- `systemctl status vllm` shows `active (running)`.
-- `/health` returns HTTP 200.
-- A minimal `POST /v1/chat/completions` request returns HTTP 2xx.
-- Model path exists and has `config.json`.
-- Unit `ExecStart` points to expected venv python and model path.
-- `--served-model-name` matches client-side model string.
+Run after install, upgrade, rollback, or config changes:
 
-## Planned changes
+1. `sudo systemctl status vllm` is `active (running)`.
+2. `curl -sf http://127.0.0.1:<port>/health` returns `200`.
+3. A `POST /v1/chat/completions` smoke request returns `2xx`.
+4. Model directory includes `config.json`.
+5. Installed unit has expected values for `--model`, `--served-model-name`, and `--port`.
 
-### Change model path / model name
+## Common failures and fixes
 
-Re-run installer with desired values:
+| Symptom | Fast check | Fix |
+| --- | --- | --- |
+| Service exits right after start | `sudo systemctl cat vllm` and inspect `ExecStart` paths | Re-run installer to rebuild unit with correct paths |
+| Health endpoint times out | `sudo journalctl -u vllm -f` during startup | Confirm model path exists and includes `config.json` |
+| Installer skips start because model missing | `ls -la <model-path>` | Copy model artifacts, then `sudo systemctl enable --now vllm` |
+| CUDA/OOM errors in logs | inspect journal for memory failures | Lower `VLLM_GPU_MEMORY_UTILIZATION` and re-run installer |
+| Port conflict on `8000` | `sudo ss -lntp | rg ":8000"` | Set `VLLM_PORT` to a free port and re-run installer |
+| Runtime flags do not match expected | `sudo ls /etc/systemd/system/vllm.service.d` | Re-run installer with `VLLM_RESET_OVERRIDES=true` |
+
+## Common change commands
 
 ```bash
+# Change model path + served model name
 sudo VLLM_MODEL_PATH=/opt/models/<model-dir> \
      VLLM_SERVED_MODEL_NAME=<served-name> \
      bash install_vllm.sh
-```
 
-### Change port
-
-```bash
+# Change port
 sudo VLLM_PORT=8001 bash install_vllm.sh
-curl -sf http://127.0.0.1:8001/health
-```
 
-### Change GPU utilization target
-
-```bash
+# Tune GPU memory target
 sudo VLLM_GPU_MEMORY_UTILIZATION=0.8 bash install_vllm.sh
 ```
 
-## Upgrade process
-
-1. Choose target artifact/version in `VLLM_PIP_SPEC`.
-2. Re-run installer with same runtime flags used by current deployment.
-3. Validate `systemctl status`, `journalctl`, and `/health`.
-4. Validate at least one real `POST /v1/chat/completions` request from a consumer service.
-
-Example:
+## Upgrade or rollback
 
 ```bash
+# Upgrade/pin version
 sudo VLLM_PIP_SPEC="vllm==0.14.1" bash install_vllm.sh
+
+# Roll back to known-good version
+sudo VLLM_PIP_SPEC="vllm==<known-good-version>" bash install_vllm.sh
 ```
 
-## Rollback process
+After either command, run the standard verify checklist.
 
-1. Re-run installer with prior known-good `VLLM_PIP_SPEC`.
-2. Verify health and logs.
-3. Notify downstream clients if served model name or endpoint changed.
+## Reset to known-good baseline
 
-## Alerting signals (minimum)
+```bash
+cd /path/to/onprem_vllm_service
+sudo VLLM_RESET_OVERRIDES=true bash install_vllm.sh
+```
 
-- `vllm` service restart loops (`Restart=on-failure` repeatedly).
-- `/health` failing for sustained interval.
-- Frequent OOM/CUDA errors in journal.
-- Unexpected changes in unit drop-ins under `/etc/systemd/system/vllm.service.d`.
+## Minimum alerts to monitor
+
+- service restart loops
+- `/health` repeatedly failing
+- repeated CUDA/OOM failures in journal
+- unexpected overrides in `/etc/systemd/system/vllm.service.d`
 

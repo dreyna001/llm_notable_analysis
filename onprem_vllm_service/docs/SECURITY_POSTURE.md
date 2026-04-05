@@ -1,52 +1,47 @@
 # vLLM Security Posture
 
-Security posture for the standalone `onprem_vllm_service` package.
+Security baseline for the standalone `onprem_vllm_service` package.
 
-## Baseline model
+## Default security boundaries
 
-- Local-only service by default (`--host 127.0.0.1`).
-- Dedicated non-login service account (`vllm` user/group).
-- Systemd hardening flags enabled in baseline unit.
+- Service listens on loopback by default (`127.0.0.1`).
+- Runtime uses a dedicated non-login account (`vllm`).
+- Baseline systemd hardening is enabled (`NoNewPrivileges`, `ProtectHome`, `PrivateTmp`, `UMask=0077`).
+- Logs are written to systemd journal.
 
-## Runtime hardening in `vllm.service`
+## `--trust-remote-code` policy
 
-- `NoNewPrivileges=yes`
-- `CapabilityBoundingSet=` and `AmbientCapabilities=`
-- `ProtectHome=yes`
-- `PrivateTmp=yes`
-- `UMask=0077`
-- Restart policy: `Restart=on-failure`
-- Log output to systemd journal only
+Default is disabled and should remain disabled unless both are true:
 
-Note: Some stricter systemd network sandbox flags are intentionally not enforced due to known distributed runtime bootstrap issues for torch/Gloo/NCCL in certain environments.
+1. The selected model requires custom architecture code.
+2. Model artifacts were imported through a trusted, verified process.
 
-## `--trust-remote-code` stance
+## Package artifact controls
 
-- Disabled by default.
-- Should only be enabled when:
-  - model requires custom architecture code, and
-  - model artifacts are verified from a trusted, controlled import process.
+- Prefer pinned installs via `VLLM_PIP_SPEC`.
+- In air-gapped deployments, install from approved local wheel artifacts.
+- Record package version, artifact source, and checksum/provenance evidence.
 
-## Artifact and supply-chain expectations
+## If you expose beyond loopback
 
-- Prefer pinned `VLLM_PIP_SPEC` values.
-- In air-gapped mode, install from approved local wheel artifacts.
-- Keep auditable records for:
-  - vLLM artifact source
-  - installed version
-  - checksum/provenance evidence
+Loopback-only is preferred. If remote access is required, add compensating controls:
 
-## Network exposure guidance
+- network ACL/firewall restrictions
+- authentication policy (for example API key usage if allowed by your deployment policy)
+- TLS and certificate lifecycle controls
 
-- Keep endpoint bound to loopback unless an explicit architecture requires remote access.
-- If remote binding is required, add compensating controls:
-  - network ACL/firewall restrictions
-  - authentication (`--api-key` if your deployment policy supports it)
-  - transport encryption and certificate policy
+## Security drift checks
 
-## Operational security checks
+```bash
+sudo systemctl cat vllm
+sudo ls /etc/systemd/system/vllm.service.d
+sudo journalctl -u vllm -n 200 --no-pager
+```
 
-- Review `journalctl -u vllm` for repeated startup failures.
-- Verify no unexpected unit overrides exist in `/etc/systemd/system/vllm.service.d`.
-- Reapply canonical unit using installer when drift is detected.
+If drift is found, re-apply the canonical unit:
+
+```bash
+cd /path/to/onprem_vllm_service
+sudo VLLM_RESET_OVERRIDES=true bash install_vllm.sh
+```
 
