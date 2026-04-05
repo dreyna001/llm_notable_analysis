@@ -423,14 +423,14 @@ Scope:
 - defines the host-to-container path mappings
 - is the main runtime orchestration file for Docker
 
-### `systemd/notable-analyzer-stack-cpu-phi35-llamacpp.service`
+### `systemd/notable-analyzer-stack.service`
 
 Scope:
 
 - host-level `systemd` unit that starts and stops the Docker stack
 - replaces direct host execution of the analyzer runtime
 - does not run application logic itself
-- reference implementation in repo path `llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/` (CPU + Phi-3.5 + llama.cpp); a **separate** stack (GPU / vLLM / gpt-oss-120B, etc.) should ship its own unit name and Compose project to avoid image and container-name collisions
+- reference implementation in repo path `llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/`; GHCR analyzer package **`notable-analyzer-service`** is the generic Python worker image (CPU/GPU-agnostic at the container level). A **separate** Compose project or host layout for GPU / vLLM / large-model serving is still recommended so model-serving images and ports do not collide
 
 ### `config.env.container.example`
 

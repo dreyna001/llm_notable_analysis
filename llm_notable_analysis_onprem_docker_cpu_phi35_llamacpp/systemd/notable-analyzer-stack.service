@@ -1,5 +1,5 @@
 [Unit]
-Description=Notable Analyzer Docker Stack (CPU, Phi-3.5, llama.cpp)
+Description=Notable Analyzer Docker Stack (analyzer + model-serving)
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target

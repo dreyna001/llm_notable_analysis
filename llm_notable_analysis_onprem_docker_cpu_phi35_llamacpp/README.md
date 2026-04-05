@@ -1,6 +1,8 @@
-# Dockerized On-Prem Notable Analyzer (CPU, Phi-3.5, llama.cpp)
+# Dockerized On-Prem Notable Analyzer (Phi-3.5 + llama.cpp reference stack)
 
-This directory is the **CPU-bound reference** Docker bundle: **Phi-3.5-mini** (default GGUF) plus upstream **`llama.cpp`** OpenAI-compatible serving. It is a sibling of the host-venv path in `llm_notable_analysis_onprem` and is intentionally **not** the GPU / **vLLM** / large-model (for example **gpt-oss-120B**) stack—use a **separate** compose project and GHCR image names for that.
+This directory is a **reference Docker bundle**: default **Phi-3.5-mini** GGUF plus upstream **`llama.cpp`** OpenAI-compatible **model-serving** (CPU-threaded defaults in `compose.yaml`). It is a sibling of the host-venv path in `llm_notable_analysis_onprem`.
+
+The **analyzer** is packaged as **`notable-analyzer-service`** on GHCR: a **generic Python worker** that talks to whatever inference endpoint you configure in `config/config.env` (`LLM_API_URL`). The same container image does **not** imply CPU-only for your whole deployment—you can point it at **GPU / vLLM** or another OpenAI-compatible server; only the **model-serving** side changes (separate compose project or image recommended for large GPU stacks).
 
 **Where the code and images live:** [docs/canonical-repos.md](docs/canonical-repos.md) — GitHub repo URL, path to this folder in Git, and GHCR image names (`ghcr.io/dreyna001/...`).
 
@@ -10,7 +12,13 @@ This directory is the **CPU-bound reference** Docker bundle: **Phi-3.5-mini** (d
 - `onprem_rag/` contains the optional retrieval-grounding runtime copied from the current sibling package.
 - `compose.yaml` runs two containers:
   - `model-serving` using the upstream `llama.cpp` server image (CPU-threaded defaults)
-  - `analyzer` using a local Python image build from this directory
+  - `analyzer` using a local Python image build from this directory (`Dockerfile.analyzer` → publish as **`notable-analyzer-service`**)
+
+## Analyzer container image (`notable-analyzer-service`)
+
+- **Base:** `python:3.13-slim-bookworm` — official slim Debian image so heavy Python deps (e.g. optional RAG stacks) install reliably compared to Alpine.
+- **Role:** file-drop ingest, HTTP client to the LLM API, optional RAG, report output — **not** the vLLM or llama.cpp server.
+- **CPU vs GPU:** the analyzer process does not need a GPU to call a remote/local OpenAI-compatible API; GPU matters for the **inference** service you run separately.
 
 ## Host Layout
 
@@ -39,15 +47,15 @@ When deployed there, the main runtime paths are:
 - `Dockerfile.analyzer`: builds the analyzer container
 - `requirements.analyzer-docker.txt`: analyzer Python dependencies
 - `.env.example`: Compose variables for UID/GID, model filename, and llama.cpp tuning
-- `compose.yaml`: two-service Docker stack (build analyzer locally); Compose **project name** `notable-analyzer-cpu-phi35-llamacpp`
+- `compose.yaml`: two-service Docker stack (build analyzer locally); Compose **project name** `notable-analyzer-service` (local build image: `notable-analyzer-service-analyzer:latest`)
 - `config/config.env.example`: example runtime env file for the analyzer
-- `systemd/notable-analyzer-stack-cpu-phi35-llamacpp.service`: host unit example to keep the stack running
+- `systemd/notable-analyzer-stack.service`: host unit example to keep the stack running
 
 ## Manual Edits Per Deployment
 
 The following values must be reviewed and filled in for each unique deployment:
 
-- `systemd/notable-analyzer-stack-cpu-phi35-llamacpp.service`
+- `systemd/notable-analyzer-stack.service`
   - replace `<user>` in `User=`
   - replace `<user>` in `Group=`
   - replace `<user>` in `WorkingDirectory=`
@@ -77,5 +85,5 @@ The following values must be reviewed and filled in for each unique deployment:
 - GGUF model files remain on the host and are mounted into the inference container.
 - The analyzer defaults to the non-SDK runtime path via `onprem_service.onprem_main_nonsdk`.
 - First install/build is an explicit operator step; boot-time recovery should rely on Docker restart policies plus a lightweight `systemd` wrapper if desired.
-- **`llm_notable_analysis_onprem`** documents and defaults toward **vLLM** and OpenAI-compatible URLs for larger on-prem models; this folder is the **small-model / CPU / llama.cpp** Docker reference only.
+- **`llm_notable_analysis_onprem`** documents host-venv deployment with **vLLM**-style URLs for larger models; this folder is the **llama.cpp + default Phi-3.5** Docker reference, while the **analyzer image name** stays **`notable-analyzer-service`** for reuse.
 - If later changes prove minimal, this fork can be collapsed back into the main on-prem package.

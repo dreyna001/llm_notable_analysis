@@ -38,7 +38,7 @@ You want to see **Login Succeeded**.
 
 ## Put **both** stack images in GHCR
 
-For **`dreyna001`** (this repo’s maintainer), the published names for **this** CPU / Phi-3.5 / llama.cpp stack are `ghcr.io/dreyna001/notable-analyzer-cpu-phi35-llamacpp` and `ghcr.io/dreyna001/llama-cpp-server-cpu-phi35-llamacpp` — see [canonical-repos.md](canonical-repos.md). Below, replace `dreyna001` with **your** GitHub username if you fork or use a different account. Tags (`1.0.0`, `server`) should match what you intend to publish.
+For **`dreyna001`** (this repo’s maintainer), the published names for **this** bundle are `ghcr.io/dreyna001/notable-analyzer-service` (Python analyzer worker, CPU/GPU-agnostic) and `ghcr.io/dreyna001/llama-cpp-server-cpu-phi35-llamacpp` (mirrored **llama.cpp** server for this reference stack) — see [canonical-repos.md](canonical-repos.md). Below, replace `dreyna001` with **your** GitHub username if you fork or use a different account. Tags (`1.0.0`, `server`) should match what you intend to publish.
 
 1. **Go to the compose directory** (so `docker compose` finds `compose.yaml`):
 
@@ -56,8 +56,8 @@ For **`dreyna001`** (this repo’s maintainer), the published names for **this**
 
    ```bash
    docker compose build analyzer
-   docker tag notable-analyzer-cpu-phi35-llamacpp-analyzer:latest ghcr.io/dreyna001/notable-analyzer-cpu-phi35-llamacpp:1.0.0
-   docker push ghcr.io/dreyna001/notable-analyzer-cpu-phi35-llamacpp:1.0.0
+   docker tag notable-analyzer-service-analyzer:latest ghcr.io/dreyna001/notable-analyzer-service:1.0.0
+   docker push ghcr.io/dreyna001/notable-analyzer-service:1.0.0
    ```
 
 4. **llama.cpp server** (mirror upstream into your namespace — re-tag local copy or pull first, then push):
@@ -71,7 +71,7 @@ For **`dreyna001`** (this repo’s maintainer), the published names for **this**
 5. **On an air-gapped / pull-only host**, set these in `.env` when using `compose.airgap.yaml`:
 
    ```env
-   ANALYZER_IMAGE=ghcr.io/dreyna001/notable-analyzer-cpu-phi35-llamacpp:1.0.0
+   ANALYZER_IMAGE=ghcr.io/dreyna001/notable-analyzer-service:1.0.0
    MODEL_SERVING_IMAGE=ghcr.io/dreyna001/llama-cpp-server-cpu-phi35-llamacpp:server
    ```
 
