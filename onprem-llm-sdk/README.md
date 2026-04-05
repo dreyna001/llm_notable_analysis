@@ -19,16 +19,22 @@ result = client.complete("Summarize this notable in one sentence.")
 print(result.text)
 ```
 
+## Playground example
+
+Use the full-featured playground script to exercise config loading, overrides,
+correlation IDs, per-call timeout/token controls, metrics sink callbacks, and
+typed exception handling.
+
+```bash
+python -m pip install -e .
+python examples/sdk_playground.py --show-config
+```
+
 ## Documentation
 
-- `docs/API_REFERENCE.md`
-- `docs/OBSERVABILITY_CONTRACT.md`
-- `docs/HIGH_LEVEL_OVERVIEW.md`
-- `docs/ARCHITECTURE.md`
-- `docs/LLM_CLIENT_CONTRACT.md`
-- `docs/PACKAGING_RATIONALE.md`
-- `docs/AIRGAP_DISTRIBUTION.md`
+- `docs/README.md` (start here)
 - `docs/DEPLOY_AND_CONSUME.md`
-- `docs/SCRIPTS_REFERENCE.md`
-- `docs/TESTING_AND_CI.md`
+- `docs/ARCHITECTURE.md`
+- `docs/API_REFERENCE.md`
+- `docs/OPERATIONS_RUNBOOK.md`
 

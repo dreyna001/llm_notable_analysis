@@ -4,7 +4,7 @@ This document defines the **public API contract** for `onprem-llm-sdk` version `
 
 Public API in this document means symbols exported from `onprem_llm_sdk` package root.
 
-For canonical log and metrics field semantics, see `docs/OBSERVABILITY_CONTRACT.md`.
+For observability and operations semantics, see `docs/OPERATIONS_RUNBOOK.md`.
 
 ## Public Exports
 

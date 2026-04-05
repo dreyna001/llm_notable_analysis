@@ -1,40 +1,65 @@
 # Architecture
 
-`onprem-llm-sdk` standardizes how local applications consume a same-host vLLM endpoint.
+`onprem-llm-sdk` is a shared client layer for local OpenAI-compatible chat-completions
+endpoints (default: `http://127.0.0.1:8000/v1/chat/completions`).
+
+## Scope
+
+### What this SDK is
+
+- A reusable Python package used by multiple projects.
+- A runtime policy layer for retries, timeout budgets, and in-flight limits.
+- A contract layer that normalizes response text extraction and exception types.
+- A packaging target for deterministic, offline install workflows.
+
+### What this SDK is not
+
+- Not a model server installer or lifecycle manager.
+- Not an async or streaming SDK.
+- Not a domain workflow framework (for example, SOC/TTP business logic).
 
 ## Design goals
 
-- Keep all consumers on the same contract for retries, timeouts, and errors.
-- Prevent per-app overload using process-local inflight limits.
-- Keep observability consistent even across unrelated projects.
-- Support deterministic offline installation in air-gapped environments.
+- Keep callers on one transport/exception contract.
+- Prevent per-process overload with bounded in-flight requests.
+- Keep logs and metrics callback behavior consistent across consumers.
+- Keep installs reproducible in air-gapped environments.
 
-## Request flow
+## Runtime request flow
 
 ```mermaid
 flowchart LR
-    AppCode[AppCode] --> SDKClient[SDKClient]
-    SDKClient --> ConfigLayer[ConfigLayer]
-    SDKClient --> InflightGuard[InflightGuard]
-    SDKClient --> RetryPolicy[RetryPolicy]
-    RetryPolicy --> VLLMEndpoint[VLLMEndpoint_127_0_0_1]
-    SDKClient --> MetricsHooks[MetricsHooks]
-    SDKClient --> StructuredLogs[StructuredLogs]
+    App[Application code] --> Config[SDKConfig]
+    App --> Client[VLLMClient.complete]
+    Client --> Guard[Inflight semaphore]
+    Client --> Retry[Retry and timeout policy]
+    Retry --> Endpoint[OpenAI-compatible endpoint]
+    Client --> Parse[Response contract parser]
+    Client --> Logs[Structured log events]
+    Client --> Metrics[Metrics sink callbacks]
 ```
 
-## Key components
+## Component responsibilities
 
-- `config.py` loads and validates environment-driven runtime settings.
-- `client.py` handles request construction, retry logic, and error mapping.
-- `contracts.py` enforces response shape extraction from OpenAI-compatible payloads.
-- `metrics.py` exposes hooks for application-level metrics sinks.
-- `logging.py` emits structured JSON logs with correlation IDs.
+- `config.py`
+  - environment parsing and validation (`SDKConfig.from_env`)
+- `client.py`
+  - request construction, retries/backoff, timeout handling, status-to-error mapping
+- `contracts.py`
+  - payload helpers, response parsing, `Retry-After` parsing, `CompletionResult`
+- `errors.py`
+  - stable exception hierarchy for consumers
+- `logging.py`
+  - structured JSON event emission
+- `metrics.py`
+  - metrics callback protocol and reference sinks
 
-## Config precedence
+## Configuration precedence
 
-1. SDK defaults in code.
-2. Environment variables loaded by `SDKConfig.from_env()`.
-3. Explicit method-call overrides (e.g., `max_tokens` per request).
+1. SDK defaults
+2. environment values
+3. explicit config overrides (`from_env(overrides=...)`)
+4. method-call overrides on `VLLMClient.complete(...)`
 
-This allows global policy defaults while preserving safe per-call flexibility.
+For public behavior details and constraints, see `docs/API_REFERENCE.md`.
 
