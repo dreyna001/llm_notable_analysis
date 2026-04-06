@@ -25,3 +25,13 @@ llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/data/archive/*
 
 # WSL-local Python venv (Linux paths; keep out of repo)
 .venv-wsl/
+
+# Cursor IDE (local only; do not commit)
+.cursor/
+
+# GPU Docker bundle — local secrets and runtime (never commit)
+llm_notable_analysis_onprem_docker_gpu_gptoss120b_vllm/.env
+llm_notable_analysis_onprem_docker_gpu_gptoss120b_vllm/config/config.env
+llm_notable_analysis_onprem_docker_gpu_gptoss120b_vllm/.pytest_cache/
+llm_notable_analysis_onprem_docker_gpu_gptoss120b_vllm/.ruff_cache/
+llm_notable_analysis_onprem_docker_gpu_gptoss120b_vllm/models/*.gguf

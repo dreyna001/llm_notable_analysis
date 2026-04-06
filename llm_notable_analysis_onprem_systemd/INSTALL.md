@@ -225,6 +225,12 @@ For a simple Phantom playbook template that builds one notable JSON payload (inc
 - `SOAR_PLAYBOOK_PHANTOM.md`
 - `soar_playbook/phantom_notable_to_analyzer.py`
 
+For an alternative scheduled/query-based Phantom template that polls
+`index=notable`, see:
+
+- `SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md`
+- `soar_playbook/phantom_notable_index_to_analyzer.py`
+
 ```bash
 # Get public key from SOAR appliance
 # Paste into:

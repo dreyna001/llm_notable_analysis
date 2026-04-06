@@ -1,0 +1,31 @@
+[Unit]
+Description=Notable Analyzer Docker Stack (analyzer + model-serving)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Manual edits required for each deployment:
+# 1) Replace <user> with the deployment account in User= and Group=.
+# 2) Replace <user> in WorkingDirectory= so it points at the real deployment root.
+# 3) If you deploy somewhere other than /home/<user>/apps/notable-analyzer,
+#    update WorkingDirectory= to that absolute path.
+# 4) If docker compose is not available at /usr/bin/docker on the host, update
+#    ExecStart= and ExecStop= to the correct docker binary path.
+# Lifecycle note:
+# - First install/build should be done manually with docker compose pull/build/up.
+# - This unit is only a thin wrapper for bringing the existing stack up/down.
+# - It intentionally does not rebuild images on every boot.
+User=<user>
+Group=<user>
+WorkingDirectory=/home/<user>/apps/notable-analyzer
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecStop=/usr/bin/docker compose stop
+ExecReload=/usr/bin/docker compose up -d --remove-orphans
+TimeoutStartSec=0
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

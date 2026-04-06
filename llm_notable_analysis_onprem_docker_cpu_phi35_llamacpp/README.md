@@ -30,6 +30,7 @@ Typical deployment root: `/home/<user>/apps/notable-analyzer`. Runtime paths und
 
 - `docs/canonical-repos.md`: Git repo + GHCR image URLs for this project
 - `docs/deployment.md`: **single deployment guide** (workflows: connected host, jump server → air-gap, optional GHCR)
+- `docs/true-no-lapse-rollout.md`: blue/green runbook for true no-lapse updates
 - `scripts/wsl-first-up.sh`: optional first-time helper (env + dirs + optional GGUF download + `compose up`); details in `docs/deployment.md`
 - `docs/ghcr-login-and-push.md`: pointer to the GHCR publish section in `docs/deployment.md`
 - `compose.airgap.yaml`: same stack as `compose.yaml` but **no `build`** — only `MODEL_SERVING_IMAGE` and `ANALYZER_IMAGE` from `.env`
@@ -76,3 +77,5 @@ The following values must be reviewed and filled in for each unique deployment:
 - First install/build is an explicit operator step; boot-time recovery should rely on Docker restart policies plus a lightweight `systemd` wrapper if desired.
 - **`llm_notable_analysis_onprem_systemd`** documents host-venv deployment with **vLLM**-style URLs for larger models; this folder is the **llama.cpp + default Phi-3.5** Docker reference, while the **analyzer image name** stays **`notable-analyzer-service`** for reuse.
 - If later changes prove minimal, this fork can be collapsed back into the main on-prem package.
+- For no-lapse release strategy, use
+  [docs/true-no-lapse-rollout.md](docs/true-no-lapse-rollout.md).

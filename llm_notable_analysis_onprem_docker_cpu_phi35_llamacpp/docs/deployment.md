@@ -2,6 +2,9 @@
 
 Operator guide from “we want this tool” to “the stack is running.” Pick **one workflow** from the table below; do not mix steps from different workflows unless you know why.
 
+For zero-interruption release strategy, see
+[`docs/true-no-lapse-rollout.md`](true-no-lapse-rollout.md).
+
 ---
 
 ## 1) What must exist on the host (deployment root)
@@ -70,6 +73,17 @@ The following are what you get from the clone or copy in section 1.0. At minimum
 - **Minimum:** Docker Engine **24.0+** and Compose **v2** (this bundle uses modern compose features such as `depends_on: condition: service_healthy`).
 - **Validated:** Docker Engine **27.4.1** with Compose **v2** shipped alongside that engine (your `docker compose version` line should show `v2.x`).
 - WSL: enable Docker Desktop **WSL integration** if `docker` is missing in the distro.
+- Linux hosts: use the distro-provided `docker.service` and enable it at boot.
+
+On Linux hosts:
+
+```bash
+sudo systemctl enable --now docker.service
+sudo systemctl is-active docker.service
+```
+
+On Windows + WSL hosts, Docker daemon lifecycle is managed by Docker Desktop
+(not Linux systemd inside the distro).
 
 ```bash
 docker version

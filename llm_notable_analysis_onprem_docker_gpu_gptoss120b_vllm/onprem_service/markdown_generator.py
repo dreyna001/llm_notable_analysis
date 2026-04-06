@@ -1,0 +1,231 @@
+"""Generate markdown reports for TTP analysis results.
+
+This module mirrors the report structure used in `s3_testing/markdown_generator.py`.
+"""
+
+from typing import Dict, Any, List
+
+
+def _render_hypothesis_spl_block(lines: List[str], hypothesis: Dict[str, Any]) -> None:
+    """Render per-hypothesis SPL details when generation is enabled."""
+    strategy = str(hypothesis.get("query_strategy", "")).strip()
+    primary_query = str(hypothesis.get("primary_spl_query", "")).strip()
+    why_this_query = str(hypothesis.get("why_this_query", "")).strip()
+    supports_if = str(hypothesis.get("supports_if", "")).strip()
+    weakens_if = str(hypothesis.get("weakens_if", "")).strip()
+
+    if strategy:
+        lines.append(f"  - **Query strategy:** {strategy}\n")
+    if primary_query:
+        lines.append("  - **Primary SPL query:**\n")
+        lines.append("```spl\n")
+        lines.append(primary_query)
+        if not primary_query.endswith("\n"):
+            lines.append("\n")
+        lines.append("```\n")
+    if why_this_query:
+        lines.append(f"  - **Why this query:** {why_this_query}\n")
+    if supports_if:
+        lines.append(f"  - **Supports hypothesis if:** {supports_if}\n")
+    if weakens_if:
+        lines.append(f"  - **Weakens hypothesis if:** {weakens_if}\n")
+
+
+def generate_markdown_report(
+    alert_text: str,
+    llm_response: Dict[str, Any],
+    scored_ttps: List[Dict[str, Any]],
+) -> str:
+    """Generate a markdown report from analysis results.
+
+    Args:
+        alert_text: Original alert text sent to the model.
+        llm_response: Structured model response used for report sections.
+        scored_ttps: Validated TTP list with normalized `score` values.
+
+    Returns:
+        Markdown report string.
+    """
+    lines: List[str] = []
+    metadata = llm_response.get("metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    spl_enabled = bool(metadata.get("spl_query_generation_enabled", False))
+    spl_unavailable = bool(metadata.get("spl_query_generation_unavailable", False))
+    spl_unavailable_reason = str(
+        metadata.get("spl_query_generation_unavailable_reason", "")
+    ).strip()
+
+    if llm_response.get("poc_unstructured_output"):
+        reason = str(llm_response.get("poc_fallback_reason", "unknown"))
+        raw = llm_response.get("raw_response") or ""
+        lines.append("## PoC: raw model output\n\n")
+        lines.append(
+            "Structured JSON validation did not succeed. The block below preserves the "
+            "model text for analyst review (proof-of-concept).\n\n"
+        )
+        lines.append(f"**Fallback reason:** {reason}\n\n")
+        safe = raw.replace("~~~", "~\\~~\\~~")
+        lines.append("~~~text\n")
+        lines.append(safe)
+        if safe and not safe.endswith("\n"):
+            lines.append("\n")
+        lines.append("~~~\n\n")
+        lines.append("---\n\n")
+
+    # Alert Reconciliation (direct disposition guidance)
+    if "alert_reconciliation" in llm_response:
+        ar = llm_response["alert_reconciliation"]
+        lines.append("### Alert Reconciliation\n\n")
+        verdict = ar.get("verdict", "N/A")
+        confidence = ar.get("confidence", "N/A")
+        summary = ar.get("one_sentence_summary", "N/A")
+        lines.append(f"**Verdict:** {verdict}\n")
+        lines.append(f"**Confidence:** {confidence}\n")
+        lines.append(f"**Summary:** {summary}\n\n")
+
+        if ar.get("decision_drivers"):
+            lines.append("**Decision drivers:**\n")
+            for item in ar["decision_drivers"]:
+                lines.append(f"- {item}\n")
+            lines.append("\n")
+
+        if ar.get("recommended_actions"):
+            lines.append("**Recommended actions:**\n")
+            for item in ar["recommended_actions"]:
+                lines.append(f"- {item}\n")
+            lines.append("\n")
+
+    # Competing Hypotheses & Pivots
+    if "competing_hypotheses" in llm_response:
+        ch = llm_response["competing_hypotheses"]
+        lines.append("### Competing Hypotheses & Pivots\n\n")
+        if spl_enabled and spl_unavailable:
+            note = (
+                "SPL query generation was enabled but unavailable for this alert."
+                if not spl_unavailable_reason
+                else (
+                    "SPL query generation was enabled but unavailable for this alert: "
+                    f"{spl_unavailable_reason}"
+                )
+            )
+            lines.append(f"**Note:** {note}\n\n")
+        for i, hyp in enumerate(ch, 1):
+            hyp_type = hyp.get("hypothesis_type", "unknown").capitalize()
+            lines.append(
+                f"**Hypothesis {i} ({hyp_type}):** {hyp.get('hypothesis', 'N/A')}\n"
+            )
+            if hyp.get("evidence_support"):
+                lines.append(
+                    f"  - **Evidence support:** {', '.join(hyp['evidence_support'])}\n"
+                )
+            if hyp.get("evidence_gaps"):
+                lines.append(
+                    f"  - **Evidence gaps:** {', '.join(hyp['evidence_gaps'])}\n"
+                )
+            if hyp.get("best_pivots"):
+                lines.append("  - **Best pivots:**\n")
+                for pivot in hyp["best_pivots"]:
+                    if isinstance(pivot, dict):
+                        lines.append(
+                            f"    - {pivot.get('log_source', 'N/A')}: {pivot.get('key_fields', 'N/A')}\n"
+                        )
+                    else:
+                        lines.append(f"    - {pivot}\n")
+            if spl_enabled and not spl_unavailable and isinstance(hyp, dict):
+                _render_hypothesis_spl_block(lines, hyp)
+            lines.append("\n")
+
+    # Evidence vs Inference
+    if "evidence_vs_inference" in llm_response:
+        evi = llm_response["evidence_vs_inference"]
+        lines.append("### Evidence vs Inference\n\n")
+        if evi.get("evidence"):
+            lines.append("**Evidence (Facts):**\n")
+            for item in evi["evidence"]:
+                lines.append(f"- {item}\n")
+            lines.append("\n")
+        if evi.get("inferences"):
+            lines.append("**Inferences (Hypotheses):**\n")
+            for item in evi["inferences"]:
+                lines.append(f"- {item}\n")
+            lines.append("\n")
+
+    # IOC Extraction
+    if "ioc_extraction" in llm_response:
+        iocs = llm_response["ioc_extraction"]
+        lines.append("### Indicators of Compromise (IOCs)\n\n")
+        if iocs.get("ip_addresses"):
+            lines.append(f"**IP Addresses:** {', '.join(iocs['ip_addresses'])}\n")
+        if iocs.get("domains"):
+            lines.append(f"**Domains:** {', '.join(iocs['domains'])}\n")
+        if iocs.get("user_accounts"):
+            lines.append(f"**User Accounts:** {', '.join(iocs['user_accounts'])}\n")
+        if iocs.get("hostnames"):
+            lines.append(f"**Hostnames:** {', '.join(iocs['hostnames'])}\n")
+        if iocs.get("process_names"):
+            lines.append(f"**Processes:** {', '.join(iocs['process_names'])}\n")
+        if iocs.get("file_paths"):
+            lines.append(f"**File Paths:** {', '.join(iocs['file_paths'])}\n")
+        if iocs.get("file_hashes"):
+            lines.append(f"**File Hashes:** {', '.join(iocs['file_hashes'])}\n")
+        if iocs.get("event_ids"):
+            lines.append(f"**Event IDs:** {', '.join(iocs['event_ids'])}\n")
+        if iocs.get("urls"):
+            lines.append(f"**URLs:** {', '.join(iocs['urls'])}\n")
+        lines.append("\n")
+
+    # Scored TTPs
+    lines.append("### Scored TTPs\n\n")
+    if scored_ttps:
+        for ttp in scored_ttps:
+            if "score" not in ttp:
+                ttp["score"] = 0.0
+
+        sorted_ttps = sorted(scored_ttps, key=lambda x: x["score"], reverse=True)
+        high_conf = [t for t in sorted_ttps if t["score"] >= 0.80]
+        med_conf = [t for t in sorted_ttps if 0.50 <= t["score"] < 0.80]
+        low_conf = [t for t in sorted_ttps if t["score"] < 0.50]
+
+        if high_conf:
+            lines.append("#### High Confidence (>=0.80)\n\n")
+            for ttp in high_conf:
+                lines.append(
+                    f"**{ttp['ttp_id']}** - {ttp.get('ttp_name', 'N/A')}: **{ttp['score']:.3f}**\n"
+                )
+                lines.append(f"  - **Explanation:** {ttp.get('explanation', 'N/A')}\n")
+                if ttp.get("evidence_fields"):
+                    lines.append(
+                        f"  - **Evidence Fields:** {', '.join(ttp['evidence_fields'])}\n"
+                    )
+                lines.append("\n")
+
+        if med_conf:
+            lines.append("#### Medium Confidence (0.50-0.79)\n\n")
+            for ttp in med_conf:
+                lines.append(
+                    f"**{ttp['ttp_id']}** - {ttp.get('ttp_name', 'N/A')}: **{ttp['score']:.3f}**\n"
+                )
+                lines.append(f"  - **Explanation:** {ttp.get('explanation', 'N/A')}\n")
+                if ttp.get("evidence_fields"):
+                    lines.append(
+                        f"  - **Evidence Fields:** {', '.join(ttp['evidence_fields'])}\n"
+                    )
+                lines.append("\n")
+
+        if low_conf:
+            lines.append("#### Low Confidence (<0.50)\n\n")
+            for ttp in low_conf:
+                lines.append(
+                    f"**{ttp['ttp_id']}** - {ttp.get('ttp_name', 'N/A')}: **{ttp['score']:.3f}**\n"
+                )
+                lines.append(f"  - **Explanation:** {ttp.get('explanation', 'N/A')}\n")
+                if ttp.get("evidence_fields"):
+                    lines.append(
+                        f"  - **Evidence Fields:** {', '.join(ttp['evidence_fields'])}\n"
+                    )
+                lines.append("\n")
+    else:
+        lines.append("No TTPs scored\n\n")
+
+    return "".join(lines)

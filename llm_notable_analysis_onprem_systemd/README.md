@@ -57,6 +57,8 @@ What this script does:
 - Creates `/usr/local/bin/notable-analyzer-mini-run` launcher.
 - Optionally installs a `systemd` unit when runtime support is available.
 
+`onprem-llm-sdk` is the shared Python transport package this service uses to call local/OpenAI-compatible LLM endpoints with consistent retries, timeouts, and error handling. It is installed into the analyzer venv (`site-packages`); it is not a standalone daemon.
+
 If your SDK is not at `../onprem-llm-sdk`, set:
 
 ```bash
@@ -336,6 +338,8 @@ Phantom/SOAR template assets in this repo:
 
 - Guide: [`SOAR_PLAYBOOK_PHANTOM.md`](SOAR_PLAYBOOK_PHANTOM.md)
 - Playbook template: [`soar_playbook/phantom_notable_to_analyzer.py`](soar_playbook/phantom_notable_to_analyzer.py)
+- Alternative guide: [`SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md`](SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md)
+- Alternative playbook template: [`soar_playbook/phantom_notable_index_to_analyzer.py`](soar_playbook/phantom_notable_index_to_analyzer.py)
 
 ### Transport Options
 

@@ -10,9 +10,20 @@ The accompanying template code is in:
 
 - `llm_notable_analysis_onprem_systemd/soar_playbook/phantom_notable_to_analyzer.py`
 
+Alternative guide/template for scheduled notable-index polling:
+
+- Guide: `llm_notable_analysis_onprem_systemd/SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md`
+- Template: `llm_notable_analysis_onprem_systemd/soar_playbook/phantom_notable_index_to_analyzer.py`
+
 ## 1) Trigger Timing (when to run playbook)
 
 Your requirement is correct: run this playbook **after the notable exists from the correlation search pipeline**, not from raw events.
+
+Important clarification:
+
+- This document describes the **container-triggered** pattern.
+- The template in this file does **not** directly run an `index=notable` query.
+- If you want SOAR to poll/query the notable index directly, use the alternative guide/template above.
 
 Recommended trigger gates:
 
