@@ -1,0 +1,34 @@
+[Unit]
+Description=LiteLLM Proxy (GLAB)
+Documentation=https://docs.litellm.ai/
+After=network.target vllm.service
+Wants=vllm.service
+
+[Service]
+Type=simple
+User=litellm
+Group=litellm
+WorkingDirectory=/opt/litellm
+ExecStart=/opt/litellm/venv/bin/litellm --config /etc/litellm/config.yaml --host 127.0.0.1 --port 4000
+
+Restart=on-failure
+RestartSec=10
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=yes
+UMask=0077
+
+LimitNOFILE=65535
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=litellm
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily GLAB Knowledge Base Rebuild
+
+[Timer]
+OnBootSec=10m
+OnUnitActiveSec=24h
+RandomizedDelaySec=5m
+Persistent=true
+Unit=kb-rebuild.service
+
+[Install]
+WantedBy=timers.target

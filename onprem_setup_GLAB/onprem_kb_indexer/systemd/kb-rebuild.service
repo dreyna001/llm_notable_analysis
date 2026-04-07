@@ -1,0 +1,30 @@
+[Unit]
+Description=GLAB Knowledge Base Rebuild
+After=network.target
+ConditionPathExists=/etc/notable-kb/config.env
+
+[Service]
+Type=oneshot
+User=notable-kb
+Group=notable-kb
+WorkingDirectory=/opt/notable-kb
+ExecStart=/opt/notable-kb/bin/run_kb_rebuild.sh
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=yes
+UMask=0077
+
+ReadWritePaths=/var/lib/notable-kb
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kb-rebuild
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+# Copy to /etc/litellm/config.yaml and replace the master key before first start.
+
+general_settings:
+  master_key: sk-change-me-before-first-start
+
+model_list:
+  - model_name: gpt-oss-120b
+    litellm_params:
+      model: hosted_vllm/gpt-oss-120b
+      api_base: http://127.0.0.1:8000/v1
