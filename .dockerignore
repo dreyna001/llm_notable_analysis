@@ -1,0 +1,13 @@
+.git
+.cursor
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.ruff_cache/
+**/.venv*/
+**/node_modules/
+
+# Prevent large runtime artifacts from entering build context.
+**/models/**
+**/data/**
+**/wsl-notable-data/**

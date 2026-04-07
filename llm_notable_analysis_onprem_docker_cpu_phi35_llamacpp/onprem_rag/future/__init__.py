@@ -1,2 +1,0 @@
-"""Future retrieval module components."""
-

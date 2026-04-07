@@ -10,8 +10,8 @@ bundle's `model-serving` service definition and your runtime config values.
 
 ## Scope
 
-- Reuses analyzer runtime code from `onprem_service/` and optional RAG package in
-  `onprem_rag/`.
+- Uses the shared analyzer image build target in
+  `../llm_notable_analysis_analyzer_image/`.
 - Uses host-mounted model artifacts under `./models` (model files are not baked
   into either container image).
 - Supports connected-host and air-gapped workflows via `compose.yaml` and
@@ -38,7 +38,7 @@ different model directory or served model name.
 - `.env.example`: Compose substitution values (`VLLM_*`, GPU runtime knobs,
   UID/GID)
 - `config/config.env.example`: analyzer runtime env defaults
-- `Dockerfile.analyzer`: analyzer image build definition
+- `../llm_notable_analysis_analyzer_image/Dockerfile.analyzer`: shared analyzer image build definition
 - `systemd/notable-analyzer-stack.service`: optional host unit wrapper
 - `docs/deployment.md`: operator deployment runbook
 - `docs/true-no-lapse-rollout.md`: blue/green runbook for true no-lapse updates

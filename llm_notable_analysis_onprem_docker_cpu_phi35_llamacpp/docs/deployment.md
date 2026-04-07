@@ -22,7 +22,13 @@ cd llm_notable_analysis/llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp
 
 Use your fork or internal mirror URL if applicable. **Canonical Git + GHCR names** for this bundle: section 6 table. Overview: [README.md](../README.md).
 
-**Air-gap / no Git on target:** copy the same directory tree onto the host (zip, `rsync`, artifact tarball). The deployment root must still contain `compose.yaml`, `onprem_service/`, `onprem_rag/`, and the other files listed in section 1.3.
+Analyzer image builds now use the shared target at
+`../llm_notable_analysis_analyzer_image/Dockerfile.analyzer`, so local
+`docker compose build analyzer` requires this bundle to remain inside the repo
+tree (or for you to copy the shared analyzer directory and source paths as
+siblings).
+
+**Air-gap / no Git on target:** copy the same directory tree onto the host (zip, `rsync`, artifact tarball). The deployment root must still contain `compose.yaml` and the other files listed in section 1.3.
 
 ### 1.1 Directory tree you create or ship
 
@@ -50,8 +56,8 @@ Use your fork or internal mirror URL if applicable. **Canonical Git + GHCR names
 The following are what you get from the clone or copy in section 1.0. At minimum for **running** containers you need:
 
 - `compose.yaml` **or** `compose.airgap.yaml` (plus the other compose file if you switch modes later)
-- `Dockerfile.analyzer`, `requirements.analyzer-docker.txt`, `.dockerignore` (only for **build** scenario)
-- `onprem_service/`, `onprem_rag/` (build context for analyzer image)
+- `../llm_notable_analysis_analyzer_image/Dockerfile.analyzer`, `../llm_notable_analysis_analyzer_image/requirements.analyzer-docker.txt`, and repo-root `.dockerignore` (only for **build** scenario)
+- `../llm_notable_analysis_onprem_docker_gpu_gptoss120b_vllm/onprem_service/`, `../llm_notable_analysis_onprem_docker_gpu_gptoss120b_vllm/onprem_rag/` (shared analyzer source for build context)
 - `.env.example`, `config/config.env.example`
 - Optional: `scripts/wsl-first-up.sh`, `systemd/notable-analyzer-stack.service`, `docs/`
 
@@ -105,7 +111,7 @@ Use **one** row below. Later headings name the workflow (A, B, or optional C) wh
 **Workflow B (jump → air-gap) in order**
 
 1. **Jump server (internet):** Clone or copy this bundle. Build the images you need (`docker compose build`, and/or `docker pull` for `model-serving` if you are baking that in). Run **`docker save`** (see section 6) to produce an image tarball. **Recommended:** skip section 4 on the jump host. Only run section 4 there if you intentionally **smoke-test** with `docker compose up`.
-2. **Transfer:** `scp` (or USB, artifact repo) the image tarball **and** a copy of this bundle (at least `compose.airgap.yaml`, `.env.example`, `config/config.env.example`, `onprem_service/` / `onprem_rag/` only if the target will rebuild—which air-gap usually does not—or any extra files you use) to the air-gapped host.
+2. **Transfer:** `scp` (or USB, artifact repo) the image tarball **and** a copy of this bundle (at least `compose.airgap.yaml`, `.env.example`, `config/config.env.example`, or any extra files you use) to the air-gapped host.
 3. **Air-gapped target:** `docker load` from the tarball. Then run **full section 4** on the target (dirs, `.env`, `config/config.env`, GGUF under `models/`, UID/GID for **this** host). Then **section 7** (`compose.airgap.yaml` — no `pull`).
 
 ---
@@ -169,7 +175,7 @@ models/<same-as-LLM_MODEL_FILENAME>
 
 **Workflow A.** **Before `compose up`:** finish **section 4** on this host (`mkdir`, `cp` to create `.env` and `config/config.env`, edit both, place GGUF under `models/`).
 
-Uses **`compose.yaml`**: pulls **model-serving** from the upstream registry; **builds** **analyzer** from `Dockerfile.analyzer` (base image + `pip install` need network unless you use a private mirror).
+Uses **`compose.yaml`**: pulls **model-serving** from the upstream registry; **builds** **analyzer** from the shared target `../llm_notable_analysis_analyzer_image/Dockerfile.analyzer` (base image + `pip install` need network unless you use a private mirror).
 
 ```bash
 docker compose up -d --build
@@ -271,7 +277,7 @@ docker save notable-analyzer-service-analyzer:latest \
 Transfer at least:
 
 - **`notable-analyzer-stack-images.tar.gz`**
-- This **bundle directory** from the clone (`compose.airgap.yaml`, `.env.example`, `config/config.env.example`, plus any of `docs/`, `systemd/`, scripts you use). You do **not** need `onprem_service/` / `onprem_rag/` on the target unless you will run `docker build` there.
+- This **bundle directory** from the clone (`compose.airgap.yaml`, `.env.example`, `config/config.env.example`, plus any of `docs/`, `systemd/`, scripts you use). You do **not** need analyzer source on the target unless you will run `docker build` there.
 
 ---
 

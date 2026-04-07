@@ -47,8 +47,8 @@ services:
 
   analyzer:
     build:
-      context: .
-      dockerfile: Dockerfile.analyzer
+      context: ..
+      dockerfile: llm_notable_analysis_analyzer_image/Dockerfile.analyzer
     restart: unless-stopped
     user: "${CONTAINER_UID:-1000}:${CONTAINER_GID:-1000}"
     env_file:

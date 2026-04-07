@@ -159,13 +159,13 @@ Build context (important):
 Example that works:
 
 ```bash
-docker build -f llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/Dockerfile.analyzer -t notable-analyzer-service .
+docker build -f llm_notable_analysis_analyzer_image/Dockerfile.analyzer -t notable-analyzer-service .
 ```
 
 Example that does not work:
 
 ```bash
-docker build -f llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/Dockerfile.analyzer -t notable-analyzer-service llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp
+docker build -f llm_notable_analysis_analyzer_image/Dockerfile.analyzer -t notable-analyzer-service .
 ```
 
 ### Option A: copy SDK source (simple)

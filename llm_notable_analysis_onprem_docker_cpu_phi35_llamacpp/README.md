@@ -8,11 +8,11 @@ The **analyzer** is packaged as **`notable-analyzer-service`** on GHCR: a **gene
 
 ## Scope
 
-- `onprem_service/` contains the analyzer runtime copied from the current on-prem package.
-- `onprem_rag/` contains the optional retrieval-grounding runtime copied from the current sibling package.
+- Uses the shared analyzer image build target in
+  `../llm_notable_analysis_analyzer_image/`.
 - `compose.yaml` runs two containers:
   - `model-serving` using the upstream `llama.cpp` server image (CPU-threaded defaults)
-  - `analyzer` using a local Python image build from this directory (`Dockerfile.analyzer` → publish as **`notable-analyzer-service`**)
+  - `analyzer` using a local Python image build from the shared analyzer target (publish as **`notable-analyzer-service`**)
 
 ## Analyzer container image (`notable-analyzer-service`)
 
@@ -34,8 +34,8 @@ Typical deployment root: `/home/<user>/apps/notable-analyzer`. Runtime paths und
 - `scripts/wsl-first-up.sh`: optional first-time helper (env + dirs + optional GGUF download + `compose up`); details in `docs/deployment.md`
 - `docs/ghcr-login-and-push.md`: pointer to the GHCR publish section in `docs/deployment.md`
 - `compose.airgap.yaml`: same stack as `compose.yaml` but **no `build`** — only `MODEL_SERVING_IMAGE` and `ANALYZER_IMAGE` from `.env`
-- `Dockerfile.analyzer`: builds the analyzer container
-- `requirements.analyzer-docker.txt`: analyzer Python dependencies
+- `../llm_notable_analysis_analyzer_image/Dockerfile.analyzer`: shared analyzer image build definition
+- `../llm_notable_analysis_analyzer_image/requirements.analyzer-docker.txt`: analyzer Python dependencies
 - `.env.example`: Compose variables for UID/GID, model filename, and llama.cpp tuning
 - `compose.yaml`: two-service Docker stack (build analyzer locally); Compose **project name** `notable-analyzer-service` (local build image: `notable-analyzer-service-analyzer:latest`)
 - `config/config.env.example`: example runtime env file for the analyzer

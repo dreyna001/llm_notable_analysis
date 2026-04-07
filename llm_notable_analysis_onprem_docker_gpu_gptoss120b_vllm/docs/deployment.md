@@ -103,7 +103,9 @@ test -f models/gpt-oss-120b/config.json
 
 ## 5) Workflow A - Connected host build and run
 
-`compose.yaml` builds analyzer locally and starts vLLM model-serving.
+`compose.yaml` builds analyzer from the shared target
+`../llm_notable_analysis_analyzer_image/Dockerfile.analyzer` and starts vLLM
+model-serving.
 
 ```bash
 docker compose up -d --build
@@ -141,6 +143,8 @@ docker save ghcr.io/dreyna001/notable-analyzer-service:<tag> \
 ### 6.2 Option B - Build analyzer locally, pull vLLM base, then save
 
 ```bash
+# Requires this bundle to remain inside the repo tree so the shared analyzer
+# source paths resolve correctly.
 docker compose build analyzer
 docker pull vllm/vllm-openai:v0.14.1
 
