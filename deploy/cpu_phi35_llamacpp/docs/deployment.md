@@ -17,7 +17,7 @@ You need **this Docker bundle on disk** (the folder that contains `compose.yaml`
 
 ```bash
 git clone https://github.com/dreyna001/llm_notable_analysis.git
-cd llm_notable_analysis/llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp
+cd llm_notable_analysis/deploy/cpu_phi35_llamacpp
 ```
 
 Use your fork or internal mirror URL if applicable. **Canonical Git + GHCR names** for this bundle: section 6 table. Overview: [README.md](../README.md).
@@ -213,7 +213,7 @@ bash scripts/wsl-first-up.sh
 | Item | Location |
 |------|----------|
 | **Git repository** | `https://github.com/dreyna001/llm_notable_analysis.git` |
-| **This Docker bundle in the repo** | `llm_notable_analysis/llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/` |
+| **This Docker bundle in the repo** | `llm_notable_analysis/deploy/cpu_phi35_llamacpp/` |
 | **GHCR — analyzer image** | `ghcr.io/dreyna001/notable-analyzer-service:<tag>` (example tag below: `1.0.0`; use the tag you published) |
 | **GHCR — model-serving mirror** | `ghcr.io/dreyna001/llama-cpp-server-cpu-phi35-llamacpp:server` |
 | **Upstream model-serving** (used by `compose.yaml` when you `compose pull model-serving`) | `ghcr.io/ggml-org/llama.cpp:server` |
@@ -222,7 +222,7 @@ bash scripts/wsl-first-up.sh
 
 ```bash
 git clone https://github.com/dreyna001/llm_notable_analysis.git
-cd llm_notable_analysis/llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp
+cd llm_notable_analysis/deploy/cpu_phi35_llamacpp
 ```
 
 ### 6.2 Option A — Pull both images from GHCR (recommended if you already published them)
@@ -242,7 +242,7 @@ docker pull ghcr.io/dreyna001/llama-cpp-server-cpu-phi35-llamacpp:server
 
 ### 6.3 Option B — Build analyzer locally; pull upstream llama.cpp
 
-From the deployment root (`llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp`):
+From the deployment root (`deploy/cpu_phi35_llamacpp`):
 
 ```bash
 docker compose pull model-serving
@@ -348,7 +348,7 @@ Build and push **analyzer**:
 
 ```bash
 git clone https://github.com/dreyna001/llm_notable_analysis.git
-cd llm_notable_analysis/llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp
+cd llm_notable_analysis/deploy/cpu_phi35_llamacpp
 docker compose build analyzer
 docker tag notable-analyzer-service-analyzer:latest ghcr.io/dreyna001/notable-analyzer-service:1.0.0
 docker push ghcr.io/dreyna001/notable-analyzer-service:1.0.0

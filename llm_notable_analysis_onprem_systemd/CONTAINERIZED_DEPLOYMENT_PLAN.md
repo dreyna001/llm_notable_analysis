@@ -430,7 +430,7 @@ Scope:
 - host-level `systemd` unit that starts and stops the Docker stack
 - replaces direct host execution of the analyzer runtime
 - does not run application logic itself
-- reference implementation in repo path `llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/`; GHCR analyzer package **`notable-analyzer-service`** is the generic Python worker image (CPU/GPU-agnostic at the container level). A **separate** Compose project or host layout for GPU / vLLM / large-model serving is still recommended so model-serving images and ports do not collide
+- reference implementation in repo path `deploy/cpu_phi35_llamacpp/`; GHCR analyzer package **`notable-analyzer-service`** is the generic Python worker image (CPU/GPU-agnostic at the container level). A **separate** Compose project or host layout for GPU / vLLM / large-model serving is still recommended so model-serving images and ports do not collide
 
 ### `config.env.container.example`
 
@@ -440,7 +440,7 @@ Scope:
 - uses container-facing paths such as `/watch/...`
 - documents required and optional analyzer settings in the new Docker layout
 
-### `docs/deployment.md` (bundle: `llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/docs/`)
+### `docs/deployment.md` (bundle: `deploy/cpu_phi35_llamacpp/docs/`)
 
 Scope:
 

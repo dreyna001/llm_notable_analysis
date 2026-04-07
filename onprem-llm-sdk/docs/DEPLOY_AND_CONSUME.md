@@ -139,7 +139,7 @@ are in `docs/OPERATIONS_RUNBOOK.md`.
 
 Use this decision:
 
-- Want only RAG in `llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp`:
+- Want only RAG in `deploy/cpu_phi35_llamacpp`:
   - keep default entrypoint (`onprem_main_nonsdk`)
   - set RAG values in `config/config.env`
   - keep `kb/index` mount

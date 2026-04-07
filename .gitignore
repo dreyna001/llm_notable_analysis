@@ -7,21 +7,21 @@ ai_use_case_delivery_framework/AI_USE_CASE_DELIVERY_PROCESS.md
 # Local secrets / environment (never commit)
 llm_notable_analysis_onprem_systemd/config.env
 llm_notable_analysis_onprem_systemd/wsl-notable-data/
-llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/.env
-llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/config/config.env
-llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/models/*.gguf
+deploy/cpu_phi35_llamacpp/.env
+deploy/cpu_phi35_llamacpp/config/config.env
+deploy/cpu_phi35_llamacpp/models/*.gguf
 
 # File-drop runtime data (keep only .gitkeep per subdirectory)
-llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/data/incoming/*
-!llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/data/incoming/.gitkeep
-llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/data/processed/*
-!llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/data/processed/.gitkeep
-llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/data/quarantine/*
-!llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/data/quarantine/.gitkeep
-llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/data/reports/*
-!llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/data/reports/.gitkeep
-llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/data/archive/*
-!llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/data/archive/.gitkeep
+deploy/cpu_phi35_llamacpp/data/incoming/*
+!deploy/cpu_phi35_llamacpp/data/incoming/.gitkeep
+deploy/cpu_phi35_llamacpp/data/processed/*
+!deploy/cpu_phi35_llamacpp/data/processed/.gitkeep
+deploy/cpu_phi35_llamacpp/data/quarantine/*
+!deploy/cpu_phi35_llamacpp/data/quarantine/.gitkeep
+deploy/cpu_phi35_llamacpp/data/reports/*
+!deploy/cpu_phi35_llamacpp/data/reports/.gitkeep
+deploy/cpu_phi35_llamacpp/data/archive/*
+!deploy/cpu_phi35_llamacpp/data/archive/.gitkeep
 
 # WSL-local Python venv (Linux paths; keep out of repo)
 .venv-wsl/
@@ -30,8 +30,8 @@ llm_notable_analysis_onprem_docker_cpu_phi35_llamacpp/data/archive/*
 .cursor/
 
 # GPU Docker bundle — local secrets and runtime (never commit)
-llm_notable_analysis_onprem_docker_gpu_gptoss120b_vllm/.env
-llm_notable_analysis_onprem_docker_gpu_gptoss120b_vllm/config/config.env
-llm_notable_analysis_onprem_docker_gpu_gptoss120b_vllm/.pytest_cache/
-llm_notable_analysis_onprem_docker_gpu_gptoss120b_vllm/.ruff_cache/
-llm_notable_analysis_onprem_docker_gpu_gptoss120b_vllm/models/*.gguf
+deploy/gpu_gptoss120b_vllm/.env
+deploy/gpu_gptoss120b_vllm/config/config.env
+deploy/gpu_gptoss120b_vllm/.pytest_cache/
+deploy/gpu_gptoss120b_vllm/.ruff_cache/
+deploy/gpu_gptoss120b_vllm/models/*.gguf
