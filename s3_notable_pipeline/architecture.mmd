@@ -50,7 +50,6 @@ flowchart TD
     subgraph SPLUNK[" "]
         direction TB
         splunktitle["Splunk<br/>(optional sinks)"]
-        hec["<span style='font-size:12px; font-weight:700; letter-spacing:0.6px;'>HEC</span><br/>Splunk HEC<br/>Ingest analysis as a new event"]
         rest["<span style='font-size:12px; font-weight:700; letter-spacing:0.6px;'>REST</span><br/>Splunk REST Notable Update<br/>Attach report to the existing notable"]
     end
 
@@ -59,7 +58,7 @@ flowchart TD
     s3title --> s3put
     lambdatitle --> recv
     bedrocktitle --> llm
-    splunktitle --> hec
+    splunktitle --> rest
 
     s3put --> s3in
     s3put --> recv
@@ -69,7 +68,6 @@ flowchart TD
     fetch --> norm --> prep --> llm --> report --> package --> route
 
     route --> s3out
-    route --> hec
     route --> rest
     route --> err
 
@@ -90,5 +88,5 @@ flowchart TD
     class s3put,s3in,s3out store;
     class recv,fetch,norm,prep,report,package,route compute;
     class llm external;
-    class hec,rest external;
+    class rest external;
     class err error;

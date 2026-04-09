@@ -1,3 +1,5 @@
+# FROM is org-specific: replace <image> and path with a Lambda Python 3.12 base you can pull.
+# SAM parameter ImageUri must point at the same handler image after you build and push to ECR.
 # Use AWS Lambda Python 3.12 base image
 FROM <image>.dkr.ecr.us-east-1.amazonaws.com/ironbank/lambda.python:312
 

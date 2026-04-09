@@ -1,8 +1,8 @@
 """
 Lambda handler for S3-triggered notable analysis pipeline.
 
-Processes notables from S3, analyzes with Bedrock Nova Pro, and outputs to
-configurable sinks (S3, Splunk HEC, or Splunk REST API).
+Processes notables from S3, analyzes with Bedrock, and outputs to
+configurable sinks (S3 or Splunk notable REST API).
 """
 
 import json
@@ -23,6 +23,7 @@ logger.setLevel(logging.INFO)
 
 # Initialize S3 client
 s3_client = boto3.client('s3')
+secretsmanager_client = boto3.client('secretsmanager')
 
 # Placeholder filenames to skip (case-insensitive basename match)
 PLACEHOLDER_FILENAMES = frozenset({'.keep', '.gitkeep', '_success', '.placeholder'})
@@ -90,7 +91,7 @@ def extract_finding_id_from_s3_key(source_key: str) -> str:
 
 
 def write_to_s3_sink(source_key: str, markdown: str, analysis_result: Dict[str, Any]) -> Dict[str, Any]:
-    """Write markdown analysis report to S3 output bucket (test mode).
+    """Write markdown analysis report to S3 output bucket.
     
     Args:
         source_key: Original S3 key from input bucket.
@@ -105,7 +106,7 @@ def write_to_s3_sink(source_key: str, markdown: str, analysis_result: Dict[str, 
         output_prefix = os.environ.get('OUTPUT_PREFIX', 'reports')
         
         if not output_bucket:
-            logger.error("OUTPUT_BUCKET_NAME not set for s3 sink mode")
+            logger.error("OUTPUT_BUCKET_NAME not set for s3/notable_rest sink mode")
             return {"status": "error", "message": "OUTPUT_BUCKET_NAME not configured"}
         
         # Generate output key based on source key
@@ -132,61 +133,75 @@ def write_to_s3_sink(source_key: str, markdown: str, analysis_result: Dict[str, 
         return {"status": "error", "message": str(e)}
 
 
-def write_to_splunk_hec(analysis_result: Dict[str, Any], original_notable: Dict[str, Any]) -> Dict[str, Any]:
-    """Write analysis results to Splunk HTTP Event Collector.
-    
+def write_to_notable_rest_sink(source_key: str, analysis_result: Dict[str, Any]) -> Dict[str, Any]:
+    """Write the markdown report to S3, then update the Splunk notable via REST.
+
     Args:
+        source_key: Original S3 key; reused for report naming and finding_id derivation.
         analysis_result: Full analysis result including markdown and TTPs.
-        original_notable: Not used (kept for signature compatibility).
-        
+
     Returns:
-        Dict with sink operation status.
+        Dict with the combined sink operation status and per-sink results.
     """
+    s3_result = write_to_s3_sink(source_key, analysis_result["markdown"], analysis_result)
+    rest_result = write_to_splunk_rest(analysis_result, source_key)
+    combined_status = (
+        "success"
+        if s3_result.get("status") == "success" and rest_result.get("status") == "success"
+        else "error"
+    )
+
+    return {
+        "status": combined_status,
+        "s3_result": s3_result,
+        "rest_result": rest_result,
+    }
+
+
+def get_splunk_api_token() -> str:
+    """Resolve Splunk API token from env var or Secrets Manager.
+
+    Returns:
+        API token value, or an empty string if not available.
+    """
+    # Backward-compatible direct env var support.
+    direct_token = os.environ.get('SPLUNK_API_TOKEN')
+    if direct_token:
+        return direct_token
+
+    secret_arn = (os.environ.get('SPLUNK_API_TOKEN_SECRET_ARN') or '').strip()
+    secret_field = (os.environ.get('SPLUNK_API_TOKEN_SECRET_FIELD') or 'token').strip() or 'token'
+    if not secret_arn:
+        return ""
+
     try:
-        import requests
-        
-        hec_url = os.environ.get('SPLUNK_HEC_URL')
-        hec_token = os.environ.get('SPLUNK_HEC_TOKEN')
-        
-        if not hec_url or not hec_token:
-            logger.error("SPLUNK_HEC_URL or SPLUNK_HEC_TOKEN not set")
-            return {"status": "error", "message": "HEC credentials not configured"}
-        
-        # Build HEC event payload
-        event_payload = {
-            "event": {
-                "notable_analysis": {
-                    "markdown": analysis_result["markdown"],
-                    "ttp_count": analysis_result["meta"]["ttp_count"],
-                    "scored_ttps": analysis_result["scored_ttps"],
-                    "execution_time": analysis_result["meta"]["execution_time_seconds"],
-                    "model_id": analysis_result["meta"]["model_id"]
-                }
-            },
-            "sourcetype": "notable:analysis",
-            "source": "aws:lambda:notable-analyzer"
-        }
-        
-        # POST to HEC
-        headers = {
-            "Authorization": f"Splunk {hec_token}",
-            "Content-Type": "application/json"
-        }
-        
-        response = requests.post(hec_url, json=event_payload, headers=headers, timeout=30)
-        response.raise_for_status()
-        
-        logger.info(f"Successfully posted to Splunk HEC: {response.status_code}")
-        
-        return {
-            "status": "success",
-            "hec_response": response.json() if response.text else {},
-            "status_code": response.status_code
-        }
-        
+        secret_response = secretsmanager_client.get_secret_value(SecretId=secret_arn)
+        secret_string = secret_response.get('SecretString') or ''
+        if not secret_string:
+            logger.error("Splunk API token secret has no SecretString content")
+            return ""
+
+        try:
+            parsed = json.loads(secret_string)
+        except json.JSONDecodeError:
+            # Allow plain-text secret values.
+            return secret_string
+
+        if isinstance(parsed, dict):
+            token_value = parsed.get(secret_field)
+            if isinstance(token_value, str) and token_value.strip():
+                return token_value
+            logger.error(
+                "Splunk API token secret JSON missing required field '%s'",
+                secret_field,
+            )
+            return ""
+
+        logger.error("Splunk API token secret JSON must be an object or plain string")
+        return ""
     except Exception as e:
-        logger.error(f"Error writing to Splunk HEC: {str(e)}")
-        return {"status": "error", "message": str(e)}
+        logger.error("Error resolving Splunk API token from Secrets Manager: %s", str(e))
+        return ""
 
 
 def write_to_splunk_rest(analysis_result: Dict[str, Any], source_key: str) -> Dict[str, Any]:
@@ -203,10 +218,13 @@ def write_to_splunk_rest(analysis_result: Dict[str, Any], source_key: str) -> Di
         import requests
         
         splunk_base_url = os.environ.get('SPLUNK_BASE_URL')
-        splunk_api_token = os.environ.get('SPLUNK_API_TOKEN')
-        
+        splunk_api_token = get_splunk_api_token()
+
         if not splunk_base_url or not splunk_api_token:
-            logger.error("SPLUNK_BASE_URL or SPLUNK_API_TOKEN not set")
+            logger.error(
+                "SPLUNK_BASE_URL or Splunk token source not set "
+                "(SPLUNK_API_TOKEN_SECRET_ARN or SPLUNK_API_TOKEN)"
+            )
             return {"status": "error", "message": "Splunk REST credentials not configured"}
 
         finding_id = extract_finding_id_from_s3_key(source_key)
@@ -297,10 +315,9 @@ def handler(event, context):
             alert_payload = normalize_notable(content, content_type)
             
             # Initialize analyzer
-            model_id = os.environ.get(
-                'BEDROCK_MODEL_ID',
-                'arn:aws:bedrock:us-east-1:911167903110:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0',
-            )
+            model_id = os.environ.get('BEDROCK_MODEL_ID')
+            if not model_id:
+                raise ValueError("BEDROCK_MODEL_ID is not configured")
             logger.info(f"Initializing analyzer with model: {model_id}")
             analyzer = BedrockAnalyzer(model_id=model_id)
             
@@ -345,13 +362,8 @@ def handler(event, context):
             
             if sink_mode == 's3':
                 sink_result = write_to_s3_sink(key, markdown, analysis_result)
-            elif sink_mode == 'hec':
-                sink_result = write_to_splunk_hec(
-                    analysis_result,
-                    alert_payload if isinstance(alert_payload, dict) else {},
-                )
             elif sink_mode == 'notable_rest':
-                sink_result = write_to_splunk_rest(analysis_result, key)
+                sink_result = write_to_notable_rest_sink(key, analysis_result)
             else:
                 logger.error(f"Unknown sink mode: {sink_mode}")
                 sink_result = {"sink": sink_mode, "status": "error", "message": "Unknown sink mode"}

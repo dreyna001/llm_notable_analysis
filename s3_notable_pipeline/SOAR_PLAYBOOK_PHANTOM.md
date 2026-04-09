@@ -44,7 +44,7 @@ In `phantom_notable_to_s3.py`, update:
 
 ## Important Mapping Note
 
-For `notable_rest` sink mode, the pipeline derives `finding_id` from the S3 filename stem.  
+For `notable_rest` sink mode, the pipeline still writes the markdown report to the configured output bucket and also derives `finding_id` from the S3 filename stem for the REST update.  
 Example: `incoming/abc-123.json` -> `finding_id=abc-123`.
 
 ## Quick Validation
@@ -52,4 +52,4 @@ Example: `incoming/abc-123.json` -> `finding_id=abc-123`.
 1. Run playbook on one known notable.
 2. Confirm object appears under `incoming/` in S3.
 3. Confirm Lambda invocation in CloudWatch.
-4. Confirm output at the configured sink (`s3`, `hec`, or `notable_rest`).
+4. Confirm output at the configured sink (`s3` or `notable_rest`). In `notable_rest`, confirm both the `reports/` object and the Splunk comment update.

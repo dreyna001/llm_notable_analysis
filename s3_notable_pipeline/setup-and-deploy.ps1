@@ -1,5 +1,8 @@
 # Setup and Deploy Script for Notable Analyzer Pipeline
 # Prerequisites: AWS CLI, SAM CLI, Docker must be installed
+#
+# Readiness: template ImageUri must be an existing ECR image (build+push first if needed).
+# The Dockerfile FROM line is not portable until you substitute your approved base image.
 
 Write-Host "=== Notable Analyzer Pipeline - Setup and Deploy ===" -ForegroundColor Cyan
 
@@ -59,18 +62,33 @@ try {
 # Check Bedrock access
 Write-Host "`nChecking Bedrock access..." -ForegroundColor Yellow
 try {
-    $models = aws bedrock list-foundation-models --region us-east-1 --query 'modelSummaries[?contains(modelId, `nova-pro`)].modelId' --output text 2>&1
-    if ($LASTEXITCODE -eq 0 -and $models) {
+    $region = "us-east-1"
+
+    $novaModels = aws bedrock list-foundation-models --region $region --query "modelSummaries[?contains(modelId, 'nova-pro')].modelId" --output text 2>$null
+    $novaAvailable = $LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($novaModels) -and $novaModels -ne "None"
+
+    $claudeProfiles = aws bedrock list-inference-profiles --region $region --query "inferenceProfileSummaries[?contains(inferenceProfileId, 'claude-sonnet-4-5')].inferenceProfileId" --output text 2>$null
+    $claudeAvailable = $LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($claudeProfiles) -and $claudeProfiles -ne "None"
+
+    if ($novaAvailable -or $claudeAvailable) {
         Write-Host "  Bedrock access confirmed" -ForegroundColor Green
-        Write-Host "  Available Nova Pro models: $models" -ForegroundColor Gray
+        if ($novaAvailable) {
+            Write-Host "  Available Nova Pro models: $novaModels" -ForegroundColor Gray
+        }
+        if ($claudeAvailable) {
+            Write-Host "  Available Claude Sonnet 4.5 inference profiles: $claudeProfiles" -ForegroundColor Gray
+        }
+        Write-Host "  Validate deploy-time values still match template parameters (AwsAccountId, model/profile, region)." -ForegroundColor Gray
     } else {
-        Write-Host "  Could not verify Bedrock access (may need model access request)" -ForegroundColor Yellow
+        Write-Host "  Could not verify Nova Pro models or Claude Sonnet 4.5 inference profiles (may need model/profile access request)." -ForegroundColor Yellow
     }
 } catch {
-    Write-Host "  Could not check Bedrock access" -ForegroundColor Yellow
+    Write-Host "  Could not check Bedrock access for Nova Pro or Claude Sonnet 4.5 profile" -ForegroundColor Yellow
 }
 
 # Build
+Write-Host "`nBefore build: ensure ImageUri (sam/template) points at your Lambda image in ECR, or sam build/push flow matches your org." -ForegroundColor Yellow
+Write-Host "If the Dockerfile FROM is still a placeholder, fix it or use another approved image build path." -ForegroundColor Yellow
 Write-Host "`n=== Step 1: Building application ===" -ForegroundColor Cyan
 Write-Host "Running: sam build -t template-sam.yaml" -ForegroundColor Gray
 sam build -t template-sam.yaml
@@ -93,7 +111,10 @@ if (Test-Path "samconfig.toml") {
     Write-Host "  - AWS Region (e.g., us-east-1)" -ForegroundColor Gray
     Write-Host "  - Input bucket name (must be globally unique)" -ForegroundColor Gray
     Write-Host "  - Output bucket name (must be globally unique)" -ForegroundColor Gray
-    Write-Host "  - Splunk sink mode (use 's3' for testing)" -ForegroundColor Gray
+    Write-Host "  - Splunk sink mode ('s3' or 'notable_rest'; use 's3' for testing)" -ForegroundColor Gray
+    Write-Host "  - AwsAccountId (12-digit) and ImageUri (existing ECR URI for this Lambda image)" -ForegroundColor Gray
+    Write-Host "  - If notable_rest: SplunkBaseUrl + SplunkApiTokenSecretArn (Secrets Manager ARN)" -ForegroundColor Gray
+    Write-Host "  - Optional: SplunkApiTokenSecretField (default 'token') and SplunkNotableUpdatePath" -ForegroundColor Gray
     sam deploy --guided
 }
 

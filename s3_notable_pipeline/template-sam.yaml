@@ -10,7 +10,7 @@ Parameters:
   
   OutputBucketName:
     Type: String
-    Description: Name for the output S3 bucket (for test mode)
+    Description: Name for the output S3 bucket (markdown reports for s3 and notable_rest modes)
     Default: notable-output-bucket
   
   SplunkSinkMode:
@@ -19,8 +19,33 @@ Parameters:
     Default: s3
     AllowedValues:
       - s3
-      - hec
       - notable_rest
+
+  SplunkBaseUrl:
+    Type: String
+    Default: ''
+    Description: >-
+      Required when SplunkSinkMode=notable_rest. Base URL for Splunk REST
+      (e.g., https://splunk.example.com:8089).
+
+  SplunkApiTokenSecretArn:
+    Type: String
+    Default: ''
+    Description: >-
+      Required when SplunkSinkMode=notable_rest. Secrets Manager ARN containing
+      the Splunk API token (plain string secret or JSON object).
+
+  SplunkApiTokenSecretField:
+    Type: String
+    Default: token
+    Description: >-
+      Optional JSON field name in SplunkApiTokenSecretArn when the secret is a
+      JSON object. Ignored for plain-string secrets.
+
+  SplunkNotableUpdatePath:
+    Type: String
+    Default: /services/notable_update
+    Description: Optional Splunk notable update path used by notable_rest mode.
   
   InputRetentionDays:
     Type: Number
@@ -35,13 +60,37 @@ Parameters:
     Default: 7
     MinValue: 1
     MaxValue: 365
+
+  AwsAccountId:
+    Type: String
+    AllowedPattern: '^[0-9]{12}$'
+    Description: >-
+      Required. Your 12-digit AWS account ID for the Bedrock inference profile ARN
+      (replace <awsaccountid> in arn:aws:bedrock:us-east-1:<awsaccountid>:inference-profile/...).
+      Pass at deploy time, e.g. sam deploy --parameter-overrides AwsAccountId=...
+    # Intentionally no Default: must be supplied per environment.
   
   # NOTE: This parameter is intentionally named `ImageUri` (not `ECRImageUri`) because other templates/tools
   # in this repo expect the standard `ImageUri` name for image-based SAM functions.
   ImageUri:
     Type: String
-    Description: Full ECR image URI with tag (e.g., 123456789012.dkr.ecr.us-east-1.amazonaws.com/notable-analyzer-s3:latest)
+    Description: >-
+      Full ECR image URI with tag for this Lambda package. The image must already exist in ECR
+      before deploy (build from Dockerfile or your approved base, then docker push). SAM only
+      references the URI; it does not create the repository image for you.
     Default: 123456789012.dkr.ecr.us-east-1.amazonaws.com/notable-analyzer-s3:latest
+
+Rules:
+  RequireNotableRestConfig:
+    RuleCondition: !Equals [!Ref SplunkSinkMode, notable_rest]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref SplunkBaseUrl, '']]
+        AssertDescription: SplunkBaseUrl is required when SplunkSinkMode=notable_rest.
+      - Assert: !Not [!Equals [!Ref SplunkApiTokenSecretArn, '']]
+        AssertDescription: SplunkApiTokenSecretArn is required when SplunkSinkMode=notable_rest.
+
+Conditions:
+  IsNotableRest: !Equals [!Ref SplunkSinkMode, notable_rest]
  
 Resources:
   InputBucket:
@@ -85,8 +134,12 @@ Resources:
       MemorySize: 512
       Environment:
         Variables:
-          BEDROCK_MODEL_ID: arn:aws:bedrock:us-east-1:911167903110:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0
+          BEDROCK_MODEL_ID: !Sub 'arn:aws:bedrock:us-east-1:${AwsAccountId}:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0'
           SPLUNK_SINK_MODE: !Ref SplunkSinkMode
+          SPLUNK_BASE_URL: !Ref SplunkBaseUrl
+          SPLUNK_API_TOKEN_SECRET_ARN: !Ref SplunkApiTokenSecretArn
+          SPLUNK_API_TOKEN_SECRET_FIELD: !Ref SplunkApiTokenSecretField
+          SPLUNK_NOTABLE_UPDATE_PATH: !Ref SplunkNotableUpdatePath
           INPUT_BUCKET_NAME: !Ref InputBucketName
           OUTPUT_BUCKET_NAME: !Ref OutputBucketName
           OUTPUT_PREFIX: reports
@@ -99,8 +152,17 @@ Resources:
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
-              Resource: 
-                - arn:aws:bedrock:us-east-1:911167903110:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0
+              Resource:
+                - !Sub 'arn:aws:bedrock:us-east-1:${AwsAccountId}:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0'
+        - !If
+          - IsNotableRest
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref SplunkApiTokenSecretArn
+          - !Ref AWS::NoValue
         - Statement:
             - Effect: Allow
               Action:
