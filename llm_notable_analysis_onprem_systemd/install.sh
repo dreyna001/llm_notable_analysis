@@ -75,6 +75,7 @@ download_model_best_effort() {
     #
     # Optional:
     #   MODEL_REPO=openai/gpt-oss-20b   (default)
+    #   MODEL_REPO=google/gemma-4-31B-it
     #
     # Never fails the installer; logs warnings on failure.
     local model_repo="${MODEL_REPO:-openai/gpt-oss-20b}"
@@ -708,7 +709,7 @@ echo "  - If vllm.service starts then immediately exits, run vLLM in foreground 
 echo "      sudo systemctl stop vllm"
 echo "      sudo -u $VLLM_USER $VLLM_VENV_DIR/bin/python -m vllm.entrypoints.openai.api_server \\"
 echo "        --model $VLLM_MODEL_PATH \\"
-echo "        --served-model-name gpt-oss-20b \\"
+echo "        --served-model-name $VLLM_SERVED_MODEL_NAME \\"
 echo "        --host 127.0.0.1 --port 8000 \\"
 echo "        --gpu-memory-utilization 0.9 --max-model-len 131072 --dtype auto \\"
 echo "        --distributed-executor-backend mp"
@@ -724,6 +725,7 @@ echo "      sudo VLLM_SMOKE_TEST=true bash install.sh"
 echo "  - Download model non-interactively (requires internet + HF token):"
 echo "      sudo MODEL_DOWNLOAD=true HF_TOKEN=... bash install.sh"
 echo "      # optional: MODEL_REPO=openai/gpt-oss-20b"
+echo "      # or: MODEL_REPO=google/gemma-4-31B-it VLLM_MODEL_PATH=/opt/models/gemma-4-31B-it VLLM_SERVED_MODEL_NAME=gemma-4-31B-it"
 echo "  - Auto-start services after install (best-effort, default true):"
 echo "      sudo AUTO_START_SERVICES=true bash install.sh"
 echo "  - Skip post-install service start:"

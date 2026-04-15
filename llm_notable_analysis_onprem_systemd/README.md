@@ -151,6 +151,7 @@ Note: During vLLM installation, the installer may appear idle for several minute
 - **Enable extra vLLM smoke checks**: `sudo VLLM_SMOKE_TEST=true bash install.sh` (non-fatal checks like `nvidia-smi` + model path presence)
 - **Download model weights (non-interactive)**: `sudo MODEL_DOWNLOAD=true HF_TOKEN=... bash install.sh`
   - Optional: `MODEL_REPO=openai/gpt-oss-120b`
+  - Alternative example: `MODEL_REPO=google/gemma-4-31B-it VLLM_MODEL_PATH=/opt/models/gemma-4-31B-it VLLM_SERVED_MODEL_NAME=gemma-4-31B-it`
   - Notes: best-effort; uses `huggingface_hub` HTTP downloads (no `git lfs` required)
 - **Auto-start services after install (best-effort, default true)**: `sudo AUTO_START_SERVICES=true bash install.sh`
 - **Skip post-install service start**: `sudo AUTO_START_SERVICES=false bash install.sh`
@@ -170,6 +171,26 @@ Even with one-command install, these items remain environment-specific:
 - Set `SPL_QUERY_GENERATION_ENABLED=true` only when you want per-hypothesis SPL query generation in reports.
 - Add SOAR public key(s) to `/var/sftp/soar/.ssh/authorized_keys` only if using SOAR SFTP ingest.
 - Review the final `install.sh` "Non-fatal issues encountered" summary and resolve items before production.
+
+### Alternative model example: Gemma 4 31B-it
+
+If you want to stage the instruction-tuned Gemma 4 variant instead of `gpt-oss-120b`, the existing installer already supports it through environment overrides:
+
+```bash
+sudo MODEL_DOWNLOAD=true HF_TOKEN=... \
+  MODEL_REPO=google/gemma-4-31B-it \
+  VLLM_MODEL_PATH=/opt/models/gemma-4-31B-it \
+  VLLM_SERVED_MODEL_NAME=gemma-4-31B-it \
+  bash install.sh
+```
+
+Then set the analyzer model name to match the served vLLM name:
+
+```bash
+LLM_MODEL_NAME=gemma-4-31B-it
+```
+
+This analyzer currently sends text-only prompts, so Gemma 4's multimodal capabilities are not used here unless the application contract is extended.
 
 ## Compliance / Gov-ready: generating a dependency manifest (what was installed)
 

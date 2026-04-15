@@ -53,6 +53,11 @@ sudo VLLM_MODEL_PATH=/opt/models/<model-dir> \
      VLLM_SERVED_MODEL_NAME=<served-name> \
      bash install_vllm.sh
 
+# Gemma 4 31B-it example
+sudo VLLM_MODEL_PATH=/opt/models/gemma-4-31B-it \
+     VLLM_SERVED_MODEL_NAME=gemma-4-31B-it \
+     bash install_vllm.sh
+
 # Different port
 sudo VLLM_PORT=8001 bash install_vllm.sh
 

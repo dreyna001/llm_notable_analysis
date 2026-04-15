@@ -147,6 +147,56 @@ test -f ~/glab_transfer/models/gpt-oss-120b/config.json && echo OK
 
 If TLS interception breaks Hub downloads, fix CA trust (preferred) or use the same `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` approach as for `pip`; avoid disabling TLS unless your security team approves.
 
+### A.3b Stage **gemma-4-31B-it** model files
+
+If you want the same staged-model workflow for Gemma 4, mirror the exact process above but use the instruction-tuned repo and target path shown below. For this analyzer's text-only chat workload, prefer **`google/gemma-4-31B-it`** over the base checkpoint.
+
+You must end up with a **complete Hugging Face-style model directory** under `~/glab_transfer/models/gemma-4-31B-it/`. The canonical public Hub repo id is **`google/gemma-4-31B-it`** ([model card](https://huggingface.co/google/gemma-4-31B-it)).
+
+**Option A - Hugging Face CLI**
+
+```bash
+python3.12 -m pip install --user "huggingface_hub>=0.23.0"
+huggingface-cli download google/gemma-4-31B-it \
+  --local-dir ~/glab_transfer/models/gemma-4-31B-it \
+  --local-dir-use-symlinks False
+```
+
+**Option B - Python `snapshot_download`**
+
+```bash
+python3.12 -m pip install --user "huggingface_hub>=0.23.0"
+python3.12 - <<'PY'
+import os
+from huggingface_hub import snapshot_download
+
+repo_id = "google/gemma-4-31B-it"
+local_dir = os.path.expanduser("~/glab_transfer/models/gemma-4-31B-it")
+token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_TOKEN")
+snapshot_download(
+    repo_id=repo_id,
+    local_dir=local_dir,
+    local_dir_use_symlinks=False,
+    token=token,
+    resume_download=True,
+)
+print("Downloaded to", local_dir)
+PY
+```
+
+**Verify**
+
+```bash
+test -f ~/glab_transfer/models/gemma-4-31B-it/config.json && echo OK
+```
+
+**Option C - Copy from internal storage or removable media**
+
+```bash
+sudo rsync -a --info=progress2 SOURCE/gemma-4-31B-it/ ~/glab_transfer/models/gemma-4-31B-it/
+test -f ~/glab_transfer/models/gemma-4-31B-it/config.json && echo OK
+```
+
 ### A.4 Stage the sentence-transformers embedding model (recommended for offline KB)
 
 Install the Hub client on staging, then snapshot the embedding model into the bundle:
