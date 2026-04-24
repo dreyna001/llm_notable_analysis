@@ -1,0 +1,56 @@
+[Unit]
+Description=Updated Notable Analyzer Worker
+Documentation=https://github.com/your-org/updated-notable-analysis
+After=network-online.target litellm.service
+Wants=network-online.target
+Requires=litellm.service
+
+[Service]
+Type=simple
+User=notable-analyzer
+Group=notable-analyzer
+WorkingDirectory=/opt/notable-analyzer
+EnvironmentFile=/etc/notable-analyzer/config.env
+
+# This package intentionally does not ship a CLI entrypoint in the current slice.
+# Deployment packaging must provide this launcher. The launcher should import
+# updated_notable_analysis.onprem.build_default_worker, inject the real core
+# runner, install stop-signal handlers, and call worker.run_until_stopped().
+ExecStart=/opt/notable-analyzer/bin/run-onprem-worker
+
+TimeoutStopSec=30
+KillMode=mixed
+KillSignal=SIGTERM
+
+Restart=on-failure
+RestartSec=10
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/notables /var/sftp/soar
+
+# Analyzer traffic should stay on loopback for LiteLLM readiness and inference.
+IPAddressDeny=any
+IPAddressAllow=127.0.0.1/32 ::1/128
+
+LimitNOFILE=65535
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=notable-analyzer
+
+[Install]
+WantedBy=multi-user.target
