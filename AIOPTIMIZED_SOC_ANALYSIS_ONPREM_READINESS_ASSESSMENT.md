@@ -12,7 +12,7 @@ This readiness view assumes the host-native GPU deployment shape represented in 
 - analyzer service from `llm_notable_analysis_onprem_systemd/`
 - `vLLM` serving `gpt-oss-120b` on `127.0.0.1:8000`
 - `LiteLLM` acting as the caller-facing proxy on `127.0.0.1:4000`
-- optional KB indexer from `onprem_setup_GLAB/`
+- optional KB indexer from `glab_vllm_litellm_kb_host_setup/`
 
 An org is genuinely ready for this deployment when all of this is already true:
 
@@ -39,7 +39,7 @@ They need:
 - enough local storage for the repo, Python environments, logs, reports, and the `gpt-oss-120b` model tree: `500 GB` NVMe is the documented minimum, but `1 TB NVMe` is the practical baseline because the model tree alone is very large and the repo, venvs, logs, and report paths add additional headroom requirements
 - a clear decision on connected-host versus offline or transfer-bundle workflow
 
-This matches the host-native deployment material in `llm_notable_analysis_onprem_systemd/INSTALL.md` and `onprem_setup_GLAB/HOST_DEPLOY_GLAB.md`.
+This matches the host-native deployment material in `llm_notable_analysis_onprem_systemd/INSTALL.md` and `glab_vllm_litellm_kb_host_setup/HOST_DEPLOY_GLAB.md`.
 
 ### 2. GPU And Inference Readiness
 This is the biggest hidden blocker.

@@ -983,8 +983,8 @@ class LocalLLMClient:
         if not bool(getattr(self.config, "RAG_ENABLED", False)):
             return None
         try:
-            from onprem_rag.future.rag_config import RAGConfig
-            from onprem_rag.future.retrieval import RAGContextProvider
+            from onprem_rag_notable_analysis.future.rag_config import RAGConfig
+            from onprem_rag_notable_analysis.future.retrieval import RAGContextProvider
 
             rag_cfg = RAGConfig(
                 enabled=True,

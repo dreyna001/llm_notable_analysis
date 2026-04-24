@@ -70,7 +70,7 @@ sudo INSTALL_SYSTEMD_UNIT=true AUTO_START_ANALYZER=true bash install_mini_qwen_c
 
 After install completes, these may still require operator input:
 
-- Ensure model weights exist at `/opt/models/gpt-oss-20b` (unless your service points to a different model path).
+- Ensure model weights exist at `/opt/models/gemma-4-31B-it` (unless your service points to a different model path).
 - Set `LLM_API_TOKEN` only if vLLM is configured with `--api-key`.
 - Set `SPLUNK_BASE_URL` / `SPLUNK_API_TOKEN` only if Splunk writeback is enabled.
 - Add SOAR key(s) to `/var/sftp/soar/.ssh/authorized_keys` only for SOAR SFTP ingest.
@@ -201,7 +201,7 @@ Then install vLLM yourself into your chosen venv path (or update `vllm.service` 
 
 ### 3. Download Model Weights
 
-Transfer model weights to `/opt/models/gpt-oss-20b` (or your chosen path).
+Transfer model weights to `/opt/models/gemma-4-31B-it` (or your chosen path).
 
 Update `vllm.service` if using a different path:
 ```bash

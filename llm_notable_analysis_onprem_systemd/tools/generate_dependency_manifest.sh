@@ -127,7 +127,7 @@ if [[ -d /etc/systemd/system ]]; then
 fi
 
 # --- Model inventory + hashes (large; can take time) ---
-model_dir="${MODEL_DIR:-/opt/models/gpt-oss-20b}"
+model_dir="${MODEL_DIR:-/opt/models/gemma-4-31B-it}"
 {
   echo "### model_dir: ${model_dir}"
   if [[ -d "$model_dir" ]]; then

@@ -2,7 +2,7 @@
 """On-prem notable analysis service entry point.
 
 Runs as a long-lived systemd service, polling INCOMING_DIR for new notables,
-analyzing them via local LLM (vLLM + gpt-oss-20b), validating TTPs, and
+analyzing them via local LLM (vLLM + gemma-4-31B-it), validating TTPs, and
 writing markdown reports.
 
 Supports optional bounded concurrency via ThreadPoolExecutor (disabled by default).

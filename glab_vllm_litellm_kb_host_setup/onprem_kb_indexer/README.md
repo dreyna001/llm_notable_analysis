@@ -9,7 +9,7 @@ This package rebuilds:
 - `chunks.jsonl`
 - `ingest_report.json`
 
-It uses `onprem_rag.future.corpus_ingest` and should run as a `systemd`
+It uses `onprem_rag_notable_analysis.future.corpus_ingest` and should run as a `systemd`
 `oneshot` service plus an optional `timer`.
 
 ## Important Boundary
@@ -32,7 +32,7 @@ rebuild job that refreshes those artifacts.
 - `config/config.env.example`
   - source/index/model path contract
 - `bin/run_kb_rebuild.sh`
-  - validated wrapper around `python -m onprem_rag.future.corpus_ingest`
+  - validated wrapper around `python -m onprem_rag_notable_analysis.future.corpus_ingest`
 - `systemd/kb-rebuild.service`
   - `oneshot` rebuild job
 - `systemd/kb-rebuild.timer`

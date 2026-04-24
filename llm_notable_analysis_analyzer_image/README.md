@@ -9,7 +9,7 @@ This directory defines the shared Docker build target for the
 Current source inputs:
 
 - `llm_notable_analysis_analyzer_image/onprem_service`
-- `llm_notable_analysis_analyzer_image/onprem_rag`
+- `llm_notable_analysis_analyzer_image/onprem_rag_notable_analysis`
 - `llm_notable_analysis_analyzer_image/tests/service_tests`
 
 Both CPU and GPU Docker deployment bundles should build/publish the analyzer

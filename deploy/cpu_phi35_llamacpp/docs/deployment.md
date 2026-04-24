@@ -57,7 +57,7 @@ The following are what you get from the clone or copy in section 1.0. At minimum
 
 - `compose.yaml` **or** `compose.airgap.yaml` (plus the other compose file if you switch modes later)
 - `../llm_notable_analysis_analyzer_image/Dockerfile.analyzer`, `../llm_notable_analysis_analyzer_image/requirements.analyzer-docker.txt`, and repo-root `.dockerignore` (only for **build** scenario)
-- `../llm_notable_analysis_analyzer_image/onprem_service/`, `../llm_notable_analysis_analyzer_image/onprem_rag/` (shared analyzer source for build context)
+- `../llm_notable_analysis_analyzer_image/onprem_service/`, `../llm_notable_analysis_analyzer_image/onprem_rag_notable_analysis/` (shared analyzer source for build context)
 - `.env.example`, `config/config.env.example`
 - Optional: `scripts/wsl-first-up.sh`, `systemd/notable-analyzer-stack.service`, `docs/`
 

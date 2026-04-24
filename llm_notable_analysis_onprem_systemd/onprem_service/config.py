@@ -68,7 +68,7 @@ class Config:
     # Local LLM (vLLM)
     LLM_API_URL: str = "http://127.0.0.1:8000/v1/chat/completions"
     LLM_API_TOKEN: str = ""
-    LLM_MODEL_NAME: str = "gpt-oss-20b"
+    LLM_MODEL_NAME: str = "gemma-4-31B-it"
     LLM_MAX_TOKENS: int = 4096
     LLM_TIMEOUT: int = 120  # seconds
 
@@ -117,7 +117,7 @@ class Config:
     RETENTION_RUN_INTERVAL_SECONDS: int = 86400
 
     # Concurrency (optional)
-    # A100 + gpt-oss-20b baseline profile:
+    # Gemma 4 31B-it baseline profile:
     # - Xeon Gold: MAX_WORKERS=4, MAX_QUEUE_DEPTH=32 (default below)
     # - Xeon Platinum: MAX_WORKERS=6, MAX_QUEUE_DEPTH=48 (override in config.env)
     # - AMD EPYC 7J13 VM (KVM, ~30 vCPU observed): start with Gold profile (4/32),
@@ -145,7 +145,7 @@ def load_config() -> Config:
             "LLM_API_URL", "http://127.0.0.1:8000/v1/chat/completions"
         ),
         LLM_API_TOKEN=os.getenv("LLM_API_TOKEN", ""),
-        LLM_MODEL_NAME=os.getenv("LLM_MODEL_NAME", "gpt-oss-20b"),
+        LLM_MODEL_NAME=os.getenv("LLM_MODEL_NAME", "gemma-4-31B-it"),
         LLM_MAX_TOKENS=int(os.getenv("LLM_MAX_TOKENS", "4096")),
         LLM_TIMEOUT=int(os.getenv("LLM_TIMEOUT", "120")),
         RAG_ENABLED=os.getenv("RAG_ENABLED", "false").lower() in ("true", "1", "yes"),

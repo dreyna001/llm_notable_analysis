@@ -11,7 +11,7 @@ No Docker. Three operational pieces:
 2. **LiteLLM** — proxy for callers, `POST /v1/chat/completions` on `127.0.0.1:4000`
 3. **KB indexer** — rebuilds `kb.sqlite3` and `kb.faiss` under `/var/lib/notable-kb/index`
 
-`vLLM` is installed from the repo root package `onprem_vllm_service/`. LiteLLM and KB assets live under `onprem_setup_GLAB/`.
+`vLLM` is installed from the repo root package `onprem_vllm_service/`. LiteLLM and KB assets live under `glab_vllm_litellm_kb_host_setup/`.
 
 ---
 
@@ -70,7 +70,7 @@ cd ~/glab_transfer
 git clone https://github.com/dreyna001/llm_notable_analysis.git
 ```
 
-You should have `~/glab_transfer/llm_notable_analysis/` with `onprem_vllm_service/` and `onprem_setup_GLAB/` inside it.
+You should have `~/glab_transfer/llm_notable_analysis/` with `onprem_vllm_service/` and `glab_vllm_litellm_kb_host_setup/` inside it.
 
 ### A.2 Download Python wheels for offline install on the target
 
@@ -440,8 +440,8 @@ sudo PIP_NO_INDEX=1 PIP_FIND_LINKS=/opt/glab_transfer/wheelhouse \
 With your current working directory set to the repository root (`llm_notable_analysis` after `git clone`, or `/opt/glab_transfer/llm_notable_analysis` after Phase C):
 
 ```bash
-sudo cp onprem_setup_GLAB/onprem_litellm_service/config/config.yaml.example /etc/litellm/config.yaml
-sudo cp onprem_setup_GLAB/onprem_litellm_service/systemd/litellm.service /etc/systemd/system/litellm.service
+sudo cp glab_vllm_litellm_kb_host_setup/onprem_litellm_service/config/config.yaml.example /etc/litellm/config.yaml
+sudo cp glab_vllm_litellm_kb_host_setup/onprem_litellm_service/systemd/litellm.service /etc/systemd/system/litellm.service
 sudo chmod 600 /etc/litellm/config.yaml
 ```
 
@@ -495,19 +495,19 @@ sudo chown -R notable-kb:notable-kb /opt/notable-kb /var/lib/notable-kb
 From repository root:
 
 ```bash
-sudo cp onprem_setup_GLAB/onprem_kb_indexer/bin/run_kb_rebuild.sh /opt/notable-kb/bin/run_kb_rebuild.sh
-sudo cp onprem_setup_GLAB/onprem_kb_indexer/config/config.env.example /etc/notable-kb/config.env
-sudo cp onprem_setup_GLAB/onprem_kb_indexer/systemd/kb-rebuild.service /etc/systemd/system/kb-rebuild.service
-sudo cp onprem_setup_GLAB/onprem_kb_indexer/systemd/kb-rebuild.timer /etc/systemd/system/kb-rebuild.timer
+sudo cp glab_vllm_litellm_kb_host_setup/onprem_kb_indexer/bin/run_kb_rebuild.sh /opt/notable-kb/bin/run_kb_rebuild.sh
+sudo cp glab_vllm_litellm_kb_host_setup/onprem_kb_indexer/config/config.env.example /etc/notable-kb/config.env
+sudo cp glab_vllm_litellm_kb_host_setup/onprem_kb_indexer/systemd/kb-rebuild.service /etc/systemd/system/kb-rebuild.service
+sudo cp glab_vllm_litellm_kb_host_setup/onprem_kb_indexer/systemd/kb-rebuild.timer /etc/systemd/system/kb-rebuild.timer
 sudo chmod 750 /opt/notable-kb/bin/run_kb_rebuild.sh
 ```
 
-### 5.3 Install `onprem_rag` and Python dependencies into `/opt/notable-kb/venv`
+### 5.3 Install `onprem_rag_notable_analysis` and Python dependencies into `/opt/notable-kb/venv`
 
 **Internet-connected target** (repository root is the current directory):
 
 ```bash
-sudo rsync -a onprem_rag /opt/notable-kb/
+sudo rsync -a onprem_rag_notable_analysis /opt/notable-kb/
 sudo python3.12 -m venv /opt/notable-kb/venv
 sudo /opt/notable-kb/venv/bin/pip install --upgrade pip
 sudo /opt/notable-kb/venv/bin/pip install faiss-cpu sentence-transformers numpy python-docx docx2txt
@@ -517,7 +517,7 @@ sudo chown -R notable-kb:notable-kb /opt/notable-kb
 **Offline target:**
 
 ```bash
-sudo rsync -a /opt/glab_transfer/llm_notable_analysis/onprem_rag /opt/notable-kb/
+sudo rsync -a /opt/glab_transfer/llm_notable_analysis/onprem_rag_notable_analysis /opt/notable-kb/
 sudo python3.12 -m venv /opt/notable-kb/venv
 sudo PIP_NO_INDEX=1 PIP_FIND_LINKS=/opt/glab_transfer/wheelhouse \
   /opt/notable-kb/venv/bin/pip install --upgrade pip
@@ -577,12 +577,12 @@ Do not send end-user traffic directly to vLLM port `8000` if LiteLLM is your int
 | Component | Location in `llm_notable_analysis` |
 |-----------|--------------------------------------|
 | vLLM installer | `onprem_vllm_service/install_vllm.sh` |
-| LiteLLM example config | `onprem_setup_GLAB/onprem_litellm_service/config/config.yaml.example` |
-| LiteLLM systemd unit | `onprem_setup_GLAB/onprem_litellm_service/systemd/litellm.service` |
-| KB rebuild script | `onprem_setup_GLAB/onprem_kb_indexer/bin/run_kb_rebuild.sh` |
-| KB env example | `onprem_setup_GLAB/onprem_kb_indexer/config/config.env.example` |
-| KB systemd units | `onprem_setup_GLAB/onprem_kb_indexer/systemd/kb-rebuild.service` and `kb-rebuild.timer` |
-| Stack overview | `onprem_setup_GLAB/README.md` |
+| LiteLLM example config | `glab_vllm_litellm_kb_host_setup/onprem_litellm_service/config/config.yaml.example` |
+| LiteLLM systemd unit | `glab_vllm_litellm_kb_host_setup/onprem_litellm_service/systemd/litellm.service` |
+| KB rebuild script | `glab_vllm_litellm_kb_host_setup/onprem_kb_indexer/bin/run_kb_rebuild.sh` |
+| KB env example | `glab_vllm_litellm_kb_host_setup/onprem_kb_indexer/config/config.env.example` |
+| KB systemd units | `glab_vllm_litellm_kb_host_setup/onprem_kb_indexer/systemd/kb-rebuild.service` and `kb-rebuild.timer` |
+| Stack overview | `glab_vllm_litellm_kb_host_setup/README.md` |
 
 ---
 
@@ -603,4 +603,4 @@ git pull origin main
 
 On an **air-gapped** target, refresh by repeating Phase A on staging, transferring a new `glab_offline_bundle.tgz`, unpacking over `/opt/glab_transfer`, and re-running any changed install steps.
 
-Re-copy any changed unit or config templates from `onprem_setup_GLAB/` if you maintain them from the repo, then `sudo systemctl daemon-reload` and restart affected services as needed.
+Re-copy any changed unit or config templates from `glab_vllm_litellm_kb_host_setup/` if you maintain them from the repo, then `sudo systemctl daemon-reload` and restart affected services as needed.

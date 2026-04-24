@@ -14,7 +14,8 @@ readonly INSTALL_DIR="/opt/notable-analyzer"
 readonly CONFIG_DIR="/etc/notable-analyzer"
 readonly DATA_DIR="/var/notables"
 readonly SFTP_CHROOT="/var/sftp/soar"
-readonly VLLM_MODEL_PATH="${VLLM_MODEL_PATH:-/opt/models/gpt-oss-20b}"
+readonly VLLM_MODEL_PATH="${VLLM_MODEL_PATH:-/opt/models/gemma-4-31B-it}"
+readonly VLLM_SERVED_MODEL_NAME="${VLLM_SERVED_MODEL_NAME:-gemma-4-31B-it}"
 readonly VLLM_INSTALL_DIR="${VLLM_INSTALL_DIR:-/opt/vllm}"
 readonly VLLM_VENV_DIR="${VLLM_VENV_DIR:-$VLLM_INSTALL_DIR/venv}"
 
@@ -74,11 +75,10 @@ download_model_best_effort() {
     #   sudo MODEL_DOWNLOAD=true HF_TOKEN=... bash install.sh
     #
     # Optional:
-    #   MODEL_REPO=openai/gpt-oss-20b   (default)
-    #   MODEL_REPO=google/gemma-4-31B-it
+    #   MODEL_REPO=google/gemma-4-31B-it   (default)
     #
     # Never fails the installer; logs warnings on failure.
-    local model_repo="${MODEL_REPO:-openai/gpt-oss-20b}"
+    local model_repo="${MODEL_REPO:-google/gemma-4-31B-it}"
     local model_dir="$VLLM_MODEL_PATH"
     local token="${HF_TOKEN:-${HUGGINGFACE_TOKEN:-}}"
 
@@ -109,9 +109,9 @@ download_model_best_effort() {
 import os
 from huggingface_hub import snapshot_download
 
-repo_id = os.environ.get("MODEL_REPO", "openai/gpt-oss-20b")
+repo_id = os.environ.get("MODEL_REPO", "google/gemma-4-31B-it")
 token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_TOKEN")
-local_dir = os.environ.get("VLLM_MODEL_PATH", "/opt/models/gpt-oss-20b")
+local_dir = os.environ.get("VLLM_MODEL_PATH", "/opt/models/gemma-4-31B-it")
 
 snapshot_download(
     repo_id=repo_id,
@@ -138,14 +138,20 @@ patch_vllm_systemd_unit() {
     [[ -f "$unit_file" ]] || err "vLLM unit not found for patching: $unit_file"
 
     local vllm_python="$VLLM_VENV_DIR/bin/python"
-    local escaped_install_dir escaped_python
+    local escaped_install_dir escaped_python escaped_model_path escaped_served_model_name
     escaped_install_dir="$(printf '%s' "$VLLM_INSTALL_DIR" | sed 's/[&|]/\\&/g')"
     escaped_python="$(printf '%s' "$vllm_python" | sed 's/[&|]/\\&/g')"
+    escaped_model_path="$(printf '%s' "$VLLM_MODEL_PATH" | sed 's/[&|]/\\&/g')"
+    escaped_served_model_name="$(printf '%s' "$VLLM_SERVED_MODEL_NAME" | sed 's/[&|]/\\&/g')"
 
     sed -i -E "s|^WorkingDirectory=.*$|WorkingDirectory=${escaped_install_dir}|" "$unit_file" \
         || err "Failed to patch WorkingDirectory in $unit_file"
     sed -i -E "s|^ExecStart=.*-m vllm\\.entrypoints\\.openai\\.api_server[[:space:]]*\\\\$|ExecStart=${escaped_python} -m vllm.entrypoints.openai.api_server \\\\|" "$unit_file" \
         || err "Failed to patch ExecStart in $unit_file"
+    sed -i -E "s|^([[:space:]]*--model[[:space:]]+).*$|\\1${escaped_model_path} \\\\|" "$unit_file" \
+        || err "Failed to patch --model in $unit_file"
+    sed -i -E "s|^([[:space:]]*--served-model-name[[:space:]]+).*$|\\1${escaped_served_model_name} \\\\|" "$unit_file" \
+        || err "Failed to patch --served-model-name in $unit_file"
 }
 
 handle_vllm_systemd_overrides() {
@@ -423,7 +429,7 @@ fi
 # Model directory (best-effort; do not fail install if this can't be created/chowned)
 #
 # We intentionally store model weights outside the repo at a stable system path:
-#   /opt/models/gpt-oss-20b
+#   /opt/models/gemma-4-31B-it
 #
 # This matches the default `vllm.service` --model argument.
 echo ""
@@ -724,8 +730,7 @@ echo "  - Add extra vLLM smoke checks (non-fatal):"
 echo "      sudo VLLM_SMOKE_TEST=true bash install.sh"
 echo "  - Download model non-interactively (requires internet + HF token):"
 echo "      sudo MODEL_DOWNLOAD=true HF_TOKEN=... bash install.sh"
-echo "      # optional: MODEL_REPO=openai/gpt-oss-20b"
-echo "      # or: MODEL_REPO=google/gemma-4-31B-it VLLM_MODEL_PATH=/opt/models/gemma-4-31B-it VLLM_SERVED_MODEL_NAME=gemma-4-31B-it"
+echo "      # optional: MODEL_REPO=google/gemma-4-31B-it VLLM_MODEL_PATH=/opt/models/gemma-4-31B-it VLLM_SERVED_MODEL_NAME=gemma-4-31B-it"
 echo "  - Auto-start services after install (best-effort, default true):"
 echo "      sudo AUTO_START_SERVICES=true bash install.sh"
 echo "  - Skip post-install service start:"

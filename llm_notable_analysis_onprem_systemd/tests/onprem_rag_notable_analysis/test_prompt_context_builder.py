@@ -1,6 +1,6 @@
 import unittest
 
-from onprem_rag.future.prompt_context_builder import (
+from onprem_rag_notable_analysis.future.prompt_context_builder import (
     ContextSnippet,
     render_context_block,
 )

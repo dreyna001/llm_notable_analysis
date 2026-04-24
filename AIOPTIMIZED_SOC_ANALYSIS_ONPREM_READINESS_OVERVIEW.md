@@ -3,7 +3,7 @@
 Executive gateway for the host-native on-prem notable analysis path. Use this document to decide whether engineer-led deployment can begin. Use `AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_ASSESSMENT.md` for the detailed technical rationale.
 
 ## In Scope
-Analyzer from `llm_notable_analysis_onprem_systemd/`, `vLLM` serving `gpt-oss-120b`, `LiteLLM` as the caller-facing proxy, and optional KB / RAG indexing from `onprem_setup_GLAB/`.
+Analyzer from `llm_notable_analysis_onprem_systemd/`, `vLLM` serving `gpt-oss-120b`, `LiteLLM` as the caller-facing proxy, and optional KB / RAG indexing from `glab_vllm_litellm_kb_host_setup/`.
 
 ## What "Ready" Means
 Ready means the organization has already settled the key host, runtime, artifact, security, and ownership decisions so an engineer can install and validate the stack without first resolving major platform questions.

@@ -27,7 +27,7 @@ curl -sf http://127.0.0.1:8000/health
 curl -sS http://127.0.0.1:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model":"gpt-oss-120b",
+    "model":"gemma-4-31B-it",
     "messages":[{"role":"user","content":"Reply with exactly OK."}],
     "temperature":0,
     "max_tokens":16
@@ -37,8 +37,8 @@ curl -sS http://127.0.0.1:8000/v1/chat/completions \
 ## Defaults (if you set nothing)
 
 - Endpoint: `127.0.0.1:8000`
-- Model path: `/opt/models/gpt-oss-120b`
-- Served model name: `gpt-oss-120b`
+- Model path: `/opt/models/gemma-4-31B-it`
+- Served model name: `gemma-4-31B-it`
 - GPU memory target: `0.9`
 - Service name: `vllm`
 
@@ -53,7 +53,7 @@ sudo VLLM_MODEL_PATH=/opt/models/<model-dir> \
      VLLM_SERVED_MODEL_NAME=<served-name> \
      bash install_vllm.sh
 
-# Gemma 4 31B-it example
+# Explicit Gemma 4 31B-it install
 sudo VLLM_MODEL_PATH=/opt/models/gemma-4-31B-it \
      VLLM_SERVED_MODEL_NAME=gemma-4-31B-it \
      bash install_vllm.sh

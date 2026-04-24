@@ -1,7 +1,7 @@
 """Local LLM client for vLLM/OpenAI-compatible inference.
 
 Replaces BedrockAnalyzer from the cloud pipeline with local HTTP calls
-to vLLM server running gpt-oss-20b/120b.
+to a vLLM server running gemma-4-31B-it by default.
 """
 
 import json
@@ -983,8 +983,8 @@ class LocalLLMClient:
         if not bool(getattr(self.config, "RAG_ENABLED", False)):
             return None
         try:
-            from onprem_rag.future.rag_config import RAGConfig
-            from onprem_rag.future.retrieval import RAGContextProvider
+            from onprem_rag_notable_analysis.future.rag_config import RAGConfig
+            from onprem_rag_notable_analysis.future.retrieval import RAGContextProvider
 
             rag_cfg = RAGConfig(
                 enabled=True,

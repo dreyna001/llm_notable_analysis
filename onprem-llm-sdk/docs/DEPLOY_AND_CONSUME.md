@@ -143,7 +143,7 @@ Use this decision:
   - keep default entrypoint (`onprem_main_nonsdk`)
   - set RAG values in `config/config.env`
   - keep `kb/index` mount
-  - `onprem_rag` is a Python package used by the analyzer (not a standalone service); see `onprem_rag/README.md`
+  - `onprem_rag_notable_analysis` is a Python package used by the analyzer (not a standalone service); see `onprem_rag_notable_analysis/README.md`
   - SDK is not required
 - Want SDK transport:
   - install `onprem-llm-sdk` in the image

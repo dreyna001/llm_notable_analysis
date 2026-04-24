@@ -26,7 +26,7 @@ set +a
 
 mkdir -p "$KB_INDEX_DIR"
 
-exec "$KB_PYTHON" -m onprem_rag.future.corpus_ingest \
+exec "$KB_PYTHON" -m onprem_rag_notable_analysis.future.corpus_ingest \
     --source-dir "$KB_SOURCE_DIR" \
     --index-dir "$KB_INDEX_DIR" \
     --embedding-model "$KB_EMBEDDING_MODEL" \

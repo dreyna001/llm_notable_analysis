@@ -379,18 +379,18 @@ Optional later tuning:
 
 ### Retrieval layer
 
-- `onprem_rag/future/retrieval.py`
+- `onprem_rag_notable_analysis/future/retrieval.py`
   - add a dedicated retrieval method for SPL grounding that returns structured snippets/refs
-- `onprem_rag/future/prompt_context_builder.py`
+- `onprem_rag_notable_analysis/future/prompt_context_builder.py`
   - add a dedicated renderer/helper for `SPL_QUERY_GROUNDING_CONTEXT`
-- `onprem_rag/future/rag_config.py`
+- `onprem_rag_notable_analysis/future/rag_config.py`
   - add SPL-specific retrieval settings/paths as needed
 
 ### Tests
 
 - `llm_notable_analysis_onprem_systemd/tests/onprem_service/test_local_llm_client_contract.py`
 - `llm_notable_analysis_onprem_systemd/tests/onprem_service/test_markdown_generator.py`
-- new retrieval-focused tests under `onprem_rag/future/tests` or existing test location if available
+- new retrieval-focused tests under `onprem_rag_notable_analysis/future/tests` or existing test location if available
 
 ## Suggested Implementation Phases
 

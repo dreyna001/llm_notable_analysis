@@ -33,10 +33,10 @@ For `onprem-llm-sdk`, either:
 
 Default service path expects:
 
-- model directory: `/opt/models/gpt-oss-20b`
-- model repo used by installer helper defaults: `openai/gpt-oss-20b`
+- model directory: `/opt/models/gemma-4-31B-it`
+- model repo used by installer helper defaults: `google/gemma-4-31B-it`
 
-Pre-download model files and transfer them so `config.json` exists under `/opt/models/gpt-oss-20b`.
+Pre-download model files and transfer them so `config.json` exists under `/opt/models/gemma-4-31B-it`.
 
 ## 4) Download OS-level dependencies (RPMs)
 
