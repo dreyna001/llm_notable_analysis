@@ -70,7 +70,7 @@ class Config:
     LLM_API_TOKEN: str = ""
     LLM_MODEL_NAME: str = "gemma-4-31B-it"
     LLM_MAX_TOKENS: int = 4096
-    LLM_TIMEOUT: int = 120  # seconds
+    LLM_TIMEOUT: int = 360  # seconds
 
     # Optional retrieval grounding (RAG)
     RAG_ENABLED: bool = False
