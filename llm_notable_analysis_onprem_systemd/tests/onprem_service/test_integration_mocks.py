@@ -69,6 +69,223 @@ class TestIntegrationMocks(unittest.TestCase):
         self.assertEqual(mock_post.call_count, 1)
 
     @patch("llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client.requests.post")
+    def test_analyze_alert_runs_second_llm_call_for_spl_generation(
+        self, mock_post: MagicMock
+    ) -> None:
+        base_hypotheses = [
+            {
+                "hypothesis_type": "benign",
+                "hypothesis": "admin maintenance",
+                "evidence_support": [],
+                "evidence_gaps": [],
+                "best_pivots": [],
+            },
+            {
+                "hypothesis_type": "benign",
+                "hypothesis": "scheduled task",
+                "evidence_support": [],
+                "evidence_gaps": [],
+                "best_pivots": [],
+            },
+            {
+                "hypothesis_type": "benign",
+                "hypothesis": "service account routine",
+                "evidence_support": [],
+                "evidence_gaps": [],
+                "best_pivots": [],
+            },
+            {
+                "hypothesis_type": "adversary",
+                "hypothesis": "credential theft",
+                "evidence_support": [],
+                "evidence_gaps": [],
+                "best_pivots": [],
+            },
+            {
+                "hypothesis_type": "adversary",
+                "hypothesis": "privilege misuse",
+                "evidence_support": [],
+                "evidence_gaps": [],
+                "best_pivots": [],
+            },
+            {
+                "hypothesis_type": "adversary",
+                "hypothesis": "remote execution",
+                "evidence_support": [],
+                "evidence_gaps": [],
+                "best_pivots": [],
+            },
+        ]
+        base_payload = {
+            "alert_reconciliation": {
+                "verdict": "likely malicious",
+                "confidence": "0.84",
+                "one_sentence_summary": "Likely credential access in progress.",
+                "decision_drivers": ["failed logins then success"],
+                "recommended_actions": ["disable account"],
+            },
+            "competing_hypotheses": base_hypotheses,
+            "evidence_vs_inference": {"evidence": ["user=admin"], "inferences": []},
+            "ioc_extraction": {"urls": []},
+            "ttp_analysis": [
+                {
+                    "ttp_id": "T1110",
+                    "ttp_name": "Brute Force",
+                    "confidence_score": 0.81,
+                    "explanation": "Repeated failures. Uncertainty: limited context.",
+                    "evidence_fields": ["user=admin"],
+                }
+            ],
+        }
+        spl_payload = {
+            "competing_hypotheses": [
+                {
+                    "query_strategy": "resolve_unknown",
+                    "primary_spl_query": "search user=admin | head 50",
+                    "why_this_query": "check baseline",
+                    "supports_if": "similar events exist",
+                    "weakens_if": "no similar events",
+                },
+                {
+                    "query_strategy": "resolve_unknown",
+                    "primary_spl_query": "search task_name=*backup* | head 50",
+                    "why_this_query": "validate scheduler pattern",
+                    "supports_if": "task appears regularly",
+                    "weakens_if": "task absent historically",
+                },
+                {
+                    "query_strategy": "check_contradiction",
+                    "primary_spl_query": "search user=svc_backup action=logon | head 50",
+                    "why_this_query": "confirm prior behavior",
+                    "supports_if": "history exists",
+                    "weakens_if": "no prior history",
+                },
+                {
+                    "query_strategy": "resolve_unknown",
+                    "primary_spl_query": "search EventCode=4624 user=admin | stats count by src_ip",
+                    "why_this_query": "check concentration",
+                    "supports_if": "new source dominates",
+                    "weakens_if": "source profile is normal",
+                },
+                {
+                    "query_strategy": "check_contradiction",
+                    "primary_spl_query": "search EventCode=4672 user=admin | head 50",
+                    "why_this_query": "look for elevated actions",
+                    "supports_if": "elevated activity appears",
+                    "weakens_if": "no elevated activity",
+                },
+                {
+                    "query_strategy": "resolve_unknown",
+                    "primary_spl_query": "search process_name=powershell.exe parent_process=wmiprvse.exe | head 50",
+                    "why_this_query": "check suspicious ancestry",
+                    "supports_if": "suspicious parent-child exists",
+                    "weakens_if": "ancestry absent",
+                },
+            ]
+        }
+
+        first_response = MagicMock()
+        first_response.raise_for_status.return_value = None
+        first_response.json.return_value = {"choices": [{"text": json.dumps(base_payload)}]}
+        second_response = MagicMock()
+        second_response.raise_for_status.return_value = None
+        second_response.json.return_value = {"choices": [{"text": json.dumps(spl_payload)}]}
+        mock_post.side_effect = [first_response, second_response]
+
+        config = Config(
+            LLM_API_URL="http://127.0.0.1:8000/v1/chat/completions",
+            SPL_QUERY_GENERATION_ENABLED=True,
+        )
+        client = LocalLLMClient(config=config, ttp_validator=_DummyValidator())
+        result = client.analyze_alert("alert_text", "2026-01-01T00:00:00Z")
+
+        self.assertNotIn("error", result)
+        self.assertEqual(mock_post.call_count, 2)
+        self.assertTrue(result["metadata"]["spl_query_generation_attempted"])
+        self.assertFalse(result["metadata"]["spl_query_generation_unavailable"])
+        self.assertIn("primary_spl_query", result["competing_hypotheses"][0])
+        self.assertEqual(
+            result["competing_hypotheses"][0]["primary_spl_query"],
+            "search user=admin | head 50",
+        )
+
+        first_call_text = str(mock_post.call_args_list[0])
+        second_call_text = str(mock_post.call_args_list[1])
+        self.assertNotIn("SPL QUERY GENERATION (Enabled)", first_call_text)
+        self.assertIn("SPL QUERY GENERATION (Enabled)", second_call_text)
+
+    @patch("llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client.requests.post")
+    def test_analyze_alert_suppresses_spl_when_second_call_contract_fails(
+        self, mock_post: MagicMock
+    ) -> None:
+        base_payload = {
+            "alert_reconciliation": {
+                "verdict": "likely malicious",
+                "confidence": "0.84",
+                "one_sentence_summary": "Likely credential access in progress.",
+                "decision_drivers": ["failed logins then success"],
+                "recommended_actions": ["disable account"],
+            },
+            "competing_hypotheses": [
+                {"hypothesis_type": "benign", "hypothesis": "h1"},
+                {"hypothesis_type": "benign", "hypothesis": "h2"},
+                {"hypothesis_type": "benign", "hypothesis": "h3"},
+                {"hypothesis_type": "adversary", "hypothesis": "h4"},
+                {"hypothesis_type": "adversary", "hypothesis": "h5"},
+                {"hypothesis_type": "adversary", "hypothesis": "h6"},
+            ],
+            "evidence_vs_inference": {"evidence": ["user=admin"], "inferences": []},
+            "ioc_extraction": {"urls": []},
+            "ttp_analysis": [],
+        }
+        bad_spl_payload = {
+            "competing_hypotheses": [
+                {
+                    "query_strategy": "resolve_unknown",
+                    "primary_spl_query": "search index=main user=admin",
+                    "why_this_query": "x",
+                    "supports_if": "y",
+                    "weakens_if": "z",
+                }
+            ]
+        }
+        bad_spl_repair_payload = {
+            "competing_hypotheses": [
+                {
+                    "query_strategy": "resolve_unknown",
+                    "primary_spl_query": "search index=main user=admin",
+                    "why_this_query": "x",
+                    "supports_if": "y",
+                    "weakens_if": "z",
+                }
+            ]
+        }
+
+        responses = []
+        for payload in (base_payload, bad_spl_payload, bad_spl_repair_payload):
+            response = MagicMock()
+            response.raise_for_status.return_value = None
+            response.json.return_value = {"choices": [{"text": json.dumps(payload)}]}
+            responses.append(response)
+        mock_post.side_effect = responses
+
+        config = Config(
+            LLM_API_URL="http://127.0.0.1:8000/v1/chat/completions",
+            SPL_QUERY_GENERATION_ENABLED=True,
+        )
+        client = LocalLLMClient(config=config, ttp_validator=_DummyValidator())
+        result = client.analyze_alert("alert_text")
+
+        self.assertNotIn("error", result)
+        self.assertTrue(result["metadata"]["spl_query_generation_unavailable"])
+        self.assertIn(
+            "spl_query_generation_unavailable_reason",
+            result["metadata"],
+        )
+        self.assertNotIn("primary_spl_query", result["competing_hypotheses"][0])
+        self.assertEqual(mock_post.call_count, 3)
+
+    @patch("llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client.requests.post")
     def test_analyze_alert_uses_repair_flow_when_initial_response_invalid(
         self, mock_post: MagicMock
     ) -> None:

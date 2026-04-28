@@ -2,6 +2,8 @@ import unittest
 from typing import Any, Dict, List
 
 from llm_notable_analysis_onprem_systemd.onprem_service.spl_query_generation import (
+    build_spl_query_generation_prompt,
+    merge_spl_query_fields_by_position,
     normalize_competing_hypotheses,
     validate_spl_query_contract,
 )
@@ -67,6 +69,45 @@ def _valid_hypotheses() -> List[Dict[str, Any]]:
 
 
 class TestSplQueryGeneration(unittest.TestCase):
+    def test_build_spl_query_generation_prompt_contains_inputs(self) -> None:
+        prompt = build_spl_query_generation_prompt(
+            alert_text="Suspicious logon alert",
+            hypotheses=normalize_competing_hypotheses(
+                _valid_hypotheses(),
+                spl_query_enabled=False,
+            ),
+            soc_operational_context="SOC_OPERATIONAL_CONTEXT\n[1] [dict] use index=main",
+            alert_time="2026-01-01T00:00:00Z",
+        )
+        self.assertIn("Suspicious logon alert", prompt)
+        self.assertIn("INPUT_COMPETING_HYPOTHESES", prompt)
+        self.assertIn("SOC_OPERATIONAL_CONTEXT", prompt)
+        self.assertIn("Return ONLY a single JSON object", prompt)
+
+    def test_merge_spl_query_fields_by_position_keeps_base_hypotheses(self) -> None:
+        base = normalize_competing_hypotheses(_valid_hypotheses(), spl_query_enabled=False)
+        generated_payload = {
+            "competing_hypotheses": [
+                {
+                    "query_strategy": "Resolve_Unknown",
+                    "primary_spl_query": " search user=admin | head 50 ",
+                    "why_this_query": " check baseline ",
+                    "supports_if": " baseline exists ",
+                    "weakens_if": " no baseline ",
+                }
+            ]
+        }
+        merged = merge_spl_query_fields_by_position(
+            base_hypotheses=base,
+            generated_payload=generated_payload,
+        )
+
+        self.assertEqual(len(merged), 6)
+        self.assertEqual(merged[0]["hypothesis"], base[0]["hypothesis"])
+        self.assertEqual(merged[0]["query_strategy"], "resolve_unknown")
+        self.assertEqual(merged[0]["primary_spl_query"], "search user=admin | head 50")
+        self.assertEqual(merged[1]["query_strategy"], "")
+
     def test_validate_spl_query_contract_accepts_valid_payload(self) -> None:
         payload = {"competing_hypotheses": _valid_hypotheses()}
         ok, err = validate_spl_query_contract(payload)
