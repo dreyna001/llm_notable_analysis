@@ -23,6 +23,11 @@ from onprem_llm_sdk.errors import (
 )
 
 from .config import Config
+from .spl_query_generation import (
+    SPL_QUERY_GENERATION_RULES,
+    normalize_competing_hypotheses,
+    validate_spl_query_contract,
+)
 from .ttp_validator import TTPValidator
 
 logger = logging.getLogger(__name__)
@@ -153,15 +158,6 @@ REQUIRED_RESPONSE_KEYS: Dict[str, type] = {
     "ttp_analysis": list,
 }
 
-_SPL_QUERY_STRATEGIES = {"resolve_unknown", "check_contradiction"}
-_SPL_QUERY_FIELDS = (
-    "query_strategy",
-    "primary_spl_query",
-    "why_this_query",
-    "supports_if",
-    "weakens_if",
-)
-
 
 ANALYST_DOCTRINE = """
 ANALYST DOCTRINE (apply to every case)
@@ -209,22 +205,6 @@ Do not assume a single root cause from one notable. Use this reasoning procedure
    - If identity is in question: pivot to IdP sign-in logs (if federated/hybrid) and AD authentication trails.
    - If local compromise is suspected: pivot to endpoint telemetry (Sysmon/EDR) and process/access signals.
    - If only Windows Security logs exist, state limitations explicitly and downgrade confidence.
-""".strip()
-
-
-SPL_QUERY_GENERATION_RULES = """
-SPL QUERY GENERATION (Enabled):
-- For each of the EXACTLY 6 hypotheses, include exactly one primary Splunk query.
-- Each hypothesis must include:
-  - query_strategy: "resolve_unknown" or "check_contradiction"
-  - primary_spl_query: a real SPL query string
-  - why_this_query: short rationale
-  - supports_if: result pattern that strengthens the hypothesis
-  - weakens_if: result pattern that weakens the hypothesis
-- Focus each query on a decision-changing unknown or strongest contradiction.
-- Do not use placeholders such as <INDEX>, <SOURCETYPE>, or similar tokens.
-- Do not output pseudo-queries such as "search ...".
-- Do not invent environment-specific tokens (indexes/sourcetypes/macros/CIM data model names) unless explicitly present in SECURITY ALERT INPUT.
 """.strip()
 
 
@@ -358,98 +338,14 @@ def validate_competing_hypotheses_balance(
 
 def _validate_spl_query_contract(result: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     """Validate strict SPL query contract for per-hypothesis query generation."""
-    ch = result.get("competing_hypotheses")
-    if not isinstance(ch, list):
-        return False, "competing_hypotheses must be a list"
-
-    ch_ok, ch_err = validate_competing_hypotheses_balance(result, strict=True)
-    if not ch_ok:
-        return False, ch_err
-
-    for i, item in enumerate(ch):
-        if not isinstance(item, dict):
-            return False, f"competing_hypotheses[{i}] must be an object"
-
-        strategy = str(item.get("query_strategy", "")).strip().lower()
-        if strategy not in _SPL_QUERY_STRATEGIES:
-            return (
-                False,
-                f"competing_hypotheses[{i}].query_strategy must be one of {_SPL_QUERY_STRATEGIES}",
-            )
-
-        primary_query = str(item.get("primary_spl_query", "")).strip()
-        if not primary_query:
-            return (
-                False,
-                f"competing_hypotheses[{i}].primary_spl_query must be non-empty",
-            )
-        if re.search(r"<[^>]+>", primary_query):
-            return (
-                False,
-                f"competing_hypotheses[{i}].primary_spl_query contains placeholder token",
-            )
-        if "..." in primary_query:
-            return (
-                False,
-                f"competing_hypotheses[{i}].primary_spl_query contains pseudo-query ellipsis",
-            )
-        if re.search(r"\bindex\s*=", primary_query, re.IGNORECASE):
-            return (
-                False,
-                f"competing_hypotheses[{i}].primary_spl_query must not assume index names",
-            )
-        if re.search(r"\bsourcetype\s*=", primary_query, re.IGNORECASE):
-            return (
-                False,
-                f"competing_hypotheses[{i}].primary_spl_query must not assume sourcetypes",
-            )
-        if re.search(r"`[^`]+`", primary_query):
-            return (
-                False,
-                f"competing_hypotheses[{i}].primary_spl_query must not assume macros",
-            )
-        if re.search(r"\bdatamodel\s*=", primary_query, re.IGNORECASE):
-            return (
-                False,
-                f"competing_hypotheses[{i}].primary_spl_query must not assume CIM data models",
-            )
-
-        for field in ("why_this_query", "supports_if", "weakens_if"):
-            value = str(item.get(field, "")).strip()
-            if not value:
-                return (
-                    False,
-                    f"competing_hypotheses[{i}].{field} must be non-empty",
-                )
-
-    return True, None
+    return validate_spl_query_contract(result)
 
 
 def _normalize_competing_hypotheses(
     value: Any, *, spl_query_enabled: bool
 ) -> List[Dict[str, Any]]:
     """Normalize competing hypotheses and optionally strip SPL query fields."""
-    if isinstance(value, dict):
-        value = [value]
-    if not isinstance(value, list):
-        return []
-
-    normalized: List[Dict[str, Any]] = []
-    for item in value:
-        if not isinstance(item, dict):
-            continue
-        hyp = dict(item)
-        if spl_query_enabled:
-            strategy = str(hyp.get("query_strategy", "")).strip().lower()
-            hyp["query_strategy"] = strategy
-            for field in ("primary_spl_query", "why_this_query", "supports_if", "weakens_if"):
-                val = hyp.get(field, "")
-                hyp[field] = str(val).strip() if val is not None else ""
-        else:
-            for field in _SPL_QUERY_FIELDS:
-                hyp.pop(field, None)
-        normalized.append(hyp)
-    return normalized
+    return normalize_competing_hypotheses(value, spl_query_enabled=spl_query_enabled)
 
 
 def _coerce_ioc_extraction(value: Any) -> Dict[str, Any]:
