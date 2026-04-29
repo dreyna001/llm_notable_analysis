@@ -31,6 +31,61 @@ def _render_hypothesis_spl_block(lines: List[str], hypothesis: Dict[str, Any]) -
         lines.append(f"  - **Weakens hypothesis if:** {weakens_if}\n")
 
 
+def _render_query_results_section(lines: List[str], query_result_section: Dict[str, Any]) -> None:
+    """Render compact query result summary details."""
+    summary = query_result_section.get("summary", {})
+    if not isinstance(summary, dict):
+        summary = {}
+    queries = query_result_section.get("queries", [])
+    if not isinstance(queries, list):
+        queries = []
+
+    lines.append("### Query Results\n\n")
+    lines.append(
+        (
+            f"**Summary:** attempted={int(summary.get('attempted', 0) or 0)}, "
+            f"executed={int(summary.get('executed', 0) or 0)}, "
+            f"denied={int(summary.get('denied', 0) or 0)}, "
+            f"failed={int(summary.get('failed', 0) or 0)}, "
+            f"skipped={int(summary.get('skipped', 0) or 0)}\n\n"
+        )
+    )
+
+    if not queries:
+        lines.append("No query attempts recorded.\n\n")
+        return
+
+    for i, item in enumerate(queries, 1):
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status", "unknown")).strip().lower() or "unknown"
+        idx = item.get("hypothesis_index")
+        idx_label = "n/a" if not isinstance(idx, int) else str(idx + 1)
+        query = str(item.get("query", "")).strip()
+        strategy = str(item.get("query_strategy", "")).strip()
+        result_count = int(item.get("result_count", 0) or 0)
+        ref = str(item.get("search_reference", "")).strip()
+        message = str(item.get("message", "")).strip()
+        columns = item.get("sample_columns", [])
+        if not isinstance(columns, list):
+            columns = []
+
+        lines.append(f"**Query {i}:** status={status}, hypothesis={idx_label}\n")
+        if strategy:
+            lines.append(f"  - **Strategy:** {strategy}\n")
+        if query:
+            lines.append(f"  - **SPL:** `{query}`\n")
+        if status == "executed":
+            lines.append(f"  - **Result count:** {result_count}\n")
+            if columns:
+                lines.append(f"  - **Sample columns:** {', '.join(str(c) for c in columns)}\n")
+        if ref:
+            lines.append(f"  - **Search reference:** {ref}\n")
+        if message and status != "executed":
+            lines.append(f"  - **Message:** {message}\n")
+        lines.append("\n")
+
+
 def generate_markdown_report(
     alert_text: str,
     llm_response: Dict[str, Any],
@@ -46,6 +101,7 @@ def generate_markdown_report(
     Returns:
         Markdown report string.
     """
+    _ = alert_text
     lines: List[str] = []
     metadata = llm_response.get("metadata", {})
     if not isinstance(metadata, dict):
@@ -132,9 +188,20 @@ def generate_markdown_report(
                         )
                     else:
                         lines.append(f"    - {pivot}\n")
+            if hyp.get("query_result_summary"):
+                lines.append(
+                    f"  - **Query result summary:** {str(hyp.get('query_result_summary', '')).strip()}\n"
+                )
+            if hyp.get("query_result_reference"):
+                lines.append(
+                    f"  - **Query result reference:** {str(hyp.get('query_result_reference', '')).strip()}\n"
+                )
             if spl_enabled and not spl_unavailable and isinstance(hyp, dict):
                 _render_hypothesis_spl_block(lines, hyp)
             lines.append("\n")
+
+    if isinstance(llm_response.get("query_result_section"), dict):
+        _render_query_results_section(lines, llm_response["query_result_section"])
 
     # Evidence vs Inference
     if "evidence_vs_inference" in llm_response:

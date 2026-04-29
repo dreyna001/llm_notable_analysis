@@ -205,6 +205,76 @@ class TestMarkdownGenerator(unittest.TestCase):
         self.assertIn("contract validation failed", markdown)
         self.assertNotIn("**Primary SPL query:**", markdown)
 
+    def test_query_results_section_renders_when_present(self) -> None:
+        llm_response = {
+            "alert_reconciliation": {"verdict": "uncertain"},
+            "competing_hypotheses": [
+                {
+                    "hypothesis_type": "benign",
+                    "hypothesis": "expected admin activity",
+                    "query_result_summary": "Query executed with 2 result(s).",
+                    "query_result_reference": "sid-123",
+                }
+            ],
+            "query_result_section": {
+                "summary": {
+                    "attempted": 2,
+                    "executed": 1,
+                    "denied": 1,
+                    "failed": 0,
+                    "skipped": 0,
+                },
+                "queries": [
+                    {
+                        "hypothesis_index": 0,
+                        "status": "executed",
+                        "query_strategy": "resolve_unknown",
+                        "query": "search index=main user=admin | head 50",
+                        "result_count": 2,
+                        "sample_columns": ["host", "user"],
+                        "search_reference": "sid-123",
+                    },
+                    {
+                        "hypothesis_index": 1,
+                        "status": "denied",
+                        "query_strategy": "check_contradiction",
+                        "query": "search index=secret user=admin | head 50",
+                        "message": "query index is not in allowed index policy",
+                    },
+                ],
+            },
+            "evidence_vs_inference": {"evidence": [], "inferences": []},
+            "ioc_extraction": {},
+            "ttp_analysis": [],
+        }
+        markdown = generate_markdown_report("alert", llm_response, [])
+        self.assertIn("### Query Results", markdown)
+        self.assertIn("attempted=2, executed=1, denied=1", markdown)
+        self.assertIn("status=executed, hypothesis=1", markdown)
+        self.assertIn("**Search reference:** sid-123", markdown)
+        self.assertIn("query index is not in allowed index policy", markdown)
+
+    def test_query_result_annotations_render_under_hypotheses(self) -> None:
+        llm_response = {
+            "alert_reconciliation": {"verdict": "uncertain"},
+            "competing_hypotheses": [
+                {
+                    "hypothesis_type": "benign",
+                    "hypothesis": "expected admin activity",
+                    "query_result_summary": "Query executed with 2 result(s).",
+                    "query_result_reference": "sid-123",
+                }
+            ],
+            "evidence_vs_inference": {"evidence": [], "inferences": []},
+            "ioc_extraction": {},
+            "ttp_analysis": [],
+        }
+        markdown = generate_markdown_report("alert", llm_response, [])
+        self.assertIn("Query result summary", markdown)
+        self.assertIn("Query executed with 2 result(s).", markdown)
+        self.assertIn("Query result reference", markdown)
+        self.assertIn("sid-123", markdown)
+
 
 if __name__ == "__main__":
     unittest.main()
