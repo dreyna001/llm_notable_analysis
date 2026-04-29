@@ -40,6 +40,18 @@ class Config:
         SPLUNK_SINK_ENABLED: Enables Splunk writeback sink.
         SPL_QUERY_GENERATION_ENABLED: Enables per-hypothesis SPL query generation.
         SPLUNK_CA_BUNDLE: Optional CA bundle for TLS verification.
+        INVESTIGATION_QUERY_EXECUTION_ENABLED: Enables read-only query execution.
+        INVESTIGATION_QUERY_EXECUTOR: Query executor mode (`rest` or `mcp`).
+        INVESTIGATION_MAX_QUERIES_PER_ALERT: Max queries attempted per alert.
+        INVESTIGATION_MAX_CONCURRENT_QUERIES: Max concurrent query execution.
+        SPLUNK_SEARCH_ENDPOINT_PATH: Splunk REST search endpoint path.
+        SPLUNK_SEARCH_ALLOWED_INDEXES: CSV allowlist of query index names.
+        SPLUNK_SEARCH_ALLOWED_COMMANDS: CSV allowlist of SPL commands.
+        SPLUNK_SEARCH_DENIED_COMMANDS: CSV denylist of SPL commands.
+        SPLUNK_SEARCH_MAX_TIME_RANGE: Max allowed query lookback duration.
+        SPLUNK_SEARCH_MAX_ROWS: Max rows per query.
+        SPLUNK_SEARCH_TIMEOUT_SECONDS: Max query timeout in seconds.
+        SPLUNK_MCP_TOOL_NAME: MCP tool identifier for Splunk search.
         MITRE_IDS_PATH: Path to ATT&CK technique ID allowlist JSON.
         INPUT_RETENTION_DAYS: Retention window for processed/quarantine inputs.
         REPORT_RETENTION_DAYS: Retention window for generated reports.
@@ -99,6 +111,20 @@ class Config:
     SPLUNK_CA_BUNDLE: str = (
         ""  # Path to PEM CA bundle for Splunk TLS; empty = system trust store
     )
+    INVESTIGATION_QUERY_EXECUTION_ENABLED: bool = False
+    INVESTIGATION_QUERY_EXECUTOR: str = "rest"
+    INVESTIGATION_MAX_QUERIES_PER_ALERT: int = 6
+    INVESTIGATION_MAX_CONCURRENT_QUERIES: int = 3
+    SPLUNK_SEARCH_ENDPOINT_PATH: str = "/services/search/jobs/oneshot"
+    SPLUNK_SEARCH_ALLOWED_INDEXES: str = "main,notable,risk"
+    SPLUNK_SEARCH_ALLOWED_COMMANDS: str = "search,stats,table,fields,where,head"
+    SPLUNK_SEARCH_DENIED_COMMANDS: str = (
+        "delete,collect,outputlookup,sendemail,map,rest,script,dbxquery"
+    )
+    SPLUNK_SEARCH_MAX_TIME_RANGE: str = "24h"
+    SPLUNK_SEARCH_MAX_ROWS: int = 100
+    SPLUNK_SEARCH_TIMEOUT_SECONDS: int = 20
+    SPLUNK_MCP_TOOL_NAME: str = "splunk_search"
 
     # MITRE ATT&CK data
     MITRE_IDS_PATH: Path = field(
@@ -184,6 +210,39 @@ def load_config() -> Config:
         ).lower()
         in ("true", "1", "yes"),
         SPLUNK_CA_BUNDLE=os.getenv("SPLUNK_CA_BUNDLE", ""),
+        INVESTIGATION_QUERY_EXECUTION_ENABLED=os.getenv(
+            "INVESTIGATION_QUERY_EXECUTION_ENABLED", "false"
+        ).lower()
+        in ("true", "1", "yes"),
+        INVESTIGATION_QUERY_EXECUTOR=os.getenv(
+            "INVESTIGATION_QUERY_EXECUTOR", "rest"
+        ).strip()
+        or "rest",
+        INVESTIGATION_MAX_QUERIES_PER_ALERT=int(
+            os.getenv("INVESTIGATION_MAX_QUERIES_PER_ALERT", "6")
+        ),
+        INVESTIGATION_MAX_CONCURRENT_QUERIES=int(
+            os.getenv("INVESTIGATION_MAX_CONCURRENT_QUERIES", "3")
+        ),
+        SPLUNK_SEARCH_ENDPOINT_PATH=os.getenv(
+            "SPLUNK_SEARCH_ENDPOINT_PATH", "/services/search/jobs/oneshot"
+        ),
+        SPLUNK_SEARCH_ALLOWED_INDEXES=os.getenv(
+            "SPLUNK_SEARCH_ALLOWED_INDEXES", "main,notable,risk"
+        ),
+        SPLUNK_SEARCH_ALLOWED_COMMANDS=os.getenv(
+            "SPLUNK_SEARCH_ALLOWED_COMMANDS", "search,stats,table,fields,where,head"
+        ),
+        SPLUNK_SEARCH_DENIED_COMMANDS=os.getenv(
+            "SPLUNK_SEARCH_DENIED_COMMANDS",
+            "delete,collect,outputlookup,sendemail,map,rest,script,dbxquery",
+        ),
+        SPLUNK_SEARCH_MAX_TIME_RANGE=os.getenv("SPLUNK_SEARCH_MAX_TIME_RANGE", "24h"),
+        SPLUNK_SEARCH_MAX_ROWS=int(os.getenv("SPLUNK_SEARCH_MAX_ROWS", "100")),
+        SPLUNK_SEARCH_TIMEOUT_SECONDS=int(
+            os.getenv("SPLUNK_SEARCH_TIMEOUT_SECONDS", "20")
+        ),
+        SPLUNK_MCP_TOOL_NAME=os.getenv("SPLUNK_MCP_TOOL_NAME", "splunk_search"),
         MITRE_IDS_PATH=Path(
             os.getenv(
                 "MITRE_IDS_PATH",

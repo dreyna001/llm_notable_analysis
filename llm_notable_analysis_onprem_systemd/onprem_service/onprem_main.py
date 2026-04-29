@@ -13,7 +13,7 @@ import json
 import signal
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, Future
+import concurrent.futures
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List, Optional, Set
@@ -31,6 +31,8 @@ from .ingest import (
 )
 from .sinks import write_markdown_to_file, update_splunk_notable
 from .markdown_generator import generate_markdown_report
+from .query_result_enrichment import enrich_analysis_with_query_results
+from .splunk_investigation import execute_hypothesis_queries
 from .retention import run_retention
 
 
@@ -112,6 +114,32 @@ def process_notable(
             logger.warning(
                 "PoC fallback: markdown report includes raw LLM output (schema not validated)"
             )
+
+        if bool(getattr(config, "INVESTIGATION_QUERY_EXECUTION_ENABLED", False)):
+            try:
+                query_results = execute_hypothesis_queries(llm_response, config=config)
+                if query_results:
+                    llm_response = enrich_analysis_with_query_results(
+                        llm_response,
+                        query_results,
+                    )
+                    section = llm_response.get("query_result_section", {})
+                    summary = section.get("summary", {}) if isinstance(section, dict) else {}
+                    logger.info(
+                        "Investigation query summary: attempted=%s executed=%s denied=%s failed=%s skipped=%s",
+                        summary.get("attempted", 0),
+                        summary.get("executed", 0),
+                        summary.get("denied", 0),
+                        summary.get("failed", 0),
+                        summary.get("skipped", 0),
+                    )
+                else:
+                    logger.info("Investigation query execution enabled; no query attempts were produced")
+            except (ValueError, RuntimeError, TypeError) as exc:
+                logger.warning(
+                    "Investigation query execution failed; continuing without query-result enrichment: %s",
+                    exc,
+                )
 
         # Extract scored TTPs
         scored_ttps = llm_response.get("ttp_analysis", [])
@@ -270,9 +298,9 @@ def _run_concurrent(config: Config, llm_client: LocalLLMClient, logger: logging.
 
     # Track in-flight work
     in_flight: Set[Path] = set()
-    futures: List[Future] = []
+    futures: List[concurrent.futures.Future] = []
 
-    def job_done_callback(future: Future, file_path: Path):
+    def job_done_callback(future: concurrent.futures.Future, file_path: Path):
         """Handle job completion.
 
         Args:
@@ -291,7 +319,7 @@ def _run_concurrent(config: Config, llm_client: LocalLLMClient, logger: logging.
             error_count += 1
             logger.exception(f"Unhandled exception in worker for {file_path.name}: {e}")
 
-    with ThreadPoolExecutor(
+    with concurrent.futures.ThreadPoolExecutor(
         max_workers=config.MAX_WORKERS, thread_name_prefix="notable-worker"
     ) as executor:
         logger.info(

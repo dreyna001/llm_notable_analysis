@@ -168,6 +168,7 @@ Even with one-command install, these items remain environment-specific:
 - Set `LLM_API_TOKEN` only if your vLLM command includes `--api-key`.
 - Set `SPLUNK_BASE_URL` / `SPLUNK_API_TOKEN` only when `SPLUNK_SINK_ENABLED=true`.
 - Set `SPL_QUERY_GENERATION_ENABLED=true` only when you want per-hypothesis SPL query generation in reports.
+- Set `INVESTIGATION_QUERY_EXECUTION_ENABLED=true` only when you want bounded read-only Splunk query execution and report enrichment.
 - Add SOAR public key(s) to `/var/sftp/soar/.ssh/authorized_keys` only if using SOAR SFTP ingest.
 - Review the final `install.sh` "Non-fatal issues encountered" summary and resolve items before production.
 
@@ -256,6 +257,34 @@ sudo journalctl -u notable-analyzer -f
 When `SPL_QUERY_GENERATION_ENABLED=true`, the structured analyzer attempts to add one
 primary SPL query per hypothesis in the "Competing Hypotheses & Pivots" report
 section. When disabled, no SPL query fields are requested or rendered.
+
+### Investigation Query Execution (Optional)
+
+When `INVESTIGATION_QUERY_EXECUTION_ENABLED=true`, the structured analyzer executes
+bounded read-only SPL queries generated per hypothesis and adds a compact
+"Query Results" section to the report.
+
+Enable in `/etc/notable-analyzer/config.env`:
+
+```bash
+INVESTIGATION_QUERY_EXECUTION_ENABLED=true
+INVESTIGATION_QUERY_EXECUTOR=rest
+INVESTIGATION_MAX_QUERIES_PER_ALERT=6
+INVESTIGATION_MAX_CONCURRENT_QUERIES=3
+SPLUNK_SEARCH_ENDPOINT_PATH=/services/search/jobs/oneshot
+SPLUNK_SEARCH_ALLOWED_INDEXES=main,notable,risk
+SPLUNK_SEARCH_ALLOWED_COMMANDS=search,stats,table,fields,where,head
+SPLUNK_SEARCH_DENIED_COMMANDS=delete,collect,outputlookup,sendemail,map,rest,script,dbxquery
+SPLUNK_SEARCH_MAX_TIME_RANGE=24h
+SPLUNK_SEARCH_MAX_ROWS=100
+SPLUNK_SEARCH_TIMEOUT_SECONDS=20
+```
+
+Notes:
+- Query execution is read-only and policy-validated before transport execution.
+- `INVESTIGATION_QUERY_EXECUTOR=rest` uses `SPLUNK_BASE_URL` and `SPLUNK_API_TOKEN`.
+- `INVESTIGATION_QUERY_EXECUTOR=mcp` expects an injected MCP client path in code.
+- Query results stay separate from `evidence_vs_inference.evidence`.
 
 ## Knowledge Base Ingestion (RAG)
 
@@ -604,6 +633,9 @@ llm_notable_analysis_onprem_systemd/
     ├── ingest.py                # File discovery and normalization
     ├── sinks.py                 # Output writers (filesystem, Splunk REST)
     ├── local_llm_client.py      # vLLM API client
+    ├── spl_query_generation.py  # SPL-only prompt/validation helpers
+    ├── splunk_investigation.py  # Read-only Splunk query executors and policy checks
+    ├── query_result_enrichment.py # Deterministic query-result enrichment
     ├── markdown_generator.py    # Report generation
     ├── retention.py             # Two-stage retention cleanup
     ├── onprem_main.py           # Service entry point
