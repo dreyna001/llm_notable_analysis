@@ -19,6 +19,146 @@ class _DummyValidator:
 
 class TestIntegrationMocks(unittest.TestCase):
     @patch("llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client.requests.post")
+    def test_analyze_alert_tool_call_mode_uses_tools_for_main_and_spl(
+        self, mock_post: MagicMock
+    ) -> None:
+        base_payload = {
+            "alert_reconciliation": {
+                "verdict": "likely malicious",
+                "confidence": "0.84",
+                "one_sentence_summary": "Likely credential access in progress.",
+                "decision_drivers": ["failed logins then success"],
+                "recommended_actions": ["disable account"],
+            },
+            "competing_hypotheses": [
+                {"hypothesis_type": "benign", "hypothesis": "h1"},
+                {"hypothesis_type": "benign", "hypothesis": "h2"},
+                {"hypothesis_type": "benign", "hypothesis": "h3"},
+                {"hypothesis_type": "adversary", "hypothesis": "h4"},
+                {"hypothesis_type": "adversary", "hypothesis": "h5"},
+                {"hypothesis_type": "adversary", "hypothesis": "h6"},
+            ],
+            "evidence_vs_inference": {"evidence": ["user=admin"], "inferences": []},
+            "ioc_extraction": {"urls": []},
+            "ttp_analysis": [],
+        }
+        spl_payload = {
+            "competing_hypotheses": [
+                {
+                    "query_strategy": "resolve_unknown",
+                    "primary_spl_query": "search user=admin | head 50",
+                    "why_this_query": "check baseline",
+                    "supports_if": "similar events exist",
+                    "weakens_if": "no similar events",
+                }
+            ]
+            * 6
+        }
+
+        first_response = MagicMock()
+        first_response.status_code = 200
+        first_response.text = ""
+        first_response.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "tool_calls": [
+                            {
+                                "function": {
+                                    "name": "analyze_notable",
+                                    "arguments": json.dumps(base_payload),
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        second_response = MagicMock()
+        second_response.status_code = 200
+        second_response.text = ""
+        second_response.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "tool_calls": [
+                            {
+                                "function": {
+                                    "name": "generate_spl_queries",
+                                    "arguments": json.dumps(spl_payload),
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        mock_post.side_effect = [first_response, second_response]
+
+        config = Config(
+            LLM_API_URL="http://127.0.0.1:8000/v1/chat/completions",
+            SPL_QUERY_GENERATION_ENABLED=True,
+            LLM_STRUCTURED_OUTPUT_MODE="tool_call",
+        )
+        client = LocalLLMClient(config=config, ttp_validator=_DummyValidator())
+        result = client.analyze_alert("alert_text", "2026-01-01T00:00:00Z")
+
+        self.assertNotIn("error", result)
+        self.assertEqual(mock_post.call_count, 2)
+        self.assertEqual(result["metadata"]["structured_output_mode"], "tool_call")
+        self.assertIn("primary_spl_query", result["competing_hypotheses"][0])
+
+        first_payload = mock_post.call_args_list[0].kwargs["json"]
+        second_payload = mock_post.call_args_list[1].kwargs["json"]
+        self.assertEqual(
+            first_payload["tool_choice"]["function"]["name"], "analyze_notable"
+        )
+        self.assertEqual(
+            second_payload["tool_choice"]["function"]["name"], "generate_spl_queries"
+        )
+
+    @patch("llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client.requests.post")
+    def test_analyze_alert_tool_call_mode_falls_back_to_prompt_json(
+        self, mock_post: MagicMock
+    ) -> None:
+        payload = {
+            "alert_reconciliation": {
+                "verdict": "likely malicious",
+                "confidence": "0.84",
+                "one_sentence_summary": "Likely credential access in progress.",
+                "decision_drivers": ["failed logins then success"],
+                "recommended_actions": ["disable account"],
+            },
+            "competing_hypotheses": [],
+            "evidence_vs_inference": {"evidence": ["user=admin"], "inferences": []},
+            "ioc_extraction": {"urls": []},
+            "ttp_analysis": [],
+        }
+
+        tool_response_missing_tool_call = MagicMock()
+        tool_response_missing_tool_call.status_code = 200
+        tool_response_missing_tool_call.text = ""
+        tool_response_missing_tool_call.json.return_value = {
+            "choices": [{"message": {"content": "not a tool call"}}]
+        }
+        prompt_json_response = MagicMock()
+        prompt_json_response.status_code = 200
+        prompt_json_response.text = ""
+        prompt_json_response.json.return_value = {"choices": [{"text": json.dumps(payload)}]}
+        mock_post.side_effect = [tool_response_missing_tool_call, prompt_json_response]
+
+        config = Config(
+            LLM_API_URL="http://127.0.0.1:8000/v1/chat/completions",
+            LLM_STRUCTURED_OUTPUT_MODE="tool_call",
+        )
+        client = LocalLLMClient(config=config, ttp_validator=_DummyValidator())
+        result = client.analyze_alert("alert_text", "2026-01-01T00:00:00Z")
+
+        self.assertNotIn("error", result)
+        self.assertEqual(mock_post.call_count, 2)
+        self.assertEqual(result["metadata"]["structured_output_mode"], "tool_call")
+
+    @patch("llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client.requests.post")
     def test_analyze_alert_success_with_mocked_llm(self, mock_post: MagicMock) -> None:
         payload = {
             "alert_reconciliation": {

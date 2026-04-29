@@ -257,6 +257,21 @@ The optional investigation/query-enrichment and ServiceNow features are implemen
 - SDK path: `python -m onprem_service.onprem_main`
 - non-SDK path: `python -m onprem_service.onprem_main_nonsdk`
 
+### Structured Output Mode (Optional)
+
+Structured output can run in prompt-json mode (default) or OpenAI-compatible tool-call mode:
+
+```bash
+LLM_STRUCTURED_OUTPUT_MODE=prompt_json
+# LLM_STRUCTURED_OUTPUT_MODE=tool_call
+```
+
+Notes:
+- `prompt_json` keeps the current prompt + parse + repair behavior.
+- `tool_call` requests function/tool-call shaped output for both the main analysis call and SPL-only second call.
+- If tool-call parsing fails for a request, the service falls back to `prompt_json` behavior for that request.
+- For `tool_call` mode with vLLM, your model/server must be launched with the correct tool parser/template settings (for example, `openai` parser for gpt-oss and `gemma4` parser/template for gemma-4-31B-it).
+
 ### Hypothesis SPL Query Generation (Optional)
 
 When `SPL_QUERY_GENERATION_ENABLED=true`, the structured analyzer attempts to add one

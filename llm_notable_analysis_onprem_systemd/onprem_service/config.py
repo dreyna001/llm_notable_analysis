@@ -24,6 +24,7 @@ class Config:
         LLM_API_URL: Local vLLM/OpenAI-compatible endpoint URL.
         LLM_API_TOKEN: Optional bearer token for LLM API authentication.
         LLM_MODEL_NAME: Model identifier used for analysis.
+        LLM_STRUCTURED_OUTPUT_MODE: Structured output strategy (`prompt_json` or `tool_call`).
         LLM_MAX_TOKENS: Per-request generation token cap.
         LLM_TIMEOUT: Request timeout in seconds.
         RAG_ENABLED: Enables retrieval-augmented prompt grounding.
@@ -89,6 +90,7 @@ class Config:
     LLM_API_URL: str = "http://127.0.0.1:8000/v1/chat/completions"
     LLM_API_TOKEN: str = ""
     LLM_MODEL_NAME: str = "gemma-4-31B-it"
+    LLM_STRUCTURED_OUTPUT_MODE: str = "prompt_json"
     LLM_MAX_TOKENS: int = 4096
     LLM_TIMEOUT: int = 120  # seconds
 
@@ -188,6 +190,10 @@ def load_config() -> Config:
         ),
         LLM_API_TOKEN=os.getenv("LLM_API_TOKEN", ""),
         LLM_MODEL_NAME=os.getenv("LLM_MODEL_NAME", "gemma-4-31B-it"),
+        LLM_STRUCTURED_OUTPUT_MODE=(
+            os.getenv("LLM_STRUCTURED_OUTPUT_MODE", "prompt_json").strip().lower()
+            or "prompt_json"
+        ),
         LLM_MAX_TOKENS=int(os.getenv("LLM_MAX_TOKENS", "4096")),
         LLM_TIMEOUT=int(os.getenv("LLM_TIMEOUT", "120")),
         RAG_ENABLED=os.getenv("RAG_ENABLED", "false").lower() in ("true", "1", "yes"),

@@ -23,6 +23,7 @@ This block must preserve the current default file-drop analysis path.
 - add ServiceNow incident draft building
 - add ServiceNow incident create with explicit approval
 - keep parity in `onprem_main_nonsdk.py` and `local_llm_client_nonsdk.py`
+- add optional local tool-call structured-output mode for analysis and SPL calls
 - add env flags to `config.env.example` and `onprem_service/config.py`
 - add deterministic unit tests with fake responses
 
@@ -107,6 +108,7 @@ SERVICENOW_CREATE_PATH=/api/now/table/incident
 SERVICENOW_API_TOKEN=
 SERVICENOW_ASSIGNMENT_GROUP=
 SERVICENOW_TIMEOUT_SECONDS=15
+LLM_STRUCTURED_OUTPUT_MODE=prompt_json
 ```
 
 ### 6.2 Config validation rules
@@ -121,6 +123,7 @@ SERVICENOW_TIMEOUT_SECONDS=15
 - `SERVICENOW_CREATE_PATH` must be non-empty and start with `/` when create is enabled.
 - ServiceNow assignment group must be non-empty when draft is enabled.
 - ServiceNow base URL and token must be non-empty when create is enabled.
+- `LLM_STRUCTURED_OUTPUT_MODE` must be `prompt_json` or `tool_call`.
 
 Do not add `QUERY_RESULT_ENRICHMENT_ENABLED`.
 
@@ -150,6 +153,12 @@ Move these into `spl_query_generation.py`:
 - SPL-only prompt builder (alert + 6 hypotheses + SOC/RAG context in, query fields out)
 - deterministic merge-by-position helper to attach generated query fields back to hypotheses
 
+When `LLM_STRUCTURED_OUTPUT_MODE=tool_call`:
+
+- main analysis call should request a local function/tool call for the analysis JSON contract
+- SPL-only second call should request a local function/tool call for SPL query fields
+- if tool-call parsing fails for a request, fallback to prompt-json behavior for that request
+
 Leave these in `local_llm_client.py`:
 
 - LLM transport
@@ -170,6 +179,7 @@ Mirror the same split behavior in `local_llm_client_nonsdk.py`.
 - SPL contract failure after one repair attempt suppresses SPL fields without failing base analysis output.
 - Existing SPL generation tests still pass.
 - New tests cover valid SPL fields, placeholder rejection, index/sourcetype/macro rejection, suppression when disabled, and second-call split behavior.
+- New tests cover tool-call mode for main + SPL calls and tool-call fallback-to-prompt-json behavior.
 
 ## 8. Diff 2: Splunk Investigation Execution
 
