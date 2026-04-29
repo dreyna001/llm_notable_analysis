@@ -286,6 +286,42 @@ Notes:
 - `INVESTIGATION_QUERY_EXECUTOR=mcp` expects an injected MCP client path in code.
 - Query results stay separate from `evidence_vs_inference.evidence`.
 
+### ServiceNow Draft/Create (Optional)
+
+When ServiceNow flags are enabled, the analyzer can build incident drafts from
+the report and optionally create incidents with approval gating.
+
+Enable in `/etc/notable-analyzer/config.env`:
+
+```bash
+SERVICENOW_DRAFT_ENABLED=true
+SERVICENOW_CREATE_ENABLED=false
+SERVICENOW_CREATE_REQUIRES_APPROVAL=true
+SERVICENOW_BASE_URL=https://your-instance.service-now.com
+SERVICENOW_CREATE_PATH=/api/now/table/incident
+SERVICENOW_API_TOKEN=
+SERVICENOW_ASSIGNMENT_GROUP=
+SERVICENOW_TIMEOUT_SECONDS=15
+```
+
+Approval metadata for create should be present in incoming JSON payload:
+
+```json
+{
+  "servicenow_create_approval": {
+    "approved": true,
+    "approved_by": "analyst@example.com",
+    "approval_ref": "SNOW-CHANGE-123",
+    "approved_at": "2026-04-29T18:00:00Z"
+  }
+}
+```
+
+Notes:
+- Draft and create status are recorded in report metadata.
+- Create fails closed when approval is missing/invalid and approval is required.
+- Uses standard ServiceNow incident table endpoint and fields.
+
 ## Knowledge Base Ingestion (RAG)
 
 When `RAG_ENABLED=true`, the analyzer can inject SOC-specific operational context
@@ -636,6 +672,7 @@ llm_notable_analysis_onprem_systemd/
     ├── spl_query_generation.py  # SPL-only prompt/validation helpers
     ├── splunk_investigation.py  # Read-only Splunk query executors and policy checks
     ├── query_result_enrichment.py # Deterministic query-result enrichment
+    ├── servicenow.py            # ServiceNow draft/create adapter
     ├── markdown_generator.py    # Report generation
     ├── retention.py             # Two-stage retention cleanup
     ├── onprem_main.py           # Service entry point

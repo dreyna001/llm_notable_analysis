@@ -52,6 +52,14 @@ class Config:
         SPLUNK_SEARCH_MAX_ROWS: Max rows per query.
         SPLUNK_SEARCH_TIMEOUT_SECONDS: Max query timeout in seconds.
         SPLUNK_MCP_TOOL_NAME: MCP tool identifier for Splunk search.
+        SERVICENOW_DRAFT_ENABLED: Enables ServiceNow draft payload generation.
+        SERVICENOW_CREATE_ENABLED: Enables ServiceNow incident create operation.
+        SERVICENOW_CREATE_REQUIRES_APPROVAL: Requires payload-level approval to create.
+        SERVICENOW_BASE_URL: ServiceNow instance base URL.
+        SERVICENOW_CREATE_PATH: Incident create endpoint path.
+        SERVICENOW_API_TOKEN: Bearer token for ServiceNow API.
+        SERVICENOW_ASSIGNMENT_GROUP: Assignment group used for incident drafts.
+        SERVICENOW_TIMEOUT_SECONDS: Create request timeout in seconds.
         MITRE_IDS_PATH: Path to ATT&CK technique ID allowlist JSON.
         INPUT_RETENTION_DAYS: Retention window for processed/quarantine inputs.
         REPORT_RETENTION_DAYS: Retention window for generated reports.
@@ -125,6 +133,14 @@ class Config:
     SPLUNK_SEARCH_MAX_ROWS: int = 100
     SPLUNK_SEARCH_TIMEOUT_SECONDS: int = 20
     SPLUNK_MCP_TOOL_NAME: str = "splunk_search"
+    SERVICENOW_DRAFT_ENABLED: bool = False
+    SERVICENOW_CREATE_ENABLED: bool = False
+    SERVICENOW_CREATE_REQUIRES_APPROVAL: bool = True
+    SERVICENOW_BASE_URL: str = "https://your-instance.service-now.com"
+    SERVICENOW_CREATE_PATH: str = "/api/now/table/incident"
+    SERVICENOW_API_TOKEN: str = ""
+    SERVICENOW_ASSIGNMENT_GROUP: str = ""
+    SERVICENOW_TIMEOUT_SECONDS: int = 15
 
     # MITRE ATT&CK data
     MITRE_IDS_PATH: Path = field(
@@ -243,6 +259,23 @@ def load_config() -> Config:
             os.getenv("SPLUNK_SEARCH_TIMEOUT_SECONDS", "20")
         ),
         SPLUNK_MCP_TOOL_NAME=os.getenv("SPLUNK_MCP_TOOL_NAME", "splunk_search"),
+        SERVICENOW_DRAFT_ENABLED=os.getenv("SERVICENOW_DRAFT_ENABLED", "false").lower()
+        in ("true", "1", "yes"),
+        SERVICENOW_CREATE_ENABLED=os.getenv("SERVICENOW_CREATE_ENABLED", "false").lower()
+        in ("true", "1", "yes"),
+        SERVICENOW_CREATE_REQUIRES_APPROVAL=os.getenv(
+            "SERVICENOW_CREATE_REQUIRES_APPROVAL", "true"
+        ).lower()
+        in ("true", "1", "yes"),
+        SERVICENOW_BASE_URL=os.getenv(
+            "SERVICENOW_BASE_URL", "https://your-instance.service-now.com"
+        ),
+        SERVICENOW_CREATE_PATH=os.getenv(
+            "SERVICENOW_CREATE_PATH", "/api/now/table/incident"
+        ),
+        SERVICENOW_API_TOKEN=os.getenv("SERVICENOW_API_TOKEN", ""),
+        SERVICENOW_ASSIGNMENT_GROUP=os.getenv("SERVICENOW_ASSIGNMENT_GROUP", ""),
+        SERVICENOW_TIMEOUT_SECONDS=int(os.getenv("SERVICENOW_TIMEOUT_SECONDS", "15")),
         MITRE_IDS_PATH=Path(
             os.getenv(
                 "MITRE_IDS_PATH",

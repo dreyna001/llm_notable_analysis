@@ -32,6 +32,11 @@ from .ingest import (
 from .sinks import write_markdown_to_file, update_splunk_notable
 from .markdown_generator import generate_markdown_report
 from .query_result_enrichment import enrich_analysis_with_query_results
+from .servicenow import (
+    build_servicenow_incident_draft,
+    create_servicenow_incident,
+    extract_servicenow_create_approval,
+)
 from .splunk_investigation import execute_hypothesis_queries
 from .retention import run_retention
 
@@ -90,6 +95,7 @@ def process_notable(
         # - text stays text
         alert_payload = normalize_notable(content, content_type)
         notable_id = get_notable_id(alert_payload, file_path)
+        finding_id = file_path.stem
 
         # Build alert text for LLM
         alert_text = _format_alert_for_llm(
@@ -145,6 +151,53 @@ def process_notable(
         scored_ttps = llm_response.get("ttp_analysis", [])
         logger.info(f"Identified {len(scored_ttps)} valid TTPs")
 
+        if bool(getattr(config, "SERVICENOW_DRAFT_ENABLED", False)) or bool(
+            getattr(config, "SERVICENOW_CREATE_ENABLED", False)
+        ):
+            draft_result = build_servicenow_incident_draft(
+                llm_response,
+                config=config,
+                notable_id=notable_id,
+                finding_id=finding_id,
+            )
+            create_result = {
+                "status": "skipped",
+                "operation": "create",
+                "message": "ServiceNow create is disabled",
+            }
+            if bool(getattr(config, "SERVICENOW_CREATE_ENABLED", False)):
+                if draft_result.get("status") != "success":
+                    create_result = {
+                        "status": "denied",
+                        "operation": "create",
+                        "message": "ServiceNow create denied: draft payload unavailable",
+                    }
+                else:
+                    approval = extract_servicenow_create_approval(alert_payload)
+                    create_result = create_servicenow_incident(
+                        draft_result.get("incident_payload", {}),
+                        config=config,
+                        approval=approval,
+                    )
+            llm_response["servicenow_section"] = {
+                "draft": {
+                    "status": str(draft_result.get("status", "")).strip(),
+                    "message": str(draft_result.get("message", "")).strip(),
+                },
+                "create": {
+                    "status": str(create_result.get("status", "")).strip(),
+                    "message": str(create_result.get("message", "")).strip(),
+                    "number": str(create_result.get("number", "")).strip(),
+                    "sys_id": str(create_result.get("sys_id", "")).strip(),
+                    "approval": create_result.get("approval", {}),
+                },
+            }
+            logger.info(
+                "ServiceNow status: draft=%s create=%s",
+                llm_response["servicenow_section"]["draft"]["status"],
+                llm_response["servicenow_section"]["create"]["status"],
+            )
+
         # Generate markdown report
         markdown = generate_markdown_report(alert_text, llm_response, scored_ttps)
 
@@ -154,7 +207,6 @@ def process_notable(
 
         # Optional: Update Splunk notable via REST API
         if config.SPLUNK_SINK_ENABLED:
-            finding_id = file_path.stem
             splunk_result = update_splunk_notable(
                 notable_id, markdown, finding_id, config
             )

@@ -86,6 +86,45 @@ def _render_query_results_section(lines: List[str], query_result_section: Dict[s
         lines.append("\n")
 
 
+def _render_servicenow_section(lines: List[str], servicenow_section: Dict[str, Any]) -> None:
+    """Render ServiceNow draft/create status details."""
+    draft = servicenow_section.get("draft", {})
+    if not isinstance(draft, dict):
+        draft = {}
+    create = servicenow_section.get("create", {})
+    if not isinstance(create, dict):
+        create = {}
+
+    draft_status = str(draft.get("status", "unknown")).strip() or "unknown"
+    draft_message = str(draft.get("message", "")).strip()
+    create_status = str(create.get("status", "unknown")).strip() or "unknown"
+    create_message = str(create.get("message", "")).strip()
+    create_number = str(create.get("number", "")).strip()
+    create_sys_id = str(create.get("sys_id", "")).strip()
+    approval = create.get("approval", {})
+    if not isinstance(approval, dict):
+        approval = {}
+
+    lines.append("### ServiceNow\n\n")
+    lines.append(f"**Draft status:** {draft_status}\n")
+    if draft_message:
+        lines.append(f"- **Draft message:** {draft_message}\n")
+    lines.append(f"**Create status:** {create_status}\n")
+    if create_message:
+        lines.append(f"- **Create message:** {create_message}\n")
+    if create_number:
+        lines.append(f"- **Incident number:** {create_number}\n")
+    if create_sys_id:
+        lines.append(f"- **Incident sys_id:** {create_sys_id}\n")
+    approved_by = str(approval.get("approved_by", "")).strip()
+    approval_ref = str(approval.get("approval_ref", "")).strip()
+    if approved_by:
+        lines.append(f"- **Approved by:** {approved_by}\n")
+    if approval_ref:
+        lines.append(f"- **Approval ref:** {approval_ref}\n")
+    lines.append("\n")
+
+
 def generate_markdown_report(
     alert_text: str,
     llm_response: Dict[str, Any],
@@ -202,6 +241,9 @@ def generate_markdown_report(
 
     if isinstance(llm_response.get("query_result_section"), dict):
         _render_query_results_section(lines, llm_response["query_result_section"])
+
+    if isinstance(llm_response.get("servicenow_section"), dict):
+        _render_servicenow_section(lines, llm_response["servicenow_section"])
 
     # Evidence vs Inference
     if "evidence_vs_inference" in llm_response:

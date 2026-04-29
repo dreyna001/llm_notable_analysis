@@ -275,6 +275,30 @@ class TestMarkdownGenerator(unittest.TestCase):
         self.assertIn("Query result reference", markdown)
         self.assertIn("sid-123", markdown)
 
+    def test_servicenow_section_renders_when_present(self) -> None:
+        llm_response = {
+            "alert_reconciliation": {"verdict": "uncertain"},
+            "competing_hypotheses": [],
+            "servicenow_section": {
+                "draft": {"status": "success", "message": "ServiceNow draft created"},
+                "create": {
+                    "status": "denied",
+                    "message": "ServiceNow create denied: explicit approval is required",
+                    "number": "",
+                    "sys_id": "",
+                    "approval": {},
+                },
+            },
+            "evidence_vs_inference": {"evidence": [], "inferences": []},
+            "ioc_extraction": {},
+            "ttp_analysis": [],
+        }
+        markdown = generate_markdown_report("alert", llm_response, [])
+        self.assertIn("### ServiceNow", markdown)
+        self.assertIn("Draft status", markdown)
+        self.assertIn("Create status", markdown)
+        self.assertIn("explicit approval is required", markdown)
+
 
 if __name__ == "__main__":
     unittest.main()
