@@ -252,6 +252,11 @@ sudo journalctl -u notable-analyzer -f
 
 ## Usage
 
+The optional investigation/query-enrichment and ServiceNow features are implemented in both service entrypoints:
+
+- SDK path: `python -m onprem_service.onprem_main`
+- non-SDK path: `python -m onprem_service.onprem_main_nonsdk`
+
 ### Hypothesis SPL Query Generation (Optional)
 
 When `SPL_QUERY_GENERATION_ENABLED=true`, the structured analyzer attempts to add one
@@ -668,14 +673,17 @@ llm_notable_analysis_onprem_systemd/
     ├── ttp_validator.py         # MITRE ATT&CK validation
     ├── ingest.py                # File discovery and normalization
     ├── sinks.py                 # Output writers (filesystem, Splunk REST)
-    ├── local_llm_client.py      # vLLM API client
+    ├── local_llm_client.py      # vLLM API client (SDK transport)
+    ├── local_llm_client_nonsdk.py # vLLM API client (requests transport)
+    ├── openai_transport_nonsdk.py # OpenAI-compatible HTTP transport helper
     ├── spl_query_generation.py  # SPL-only prompt/validation helpers
     ├── splunk_investigation.py  # Read-only Splunk query executors and policy checks
     ├── query_result_enrichment.py # Deterministic query-result enrichment
     ├── servicenow.py            # ServiceNow draft/create adapter
     ├── markdown_generator.py    # Report generation
     ├── retention.py             # Two-stage retention cleanup
-    ├── onprem_main.py           # Service entry point
+    ├── onprem_main.py           # Service entry point (SDK path)
+    ├── onprem_main_nonsdk.py    # Service entry point (non-SDK path)
     └── enterprise_attack_v17.1_ids.json  # MITRE TTP IDs
 ```
 

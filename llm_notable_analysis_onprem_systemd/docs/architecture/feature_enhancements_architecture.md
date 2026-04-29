@@ -28,6 +28,7 @@ This architecture answers:
 - ServiceNow incident draft creation
 - ServiceNow incident create with explicit approval
 - light extraction of SPL generation helpers from `local_llm_client.py`
+- parity updates for `onprem_main_nonsdk.py` and `local_llm_client_nonsdk.py`
 - env flag additions in the existing config style
 - deterministic unit tests with fake Splunk and ServiceNow responses
 
@@ -61,7 +62,7 @@ The current service does not execute generated SPL, enrich reports with query re
 Keep the current direct modular style:
 
 - use simple env flags
-- keep `onprem_main.py` focused on orchestration
+- keep `onprem_main.py` and `onprem_main_nonsdk.py` focused on orchestration
 - add files only when the current module would become harder to read or test
 - keep modules concrete to this app and these features
 - prefer plain functions and dataclasses over framework-style interfaces
@@ -113,7 +114,7 @@ flowchart LR
 
 ## Architecture Boundary
 
-### `onprem_main.py` owns
+### `onprem_main.py` and `onprem_main_nonsdk.py` own
 
 - current service loop wiring
 - calling analysis, enrichment, rendering, sinks, and archive/quarantine steps
@@ -121,7 +122,7 @@ flowchart LR
 - choosing whether optional steps run
 - preserving existing processed/quarantine behavior
 
-### `local_llm_client.py` owns
+### `local_llm_client.py` and `local_llm_client_nonsdk.py` own
 
 - LLM transport call through the SDK client
 - RAG provider setup and context retrieval
@@ -172,6 +173,12 @@ Only the most self-contained SPL generation pieces should move first, plus the b
 
 General LLM response validation can stay in `local_llm_client.py` unless a later diff makes that file harder to read.
 
+`local_llm_client_nonsdk.py` should keep parity with this SPL split behavior:
+
+- base analysis call remains separate from SPL-generation call
+- SPL-only call uses the same bounded prompt contract and merge-by-position behavior
+- base analysis continues even when SPL generation is unavailable
+
 ## Feature Boundaries
 
 ### Read-only Splunk investigation
@@ -209,6 +216,7 @@ Rules:
 - deterministic code only
 - no second LLM call for the first implementation
 - query results remain separate from direct alert facts and RAG context
+- enriched payload may include `query_result_section` for markdown rendering
 
 ### ServiceNow incident draft
 
@@ -263,6 +271,8 @@ Approval comes from the incoming alert payload:
   }
 }
 ```
+
+Local report payload may include `servicenow_section` with draft and create statuses, incident identifiers, and approval metadata when available.
 
 ## Config Contract
 

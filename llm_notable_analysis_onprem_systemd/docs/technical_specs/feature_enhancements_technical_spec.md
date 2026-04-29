@@ -22,6 +22,7 @@ This block must preserve the current default file-drop analysis path.
 - add deterministic query-result enrichment before markdown rendering
 - add ServiceNow incident draft building
 - add ServiceNow incident create with explicit approval
+- keep parity in `onprem_main_nonsdk.py` and `local_llm_client_nonsdk.py`
 - add env flags to `config.env.example` and `onprem_service/config.py`
 - add deterministic unit tests with fake responses
 
@@ -46,7 +47,7 @@ This block must preserve the current default file-drop analysis path.
 ## 4. Baseline Constraints
 
 - Keep the existing direct modular style.
-- Keep `onprem_main.py` as the orchestration point.
+- Keep `onprem_main.py` and `onprem_main_nonsdk.py` as orchestration points.
 - Add new files only when an existing module would become harder to read or test.
 - Keep query execution read-only.
 - Do not treat query results as direct alert evidence.
@@ -64,8 +65,10 @@ Required new implementation files:
 Expected modified files:
 
 - `onprem_service/local_llm_client.py`
+- `onprem_service/local_llm_client_nonsdk.py`
 - `onprem_service/markdown_generator.py`
 - `onprem_service/onprem_main.py`
+- `onprem_service/onprem_main_nonsdk.py`
 - `onprem_service/config.py`
 - `config.env.example`
 - `README.md`
@@ -131,6 +134,7 @@ Move self-contained SPL generation pieces out of `local_llm_client.py` without c
 
 - `onprem_service/spl_query_generation.py`
 - `onprem_service/local_llm_client.py`
+- `onprem_service/local_llm_client_nonsdk.py`
 - `tests/onprem_service/test_spl_query_generation.py`
 - existing LLM client tests as needed
 
@@ -154,6 +158,8 @@ Leave these in `local_llm_client.py`:
 - repair loop
 - TTP filtering
 - metadata annotation
+
+Mirror the same split behavior in `local_llm_client_nonsdk.py`.
 
 ### Acceptance criteria
 
@@ -252,6 +258,7 @@ Enrichment must:
 - preserve existing report fields
 - keep query-result evidence separate from `evidence_vs_inference.evidence`
 - summarize aggregate results and include only compact samples when needed
+- store normalized output under `query_result_section`
 
 Markdown rendering must:
 
@@ -315,6 +322,11 @@ Create response normalization:
 - metadata with operation and source record reference
 - approval metadata when present
 
+When ServiceNow logic runs, local report payload should include `servicenow_section`:
+
+- `servicenow_section.draft.status|message`
+- `servicenow_section.create.status|message|number|sys_id|approval`
+
 ### Acceptance criteria
 
 - Draft creation has no network side effect.
@@ -335,6 +347,7 @@ Wire enabled optional features into the existing processing flow.
 ### Files
 
 - `onprem_service/onprem_main.py`
+- `onprem_service/onprem_main_nonsdk.py`
 - `onprem_service/config.py`
 - `config.env.example`
 - `README.md`
@@ -362,6 +375,7 @@ Processing order:
 - ServiceNow draft-only path records draft metadata.
 - ServiceNow create path requires approval.
 - Existing file processing behavior remains unchanged.
+- `onprem_main_nonsdk.py` preserves the same optional feature behavior and ordering.
 
 ## 12. Approval Input
 
