@@ -31,6 +31,100 @@ def _render_hypothesis_spl_block(lines: List[str], hypothesis: Dict[str, Any]) -
         lines.append(f"  - **Weakens hypothesis if:** {weakens_if}\n")
 
 
+def _render_query_results_section(lines: List[str], query_result_section: Dict[str, Any]) -> None:
+    """Render compact query result summary details."""
+    summary = query_result_section.get("summary", {})
+    if not isinstance(summary, dict):
+        summary = {}
+    queries = query_result_section.get("queries", [])
+    if not isinstance(queries, list):
+        queries = []
+
+    lines.append("### Query Results\n\n")
+    lines.append(
+        (
+            f"**Summary:** attempted={int(summary.get('attempted', 0) or 0)}, "
+            f"executed={int(summary.get('executed', 0) or 0)}, "
+            f"denied={int(summary.get('denied', 0) or 0)}, "
+            f"failed={int(summary.get('failed', 0) or 0)}, "
+            f"skipped={int(summary.get('skipped', 0) or 0)}\n\n"
+        )
+    )
+
+    if not queries:
+        lines.append("No query attempts recorded.\n\n")
+        return
+
+    for i, item in enumerate(queries, 1):
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status", "unknown")).strip().lower() or "unknown"
+        idx = item.get("hypothesis_index")
+        idx_label = "n/a" if not isinstance(idx, int) else str(idx + 1)
+        query = str(item.get("query", "")).strip()
+        strategy = str(item.get("query_strategy", "")).strip()
+        result_count = int(item.get("result_count", 0) or 0)
+        ref = str(item.get("search_reference", "")).strip()
+        message = str(item.get("message", "")).strip()
+        columns = item.get("sample_columns", [])
+        if not isinstance(columns, list):
+            columns = []
+
+        lines.append(f"**Query {i}:** status={status}, hypothesis={idx_label}\n")
+        if strategy:
+            lines.append(f"  - **Strategy:** {strategy}\n")
+        if query:
+            lines.append(f"  - **SPL:** `{query}`\n")
+        if status == "executed":
+            lines.append(f"  - **Result count:** {result_count}\n")
+            if columns:
+                lines.append(f"  - **Sample columns:** {', '.join(str(c) for c in columns)}\n")
+        if ref:
+            lines.append(f"  - **Search reference:** {ref}\n")
+        if message and status != "executed":
+            lines.append(f"  - **Message:** {message}\n")
+        lines.append("\n")
+
+
+def _render_servicenow_section(lines: List[str], servicenow_section: Dict[str, Any]) -> None:
+    """Render ServiceNow draft/create status details."""
+    draft = servicenow_section.get("draft", {})
+    if not isinstance(draft, dict):
+        draft = {}
+    create = servicenow_section.get("create", {})
+    if not isinstance(create, dict):
+        create = {}
+
+    draft_status = str(draft.get("status", "unknown")).strip() or "unknown"
+    draft_message = str(draft.get("message", "")).strip()
+    create_status = str(create.get("status", "unknown")).strip() or "unknown"
+    create_message = str(create.get("message", "")).strip()
+    create_number = str(create.get("number", "")).strip()
+    create_sys_id = str(create.get("sys_id", "")).strip()
+    approval = create.get("approval", {})
+    if not isinstance(approval, dict):
+        approval = {}
+
+    lines.append("### ServiceNow\n\n")
+    lines.append(f"**Draft status:** {draft_status}\n")
+    if draft_message:
+        lines.append(f"- **Draft message:** {draft_message}\n")
+    lines.append(f"**Create status:** {create_status}\n")
+    if create_message:
+        lines.append(f"- **Create message:** {create_message}\n")
+    if create_number:
+        lines.append(f"- **Incident number:** {create_number}\n")
+    if create_sys_id:
+        lines.append(f"- **Incident sys_id:** {create_sys_id}\n")
+    approved_by = str(approval.get("approved_by", "")).strip()
+    approval_ref = str(approval.get("approval_ref", "")).strip()
+    if approved_by:
+        lines.append(f"- **Approved by:** {approved_by}\n")
+    if approval_ref:
+        lines.append(f"- **Approval ref:** {approval_ref}\n")
+    lines.append("\n")
+
+
 def generate_markdown_report(
     alert_text: str,
     llm_response: Dict[str, Any],
@@ -46,6 +140,7 @@ def generate_markdown_report(
     Returns:
         Markdown report string.
     """
+    _ = alert_text
     lines: List[str] = []
     metadata = llm_response.get("metadata", {})
     if not isinstance(metadata, dict):
@@ -132,9 +227,23 @@ def generate_markdown_report(
                         )
                     else:
                         lines.append(f"    - {pivot}\n")
+            if hyp.get("query_result_summary"):
+                lines.append(
+                    f"  - **Query result summary:** {str(hyp.get('query_result_summary', '')).strip()}\n"
+                )
+            if hyp.get("query_result_reference"):
+                lines.append(
+                    f"  - **Query result reference:** {str(hyp.get('query_result_reference', '')).strip()}\n"
+                )
             if spl_enabled and not spl_unavailable and isinstance(hyp, dict):
                 _render_hypothesis_spl_block(lines, hyp)
             lines.append("\n")
+
+    if isinstance(llm_response.get("query_result_section"), dict):
+        _render_query_results_section(lines, llm_response["query_result_section"])
+
+    if isinstance(llm_response.get("servicenow_section"), dict):
+        _render_servicenow_section(lines, llm_response["servicenow_section"])
 
     # Evidence vs Inference
     if "evidence_vs_inference" in llm_response:

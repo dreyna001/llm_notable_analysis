@@ -168,6 +168,7 @@ Even with one-command install, these items remain environment-specific:
 - Set `LLM_API_TOKEN` only if your vLLM command includes `--api-key`.
 - Set `SPLUNK_BASE_URL` / `SPLUNK_API_TOKEN` only when `SPLUNK_SINK_ENABLED=true`.
 - Set `SPL_QUERY_GENERATION_ENABLED=true` only when you want per-hypothesis SPL query generation in reports.
+- Set `INVESTIGATION_QUERY_EXECUTION_ENABLED=true` only when you want bounded read-only Splunk query execution and report enrichment.
 - Add SOAR public key(s) to `/var/sftp/soar/.ssh/authorized_keys` only if using SOAR SFTP ingest.
 - Review the final `install.sh` "Non-fatal issues encountered" summary and resolve items before production.
 
@@ -251,11 +252,80 @@ sudo journalctl -u notable-analyzer -f
 
 ## Usage
 
+The optional investigation/query-enrichment and ServiceNow features are implemented in both service entrypoints:
+
+- SDK path: `python -m onprem_service.onprem_main`
+- non-SDK path: `python -m onprem_service.onprem_main_nonsdk`
+
 ### Hypothesis SPL Query Generation (Optional)
 
 When `SPL_QUERY_GENERATION_ENABLED=true`, the structured analyzer attempts to add one
 primary SPL query per hypothesis in the "Competing Hypotheses & Pivots" report
 section. When disabled, no SPL query fields are requested or rendered.
+
+### Investigation Query Execution (Optional)
+
+When `INVESTIGATION_QUERY_EXECUTION_ENABLED=true`, the structured analyzer executes
+bounded read-only SPL queries generated per hypothesis and adds a compact
+"Query Results" section to the report.
+
+Enable in `/etc/notable-analyzer/config.env`:
+
+```bash
+INVESTIGATION_QUERY_EXECUTION_ENABLED=true
+INVESTIGATION_QUERY_EXECUTOR=rest
+INVESTIGATION_MAX_QUERIES_PER_ALERT=6
+INVESTIGATION_MAX_CONCURRENT_QUERIES=3
+SPLUNK_SEARCH_ENDPOINT_PATH=/services/search/jobs/oneshot
+SPLUNK_SEARCH_ALLOWED_INDEXES=main,notable,risk
+SPLUNK_SEARCH_ALLOWED_COMMANDS=search,stats,table,fields,where,head
+SPLUNK_SEARCH_DENIED_COMMANDS=delete,collect,outputlookup,sendemail,map,rest,script,dbxquery
+SPLUNK_SEARCH_MAX_TIME_RANGE=24h
+SPLUNK_SEARCH_MAX_ROWS=100
+SPLUNK_SEARCH_TIMEOUT_SECONDS=20
+```
+
+Notes:
+- Query execution is read-only and policy-validated before transport execution.
+- `INVESTIGATION_QUERY_EXECUTOR=rest` uses `SPLUNK_BASE_URL` and `SPLUNK_API_TOKEN`.
+- `INVESTIGATION_QUERY_EXECUTOR=mcp` expects an injected MCP client path in code.
+- Query results stay separate from `evidence_vs_inference.evidence`.
+
+### ServiceNow Draft/Create (Optional)
+
+When ServiceNow flags are enabled, the analyzer can build incident drafts from
+the report and optionally create incidents with approval gating.
+
+Enable in `/etc/notable-analyzer/config.env`:
+
+```bash
+SERVICENOW_DRAFT_ENABLED=true
+SERVICENOW_CREATE_ENABLED=false
+SERVICENOW_CREATE_REQUIRES_APPROVAL=true
+SERVICENOW_BASE_URL=https://your-instance.service-now.com
+SERVICENOW_CREATE_PATH=/api/now/table/incident
+SERVICENOW_API_TOKEN=
+SERVICENOW_ASSIGNMENT_GROUP=
+SERVICENOW_TIMEOUT_SECONDS=15
+```
+
+Approval metadata for create should be present in incoming JSON payload:
+
+```json
+{
+  "servicenow_create_approval": {
+    "approved": true,
+    "approved_by": "analyst@example.com",
+    "approval_ref": "SNOW-CHANGE-123",
+    "approved_at": "2026-04-29T18:00:00Z"
+  }
+}
+```
+
+Notes:
+- Draft and create status are recorded in report metadata.
+- Create fails closed when approval is missing/invalid and approval is required.
+- Uses standard ServiceNow incident table endpoint and fields.
 
 ## Knowledge Base Ingestion (RAG)
 
@@ -603,10 +673,17 @@ llm_notable_analysis_onprem_systemd/
     ├── ttp_validator.py         # MITRE ATT&CK validation
     ├── ingest.py                # File discovery and normalization
     ├── sinks.py                 # Output writers (filesystem, Splunk REST)
-    ├── local_llm_client.py      # vLLM API client
+    ├── local_llm_client.py      # vLLM API client (SDK transport)
+    ├── local_llm_client_nonsdk.py # vLLM API client (requests transport)
+    ├── openai_transport_nonsdk.py # OpenAI-compatible HTTP transport helper
+    ├── spl_query_generation.py  # SPL-only prompt/validation helpers
+    ├── splunk_investigation.py  # Read-only Splunk query executors and policy checks
+    ├── query_result_enrichment.py # Deterministic query-result enrichment
+    ├── servicenow.py            # ServiceNow draft/create adapter
     ├── markdown_generator.py    # Report generation
     ├── retention.py             # Two-stage retention cleanup
-    ├── onprem_main.py           # Service entry point
+    ├── onprem_main.py           # Service entry point (SDK path)
+    ├── onprem_main_nonsdk.py    # Service entry point (non-SDK path)
     └── enterprise_attack_v17.1_ids.json  # MITRE TTP IDs
 ```
 

@@ -157,13 +157,13 @@ class TestLocalLlmClientContract(unittest.TestCase):
         self.assertIn("SOC_OPERATIONAL_CONTEXT", prompt)
         self.assertNotIn("SPL QUERY GENERATION (Enabled)", prompt)
 
-    def test_build_prompt_includes_spl_rules_when_enabled(self) -> None:
+    def test_build_prompt_excludes_spl_rules_when_enabled(self) -> None:
         client = LocalLLMClient(
             config=Config(SPL_QUERY_GENERATION_ENABLED=True),
             ttp_validator=_DummyValidator(),
         )
         prompt = client._build_prompt("alert text")
-        self.assertIn("SPL QUERY GENERATION (Enabled)", prompt)
+        self.assertNotIn("SPL QUERY GENERATION (Enabled)", prompt)
 
     def test_normalize_defaults_strips_spl_fields_when_disabled(self) -> None:
         parsed = {

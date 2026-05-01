@@ -1,0 +1,275 @@
+"""SPL query-generation contract and normalization helpers.
+
+This module keeps SPL-specific prompt doctrine and response-contract logic
+separate from broader LLM transport, parsing, and report processing.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from typing import Any, Dict, List, Optional, Tuple
+
+SPL_QUERY_STRATEGIES = {"resolve_unknown", "check_contradiction"}
+SPL_QUERY_FIELDS = (
+    "query_strategy",
+    "primary_spl_query",
+    "why_this_query",
+    "supports_if",
+    "weakens_if",
+)
+
+SPL_QUERY_GENERATION_RULES = """
+SPL QUERY GENERATION (Enabled):
+- For each of the EXACTLY 6 hypotheses, include exactly one primary Splunk query.
+- Each hypothesis must include:
+  - query_strategy: "resolve_unknown" or "check_contradiction"
+  - primary_spl_query: a real SPL query string
+  - why_this_query: short rationale
+  - supports_if: result pattern that strengthens the hypothesis
+  - weakens_if: result pattern that weakens the hypothesis
+- Focus each query on a decision-changing unknown or strongest contradiction.
+- Do not use placeholders such as <INDEX>, <SOURCETYPE>, or similar tokens.
+- Do not output pseudo-queries such as "search ...".
+- Do not invent environment-specific tokens (indexes/sourcetypes/macros/CIM data model names) unless explicitly present in SECURITY ALERT INPUT.
+""".strip()
+
+SPL_QUERY_CONTEXT_RULES = """
+SPL QUERY CONTEXT RULES:
+- Treat SOC_OPERATIONAL_CONTEXT as advisory context only.
+- Never treat SOC_OPERATIONAL_CONTEXT as direct alert evidence.
+- Do not invent indexes, sourcetypes, macros, or CIM data models unless they appear in SECURITY ALERT INPUT or SOC_OPERATIONAL_CONTEXT.
+- Keep each query bounded and decision-oriented.
+""".strip()
+
+SPL_QUERY_OUTPUT_SCHEMA = """
+Return ONLY a single JSON object with this shape:
+{
+  "competing_hypotheses": [
+    {
+      "query_strategy": "resolve_unknown|check_contradiction",
+      "primary_spl_query": "string",
+      "why_this_query": "string",
+      "supports_if": "string",
+      "weakens_if": "string"
+    }
+  ]
+}
+
+Requirements:
+- Output exactly 6 items in competing_hypotheses.
+- Keep the same order as INPUT_COMPETING_HYPOTHESES.
+- Include only the query fields above per hypothesis item.
+- Do not include markdown fences or extra prose.
+""".strip()
+
+
+def build_spl_query_generation_prompt(
+    *,
+    alert_text: str,
+    hypotheses: List[Dict[str, Any]],
+    soc_operational_context: str = "",
+    alert_time: Optional[str] = None,
+) -> str:
+    """Build a bounded second-call prompt for SPL query generation only.
+
+    Args:
+        alert_text: The original alert text.
+        hypotheses: Baseline competing hypotheses from the analysis call.
+        soc_operational_context: Optional advisory context string from RAG.
+        alert_time: Optional alert timestamp.
+
+    Returns:
+        Prompt text that asks only for SPL query fields in JSON.
+    """
+    alert_time_str = f"\n**ALERT_TIME:** {alert_time}\n" if alert_time else ""
+    soc_context_block = (soc_operational_context or "").strip()
+    if not soc_context_block:
+        soc_context_block = "SOC_OPERATIONAL_CONTEXT\n(none)\n"
+
+    hypotheses_block = json.dumps(hypotheses, indent=2, ensure_ascii=True)
+    return f"""You are a cybersecurity investigation assistant generating Splunk queries for predefined hypotheses.
+{alert_time_str}
+---
+
+SECURITY ALERT INPUT:
+{alert_text}
+
+---
+
+INPUT_COMPETING_HYPOTHESES (ordered):
+{hypotheses_block}
+
+---
+
+{soc_context_block}
+
+{SPL_QUERY_CONTEXT_RULES}
+
+---
+
+{SPL_QUERY_GENERATION_RULES}
+
+---
+
+{SPL_QUERY_OUTPUT_SCHEMA}
+"""
+
+
+def merge_spl_query_fields_by_position(
+    *,
+    base_hypotheses: List[Dict[str, Any]],
+    generated_payload: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Merge generated SPL query fields onto baseline hypotheses by list order.
+
+    Args:
+        base_hypotheses: Existing hypotheses from the base analysis call.
+        generated_payload: Parsed payload from the SPL-only LLM call.
+
+    Returns:
+        Hypotheses with SPL query fields merged and normalized.
+    """
+    base = normalize_competing_hypotheses(base_hypotheses, spl_query_enabled=False)
+    generated = generated_payload.get("competing_hypotheses", [])
+    if not isinstance(generated, list):
+        generated = []
+
+    merged: List[Dict[str, Any]] = []
+    for idx, item in enumerate(base):
+        merged_item = dict(item)
+        generated_item = generated[idx] if idx < len(generated) else {}
+        if isinstance(generated_item, dict):
+            for field in SPL_QUERY_FIELDS:
+                if field in generated_item:
+                    merged_item[field] = generated_item.get(field)
+        merged.append(merged_item)
+
+    return normalize_competing_hypotheses(merged, spl_query_enabled=True)
+
+
+def _validate_strict_hypothesis_balance(
+    hypotheses: List[Any],
+) -> Tuple[bool, Optional[str]]:
+    """Validate EXACTLY 3 benign and 3 adversary hypotheses."""
+    if len(hypotheses) != 6:
+        return (
+            False,
+            f"competing_hypotheses must contain exactly 6 items, got {len(hypotheses)}",
+        )
+
+    benign = 0
+    adversary = 0
+    for i, item in enumerate(hypotheses):
+        if not isinstance(item, dict):
+            return False, f"competing_hypotheses[{i}] must be an object"
+        htype = str(item.get("hypothesis_type", "")).strip().lower()
+        if htype == "benign":
+            benign += 1
+        elif htype == "adversary":
+            adversary += 1
+        else:
+            return (
+                False,
+                f"competing_hypotheses[{i}].hypothesis_type must be benign or adversary",
+            )
+
+    if benign != 3 or adversary != 3:
+        return (
+            False,
+            f"competing_hypotheses must include exactly 3 benign and 3 adversary; got benign={benign}, adversary={adversary}",
+        )
+    return True, None
+
+
+def validate_spl_query_contract(result: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """Validate strict SPL query contract for per-hypothesis query generation."""
+    ch = result.get("competing_hypotheses")
+    if not isinstance(ch, list):
+        return False, "competing_hypotheses must be a list"
+
+    ch_ok, ch_err = _validate_strict_hypothesis_balance(ch)
+    if not ch_ok:
+        return False, ch_err
+
+    for i, item in enumerate(ch):
+        strategy = str(item.get("query_strategy", "")).strip().lower()
+        if strategy not in SPL_QUERY_STRATEGIES:
+            return (
+                False,
+                f"competing_hypotheses[{i}].query_strategy must be one of {SPL_QUERY_STRATEGIES}",
+            )
+
+        primary_query = str(item.get("primary_spl_query", "")).strip()
+        if not primary_query:
+            return (
+                False,
+                f"competing_hypotheses[{i}].primary_spl_query must be non-empty",
+            )
+        if re.search(r"<[^>]+>", primary_query):
+            return (
+                False,
+                f"competing_hypotheses[{i}].primary_spl_query contains placeholder token",
+            )
+        if "..." in primary_query:
+            return (
+                False,
+                f"competing_hypotheses[{i}].primary_spl_query contains pseudo-query ellipsis",
+            )
+        if re.search(r"\bindex\s*=", primary_query, re.IGNORECASE):
+            return (
+                False,
+                f"competing_hypotheses[{i}].primary_spl_query must not assume index names",
+            )
+        if re.search(r"\bsourcetype\s*=", primary_query, re.IGNORECASE):
+            return (
+                False,
+                f"competing_hypotheses[{i}].primary_spl_query must not assume sourcetypes",
+            )
+        if re.search(r"`[^`]+`", primary_query):
+            return (
+                False,
+                f"competing_hypotheses[{i}].primary_spl_query must not assume macros",
+            )
+        if re.search(r"\bdatamodel\s*=", primary_query, re.IGNORECASE):
+            return (
+                False,
+                f"competing_hypotheses[{i}].primary_spl_query must not assume CIM data models",
+            )
+
+        for field in ("why_this_query", "supports_if", "weakens_if"):
+            value = str(item.get(field, "")).strip()
+            if not value:
+                return (
+                    False,
+                    f"competing_hypotheses[{i}].{field} must be non-empty",
+                )
+
+    return True, None
+
+
+def normalize_competing_hypotheses(
+    value: Any, *, spl_query_enabled: bool
+) -> List[Dict[str, Any]]:
+    """Normalize competing hypotheses and optionally strip SPL query fields."""
+    if isinstance(value, dict):
+        value = [value]
+    if not isinstance(value, list):
+        return []
+
+    normalized: List[Dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        hyp = dict(item)
+        if spl_query_enabled:
+            strategy = str(hyp.get("query_strategy", "")).strip().lower()
+            hyp["query_strategy"] = strategy
+            for field in ("primary_spl_query", "why_this_query", "supports_if", "weakens_if"):
+                val = hyp.get(field, "")
+                hyp[field] = str(val).strip() if val is not None else ""
+        else:
+            for field in SPL_QUERY_FIELDS:
+                hyp.pop(field, None)
+        normalized.append(hyp)
+    return normalized

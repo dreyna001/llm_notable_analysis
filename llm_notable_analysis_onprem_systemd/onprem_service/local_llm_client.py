@@ -23,6 +23,12 @@ from onprem_llm_sdk.errors import (
 )
 
 from .config import Config
+from .spl_query_generation import (
+    build_spl_query_generation_prompt,
+    merge_spl_query_fields_by_position,
+    normalize_competing_hypotheses,
+    validate_spl_query_contract,
+)
 from .ttp_validator import TTPValidator
 
 logger = logging.getLogger(__name__)
@@ -153,15 +159,6 @@ REQUIRED_RESPONSE_KEYS: Dict[str, type] = {
     "ttp_analysis": list,
 }
 
-_SPL_QUERY_STRATEGIES = {"resolve_unknown", "check_contradiction"}
-_SPL_QUERY_FIELDS = (
-    "query_strategy",
-    "primary_spl_query",
-    "why_this_query",
-    "supports_if",
-    "weakens_if",
-)
-
 
 ANALYST_DOCTRINE = """
 ANALYST DOCTRINE (apply to every case)
@@ -209,22 +206,6 @@ Do not assume a single root cause from one notable. Use this reasoning procedure
    - If identity is in question: pivot to IdP sign-in logs (if federated/hybrid) and AD authentication trails.
    - If local compromise is suspected: pivot to endpoint telemetry (Sysmon/EDR) and process/access signals.
    - If only Windows Security logs exist, state limitations explicitly and downgrade confidence.
-""".strip()
-
-
-SPL_QUERY_GENERATION_RULES = """
-SPL QUERY GENERATION (Enabled):
-- For each of the EXACTLY 6 hypotheses, include exactly one primary Splunk query.
-- Each hypothesis must include:
-  - query_strategy: "resolve_unknown" or "check_contradiction"
-  - primary_spl_query: a real SPL query string
-  - why_this_query: short rationale
-  - supports_if: result pattern that strengthens the hypothesis
-  - weakens_if: result pattern that weakens the hypothesis
-- Focus each query on a decision-changing unknown or strongest contradiction.
-- Do not use placeholders such as <INDEX>, <SOURCETYPE>, or similar tokens.
-- Do not output pseudo-queries such as "search ...".
-- Do not invent environment-specific tokens (indexes/sourcetypes/macros/CIM data model names) unless explicitly present in SECURITY ALERT INPUT.
 """.strip()
 
 
@@ -358,98 +339,14 @@ def validate_competing_hypotheses_balance(
 
 def _validate_spl_query_contract(result: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     """Validate strict SPL query contract for per-hypothesis query generation."""
-    ch = result.get("competing_hypotheses")
-    if not isinstance(ch, list):
-        return False, "competing_hypotheses must be a list"
-
-    ch_ok, ch_err = validate_competing_hypotheses_balance(result, strict=True)
-    if not ch_ok:
-        return False, ch_err
-
-    for i, item in enumerate(ch):
-        if not isinstance(item, dict):
-            return False, f"competing_hypotheses[{i}] must be an object"
-
-        strategy = str(item.get("query_strategy", "")).strip().lower()
-        if strategy not in _SPL_QUERY_STRATEGIES:
-            return (
-                False,
-                f"competing_hypotheses[{i}].query_strategy must be one of {_SPL_QUERY_STRATEGIES}",
-            )
-
-        primary_query = str(item.get("primary_spl_query", "")).strip()
-        if not primary_query:
-            return (
-                False,
-                f"competing_hypotheses[{i}].primary_spl_query must be non-empty",
-            )
-        if re.search(r"<[^>]+>", primary_query):
-            return (
-                False,
-                f"competing_hypotheses[{i}].primary_spl_query contains placeholder token",
-            )
-        if "..." in primary_query:
-            return (
-                False,
-                f"competing_hypotheses[{i}].primary_spl_query contains pseudo-query ellipsis",
-            )
-        if re.search(r"\bindex\s*=", primary_query, re.IGNORECASE):
-            return (
-                False,
-                f"competing_hypotheses[{i}].primary_spl_query must not assume index names",
-            )
-        if re.search(r"\bsourcetype\s*=", primary_query, re.IGNORECASE):
-            return (
-                False,
-                f"competing_hypotheses[{i}].primary_spl_query must not assume sourcetypes",
-            )
-        if re.search(r"`[^`]+`", primary_query):
-            return (
-                False,
-                f"competing_hypotheses[{i}].primary_spl_query must not assume macros",
-            )
-        if re.search(r"\bdatamodel\s*=", primary_query, re.IGNORECASE):
-            return (
-                False,
-                f"competing_hypotheses[{i}].primary_spl_query must not assume CIM data models",
-            )
-
-        for field in ("why_this_query", "supports_if", "weakens_if"):
-            value = str(item.get(field, "")).strip()
-            if not value:
-                return (
-                    False,
-                    f"competing_hypotheses[{i}].{field} must be non-empty",
-                )
-
-    return True, None
+    return validate_spl_query_contract(result)
 
 
 def _normalize_competing_hypotheses(
     value: Any, *, spl_query_enabled: bool
 ) -> List[Dict[str, Any]]:
     """Normalize competing hypotheses and optionally strip SPL query fields."""
-    if isinstance(value, dict):
-        value = [value]
-    if not isinstance(value, list):
-        return []
-
-    normalized: List[Dict[str, Any]] = []
-    for item in value:
-        if not isinstance(item, dict):
-            continue
-        hyp = dict(item)
-        if spl_query_enabled:
-            strategy = str(hyp.get("query_strategy", "")).strip().lower()
-            hyp["query_strategy"] = strategy
-            for field in ("primary_spl_query", "why_this_query", "supports_if", "weakens_if"):
-                val = hyp.get(field, "")
-                hyp[field] = str(val).strip() if val is not None else ""
-        else:
-            for field in _SPL_QUERY_FIELDS:
-                hyp.pop(field, None)
-        normalized.append(hyp)
-    return normalized
+    return normalize_competing_hypotheses(value, spl_query_enabled=spl_query_enabled)
 
 
 def _coerce_ioc_extraction(value: Any) -> Dict[str, Any]:
@@ -1060,10 +957,6 @@ class LocalLLMClient:
         if not soc_context_block:
             soc_context_block = "SOC_OPERATIONAL_CONTEXT\n(none)\n"
 
-        spl_query_block = ""
-        if bool(getattr(self.config, "SPL_QUERY_GENERATION_ENABLED", False)):
-            spl_query_block = f"\n{SPL_QUERY_GENERATION_RULES}\n"
-
         return f"""{qwen_json_hint}You are a cybersecurity expert mapping MITRE ATT&CK techniques from a single alert.
 {alert_time_str}
 ---
@@ -1075,8 +968,6 @@ class LocalLLMClient:
 {SCORING_RUBRIC}
 
 {CAUSAL_HUMILITY}
-
-{spl_query_block}
 
 {PROCEDURE}
 
@@ -1197,6 +1088,10 @@ SECURITY ALERT INPUT:
             repair_attempted: bool,
             repair_reason: Optional[str] = None,
             spl_unavailable_reason: Optional[str] = None,
+            spl_generation_attempted: bool = False,
+            spl_generation_inference_time_seconds: float = 0.0,
+            spl_generation_prompt_length: int = 0,
+            spl_generation_repair_attempted: bool = False,
         ) -> Dict[str, Any]:
             metadata: Dict[str, Any] = {
                 "model": self.config.LLM_MODEL_NAME,
@@ -1208,6 +1103,10 @@ SECURITY ALERT INPUT:
                 "soc_context_chars": len(soc_context),
                 "spl_query_generation_enabled": spl_query_generation_enabled,
                 "spl_query_generation_unavailable": bool(spl_unavailable_reason),
+                "spl_query_generation_attempted": spl_generation_attempted,
+                "spl_query_generation_inference_time_seconds": spl_generation_inference_time_seconds,
+                "spl_query_generation_prompt_length": spl_generation_prompt_length,
+                "spl_query_generation_repair_attempted": spl_generation_repair_attempted,
             }
             if repair_reason:
                 metadata["repair_reason"] = repair_reason
@@ -1243,7 +1142,7 @@ SECURITY ALERT INPUT:
             # Make schema a bit more resilient for local inference (best-effort coercion).
             parsed = _normalize_and_fill_defaults(
                 parsed,
-                spl_query_enabled=spl_query_generation_enabled,
+                spl_query_enabled=False,
             )
 
             # If the model ignored the schema but mentioned technique IDs in the preamble,
@@ -1292,6 +1191,151 @@ SECURITY ALERT INPUT:
                 return True, None
             return _validate_spl_query_contract(result_obj)
 
+        def _generate_spl_queries_for_alert(
+            result_obj: Dict[str, Any], *, alert_time_value: Optional[str]
+        ) -> Tuple[bool, Optional[str], Dict[str, Any], float, int, bool]:
+            """Run bounded second LLM call for SPL query fields only."""
+            spl_prompt = build_spl_query_generation_prompt(
+                alert_text=alert_text,
+                hypotheses=result_obj.get("competing_hypotheses", []),
+                soc_operational_context=soc_context,
+                alert_time=alert_time_value,
+            )
+            if _model_name_suggests_qwen(self.config.LLM_MODEL_NAME):
+                spl_prompt = (
+                    "Output policy: Respond with a single JSON object only, no markdown fences, "
+                    "no text before or after the object. /no_think\n\n"
+                    + spl_prompt
+                )
+
+            def _merge_and_validate_spl(parsed_obj: Dict[str, Any]) -> Tuple[bool, Optional[str], Dict[str, Any]]:
+                merged_obj = dict(result_obj)
+                merged_obj["competing_hypotheses"] = merge_spl_query_fields_by_position(
+                    base_hypotheses=result_obj.get("competing_hypotheses", []),
+                    generated_payload=parsed_obj,
+                )
+                spl_ok, spl_err = _check_spl_query_contract(merged_obj)
+                return spl_ok, spl_err, merged_obj
+
+            elapsed_total = 0.0
+            try:
+                spl_text, spl_elapsed = _call_llm(spl_prompt)
+                elapsed_total += spl_elapsed
+                spl_parsed = self._parse_llm_response(spl_text)
+                spl_ok, spl_err, spl_merged = _merge_and_validate_spl(spl_parsed)
+                if spl_ok:
+                    return True, None, spl_merged, elapsed_total, len(spl_prompt), False
+                first_error = f"SPL query contract validation: {spl_err or 'unknown'}"
+            except (
+                RequestTimeoutError,
+                TransportError,
+                RateLimitError,
+                ServerError,
+                ClientRequestError,
+                json.JSONDecodeError,
+                ValueError,
+                SyntaxError,
+                ResponseFormatError,
+            ) as exc:
+                first_error = f"SPL query generation failed: {exc}"
+                spl_text = ""
+
+            prior = (spl_text or "")[:4000]
+            repair_prompt = REPAIR_PROMPT_TEMPLATE_RAW_JSON.format(
+                error=first_error,
+                prior_output=prior,
+            )
+            try:
+                spl_text2, spl_elapsed2 = _call_llm(repair_prompt)
+                elapsed_total += spl_elapsed2
+                spl_parsed2 = self._parse_llm_response(spl_text2)
+                spl_ok2, spl_err2, spl_merged2 = _merge_and_validate_spl(spl_parsed2)
+                if spl_ok2:
+                    return True, None, spl_merged2, elapsed_total, len(spl_prompt), True
+                reason = (
+                    f"{first_error}; repair SPL validation: {spl_err2 or 'unknown'}"
+                )
+                return False, reason, result_obj, elapsed_total, len(spl_prompt), True
+            except (
+                RequestTimeoutError,
+                TransportError,
+                RateLimitError,
+                ServerError,
+                ClientRequestError,
+                json.JSONDecodeError,
+                ValueError,
+                SyntaxError,
+                ResponseFormatError,
+            ) as exc:
+                reason = f"{first_error}; repair SPL generation failed: {exc}"
+                return False, reason, result_obj, elapsed_total, len(spl_prompt), True
+
+        def _finalize_with_optional_spl(
+            base_obj: Dict[str, Any],
+            *,
+            base_elapsed: float,
+            base_prompt_length: int,
+            attempt_num: int,
+            repair_attempted: bool,
+            repair_reason: Optional[str],
+            raw_response: str,
+        ) -> Dict[str, Any]:
+            """Attach SPL queries if enabled, otherwise return base analysis output."""
+            if not spl_query_generation_enabled:
+                base_obj = _annotate_metadata(
+                    base_obj,
+                    inference_time_seconds=base_elapsed,
+                    prompt_length=base_prompt_length,
+                    attempt_num=attempt_num,
+                    repair_attempted=repair_attempted,
+                    repair_reason=repair_reason,
+                )
+                base_obj["raw_response"] = raw_response
+                return base_obj
+
+            spl_ok, spl_reason, spl_obj, spl_elapsed, spl_prompt_len, spl_repair = (
+                _generate_spl_queries_for_alert(base_obj, alert_time_value=alert_time)
+            )
+            if spl_ok:
+                spl_obj = _annotate_metadata(
+                    spl_obj,
+                    inference_time_seconds=base_elapsed + spl_elapsed,
+                    prompt_length=base_prompt_length,
+                    attempt_num=attempt_num,
+                    repair_attempted=repair_attempted,
+                    repair_reason=repair_reason,
+                    spl_generation_attempted=True,
+                    spl_generation_inference_time_seconds=spl_elapsed,
+                    spl_generation_prompt_length=spl_prompt_len,
+                    spl_generation_repair_attempted=spl_repair,
+                )
+                spl_obj["raw_response"] = raw_response
+                return spl_obj
+
+            logger.warning(
+                "SPL query generation unavailable after repair; suppressing SPL output for this alert: %s",
+                spl_reason,
+            )
+            suppressed_obj = _suppress_spl_queries_for_alert(
+                base_obj,
+                reason=spl_reason or "unknown SPL query generation error",
+            )
+            suppressed_obj = _annotate_metadata(
+                suppressed_obj,
+                inference_time_seconds=base_elapsed + spl_elapsed,
+                prompt_length=base_prompt_length,
+                attempt_num=attempt_num,
+                repair_attempted=repair_attempted,
+                repair_reason=repair_reason,
+                spl_unavailable_reason=spl_reason,
+                spl_generation_attempted=True,
+                spl_generation_inference_time_seconds=spl_elapsed,
+                spl_generation_prompt_length=spl_prompt_len,
+                spl_generation_repair_attempted=spl_repair,
+            )
+            suppressed_obj["raw_response"] = raw_response
+            return suppressed_obj
+
         # Retry logic (transport)
         max_retries = 3
         retry_delay = 5
@@ -1308,30 +1352,19 @@ SECURITY ALERT INPUT:
                 base_ok, base_err, final_obj = _validate_base_and_postprocess(
                     parsed, raw_text=llm_text
                 )
-                primary_spl_ok = False
-                primary_spl_err: Optional[str] = None
                 if base_ok:
-                    primary_spl_ok, primary_spl_err = _check_spl_query_contract(final_obj)
-                if base_ok and primary_spl_ok:
-                    final_obj = _annotate_metadata(
+                    return _finalize_with_optional_spl(
                         final_obj,
-                        inference_time_seconds=elapsed,
-                        prompt_length=len(prompt),
+                        base_elapsed=elapsed,
+                        base_prompt_length=len(prompt),
                         attempt_num=attempt + 1,
                         repair_attempted=False,
+                        repair_reason=None,
+                        raw_response=llm_text,
                     )
-                    final_obj["raw_response"] = llm_text
-                    return final_obj
 
-                if base_ok and not primary_spl_ok:
-                    last_error = (
-                        f"SPL query contract validation: {primary_spl_err or 'unknown'}"
-                    )
-                else:
-                    last_error = base_err or "Unknown validation error"
-                logger.warning(
-                    f"LLM output invalid, attempting single repair: {last_error}"
-                )
+                last_error = base_err or "Unknown validation error"
+                logger.warning("LLM output invalid, attempting single repair: %s", last_error)
 
                 prior = (llm_text or "")[:4000]
                 repair_prompt = REPAIR_PROMPT_TEMPLATE_RAW_JSON.format(
@@ -1343,73 +1376,16 @@ SECURITY ALERT INPUT:
                 base_ok2, base_err2, final_obj2 = _validate_base_and_postprocess(
                     parsed2, raw_text=llm_text2
                 )
-                repair_spl_ok = False
-                repair_spl_err: Optional[str] = None
                 if base_ok2:
-                    repair_spl_ok, repair_spl_err = _check_spl_query_contract(final_obj2)
-                if base_ok2 and repair_spl_ok:
-                    final_obj2 = _annotate_metadata(
+                    return _finalize_with_optional_spl(
                         final_obj2,
-                        inference_time_seconds=elapsed2 or 0.0,
-                        prompt_length=len(repair_prompt),
+                        base_elapsed=elapsed2 or 0.0,
+                        base_prompt_length=len(repair_prompt),
                         attempt_num=attempt + 1,
                         repair_attempted=True,
                         repair_reason=last_error,
+                        raw_response=llm_text2,
                     )
-                    final_obj2["raw_response"] = llm_text2
-                    return final_obj2
-
-                if spl_query_generation_enabled and base_ok:
-                    spl_reason = primary_spl_err or "unknown SPL query contract error"
-                    if base_ok2 and not repair_spl_ok:
-                        spl_reason = (
-                            f"{spl_reason}; repair SPL validation: {repair_spl_err or 'unknown'}"
-                        )
-                    elif not base_ok2:
-                        spl_reason = (
-                            f"{spl_reason}; repair validation: {base_err2 or 'unknown'}"
-                        )
-                    logger.warning(
-                        "SPL query generation unavailable after repair; suppressing SPL output for this alert: %s",
-                        spl_reason,
-                    )
-                    suppressed_obj = _suppress_spl_queries_for_alert(
-                        final_obj,
-                        reason=spl_reason,
-                    )
-                    suppressed_obj = _annotate_metadata(
-                        suppressed_obj,
-                        inference_time_seconds=elapsed,
-                        prompt_length=len(prompt),
-                        attempt_num=attempt + 1,
-                        repair_attempted=True,
-                        repair_reason=last_error,
-                        spl_unavailable_reason=spl_reason,
-                    )
-                    suppressed_obj["raw_response"] = llm_text
-                    return suppressed_obj
-
-                if spl_query_generation_enabled and base_ok2 and not repair_spl_ok:
-                    spl_reason = repair_spl_err or "unknown SPL query contract error"
-                    logger.warning(
-                        "SPL query generation unavailable after repair; suppressing SPL output for this alert: %s",
-                        spl_reason,
-                    )
-                    suppressed_obj = _suppress_spl_queries_for_alert(
-                        final_obj2,
-                        reason=spl_reason,
-                    )
-                    suppressed_obj = _annotate_metadata(
-                        suppressed_obj,
-                        inference_time_seconds=elapsed2 or 0.0,
-                        prompt_length=len(repair_prompt),
-                        attempt_num=attempt + 1,
-                        repair_attempted=True,
-                        repair_reason=last_error,
-                        spl_unavailable_reason=spl_reason,
-                    )
-                    suppressed_obj["raw_response"] = llm_text2
-                    return suppressed_obj
 
                 last_error = base_err2 or "Unknown validation error after repair"
                 logger.error(f"Repair attempt failed: {last_error}")
