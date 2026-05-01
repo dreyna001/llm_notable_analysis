@@ -116,6 +116,8 @@ The `export` values below are optional shell shortcuts. You can either use varia
 
 You do not have to create a new ECR repository if one already exists. Use the existing repository name in `IMAGE_REPO` and skip the `aws ecr create-repository` step.
 
+Right now, `us-east-1` is not only an example region. `template-sam.yaml` currently hard-codes the Bedrock inference profile ARN to `us-east-1`, so changing `AWS_REGION` without also updating the template can break deployment or runtime Bedrock calls.
+
 ```bash
 export AWS_REGION=us-east-1
 export AWS_ACCOUNT_ID=<account-id>
@@ -123,6 +125,8 @@ export IMAGE_REPO=notable-analyzer-s3
 export IMAGE_TAG=latest
 export IMAGE_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$IMAGE_REPO:$IMAGE_TAG
 ```
+
+This guide uses `latest` to keep scratch deployments simple. For customer environments, use whatever image-tagging convention the customer already uses, such as a build number, date tag, or git SHA.
 
 ```bash
 aws ecr create-repository \
@@ -161,11 +165,26 @@ When prompted for `ImageUri`, use:
 $IMAGE_URI
 ```
 
-For non-guided deploy:
+For non-guided deploy when `samconfig.toml` already exists:
 
 ```bash
 sam deploy \
   --parameter-overrides \
+    AwsAccountId=$AWS_ACCOUNT_ID \
+    ImageUri=$IMAGE_URI
+```
+
+For a first-time non-guided deploy, include the stack name, region, capabilities, and required parameters explicitly:
+
+```bash
+sam deploy \
+  --stack-name notable-analyzer-stack \
+  --region $AWS_REGION \
+  --capabilities CAPABILITY_IAM \
+  --parameter-overrides \
+    InputBucketName=<globally-unique-input-bucket-name> \
+    OutputBucketName=<globally-unique-output-bucket-name> \
+    SplunkSinkMode=s3 \
     AwsAccountId=$AWS_ACCOUNT_ID \
     ImageUri=$IMAGE_URI
 ```
