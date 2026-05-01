@@ -29,6 +29,7 @@ This architecture answers:
 - ServiceNow incident create with explicit approval
 - light extraction of SPL generation helpers from `local_llm_client.py`
 - parity updates for `onprem_main_nonsdk.py` and `local_llm_client_nonsdk.py`
+- optional tool-call structured-output mode for local vLLM responses
 - env flag additions in the existing config style
 - deterministic unit tests with fake Splunk and ServiceNow responses
 
@@ -111,6 +112,8 @@ flowchart LR
 - Query-result enrichment is part of query execution and does not get a separate flag.
 - ServiceNow create approval comes from the incoming payload, not config.
 - Local report metadata records ServiceNow draft/create status even when create is skipped, denied, or fails.
+- Local structured-output mode is flag-gated and defaults to prompt-json.
+- Tool-call mode falls back to prompt-json behavior for a request when tool-call parsing fails.
 
 ## Architecture Boundary
 
@@ -298,6 +301,7 @@ New flags should follow the existing `config.env.example` and `Config` style:
 - `SERVICENOW_API_TOKEN=`
 - `SERVICENOW_ASSIGNMENT_GROUP=`
 - `SERVICENOW_TIMEOUT_SECONDS=15`
+- `LLM_STRUCTURED_OUTPUT_MODE=prompt_json`
 
 Do not add `QUERY_RESULT_ENRICHMENT_ENABLED`.
 

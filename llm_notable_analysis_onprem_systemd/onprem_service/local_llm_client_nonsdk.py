@@ -21,6 +21,7 @@ from .openai_transport_nonsdk import (
     ServerError,
     TransportError,
     openai_chat_complete,
+    openai_chat_complete_tool_call,
 )
 
 from .config import Config
@@ -120,6 +121,10 @@ _COMMON_RESULT_WRAPPER_KEYS = (
     "payload",
 )
 
+_STRUCTURED_OUTPUT_MODES = {"prompt_json", "tool_call"}
+_TOOL_ANALYZE_NOTABLE_NAME = "analyze_notable"
+_TOOL_GENERATE_SPL_NAME = "generate_spl_queries"
+
 
 def _normalize_llm_result_shape(result: Any) -> Any:
     """Normalize common wrapper shapes around the expected top-level schema.
@@ -149,6 +154,83 @@ def _normalize_llm_result_shape(result: Any) -> Any:
             return only_val
 
     return result
+
+
+def _structured_output_mode(config: Config) -> str:
+    """Return normalized structured-output mode with safe fallback."""
+    mode = str(getattr(config, "LLM_STRUCTURED_OUTPUT_MODE", "prompt_json")).strip().lower()
+    if mode not in _STRUCTURED_OUTPUT_MODES:
+        logger.warning(
+            "Unsupported LLM_STRUCTURED_OUTPUT_MODE=%r; defaulting to prompt_json",
+            mode,
+        )
+        return "prompt_json"
+    return mode
+
+
+def _analysis_tool_spec() -> Dict[str, Any]:
+    """Build tool schema for main analysis JSON contract."""
+    return {
+        "type": "function",
+        "function": {
+            "name": _TOOL_ANALYZE_NOTABLE_NAME,
+            "description": "Return the notable analysis JSON object.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "alert_reconciliation": {"type": "object"},
+                    "competing_hypotheses": {"type": "array"},
+                    "evidence_vs_inference": {"type": "object"},
+                    "ioc_extraction": {"type": "object"},
+                    "ttp_analysis": {"type": "array"},
+                },
+                "required": list(REQUIRED_RESPONSE_KEYS.keys()),
+                "additionalProperties": True,
+            },
+        },
+    }
+
+
+def _spl_tool_spec() -> Dict[str, Any]:
+    """Build tool schema for SPL-only second-call contract."""
+    return {
+        "type": "function",
+        "function": {
+            "name": _TOOL_GENERATE_SPL_NAME,
+            "description": "Return SPL query fields for each competing hypothesis.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "competing_hypotheses": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "query_strategy": {
+                                    "type": "string",
+                                    "enum": ["resolve_unknown", "check_contradiction"],
+                                },
+                                "primary_spl_query": {"type": "string"},
+                                "why_this_query": {"type": "string"},
+                                "supports_if": {"type": "string"},
+                                "weakens_if": {"type": "string"},
+                            },
+                            "required": [
+                                "query_strategy",
+                                "primary_spl_query",
+                                "why_this_query",
+                                "supports_if",
+                                "weakens_if",
+                            ],
+                            "additionalProperties": True,
+                        },
+                    }
+                },
+                "required": ["competing_hypotheses"],
+                "additionalProperties": True,
+            },
+        },
+    }
 
 
 # Required keys and their expected types for schema validation (matches s3_testing)
@@ -1044,10 +1126,46 @@ SECURITY ALERT INPUT:
         prompt = self._build_prompt(
             alert_text, alert_time, soc_operational_context=soc_context
         )
+        structured_mode = _structured_output_mode(self.config)
 
-        def _call_llm(prompt_text: str) -> Tuple[str, float]:
+        def _call_llm(
+            prompt_text: str,
+            *,
+            tool_spec: Optional[Dict[str, Any]] = None,
+            tool_name: Optional[str] = None,
+        ) -> Tuple[str, float]:
             self._semaphore.acquire()
             try:
+                if (
+                    structured_mode == "tool_call"
+                    and tool_spec is not None
+                    and tool_name is not None
+                ):
+                    try:
+                        return openai_chat_complete_tool_call(
+                            self._session,
+                            self.config,
+                            prompt=prompt_text,
+                            max_tokens=self.config.LLM_MAX_TOKENS,
+                            temperature=0.0,
+                            tool_spec=tool_spec,
+                            tool_name=tool_name,
+                            connect_timeout_sec=float(self.config.LLM_TIMEOUT),
+                            read_timeout_sec=float(self.config.LLM_TIMEOUT),
+                        )
+                    except (
+                        RequestTimeoutError,
+                        TransportError,
+                        RateLimitError,
+                        ServerError,
+                        ClientRequestError,
+                        ResponseFormatError,
+                    ) as exc:
+                        logger.warning(
+                            "Tool-call mode failed for %s; falling back to prompt_json for this call: %s",
+                            tool_name,
+                            exc,
+                        )
                 return openai_chat_complete(
                     self._session,
                     self.config,
@@ -1086,6 +1204,7 @@ SECURITY ALERT INPUT:
                 "repair_attempted": repair_attempted,
                 "soc_context_included": bool(soc_context),
                 "soc_context_chars": len(soc_context),
+                "structured_output_mode": structured_mode,
                 "spl_query_generation_enabled": spl_query_generation_enabled,
                 "spl_query_generation_unavailable": bool(spl_unavailable_reason),
                 "spl_query_generation_attempted": spl_generation_attempted,
@@ -1206,7 +1325,11 @@ SECURITY ALERT INPUT:
 
             elapsed_total = 0.0
             try:
-                spl_text, spl_elapsed = _call_llm(spl_prompt)
+                spl_text, spl_elapsed = _call_llm(
+                    spl_prompt,
+                    tool_spec=_spl_tool_spec(),
+                    tool_name=_TOOL_GENERATE_SPL_NAME,
+                )
                 elapsed_total += spl_elapsed
                 spl_parsed = self._parse_llm_response(spl_text)
                 spl_ok, spl_err, spl_merged = _merge_and_validate_spl(spl_parsed)
@@ -1233,7 +1356,11 @@ SECURITY ALERT INPUT:
                 prior_output=prior,
             )
             try:
-                spl_text2, spl_elapsed2 = _call_llm(repair_prompt)
+                spl_text2, spl_elapsed2 = _call_llm(
+                    repair_prompt,
+                    tool_spec=_spl_tool_spec(),
+                    tool_name=_TOOL_GENERATE_SPL_NAME,
+                )
                 elapsed_total += spl_elapsed2
                 spl_parsed2 = self._parse_llm_response(spl_text2)
                 spl_ok2, spl_err2, spl_merged2 = _merge_and_validate_spl(spl_parsed2)
@@ -1333,7 +1460,11 @@ SECURITY ALERT INPUT:
             elapsed2: Optional[float] = None
             try:
                 logger.info(f"LLM API call attempt {attempt + 1}/{max_retries}")
-                llm_text, elapsed = _call_llm(prompt)
+                llm_text, elapsed = _call_llm(
+                    prompt,
+                    tool_spec=_analysis_tool_spec(),
+                    tool_name=_TOOL_ANALYZE_NOTABLE_NAME,
+                )
 
                 parsed = self._parse_llm_response(llm_text)
                 base_ok, base_err, final_obj = _validate_base_and_postprocess(
@@ -1357,7 +1488,11 @@ SECURITY ALERT INPUT:
                 repair_prompt = REPAIR_PROMPT_TEMPLATE_RAW_JSON.format(
                     error=last_error, prior_output=prior
                 )
-                llm_text2, elapsed2 = _call_llm(repair_prompt)
+                llm_text2, elapsed2 = _call_llm(
+                    repair_prompt,
+                    tool_spec=_analysis_tool_spec(),
+                    tool_name=_TOOL_ANALYZE_NOTABLE_NAME,
+                )
 
                 parsed2 = self._parse_llm_response(llm_text2)
                 base_ok2, base_err2, final_obj2 = _validate_base_and_postprocess(
