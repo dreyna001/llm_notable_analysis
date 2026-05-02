@@ -13,6 +13,7 @@ import time
 
 # Download the v17.1 Excel from MITRE's site
 # Using direct link from MITRE's attack site for Enterprise ATT&CK v17.1 techniques
+# update the url as new versions come out to get the latest
 url = "https://attack.mitre.org/docs/enterprise-attack-v17.1/enterprise-attack-v17.1-techniques.xlsx"
 
 # Retry logic for download
