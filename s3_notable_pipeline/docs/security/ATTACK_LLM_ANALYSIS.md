@@ -8,7 +8,7 @@ Turn a notable into ATT&CK-oriented output without allowing free-form or unsuppo
 
 ## Guardrails
 
-- Load allowed ATT&CK IDs from `enterprise_attack_v17.1_ids.json`.
+- Load allowed ATT&CK IDs from `src/s3_notable_pipeline/enterprise_attack_v17.1_ids.json`.
 - Include the allowed ID set in the LLM prompt.
 - Parse and normalize model output into a known schema.
 - Drop any `ttp_id` that is not in the allowed ATT&CK set.
@@ -22,17 +22,17 @@ Turn a notable into ATT&CK-oriented output without allowing free-form or unsuppo
 
 ## Runtime Flow
 
-1. `lambda_handler.py` reads S3 object content.
-2. `ttp_analyzer.py` normalizes input and builds the constrained prompt.
+1. `src/s3_notable_pipeline/lambda_handler.py` reads S3 object content.
+2. `src/s3_notable_pipeline/ttp_analyzer.py` normalizes input and builds the constrained prompt.
 3. Bedrock is called with retries/backoff.
 4. Response is parsed and repaired if needed.
 5. TTP IDs are validated against the local ATT&CK dataset.
-6. `markdown_generator.py` renders the final report.
+6. `src/s3_notable_pipeline/markdown_generator.py` renders the final report.
 
 ## Updating ATT&CK IDs
 
 When moving to a newer ATT&CK release:
 
-1. Regenerate `enterprise_attack_v17.1_ids.json` from official ATT&CK data.
+1. Regenerate `src/s3_notable_pipeline/enterprise_attack_v17.1_ids.json` from official ATT&CK data.
 2. Keep validator/prompt logic unchanged unless schema requirements changed.
 3. Re-run pipeline tests with known alerts and compare outputs.

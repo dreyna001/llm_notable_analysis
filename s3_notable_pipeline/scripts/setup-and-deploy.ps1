@@ -2,9 +2,15 @@
 # Prerequisites: AWS CLI, SAM CLI, Docker must be installed
 #
 # Readiness: template ImageUri must be an existing ECR image (build+push first if needed).
-# The Dockerfile FROM line is not portable until you substitute your approved base image.
+# The deploy/docker/Dockerfile FROM line is not portable until you substitute your approved base image.
 
 Write-Host "=== Notable Analyzer Pipeline - Setup and Deploy ===" -ForegroundColor Cyan
+
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$projectDir = Resolve-Path (Join-Path $scriptDir "..")
+$samTemplate = "deploy/aws/template-sam.yaml"
+$samBuiltTemplate = ".aws-sam/build/template.yaml"
+Set-Location $projectDir
 
 # Check prerequisites
 Write-Host "`nChecking prerequisites..." -ForegroundColor Yellow
@@ -88,10 +94,10 @@ try {
 
 # Build
 Write-Host "`nBefore build: ensure ImageUri (sam/template) points at your Lambda image in ECR, or sam build/push flow matches your org." -ForegroundColor Yellow
-Write-Host "If the Dockerfile FROM is still a placeholder, fix it or use another approved image build path." -ForegroundColor Yellow
+Write-Host "If the deploy/docker/Dockerfile FROM is still a placeholder, fix it or use another approved image build path." -ForegroundColor Yellow
 Write-Host "`n=== Step 1: Building application ===" -ForegroundColor Cyan
-Write-Host "Running: sam build -t template-sam.yaml" -ForegroundColor Gray
-sam build -t template-sam.yaml
+Write-Host "Running: sam build -t $samTemplate" -ForegroundColor Gray
+sam build -t $samTemplate
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Build failed" -ForegroundColor Red
     exit 1
@@ -101,11 +107,11 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "`n=== Step 2: Deploying to AWS ===" -ForegroundColor Cyan
 if (Test-Path "samconfig.toml") {
     Write-Host "Found samconfig.toml - using existing configuration" -ForegroundColor Gray
-    Write-Host "Running: sam deploy" -ForegroundColor Gray
-    sam deploy
+    Write-Host "Running: sam deploy --template-file $samBuiltTemplate" -ForegroundColor Gray
+    sam deploy --template-file $samBuiltTemplate
 } else {
     Write-Host "No samconfig.toml found - running guided deployment" -ForegroundColor Gray
-    Write-Host "Running: sam deploy --guided" -ForegroundColor Gray
+    Write-Host "Running: sam deploy --guided --template-file $samBuiltTemplate" -ForegroundColor Gray
     Write-Host "`nYou'll be prompted for:" -ForegroundColor Yellow
     Write-Host "  - Stack name (e.g., notable-analyzer-stack)" -ForegroundColor Gray
     Write-Host "  - AWS Region (e.g., us-east-1)" -ForegroundColor Gray
@@ -115,7 +121,7 @@ if (Test-Path "samconfig.toml") {
     Write-Host "  - AwsAccountId (12-digit) and ImageUri (existing ECR URI for this Lambda image)" -ForegroundColor Gray
     Write-Host "  - If notable_rest: SplunkBaseUrl + SplunkApiTokenSecretArn (Secrets Manager ARN)" -ForegroundColor Gray
     Write-Host "  - Optional: SplunkApiTokenSecretField (default 'token') and SplunkNotableUpdatePath" -ForegroundColor Gray
-    sam deploy --guided
+    sam deploy --guided --template-file $samBuiltTemplate
 }
 
 if ($LASTEXITCODE -ne 0) {
@@ -125,4 +131,4 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "`nDeployment complete!" -ForegroundColor Green
 Write-Host "`nNext steps:" -ForegroundColor Cyan
-Write-Host "  1. Run test-pipeline.ps1 to test the deployment" -ForegroundColor Yellow
+Write-Host "  1. Run scripts/test-pipeline.ps1 to test the deployment" -ForegroundColor Yellow

@@ -4,7 +4,7 @@
 
 The current deployment flow does not create the Lambda container image.
 
-`template-sam.yaml` expects `ImageUri` to point to an existing ECR image:
+`deploy/aws/template-sam.yaml` expects `ImageUri` to point to an existing ECR image:
 
 ```yaml
 PackageType: Image
@@ -13,7 +13,7 @@ ImageUri: !Ref ImageUri
 
 That means `sam deploy` only references an image that already exists in ECR. It does not create the ECR repository, build the Docker image, tag it, or push it.
 
-The `Dockerfile` is the image recipe, but its current `FROM` line is a placeholder and must be replaced with a real approved Lambda Python 3.12 base image before building:
+The `deploy/docker/Dockerfile` is the image recipe, but its current `FROM` line is a placeholder and must be replaced with a real approved Lambda Python 3.12 base image before building:
 
 ```dockerfile
 FROM <image>.dkr.ecr.us-east-1.amazonaws.com/ironbank/lambda.python:312
@@ -112,11 +112,11 @@ aws ecr describe-images \
 
 Run these from `s3_notable_pipeline/` after replacing placeholders.
 
-The `export` values below are optional shell shortcuts. You can either use variables, paste the full values directly into each command, or update `template-sam.yaml` so SAM builds and pushes the image from the `Dockerfile`.
+The `export` values below are optional shell shortcuts. You can either use variables, paste the full values directly into each command, or update `deploy/aws/template-sam.yaml` so SAM builds and pushes the image from `deploy/docker/Dockerfile`.
 
 You do not have to create a new ECR repository if one already exists. Use the existing repository name in `IMAGE_REPO` and skip the `aws ecr create-repository` step.
 
-Right now, `us-east-1` is not only an example region. `template-sam.yaml` currently hard-codes the Bedrock inference profile ARN to `us-east-1`, so changing `AWS_REGION` without also updating the template can break deployment or runtime Bedrock calls.
+Right now, `us-east-1` is not only an example region. `deploy/aws/template-sam.yaml` currently hard-codes the Bedrock inference profile ARN to `us-east-1`, so changing `AWS_REGION` without also updating the template can break deployment or runtime Bedrock calls.
 
 ```bash
 export AWS_REGION=us-east-1
@@ -143,7 +143,7 @@ aws ecr get-login-password --region $AWS_REGION \
 ```
 
 ```bash
-docker build -t $IMAGE_REPO:$IMAGE_TAG .
+docker build -f deploy/docker/Dockerfile -t $IMAGE_REPO:$IMAGE_TAG .
 ```
 
 ```bash
@@ -152,11 +152,11 @@ docker push $IMAGE_URI
 ```
 
 ```bash
-sam build -t template-sam.yaml
+sam build -t deploy/aws/template-sam.yaml
 ```
 
 ```bash
-sam deploy --guided
+sam deploy --guided --template-file .aws-sam/build/template.yaml
 ```
 
 When prompted for `ImageUri`, use:
@@ -169,6 +169,7 @@ For non-guided deploy when `samconfig.toml` already exists:
 
 ```bash
 sam deploy \
+  --template-file .aws-sam/build/template.yaml \
   --parameter-overrides \
     AwsAccountId=$AWS_ACCOUNT_ID \
     ImageUri=$IMAGE_URI
@@ -178,6 +179,7 @@ For a first-time non-guided deploy, include the stack name, region, capabilities
 
 ```bash
 sam deploy \
+  --template-file .aws-sam/build/template.yaml \
   --stack-name notable-analyzer-stack \
   --region $AWS_REGION \
   --capabilities CAPABILITY_IAM \
@@ -191,7 +193,7 @@ sam deploy \
 
 ## Alternative: Update SAM YAML
 
-Instead of manually building, tagging, pushing, and passing `ImageUri`, update `template-sam.yaml` so SAM uses the local `Dockerfile`.
+Instead of manually building, tagging, pushing, and passing `ImageUri`, update `deploy/aws/template-sam.yaml` so SAM uses the local `deploy/docker/Dockerfile`.
 
 Change the function to remove `ImageUri` and add image metadata:
 
@@ -204,7 +206,7 @@ NotableAnalyzerFunction:
     Timeout: 360
     MemorySize: 512
   Metadata:
-    Dockerfile: Dockerfile
+    Dockerfile: deploy/docker/Dockerfile
     DockerContext: .
     DockerTag: latest
 ```
@@ -212,34 +214,35 @@ NotableAnalyzerFunction:
 Then run:
 
 ```bash
-sam build -t template-sam.yaml
-sam deploy --guided
+sam build -t deploy/aws/template-sam.yaml
+sam deploy --guided --template-file .aws-sam/build/template.yaml
 ```
 
 For non-guided deploy with an existing ECR repo:
 
 ```bash
 sam deploy \
+  --template-file .aws-sam/build/template.yaml \
   --image-repository 123456789012.dkr.ecr.us-east-1.amazonaws.com/notable-analyzer-s3
 ```
 
-This still requires the `Dockerfile` `FROM` image to be real and pullable.
+This still requires the `deploy/docker/Dockerfile` `FROM` image to be real and pullable.
 
 ## SAM Commands: Outputs And Fields
 
-### `sam build -t template-sam.yaml`
+### `sam build -t deploy/aws/template-sam.yaml`
 
 What it generates:
 
 - `.aws-sam/build/` local build directory.
 - `.aws-sam/build/template.yaml` built SAM template.
 - With the current YAML, it does not create or push the Docker image because `ImageUri` points to an existing ECR image.
-- With the SAM YAML alternative, it builds the Docker image from `Dockerfile` before deploy.
+- With the SAM YAML alternative, it builds the Docker image from `deploy/docker/Dockerfile` before deploy.
 
 What to check:
 
 ```bash
-sam build -t template-sam.yaml
+sam build -t deploy/aws/template-sam.yaml
 ```
 
 Expected result:
@@ -269,7 +272,7 @@ What it generates locally if you choose to save settings:
 Use `samconfig.toml` so future deploys can run with:
 
 ```bash
-sam deploy
+sam deploy --template-file .aws-sam/build/template.yaml
 ```
 
 ### Guided Deploy Fields
@@ -326,7 +329,7 @@ Parameter `AwsAccountId`:
 <12-digit-account-id>
 ```
 
-Why: used to build the Bedrock inference profile ARN in `template-sam.yaml`.
+Why: used to build the Bedrock inference profile ARN in `deploy/aws/template-sam.yaml`.
 
 Find it with:
 

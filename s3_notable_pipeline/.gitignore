@@ -52,6 +52,6 @@ Thumbs.db
 .env.local
 
 # Test files
-test-notable.txt
+/test-notable.txt
 test-*.json
 test-*.md

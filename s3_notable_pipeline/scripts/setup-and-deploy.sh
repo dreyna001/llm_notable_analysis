@@ -3,12 +3,15 @@
 # Prerequisites: AWS CLI, SAM CLI, Docker must be installed
 #
 # Readiness: template ImageUri must be an existing ECR image (build+push first if needed).
-# The Dockerfile FROM line is not portable until you substitute your approved base image.
+# The deploy/docker/Dockerfile FROM line is not portable until you substitute your approved base image.
 
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SAM_TEMPLATE="deploy/aws/template-sam.yaml"
+SAM_BUILT_TEMPLATE=".aws-sam/build/template.yaml"
+cd "$PROJECT_DIR"
 
 echo "=== Notable Analyzer Pipeline - Setup and Deploy ==="
 
@@ -93,11 +96,11 @@ fi
 
 echo
 echo "Before build: ensure ImageUri (sam/template) points at your Lambda image in ECR, or your sam build/push flow matches your org."
-echo "If the Dockerfile FROM is still a placeholder, fix it or use another approved image build path."
+echo "If the deploy/docker/Dockerfile FROM is still a placeholder, fix it or use another approved image build path."
 echo
 echo "=== Step 1: Building application ==="
-echo "Running: sam build -t template-sam.yaml"
-if ! sam build -t template-sam.yaml; then
+echo "Running: sam build -t $SAM_TEMPLATE"
+if ! sam build -t "$SAM_TEMPLATE"; then
   echo "Build failed"
   exit 1
 fi
@@ -106,14 +109,14 @@ echo
 echo "=== Step 2: Deploying to AWS ==="
 if [ -f "samconfig.toml" ]; then
   echo "Found samconfig.toml - using existing configuration"
-  echo "Running: sam deploy"
-  if ! sam deploy; then
+  echo "Running: sam deploy --template-file $SAM_BUILT_TEMPLATE"
+  if ! sam deploy --template-file "$SAM_BUILT_TEMPLATE"; then
     echo "Deployment failed"
     exit 1
   fi
 else
   echo "No samconfig.toml found - running guided deployment"
-  echo "Running: sam deploy --guided"
+  echo "Running: sam deploy --guided --template-file $SAM_BUILT_TEMPLATE"
   echo
   echo "You'll be prompted for:"
   echo "  - Stack name (e.g., notable-analyzer-stack)"
@@ -124,7 +127,7 @@ else
   echo "  - AwsAccountId (12-digit) and ImageUri (existing ECR URI for this Lambda image)"
   echo "  - If notable_rest: SplunkBaseUrl + SplunkApiTokenSecretArn (Secrets Manager ARN)"
   echo "  - Optional: SplunkApiTokenSecretField (default 'token') and SplunkNotableUpdatePath"
-  if ! sam deploy --guided; then
+  if ! sam deploy --guided --template-file "$SAM_BUILT_TEMPLATE"; then
     echo "Deployment failed"
     exit 1
   fi
@@ -134,4 +137,4 @@ echo
 echo "Deployment complete!"
 echo
 echo "Next steps:"
-echo "  1. Run test-pipeline.ps1 from PowerShell, or follow the manual test flow in README."
+echo "  1. Run scripts/test-pipeline.ps1 from PowerShell, or follow the manual test flow in README."

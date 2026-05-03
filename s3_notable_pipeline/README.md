@@ -13,7 +13,7 @@ This service processes security notables uploaded to S3, runs LLM-based ATT&CK a
 - AWS CLI configured (`aws configure`)
 - AWS SAM CLI
 - Docker running (required for Lambda image build)
-- An **ECR image URI** for this Lambda: SAM’s `ImageUri` must reference an image **already pushed to ECR** in your account/region. You are not ready to deploy until you can build that image (see `Dockerfile`) and publish it, or you use an image your org already ships.
+- An **ECR image URI** for this Lambda: SAM’s `ImageUri` must reference an image **already pushed to ECR** in your account/region. You are not ready to deploy until you can build that image (see `deploy/docker/Dockerfile`) and publish it, or you use an image your org already ships.
 
 Quick checks:
 
@@ -25,33 +25,33 @@ docker --version
 
 ## 2) Deploy (Fast Path)
 
-**Packaging readiness:** Deploy passes `ImageUri` into the stack. That URI must be a real Lambda container image in ECR **before** `sam deploy` succeeds. The `Dockerfile` `FROM` is a placeholder/org-specific base—if you cannot pull and build it as written, you still need an agreed way to produce the same handler code inside **some** approved base image and push it to ECR. Until that exists, “ready to deploy” really means “ready to build and publish the Lambda image.”
+**Packaging readiness:** Deploy passes `ImageUri` into the stack. That URI must be a real Lambda container image in ECR **before** `sam deploy` succeeds. The `deploy/docker/Dockerfile` `FROM` is a placeholder/org-specific base—if you cannot pull and build it as written, you still need an agreed way to produce the same handler code inside **some** approved base image and push it to ECR. Until that exists, “ready to deploy” really means “ready to build and publish the Lambda image.”
 
 From this directory:
 
 ```powershell
-.\setup-and-deploy.ps1
+.\scripts\setup-and-deploy.ps1
 ```
 
 ```bash
-chmod +x ./setup-and-deploy.sh
-./setup-and-deploy.sh
+chmod +x ./scripts/setup-and-deploy.sh
+./scripts/setup-and-deploy.sh
 ```
 
 What it does:
 
 1. Validates local prerequisites.
-2. Runs `sam build -t template-sam.yaml`.
-3. Runs `sam deploy` (or `sam deploy --guided` first time).
+2. Runs `sam build -t deploy/aws/template-sam.yaml`.
+3. Runs `sam deploy --template-file .aws-sam/build/template.yaml` (or guided mode first time).
 
 Manual equivalent (same core deploy steps both scripts run):
 
 ```bash
-sam build -t template-sam.yaml
+sam build -t deploy/aws/template-sam.yaml
 # If samconfig.toml exists:
-sam deploy
+sam deploy --template-file .aws-sam/build/template.yaml
 # First deploy (no samconfig.toml):
-sam deploy --guided
+sam deploy --guided --template-file .aws-sam/build/template.yaml
 ```
 
 If using guided deploy, start with:
@@ -69,13 +69,13 @@ If using guided deploy, start with:
 ## 3) Test End-to-End
 
 ```powershell
-.\test-pipeline.ps1
+.\scripts\test-pipeline.ps1
 ```
 
 This script:
 
 1. Reads bucket names from CloudFormation outputs.
-2. Uploads `test-notable.txt` to `incoming/`.
+2. Uploads `data/test-notable.txt` to `incoming/`.
 3. Waits for processing.
 4. Pulls generated markdown from `reports/`.
 
@@ -113,13 +113,19 @@ aws secretsmanager create-secret \
 
 ## 6) Key Files
 
-- `Dockerfile` - Lambda image build; `FROM` is not portable until you substitute your approved base registry/image
-- `lambda_handler.py` - S3 event handling and sink routing
-- `ttp_analyzer.py` - Bedrock call, schema validation, TTP filtering
-- `markdown_generator.py` - report formatting
-- `template-sam.yaml` - deployable infrastructure
-- `SOAR_PLAYBOOK_PHANTOM.md` - SOAR upload pattern
-- `ATTACK_LLM_ANALYSIS.md` - ATT&CK grounding and validation approach
+- `pyproject.toml` - package metadata for the `src/` layout
+- `src/s3_notable_pipeline/lambda_handler.py` - S3 event handling and sink routing
+- `src/s3_notable_pipeline/ttp_analyzer.py` - Bedrock call, schema validation, TTP filtering
+- `src/s3_notable_pipeline/markdown_generator.py` - report formatting
+- `deploy/docker/Dockerfile` - Lambda image build; `FROM` is not portable until you substitute your approved base registry/image
+- `deploy/aws/template-sam.yaml` - deployable SAM infrastructure
+- `tests/test_lambda_handler.py` - focused Lambda sink routing tests
+- `scripts/` - deployment, test, and maintenance helpers
+- `data/test-notable.txt` - sample notable used by the test helper
+- `docs/delivery_package/EXECUTIVE_AWS_WORKFLOW.md` - executive end-to-end workflow overview
+- `docs/operations/DEPLOYMENT_IMAGE_STEPS.md` - Lambda image build and ECR deployment notes
+- `docs/integrations/SOAR_PLAYBOOK_PHANTOM.md` - SOAR upload pattern
+- `docs/security/ATTACK_LLM_ANALYSIS.md` - ATT&CK grounding and validation approach
 
 ## 7) Common Issues
 

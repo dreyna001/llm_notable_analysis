@@ -15,8 +15,8 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import unquote_plus
 from typing import Dict, Any
 
-from ttp_analyzer import BedrockAnalyzer
-from markdown_generator import generate_markdown_report
+from .ttp_analyzer import BedrockAnalyzer
+from .markdown_generator import generate_markdown_report
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)

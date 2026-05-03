@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import sys
 import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_DIR = PROJECT_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
 
 def load_lambda_handler_module() -> types.ModuleType:
-    """Load `lambda_handler.py` with stubbed external dependencies."""
-    module_name = "s3_notable_pipeline_lambda_handler_test"
-    module_path = Path(__file__).with_name("lambda_handler.py")
+    """Load Lambda handler package with stubbed external dependencies."""
+    module_name = "s3_notable_pipeline.lambda_handler"
 
     fake_boto3 = types.ModuleType("boto3")
 
@@ -24,7 +28,7 @@ def load_lambda_handler_module() -> types.ModuleType:
 
     fake_boto3.client = fake_client
 
-    fake_ttp_analyzer = types.ModuleType("ttp_analyzer")
+    fake_ttp_analyzer = types.ModuleType("s3_notable_pipeline.ttp_analyzer")
 
     class FakeBedrockAnalyzer:
         """Minimal analyzer stub for module import."""
@@ -42,25 +46,20 @@ def load_lambda_handler_module() -> types.ModuleType:
 
     fake_ttp_analyzer.BedrockAnalyzer = FakeBedrockAnalyzer
 
-    fake_markdown_generator = types.ModuleType("markdown_generator")
+    fake_markdown_generator = types.ModuleType("s3_notable_pipeline.markdown_generator")
     fake_markdown_generator.generate_markdown_report = lambda *_args, **_kwargs: "markdown"
 
-    spec = importlib.util.spec_from_file_location(module_name, module_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError("Unable to load lambda_handler.py for tests")
-
-    module = importlib.util.module_from_spec(spec)
+    sys.modules.pop(module_name, None)
     with patch.dict(
         sys.modules,
         {
             "boto3": fake_boto3,
-            "ttp_analyzer": fake_ttp_analyzer,
-            "markdown_generator": fake_markdown_generator,
+            "s3_notable_pipeline.ttp_analyzer": fake_ttp_analyzer,
+            "s3_notable_pipeline.markdown_generator": fake_markdown_generator,
         },
         clear=False,
     ):
-        spec.loader.exec_module(module)
-    return module
+        return importlib.import_module(module_name)
 
 
 class NotableRestSinkTests(unittest.TestCase):

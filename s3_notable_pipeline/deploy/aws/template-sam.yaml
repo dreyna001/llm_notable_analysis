@@ -1,5 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: S3-triggered notable analysis pipeline using Bedrock Nova Pro (pure CloudFormation)
+Transform: AWS::Serverless-2016-10-31
+Description: S3-triggered notable analysis pipeline using Bedrock Nova Pro
 
 Parameters:
   InputBucketName:
@@ -29,10 +30,13 @@ Parameters:
 
   SplunkApiTokenSecretArn:
     Type: String
-    Default: ''
+    Default: '*'
+    AllowedPattern: '^\*$|^arn:(aws|aws-us-gov|aws-cn):secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+$'
+    ConstraintDescription: Must be the s3-mode placeholder * or a valid Secrets Manager secret ARN for notable_rest mode.
     Description: >-
       Required when SplunkSinkMode=notable_rest. Secrets Manager ARN containing
-      the Splunk API token (plain string secret or JSON object).
+      the Splunk API token (plain string secret or JSON object). Leave the
+      default * only for s3 mode.
 
   SplunkApiTokenSecretField:
     Type: String
@@ -66,16 +70,18 @@ Parameters:
     Description: >-
       Required. Your 12-digit AWS account ID for the Bedrock inference profile ARN
       (replace <awsaccountid> in arn:aws:bedrock:us-east-1:<awsaccountid>:inference-profile/...).
-      Pass at deploy time via parameter overrides or stack input.
+      Pass at deploy time, e.g. sam deploy --parameter-overrides AwsAccountId=...
+    # Intentionally no Default: must be supplied per environment.
   
-  LambdaCodeS3Bucket:
+  # NOTE: This parameter is intentionally named `ImageUri` (not `ECRImageUri`) because other templates/tools
+  # in this repo expect the standard `ImageUri` name for image-based SAM functions.
+  ImageUri:
     Type: String
-    Description: S3 bucket containing the Lambda deployment package
-  
-  LambdaCodeS3Key:
-    Type: String
-    Description: S3 key for the Lambda deployment package (zip file)
-    Default: lambda-package.zip
+    Description: >-
+      Full ECR image URI with tag for this Lambda package. The image must already exist in ECR
+      before deploy (build from deploy/docker/Dockerfile or your approved base, then docker push). SAM only
+      references the URI; it does not create the repository image for you.
+    Default: 123456789012.dkr.ecr.us-east-1.amazonaws.com/notable-analyzer-s3:latest
 
 Rules:
   RequireNotableRestConfig:
@@ -85,10 +91,12 @@ Rules:
         AssertDescription: SplunkBaseUrl is required when SplunkSinkMode=notable_rest.
       - Assert: !Not [!Equals [!Ref SplunkApiTokenSecretArn, '']]
         AssertDescription: SplunkApiTokenSecretArn is required when SplunkSinkMode=notable_rest.
+      - Assert: !Not [!Equals [!Ref SplunkApiTokenSecretArn, '*']]
+        AssertDescription: SplunkApiTokenSecretArn must be a real Secrets Manager ARN when SplunkSinkMode=notable_rest.
 
 Conditions:
   IsNotableRest: !Equals [!Ref SplunkSinkMode, notable_rest]
-
+ 
 Resources:
   InputBucket:
     Type: AWS::S3::Bucket
@@ -122,77 +130,13 @@ Resources:
             Prefix: reports/
             ExpirationInDays: !Ref OutputRetentionDays
   
-  LambdaExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: NotableAnalyzerLambdaRole
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: S3AccessPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:ListBucket
-                Resource:
-                  - !Sub 'arn:aws:s3:::${InputBucketName}'
-                  - !Sub 'arn:aws:s3:::${InputBucketName}/*'
-              - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:DeleteObject
-                Resource:
-                  - !Sub 'arn:aws:s3:::${OutputBucketName}/*'
-              - !If
-                - IsNotableRest
-                - Effect: Allow
-                  Action:
-                    - secretsmanager:GetSecretValue
-                  Resource:
-                    - !Ref SplunkApiTokenSecretArn
-                - !Ref AWS::NoValue
-        - PolicyName: BedrockInvokePolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - bedrock:InvokeModel
-                Resource:
-                  - !Sub 'arn:aws:bedrock:us-east-1:${AwsAccountId}:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0'
-        - PolicyName: CloudWatchLogsPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/notable-analyzer-s3:*'
-  
   NotableAnalyzerFunction:
-    Type: AWS::Lambda::Function
+    Type: AWS::Serverless::Function
     Properties:
       FunctionName: notable-analyzer-s3
-      Runtime: python3.12
-      Handler: lambda_handler.handler
-      Role: !GetAtt LambdaExecutionRole.Arn
+      PackageType: Image
       Timeout: 360
       MemorySize: 512
-      Code:
-        S3Bucket: !Ref LambdaCodeS3Bucket
-        S3Key: !Ref LambdaCodeS3Key
       Environment:
         Variables:
           BEDROCK_MODEL_ID: !Sub 'arn:aws:bedrock:us-east-1:${AwsAccountId}:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0'
@@ -204,6 +148,34 @@ Resources:
           INPUT_BUCKET_NAME: !Ref InputBucketName
           OUTPUT_BUCKET_NAME: !Ref OutputBucketName
           OUTPUT_PREFIX: reports
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref InputBucketName
+        - S3CrudPolicy:
+            BucketName: !Ref OutputBucketName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub 'arn:aws:bedrock:us-east-1:${AwsAccountId}:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0'
+        - !If
+          - IsNotableRest
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref SplunkApiTokenSecretArn
+          - !Ref AWS::NoValue
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/notable-analyzer-s3:*'
+      ImageUri: !Ref ImageUri
   
   LambdaInvokePermission:
     Type: AWS::Lambda::Permission
@@ -228,6 +200,5 @@ Outputs:
   
   TestCommand:
     Description: Command to upload a test notable
-    Value: !Sub 'aws s3 cp test-notable.txt s3://${InputBucket}/incoming/test-notable.txt'
-
+    Value: !Sub 'aws s3 cp data/test-notable.txt s3://${InputBucket}/incoming/test-notable.txt'
 

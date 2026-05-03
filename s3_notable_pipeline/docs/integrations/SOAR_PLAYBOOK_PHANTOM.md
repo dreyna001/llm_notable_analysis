@@ -11,7 +11,7 @@ Minimal integration pattern for feeding this pipeline from SOAR.
 
 Template script:
 
-- `soar_playbook/phantom_notable_to_s3.py`
+- `scripts/soar_playbook/phantom_notable_to_s3.py`
 
 ## Minimum Payload
 
@@ -35,7 +35,7 @@ Recommended optional fields:
 
 ## Placeholder Values to Replace
 
-In `phantom_notable_to_s3.py`, update:
+In `scripts/soar_playbook/phantom_notable_to_s3.py`, update:
 
 - `AWS_S3_ASSET_NAME`
 - `INPUT_BUCKET_NAME`

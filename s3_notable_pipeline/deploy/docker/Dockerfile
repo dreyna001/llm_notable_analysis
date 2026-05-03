@@ -9,12 +9,9 @@ COPY requirements.txt ${LAMBDA_TASK_ROOT}
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy function code and data files
-COPY lambda_handler.py ${LAMBDA_TASK_ROOT}
-COPY ttp_analyzer.py ${LAMBDA_TASK_ROOT}
-COPY markdown_generator.py ${LAMBDA_TASK_ROOT}
-COPY enterprise_attack_v17.1_ids.json ${LAMBDA_TASK_ROOT}
+# Copy function package and data files
+COPY src/s3_notable_pipeline ${LAMBDA_TASK_ROOT}/s3_notable_pipeline
 
 # Set the CMD to your handler (could also be done as a parameter override)
-CMD ["lambda_handler.handler"]
+CMD ["s3_notable_pipeline.lambda_handler.handler"]
 

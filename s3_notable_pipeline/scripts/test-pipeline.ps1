@@ -3,6 +3,10 @@
 
 Write-Host "=== Testing Notable Analyzer Pipeline ===" -ForegroundColor Cyan
 
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$projectDir = Resolve-Path (Join-Path $scriptDir "..")
+Set-Location $projectDir
+
 # Get stack name (default or from user)
 $stackName = "notable-analyzer-stack"
 if ($args.Count -gt 0) {
@@ -39,7 +43,7 @@ try {
 
 # Upload test file
 Write-Host "`nUploading test file..." -ForegroundColor Yellow
-$testFile = "test-notable.txt"
+$testFile = "data/test-notable.txt"
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $s3Key = "incoming/test-notable-$timestamp.txt"
 

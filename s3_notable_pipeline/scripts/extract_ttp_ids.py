@@ -6,6 +6,7 @@ extracts parent and sub-technique IDs, and writes them to
 """
 
 import json
+from pathlib import Path
 import pandas as pd
 import requests
 from io import BytesIO
@@ -59,8 +60,9 @@ ordered_ids = parents + subs
 print(f"  - {len(parents)} parent techniques")
 print(f"  - {len(subs)} sub-techniques")
 
-# Save to JSON
-output_path = "enterprise_attack_v17.1_ids.json"
+# Save to package data
+project_root = Path(__file__).resolve().parents[1]
+output_path = project_root / "src" / "s3_notable_pipeline" / "enterprise_attack_v17.1_ids.json"
 with open(output_path, "w") as f:
     json.dump(ordered_ids, f, indent=2)
 
