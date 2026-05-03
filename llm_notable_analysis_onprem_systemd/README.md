@@ -7,6 +7,10 @@ Air-gapped, single-host deployment for security notable analysis using local LLM
 - **Doc intent / naming**: This doc is meant to capture the **architecture + service design** for an **on-prem / air-gapped** operating model (not only “how to deploy”).
 - **Why `src/` exists**: `src/llm_notable_analysis_onprem_systemd/` is the installable Python package root, so imports and service entrypoints stay stable after deployment.
 
+## Deployment readiness
+
+Use [`docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.md`](docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.md) as the executive gateway, and [`docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_ASSESSMENT.md`](docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_ASSESSMENT.md) for the full technical checklist and assumptions.
+
 ## Architecture
 
 ```
@@ -676,7 +680,7 @@ llm_notable_analysis_onprem_systemd/
 ├── requirements.txt             # Python dependencies
 ├── config.env.example           # Configuration template
 ├── docs/
-│   ├── delivery_package/        # Executive workflow and release delivery docs
+│   ├── delivery_package/        # Executive workflow, readiness, release delivery docs
 │   ├── operations/              # Install, offline prestage, recovery docs
 │   ├── integrations/            # SOAR/Phantom integration guides
 │   ├── security/                # Security posture docs
