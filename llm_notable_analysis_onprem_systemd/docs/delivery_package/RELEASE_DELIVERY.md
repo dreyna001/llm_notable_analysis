@@ -1,11 +1,11 @@
 # On-Prem Analyzer — Release + Customer Delivery (GitLab / Bitbucket)
 
-This document describes the **operator workflow** to obtain a vetted release bundle from **GitLab or Bitbucket**, transfer it to a target server (including air-gapped workflows), unpack it, and **start the install** by running `install.sh`.
+This document describes the **operator workflow** to obtain a vetted release bundle from **GitLab or Bitbucket**, transfer it to a target server (including air-gapped workflows), unpack it, and **start the install** by running `scripts/install.sh`.
 
 Scope:
 - Starts at the Git hosting portal (GitLab/Bitbucket)
-- Ends at: `sudo bash install.sh`
-- Does **not** document what `install.sh` does internally (see `INSTALL.md`)
+- Ends at: `sudo bash scripts/install.sh`
+- Does **not** document what `scripts/install.sh` does internally (see `../operations/INSTALL.md`)
 
 ## Pre-release validation (recommended)
 
@@ -87,8 +87,8 @@ On the target host:
 mkdir -p /opt/notable-analyzer-release
 tar -xzf /tmp/notable-analyzer-onprem-<version>.tar.gz -C /opt/notable-analyzer-release
 cd /opt/notable-analyzer-release/llm_notable_analysis_onprem_systemd
-sudo bash install.sh
+sudo bash scripts/install.sh
 ```
 
-Next: follow `INSTALL.md` (configuration + service start/verification).
+Next: follow `../operations/INSTALL.md` (configuration + service start/verification).
 

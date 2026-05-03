@@ -1,5 +1,7 @@
 import unittest
 
+import _bootstrap  # noqa: F401
+
 from onprem_rag_notable_analysis.future.prompt_context_builder import (
     ContextSnippet,
     render_context_block,

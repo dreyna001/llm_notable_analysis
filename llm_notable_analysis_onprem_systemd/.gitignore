@@ -1,0 +1,12 @@
+config.env
+.pytest_cache/
+__pycache__/
+*.py[cod]
+
+# Runtime/customer artifacts stay outside source control.
+dependency_manifest_*/
+data/runtime/
+data/reports/
+data/notables/
+data/models/
+data/rag_indexes/

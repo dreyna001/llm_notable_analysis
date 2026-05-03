@@ -423,7 +423,7 @@ Scope:
 - defines the host-to-container path mappings
 - is the main runtime orchestration file for Docker
 
-### `systemd/notable-analyzer-stack.service`
+### `deploy/systemd/notable-analyzer-stack.service`
 
 Scope:
 

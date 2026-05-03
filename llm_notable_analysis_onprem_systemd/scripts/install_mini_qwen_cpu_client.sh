@@ -14,6 +14,7 @@ info() { echo "  $*"; }
 trap 'err "Failed at line ${LINENO}: ${BASH_COMMAND}"' ERR
 
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # ------------------------------------------------------------------------------
 # Configuration (override with env vars if needed)
@@ -26,8 +27,8 @@ readonly ANALYZER_VENV_DIR="${ANALYZER_VENV_DIR:-$ANALYZER_INSTALL_DIR/venv}"
 readonly ANALYZER_PYTHON_BIN="${ANALYZER_PYTHON_BIN:-python3}"
 readonly ANALYZER_SERVICE_USER="${ANALYZER_SERVICE_USER:-notable-analyzer}"
 readonly ANALYZER_SERVICE_GROUP="${ANALYZER_SERVICE_GROUP:-$ANALYZER_SERVICE_USER}"
-readonly ANALYZER_ENTRYPOINT="${ANALYZER_ENTRYPOINT:-onprem_service.onprem_main}"
-readonly SDK_SOURCE_DIR="${SDK_SOURCE_DIR:-$SCRIPT_DIR/../onprem-llm-sdk}"
+readonly ANALYZER_ENTRYPOINT="${ANALYZER_ENTRYPOINT:-llm_notable_analysis_onprem_systemd.onprem_service.onprem_main}"
+readonly SDK_SOURCE_DIR="${SDK_SOURCE_DIR:-$REPO_DIR/../onprem-llm-sdk}"
 readonly LAUNCHER_PATH="${LAUNCHER_PATH:-/usr/local/bin/notable-analyzer-mini-run}"
 
 # Systemd behavior:
@@ -43,7 +44,7 @@ readonly LLM_API_URL="${LLM_API_URL:-http://127.0.0.1:8000/v1/chat/completions}"
 readonly LLM_MODEL_NAME="${LLM_MODEL_NAME:-Qwen3-4B-Q4_K_M.gguf}"
 readonly LLM_TIMEOUT="${LLM_TIMEOUT:-300}"
 readonly LLM_MAX_TOKENS="${LLM_MAX_TOKENS:-2048}"
-readonly MITRE_IDS_PATH="${MITRE_IDS_PATH:-$ANALYZER_INSTALL_DIR/onprem_service/enterprise_attack_v17.1_ids.json}"
+readonly MITRE_IDS_PATH="${MITRE_IDS_PATH:-$ANALYZER_INSTALL_DIR/src/llm_notable_analysis_onprem_systemd/onprem_service/enterprise_attack_v17.1_ids.json}"
 
 check_root() {
     [[ "${EUID}" -eq 0 ]] || err "Run as root (or sudo)."
@@ -209,9 +210,10 @@ check_command cp
 check_command sed
 check_python_version "$ANALYZER_PYTHON_BIN"
 
-[[ -d "$SCRIPT_DIR/onprem_service" ]] || err "Missing directory: $SCRIPT_DIR/onprem_service"
-[[ -f "$SCRIPT_DIR/config.env.example" ]] || err "Missing file: $SCRIPT_DIR/config.env.example"
-[[ -f "$SCRIPT_DIR/requirements.txt" ]] || err "Missing file: $SCRIPT_DIR/requirements.txt"
+[[ -d "$REPO_DIR/src/llm_notable_analysis_onprem_systemd/onprem_service" ]] || err "Missing package directory: $REPO_DIR/src/llm_notable_analysis_onprem_systemd/onprem_service"
+[[ -f "$REPO_DIR/config.env.example" ]] || err "Missing file: $REPO_DIR/config.env.example"
+[[ -f "$REPO_DIR/requirements.txt" ]] || err "Missing file: $REPO_DIR/requirements.txt"
+[[ -f "$REPO_DIR/pyproject.toml" ]] || err "Missing file: $REPO_DIR/pyproject.toml"
 [[ -f "$SDK_SOURCE_DIR/pyproject.toml" ]] || err "SDK source not found: $SDK_SOURCE_DIR"
 
 echo "[1/8] Creating service identity..."
@@ -230,10 +232,12 @@ for subdir in processed quarantine reports; do
 done
 
 echo "[3/8] Installing analyzer code..."
-rm -rf "$ANALYZER_INSTALL_DIR/onprem_service"
-cp -a "$SCRIPT_DIR/onprem_service" "$ANALYZER_INSTALL_DIR/" \
-    || err "Failed to copy onprem_service"
-cp "$SCRIPT_DIR/requirements.txt" "$ANALYZER_INSTALL_DIR/requirements.txt" \
+rm -rf "$ANALYZER_INSTALL_DIR/onprem_service" "$ANALYZER_INSTALL_DIR/src"
+cp -a "$REPO_DIR/src" "$ANALYZER_INSTALL_DIR/" \
+    || err "Failed to copy src package tree"
+cp "$REPO_DIR/pyproject.toml" "$ANALYZER_INSTALL_DIR/pyproject.toml" \
+    || err "Failed to copy pyproject.toml"
+cp "$REPO_DIR/requirements.txt" "$ANALYZER_INSTALL_DIR/requirements.txt" \
     || err "Failed to copy requirements.txt"
 chown -R "$ANALYZER_SERVICE_USER:$ANALYZER_SERVICE_GROUP" "$ANALYZER_INSTALL_DIR"
 
@@ -262,12 +266,14 @@ rm -f "$tmp_requirements"
 
 "$ANALYZER_VENV_DIR/bin/pip" install --upgrade "$SDK_SOURCE_DIR" >/dev/null \
     || err "Failed installing local onprem-llm-sdk from $SDK_SOURCE_DIR"
+"$ANALYZER_VENV_DIR/bin/pip" install --upgrade "$ANALYZER_INSTALL_DIR" >/dev/null \
+    || err "Failed installing analyzer package from $ANALYZER_INSTALL_DIR"
 
 chown -R "$ANALYZER_SERVICE_USER:$ANALYZER_SERVICE_GROUP" "$ANALYZER_VENV_DIR"
 
 echo "[6/8] Installing/updating config..."
 if [[ ! -f "$ANALYZER_CONFIG_FILE" ]]; then
-    cp "$SCRIPT_DIR/config.env.example" "$ANALYZER_CONFIG_FILE" \
+    cp "$REPO_DIR/config.env.example" "$ANALYZER_CONFIG_FILE" \
         || err "Failed to create config: $ANALYZER_CONFIG_FILE"
 fi
 

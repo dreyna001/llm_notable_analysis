@@ -6,16 +6,16 @@ This document defines restart/recovery semantics for `llm_notable_analysis_onpre
 
 - Deployment model: single-host service with file-drop ingest.
 - Input queue location: `INCOMING_DIR`.
-- Processing implementation: `onprem_service/onprem_main.py`, `onprem_service/ingest.py`, `onprem_service/local_llm_client.py`, `onprem_service/sinks.py`.
+- Processing implementation: `src/llm_notable_analysis_onprem_systemd/onprem_service/onprem_main.py`, `src/llm_notable_analysis_onprem_systemd/onprem_service/ingest.py`, `src/llm_notable_analysis_onprem_systemd/onprem_service/local_llm_client.py`, `src/llm_notable_analysis_onprem_systemd/onprem_service/sinks.py`.
 - Shared transport SDK: `onprem-llm-sdk/src/onprem_llm_sdk/`.
 
 ## Facts From Current Code
 
-- Discovery only reads files currently present in `INCOMING_DIR` matching `*.json` or `*.txt` (`onprem_service/ingest.py`).
-- Files are moved to `PROCESSED_DIR` only after the full processing path succeeds (`onprem_service/onprem_main.py`, `onprem_service/ingest.py`).
-- Files are moved to `QUARANTINE_DIR` on known failures (`onprem_service/onprem_main.py`, `onprem_service/ingest.py`).
+- Discovery only reads files currently present in `INCOMING_DIR` matching `*.json` or `*.txt` (`src/llm_notable_analysis_onprem_systemd/onprem_service/ingest.py`).
+- Files are moved to `PROCESSED_DIR` only after the full processing path succeeds (`src/llm_notable_analysis_onprem_systemd/onprem_service/onprem_main.py`, `src/llm_notable_analysis_onprem_systemd/onprem_service/ingest.py`).
+- Files are moved to `QUARANTINE_DIR` on known failures (`src/llm_notable_analysis_onprem_systemd/onprem_service/onprem_main.py`, `src/llm_notable_analysis_onprem_systemd/onprem_service/ingest.py`).
 - The service does not maintain a persistent per-file checkpoint ledger.
-- In concurrent mode, graceful shutdown waits for in-flight jobs to complete (`executor.shutdown(wait=True)` in `onprem_service/onprem_main.py`).
+- In concurrent mode, graceful shutdown waits for in-flight jobs to complete (`executor.shutdown(wait=True)` in `src/llm_notable_analysis_onprem_systemd/onprem_service/onprem_main.py`).
 
 ## Restart / Power Event Behavior Matrix
 
@@ -76,7 +76,7 @@ SDK does **not** implement persistent checkpointing, durable queue state, or cra
 
 ## What Notable Analysis Does (and where)
 
-Implemented in `llm_notable_analysis_onprem_systemd/onprem_service/`:
+Implemented in `llm_notable_analysis_onprem_systemd/src/llm_notable_analysis_onprem_systemd/onprem_service/`:
 
 - **Outer retry policy preserved for this app:** `local_llm_client.py`
   - App-level retry loop with existing backoff semantics.

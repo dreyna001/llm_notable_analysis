@@ -43,8 +43,8 @@ Pre-download model files and transfer them so `config.json` exists under `/opt/m
 ### Python interpreter (required)
 
 - **Minimum:** Python **3.10+** (installer fails below that).
-- **Default / recommended:** Python **3.12** for both analyzer and vLLM venvs (`install.sh` defaults `ANALYZER_PYTHON_BIN` / `VLLM_PYTHON_BIN` to `python3.12`).
-- **Pin explicitly:** `sudo ANALYZER_PYTHON_BIN=python3.12 VLLM_PYTHON_BIN=python3.12 bash install.sh`
+- **Default / recommended:** Python **3.12** for both analyzer and vLLM venvs (`scripts/install.sh` defaults `ANALYZER_PYTHON_BIN` / `VLLM_PYTHON_BIN` to `python3.12`).
+- **Pin explicitly:** `sudo ANALYZER_PYTHON_BIN=python3.12 VLLM_PYTHON_BIN=python3.12 bash scripts/install.sh`
 - **3.13+:** allowed; installer warns (vLLM wheel compatibility may break—prefer 3.12 for regulated builds).
 
 Stage matching OS packages for your chosen interpreter (names vary by RHEL/variant), e.g. `python3.12`, pip/venv, and **devel** headers for the vLLM interpreter.
@@ -78,7 +78,7 @@ sudo PIP_NO_INDEX=1 \
      VLLM_PIP_SPEC="/mnt/media/wheelhouse/vllm-0.14.1-*.whl" \
      VLLM_SKIP_INSTALL=false \
      MODEL_DOWNLOAD=false \
-     bash install.sh
+     bash scripts/install.sh
 ```
 
 `PIP_NO_INDEX/PIP_FIND_LINKS` make installer `pip install` steps use the local wheelhouse only.
@@ -89,5 +89,5 @@ No vLLM/GPU install path:
 
 ```bash
 cd /path/to/llm_notable_analysis_onprem_systemd
-sudo SDK_SOURCE_DIR=/path/to/onprem-llm-sdk bash install_mini_qwen_cpu_client.sh
+sudo SDK_SOURCE_DIR=/path/to/onprem-llm-sdk bash scripts/install_mini_qwen_cpu_client.sh
 ```

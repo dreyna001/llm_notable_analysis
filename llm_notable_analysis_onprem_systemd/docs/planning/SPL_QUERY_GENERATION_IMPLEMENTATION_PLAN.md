@@ -65,7 +65,7 @@ When enabled:
 
 The following decisions are locked for implementation:
 
-- v1 scope is the structured JSON analysis path in `onprem_service/local_llm_client.py` only.
+- v1 scope is the structured JSON analysis path in `src/llm_notable_analysis_onprem_systemd/onprem_service/local_llm_client.py` only.
 - `freeform_llm_client.py` is out of scope for v1.
 - When `SPL_QUERY_GENERATION_ENABLED=true`, a successful SPL-enabled result must contain:
   - exactly 6 competing hypotheses total
@@ -221,7 +221,7 @@ Suggested fields:
 
 ### 1. Prompt Contract Updates
 
-Update `onprem_service/local_llm_client.py` to extend the existing competing hypothesis instructions so each hypothesis also returns:
+Update `src/llm_notable_analysis_onprem_systemd/onprem_service/local_llm_client.py` to extend the existing competing hypothesis instructions so each hypothesis also returns:
 
 - `query_strategy`
 - `primary_spl_query`
@@ -240,7 +240,7 @@ Update prompt rules so the model:
 
 ### 2. Response Validation Updates
 
-Extend structured response validation in `onprem_service/local_llm_client.py` to check:
+Extend structured response validation in `src/llm_notable_analysis_onprem_systemd/onprem_service/local_llm_client.py` to check:
 
 - `query_strategy` is present and valid when hypotheses are present
 - `primary_spl_query` is a non-empty string
@@ -259,7 +259,7 @@ Validation behavior is locked:
 
 ### 3. Markdown Rendering Updates
 
-Update `onprem_service/markdown_generator.py` so each hypothesis renders:
+Update `src/llm_notable_analysis_onprem_systemd/onprem_service/markdown_generator.py` so each hypothesis renders:
 
 - query strategy
 - primary SPL query
@@ -275,7 +275,7 @@ If SPL query generation is enabled but the SPL contract still fails after repair
 
 ### 4. Configuration Updates
 
-Update `onprem_service/config.py` and environment documentation to add:
+Update `src/llm_notable_analysis_onprem_systemd/onprem_service/config.py` and environment documentation to add:
 
 - `SPL_QUERY_GENERATION_ENABLED: bool = False`
 - parsing from `os.getenv("SPL_QUERY_GENERATION_ENABLED", "false")`
@@ -314,15 +314,15 @@ Implement in this order:
 
 The following files are in scope for the implementation and why they are needed.
 
-- `onprem_service/config.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/config.py`
   - add `SPL_QUERY_GENERATION_ENABLED: bool = False`
   - parse the environment variable in `load_config()`
-- `onprem_service/local_llm_client.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/local_llm_client.py`
   - add prompt rules and schema contract for per-hypothesis SPL fields
   - gate SPL generation behavior on `SPL_QUERY_GENERATION_ENABLED`
   - enforce/repair the strict `6 hypotheses -> 6 queries` contract when enabled
   - strip/ignore SPL fields when disabled
-- `onprem_service/markdown_generator.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/markdown_generator.py`
   - render SPL query details under each hypothesis when enabled and valid
   - omit SPL query sections when disabled
   - show a short SPL-unavailable note when enabled but contract fails after repair
@@ -337,8 +337,8 @@ The following files are in scope for the implementation and why they are needed.
 
 ### Explicitly Out Of Scope (v1)
 
-- `onprem_service/freeform_llm_client.py`
-- `onprem_service/freeform_main.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/freeform_llm_client.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/freeform_main.py`
 - Phantom/SOAR playbook files
 
 ## Notes From Design Discussion

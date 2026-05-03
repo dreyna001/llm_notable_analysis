@@ -8,12 +8,12 @@ This guide provides a minimal playbook pattern for environments where:
 
 The accompanying template code is in:
 
-- `llm_notable_analysis_onprem_systemd/soar_playbook/phantom_notable_to_analyzer.py`
+- `llm_notable_analysis_onprem_systemd/src/llm_notable_analysis_onprem_systemd/soar_playbook/phantom_notable_to_analyzer.py`
 
 Alternative guide/template for scheduled notable-index polling:
 
-- Guide: `llm_notable_analysis_onprem_systemd/SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md`
-- Template: `llm_notable_analysis_onprem_systemd/soar_playbook/phantom_notable_index_to_analyzer.py`
+- Guide: `SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md`
+- Template: `llm_notable_analysis_onprem_systemd/src/llm_notable_analysis_onprem_systemd/soar_playbook/phantom_notable_index_to_analyzer.py`
 
 ## 1) Trigger Timing (when to run playbook)
 

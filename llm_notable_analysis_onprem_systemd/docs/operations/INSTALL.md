@@ -15,7 +15,7 @@
 - **Default:** The installer defaults both analyzer and vLLM venvs to `python3.12`. Override with `ANALYZER_PYTHON_BIN` and `VLLM_PYTHON_BIN` if needed.
 - **Minimum:** Python 3.10+ is required; the installer fails if the chosen interpreter is older.
 - **3.13+:** If the interpreter is 3.13 or newer, the installer warns (does not fail). If vLLM later fails to start, pin to Python 3.12.
-- **Pinning (regulated envs):** For reproducible installs, pin both venvs to a specific interpreter, e.g. `sudo ANALYZER_PYTHON_BIN=python3.12 VLLM_PYTHON_BIN=python3.12 bash install.sh`. See README "Reproducibility: pinning Python".
+- **Pinning (regulated envs):** For reproducible installs, pin both venvs to a specific interpreter, e.g. `sudo ANALYZER_PYTHON_BIN=python3.12 VLLM_PYTHON_BIN=python3.12 bash scripts/install.sh`. See README "Reproducibility: pinning Python".
 - **Debian/Ubuntu headers:** Ensure Python dev headers match the vLLM interpreter (for Triton/Inductor runtime compile), e.g. `python3.11-dev` for `python3.11`, `python3.12-dev` for `python3.12`.
 
 ## Quick Install
@@ -25,13 +25,13 @@
 cd /path/to/llm_notable_analysis_onprem_systemd
 
 # Run installer as root
-sudo bash install.sh
+sudo bash scripts/install.sh
 
-# install.sh will also attempt post-install service start and a canned
+# scripts/install.sh will also attempt post-install service start and a canned
 # inference smoke test (best-effort, non-fatal). To skip:
-# sudo AUTO_START_SERVICES=false RUN_SMOKE_TEST=false bash install.sh
+# sudo AUTO_START_SERVICES=false RUN_SMOKE_TEST=false bash scripts/install.sh
 # Tune readiness windows if model startup is slow:
-# sudo VLLM_HEALTH_TIMEOUT_SECONDS=420 SMOKE_TEST_TIMEOUT_SECONDS=240 bash install.sh
+# sudo VLLM_HEALTH_TIMEOUT_SECONDS=420 SMOKE_TEST_TIMEOUT_SECONDS=240 bash scripts/install.sh
 ```
 
 ## Mini/Qwen CPU client-mode install (with mini llama.cpp service)
@@ -43,7 +43,7 @@ Use this when your inference service is already running from `onprem_qwen3_sudo_
 #   /path/to/llm_notable_analysis_onprem_systemd
 #   /path/to/onprem-llm-sdk
 cd /path/to/llm_notable_analysis_onprem_systemd
-sudo bash install_mini_qwen_cpu_client.sh
+sudo bash scripts/install_mini_qwen_cpu_client.sh
 ```
 
 Behavior highlights:
@@ -60,10 +60,10 @@ Optional flags:
 
 ```bash
 # Explicit SDK path
-sudo SDK_SOURCE_DIR=/opt/notable-analyzer-src/onprem-llm-sdk bash install_mini_qwen_cpu_client.sh
+sudo SDK_SOURCE_DIR=/opt/notable-analyzer-src/onprem-llm-sdk bash scripts/install_mini_qwen_cpu_client.sh
 
 # Install/start systemd unit when available
-sudo INSTALL_SYSTEMD_UNIT=true AUTO_START_ANALYZER=true bash install_mini_qwen_cpu_client.sh
+sudo INSTALL_SYSTEMD_UNIT=true AUTO_START_ANALYZER=true bash scripts/install_mini_qwen_cpu_client.sh
 ```
 
 ## Manual Inputs Still Required
@@ -74,9 +74,9 @@ After install completes, these may still require operator input:
 - Set `LLM_API_TOKEN` only if vLLM is configured with `--api-key`.
 - Set `SPLUNK_BASE_URL` / `SPLUNK_API_TOKEN` only if Splunk writeback is enabled.
 - Add SOAR key(s) to `/var/sftp/soar/.ssh/authorized_keys` only for SOAR SFTP ingest.
-- Review and clear any post-install non-fatal issues reported by `install.sh`.
+- Review and clear any post-install non-fatal issues reported by `scripts/install.sh`.
 
-## What install.sh Does
+## What `scripts/install.sh` Does
 
 | Step | Action | Failure Handling |
 |------|--------|------------------|
@@ -96,7 +96,8 @@ After install completes, these may still require operator input:
 
 ```
 /opt/notable-analyzer/
-├── onprem_service/          # Python package
+├── src/                     # Installed package source tree
+├── pyproject.toml           # Package metadata
 ├── venv/                    # Virtual environment
 └── requirements.txt
 
@@ -143,7 +144,7 @@ For `sshd` chroot to work:
 
 1. **Chroot directory ownership:** `root:root` with mode `755` (no group/other write)
 2. **User directory inside chroot:** Can be owned by user
-3. **SELinux:** `ssh_chroot_rw_homedirs` boolean must be on (install.sh handles this)
+3. **SELinux:** `ssh_chroot_rw_homedirs` boolean must be on (`scripts/install.sh` handles this)
 
 If SFTP fails with "broken pipe" or "permission denied":
 
@@ -181,20 +182,20 @@ The analyzer talks to an OpenAI-compatible local endpoint (vLLM). The included `
 
 - `/opt/vllm/venv` (Python venv)
 
-If you ran `install.sh` without overrides, it will create this venv and install vLLM automatically.
+If you ran `scripts/install.sh` without overrides, it will create this venv and install vLLM automatically.
 
 If you need a different path (for example, Python 3.12 side-by-side), set:
 
 - `VLLM_INSTALL_DIR` (default: `/opt/vllm`)
 - `VLLM_VENV_DIR` (default: `$VLLM_INSTALL_DIR/venv`)
 
-`install.sh` now patches the installed `/etc/systemd/system/vllm.service` `WorkingDirectory` and `ExecStart` to match these values automatically.
+`scripts/install.sh` now patches the installed `/etc/systemd/system/vllm.service` `WorkingDirectory` and `ExecStart` to match these values automatically.
 Single-node loopback rendezvous settings are already embedded in the base `vllm.service`; an additional `override.conf` is not required for normal deployments.
 
 If you need to skip vLLM install (common in air-gapped environments where you pre-stage wheels), run:
 
 ```bash
-sudo VLLM_SKIP_INSTALL=true bash install.sh
+sudo VLLM_SKIP_INSTALL=true bash scripts/install.sh
 ```
 
 Then install vLLM yourself into your chosen venv path (or update `vllm.service` to point to your chosen interpreter).
@@ -213,7 +214,7 @@ sudo systemctl daemon-reload
 If prior host-local drop-ins exist and you want deterministic behavior from the repo unit, rerun installer with:
 
 ```bash
-sudo VLLM_RESET_OVERRIDES=true bash install.sh
+sudo VLLM_RESET_OVERRIDES=true bash scripts/install.sh
 ```
 
 ### 4. Add SOAR SSH Key
@@ -222,14 +223,14 @@ sudo VLLM_RESET_OVERRIDES=true bash install.sh
 
 For a simple Phantom playbook template that builds one notable JSON payload (including supporting events) and uploads it to `/incoming`, see:
 
-- `SOAR_PLAYBOOK_PHANTOM.md`
-- `soar_playbook/phantom_notable_to_analyzer.py`
+- `../integrations/SOAR_PLAYBOOK_PHANTOM.md`
+- `../../src/llm_notable_analysis_onprem_systemd/soar_playbook/phantom_notable_to_analyzer.py`
 
 For an alternative scheduled/query-based Phantom template that polls
 `index=notable`, see:
 
-- `SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md`
-- `soar_playbook/phantom_notable_index_to_analyzer.py`
+- `../integrations/SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md`
+- `../../src/llm_notable_analysis_onprem_systemd/soar_playbook/phantom_notable_index_to_analyzer.py`
 
 ```bash
 # Get public key from SOAR appliance
@@ -253,7 +254,7 @@ Run tests from repo root before first service start:
 
 ```bash
 cd ~/llm_notable_analysis
-PYTHONPATH=llm_notable_analysis_onprem_systemd /opt/notable-analyzer/venv/bin/python -m unittest discover -s llm_notable_analysis_onprem_systemd/tests -p "test*.py" -v
+PYTHONPATH=llm_notable_analysis_onprem_systemd/src /opt/notable-analyzer/venv/bin/python -m unittest discover -s llm_notable_analysis_onprem_systemd/tests -p "test*.py" -v
 ```
 
 Expected result:
@@ -343,7 +344,7 @@ sudo systemctl restart sshd
 
 ## Ansible Alternative
 
-For multi-host or enterprise deployments, consider converting `install.sh` to an Ansible playbook. Key modules:
+For multi-host or enterprise deployments, consider converting `scripts/install.sh` to an Ansible playbook. Key modules:
 
 | Task | Ansible Module |
 |------|----------------|

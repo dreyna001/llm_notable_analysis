@@ -23,15 +23,15 @@ readonly VLLM_VENV_DIR="${VLLM_VENV_DIR:-$VLLM_INSTALL_DIR/venv}"
 # - Default pins to a known-good version.
 # - Override for air-gapped installs to point at an internal wheelhouse or local artifact.
 #   Examples:
-#     sudo VLLM_PIP_SPEC="vllm==0.14.1" bash install.sh
-#     sudo VLLM_PIP_SPEC="/mnt/media/wheels/vllm-0.14.1-*.whl" bash install.sh
+#     sudo VLLM_PIP_SPEC="vllm==0.14.1" bash scripts/install.sh
+#     sudo VLLM_PIP_SPEC="/mnt/media/wheels/vllm-0.14.1-*.whl" bash scripts/install.sh
 readonly VLLM_PIP_SPEC="${VLLM_PIP_SPEC:-vllm==0.14.1}"
 
 # Python interpreter selection (pinning / reproducibility)
 #
 # For regulated environments, prefer pinning vLLM to a specific Python (commonly 3.12).
 # Example:
-#   sudo ANALYZER_PYTHON_BIN=python3.12 VLLM_PYTHON_BIN=python3.12 bash install.sh
+#   sudo ANALYZER_PYTHON_BIN=python3.12 VLLM_PYTHON_BIN=python3.12 bash scripts/install.sh
 #
 # If these are set and missing/unusable, the installer will fail early.
 readonly ANALYZER_PYTHON_BIN="${ANALYZER_PYTHON_BIN:-python3.12}"
@@ -72,7 +72,7 @@ download_model_best_effort() {
     # Optional: download model weights non-interactively via Hugging Face Hub.
     #
     # Enable with:
-    #   sudo MODEL_DOWNLOAD=true HF_TOKEN=... bash install.sh
+    #   sudo MODEL_DOWNLOAD=true HF_TOKEN=... bash scripts/install.sh
     #
     # Optional:
     #   MODEL_REPO=google/gemma-4-31B-it   (default)
@@ -361,13 +361,15 @@ check_python_version "$ANALYZER_PYTHON_BIN" "Analyzer"
 check_python_version "$VLLM_PYTHON_BIN" "vLLM"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Verify required files exist
 for f in requirements.txt config.env.example; do
-    [[ -f "$SCRIPT_DIR/$f" ]] || err "Missing required file: $SCRIPT_DIR/$f"
+    [[ -f "$REPO_DIR/$f" ]] || err "Missing required file: $REPO_DIR/$f"
 done
-[[ -d "$SCRIPT_DIR/onprem_service" ]] || err "Missing directory: $SCRIPT_DIR/onprem_service"
-[[ -d "$SCRIPT_DIR/systemd" ]] || err "Missing directory: $SCRIPT_DIR/systemd"
+[[ -f "$REPO_DIR/pyproject.toml" ]] || err "Missing required file: $REPO_DIR/pyproject.toml"
+[[ -d "$REPO_DIR/src/llm_notable_analysis_onprem_systemd/onprem_service" ]] || err "Missing package directory: $REPO_DIR/src/llm_notable_analysis_onprem_systemd/onprem_service"
+[[ -d "$REPO_DIR/deploy/systemd" ]] || err "Missing directory: $REPO_DIR/deploy/systemd"
 
 echo ""
 
@@ -479,13 +481,16 @@ fi
 #------------------------------------------------------------------------------
 echo "[4/8] Copying application code..."
 
-cp -r "$SCRIPT_DIR/onprem_service" "$INSTALL_DIR/" \
-    || err "Failed to copy onprem_service to $INSTALL_DIR"
-cp "$SCRIPT_DIR/requirements.txt" "$INSTALL_DIR/" \
+rm -rf "$INSTALL_DIR/onprem_service" "$INSTALL_DIR/src"
+cp -a "$REPO_DIR/src" "$INSTALL_DIR/" \
+    || err "Failed to copy src package tree to $INSTALL_DIR"
+cp "$REPO_DIR/pyproject.toml" "$INSTALL_DIR/" \
+    || err "Failed to copy pyproject.toml"
+cp "$REPO_DIR/requirements.txt" "$INSTALL_DIR/" \
     || err "Failed to copy requirements.txt"
 
 chown -R "$SVC_USER:$SVC_USER" "$INSTALL_DIR"
-info "Code installed at $INSTALL_DIR/onprem_service"
+info "Code installed at $INSTALL_DIR/src/llm_notable_analysis_onprem_systemd"
 
 #------------------------------------------------------------------------------
 # 5. Create Python virtual environment
@@ -504,6 +509,8 @@ fi
     || err "Failed to upgrade pip"
 "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt" --quiet \
     || err "Failed to install requirements"
+"$INSTALL_DIR/venv/bin/pip" install --upgrade "$INSTALL_DIR" --quiet \
+    || err "Failed to install analyzer package"
 
 chown -R "$SVC_USER:$SVC_USER" "$INSTALL_DIR/venv"
 info "Dependencies installed"
@@ -520,7 +527,7 @@ echo "[5b] Creating vLLM virtual environment (optional)..."
 
 # Allow skipping vLLM install (useful for air-gapped environments where vLLM is pre-installed)
 # Example:
-#   sudo VLLM_SKIP_INSTALL=true bash install.sh
+#   sudo VLLM_SKIP_INSTALL=true bash scripts/install.sh
 if [[ "${VLLM_SKIP_INSTALL:-false}" == "true" ]]; then
     warn "VLLM_SKIP_INSTALL=true; skipping vLLM venv creation and vLLM installation"
 else
@@ -567,7 +574,7 @@ echo "[6/8] Installing configuration..."
 if [[ -f "$CONFIG_DIR/config.env" ]]; then
     info "Config exists: $CONFIG_DIR/config.env (not overwritten)"
 else
-    cp "$SCRIPT_DIR/config.env.example" "$CONFIG_DIR/config.env" \
+    cp "$REPO_DIR/config.env.example" "$CONFIG_DIR/config.env" \
         || err "Failed to copy config.env.example"
     chown "$SVC_USER:$SVC_USER" "$CONFIG_DIR/config.env"
     chmod 600 "$CONFIG_DIR/config.env"
@@ -581,7 +588,7 @@ fi
 echo "[7/8] Installing systemd units..."
 
 # If you want to "comment out" systemd unit installation without deleting code:
-#   sudo INSTALL_SYSTEMD_UNITS=false bash install.sh
+#   sudo INSTALL_SYSTEMD_UNITS=false bash scripts/install.sh
 if [[ "${INSTALL_SYSTEMD_UNITS:-true}" == "true" ]]; then
     # Default units (stable baseline)
     units=(
@@ -594,13 +601,13 @@ if [[ "${INSTALL_SYSTEMD_UNITS:-true}" == "true" ]]; then
     # Optional: install the freeform (paragraphs-only) analyzer as an additional unit.
     # This avoids modifying/replacing the baseline unit and removes "remember to change it back" risk.
     # Enable with:
-    #   sudo INSTALL_FREEFORM_SERVICE=true bash install.sh
+    #   sudo INSTALL_FREEFORM_SERVICE=true bash scripts/install.sh
     if [[ "${INSTALL_FREEFORM_SERVICE:-false}" == "true" ]]; then
         units+=(notable-analyzer-freeform.service)
     fi
 
     for unit in "${units[@]}"; do
-        src="$SCRIPT_DIR/systemd/$unit"
+        src="$REPO_DIR/deploy/systemd/$unit"
         [[ -f "$src" ]] || err "Missing systemd unit: $src"
         # Prevent subtle failures when unit files were edited on Windows.
         strip_crlf_in_file_best_effort "$src"
@@ -725,25 +732,25 @@ echo "      sudo systemctl daemon-reload && sudo systemctl restart vllm"
 echo ""
 echo "Optional installer flags:"
 echo "  - Skip vLLM install (air-gapped / preinstalled):"
-echo "      sudo VLLM_SKIP_INSTALL=true bash install.sh"
+echo "      sudo VLLM_SKIP_INSTALL=true bash scripts/install.sh"
 echo "  - Add extra vLLM smoke checks (non-fatal):"
-echo "      sudo VLLM_SMOKE_TEST=true bash install.sh"
+echo "      sudo VLLM_SMOKE_TEST=true bash scripts/install.sh"
 echo "  - Download model non-interactively (requires internet + HF token):"
-echo "      sudo MODEL_DOWNLOAD=true HF_TOKEN=... bash install.sh"
+echo "      sudo MODEL_DOWNLOAD=true HF_TOKEN=... bash scripts/install.sh"
 echo "      # optional: MODEL_REPO=google/gemma-4-31B-it VLLM_MODEL_PATH=/opt/models/gemma-4-31B-it VLLM_SERVED_MODEL_NAME=gemma-4-31B-it"
 echo "  - Auto-start services after install (best-effort, default true):"
-echo "      sudo AUTO_START_SERVICES=true bash install.sh"
+echo "      sudo AUTO_START_SERVICES=true bash scripts/install.sh"
 echo "  - Skip post-install service start:"
-echo "      sudo AUTO_START_SERVICES=false bash install.sh"
+echo "      sudo AUTO_START_SERVICES=false bash scripts/install.sh"
 echo "  - Run/skip canned smoke inference (best-effort, default true):"
-echo "      sudo RUN_SMOKE_TEST=true bash install.sh"
-echo "      sudo RUN_SMOKE_TEST=false bash install.sh"
+echo "      sudo RUN_SMOKE_TEST=true bash scripts/install.sh"
+echo "      sudo RUN_SMOKE_TEST=false bash scripts/install.sh"
 echo "  - Override vLLM health timeout seconds (default: 420):"
-echo "      sudo VLLM_HEALTH_TIMEOUT_SECONDS=420 bash install.sh"
+echo "      sudo VLLM_HEALTH_TIMEOUT_SECONDS=420 bash scripts/install.sh"
 echo "  - Reset existing vLLM systemd drop-ins (recommended when standardizing unit behavior):"
-echo "      sudo VLLM_RESET_OVERRIDES=true bash install.sh"
+echo "      sudo VLLM_RESET_OVERRIDES=true bash scripts/install.sh"
 echo "  - Override smoke test timeout seconds (default: 240):"
-echo "      sudo SMOKE_TEST_TIMEOUT_SECONDS=240 bash install.sh"
+echo "      sudo SMOKE_TEST_TIMEOUT_SECONDS=240 bash scripts/install.sh"
 
 echo ""
 if [[ ${#NON_FATAL_ISSUES[@]} -gt 0 ]]; then

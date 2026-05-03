@@ -24,7 +24,7 @@ This block must preserve the current default file-drop analysis path.
 - add ServiceNow incident create with explicit approval
 - keep parity in `onprem_main_nonsdk.py` and `local_llm_client_nonsdk.py`
 - add optional local tool-call structured-output mode for analysis and SPL calls
-- add env flags to `config.env.example` and `onprem_service/config.py`
+- add env flags to `config.env.example` and `src/llm_notable_analysis_onprem_systemd/onprem_service/config.py`
 - add deterministic unit tests with fake responses
 
 ### Out of scope
@@ -58,19 +58,19 @@ This block must preserve the current default file-drop analysis path.
 
 Required new implementation files:
 
-- `onprem_service/spl_query_generation.py`
-- `onprem_service/splunk_investigation.py`
-- `onprem_service/query_result_enrichment.py`
-- `onprem_service/servicenow.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/spl_query_generation.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/splunk_investigation.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/query_result_enrichment.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/servicenow.py`
 
 Expected modified files:
 
-- `onprem_service/local_llm_client.py`
-- `onprem_service/local_llm_client_nonsdk.py`
-- `onprem_service/markdown_generator.py`
-- `onprem_service/onprem_main.py`
-- `onprem_service/onprem_main_nonsdk.py`
-- `onprem_service/config.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/local_llm_client.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/local_llm_client_nonsdk.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/markdown_generator.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/onprem_main.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/onprem_main_nonsdk.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/config.py`
 - `config.env.example`
 - `README.md`
 
@@ -135,9 +135,9 @@ Move self-contained SPL generation pieces out of `local_llm_client.py` without c
 
 ### Files
 
-- `onprem_service/spl_query_generation.py`
-- `onprem_service/local_llm_client.py`
-- `onprem_service/local_llm_client_nonsdk.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/spl_query_generation.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/local_llm_client.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/local_llm_client_nonsdk.py`
 - `tests/onprem_service/test_spl_query_generation.py`
 - existing LLM client tests as needed
 
@@ -189,7 +189,7 @@ Add read-only Splunk investigation execution through REST and MCP in one concret
 
 ### Files
 
-- `onprem_service/splunk_investigation.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/splunk_investigation.py`
 - `tests/onprem_service/test_splunk_investigation.py`
 
 ### Implementation
@@ -252,8 +252,8 @@ Deterministically enrich the existing LLM response object with query-result evid
 
 ### Files
 
-- `onprem_service/query_result_enrichment.py`
-- `onprem_service/markdown_generator.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/query_result_enrichment.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/markdown_generator.py`
 - `tests/onprem_service/test_query_result_enrichment.py`
 - `tests/onprem_service/test_markdown_generator.py`
 
@@ -291,7 +291,7 @@ Add ServiceNow draft and approved create behavior in one concrete module.
 
 ### Files
 
-- `onprem_service/servicenow.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/servicenow.py`
 - `tests/onprem_service/test_servicenow.py`
 
 ### Implementation
@@ -356,9 +356,9 @@ Wire enabled optional features into the existing processing flow.
 
 ### Files
 
-- `onprem_service/onprem_main.py`
-- `onprem_service/onprem_main_nonsdk.py`
-- `onprem_service/config.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/onprem_main.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/onprem_main_nonsdk.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/config.py`
 - `config.env.example`
 - `README.md`
 - relevant tests under `tests/onprem_service/`

@@ -5,7 +5,7 @@ Air-gapped, single-host deployment for security notable analysis using local LLM
 ## Notes / Clarifications
 
 - **Doc intent / naming**: This doc is meant to capture the **architecture + service design** for an **on-prem / air-gapped** operating model (not only “how to deploy”).
-- **Why `__init__.py` exists**: `onprem_service/__init__.py` makes `onprem_service` a Python package so imports are reliable (and `python -m onprem_service.onprem_main` works predictably).
+- **Why `src/` exists**: `src/llm_notable_analysis_onprem_systemd/` is the installable Python package root, so imports and service entrypoints stay stable after deployment.
 
 ## Architecture
 
@@ -43,12 +43,12 @@ If your inference layer is already provided by `onprem_qwen3_sudo_llamacpp_servi
 
 ```bash
 cd /path/to/llm_notable_analysis_onprem_systemd
-sudo bash install_mini_qwen_cpu_client.sh
+sudo bash scripts/install_mini_qwen_cpu_client.sh
 ```
 
 What this script does:
 
-- Installs `onprem_service` into `/opt/notable-analyzer`.
+- Installs the package source tree into `/opt/notable-analyzer/src`.
 - Creates `/opt/notable-analyzer/venv` and installs dependencies.
 - Installs the local SDK from `../onprem-llm-sdk` by default.
 - Creates/updates `/etc/notable-analyzer/config.env` for mini defaults:
@@ -62,7 +62,7 @@ What this script does:
 If your SDK is not at `../onprem-llm-sdk`, set:
 
 ```bash
-sudo SDK_SOURCE_DIR=/path/to/onprem-llm-sdk bash install_mini_qwen_cpu_client.sh
+sudo SDK_SOURCE_DIR=/path/to/onprem-llm-sdk bash scripts/install_mini_qwen_cpu_client.sh
 ```
 
 ## Quick Start
@@ -75,14 +75,15 @@ sudo mkdir -p /opt/notable-analyzer
 sudo chown $USER:$USER /opt/notable-analyzer
 
 # Copy files
-cp -r onprem_service /opt/notable-analyzer/
-cp requirements.txt /opt/notable-analyzer/
+cp -r src /opt/notable-analyzer/
+cp pyproject.toml requirements.txt /opt/notable-analyzer/
 
 # Create virtual environment
 cd /opt/notable-analyzer
 python3.10 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+pip install /opt/notable-analyzer
 ```
 
 ### 2. Configure
@@ -107,8 +108,8 @@ sudo chown -R notable-analyzer:notable-analyzer /var/notables
 ### 4. Install Systemd Services
 
 ```bash
-sudo cp systemd/notable-analyzer.service /etc/systemd/system/
-sudo cp systemd/vllm.service /etc/systemd/system/
+sudo cp deploy/systemd/notable-analyzer.service /etc/systemd/system/
+sudo cp deploy/systemd/vllm.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable notable-analyzer vllm
 sudo systemctl start vllm
@@ -123,42 +124,42 @@ The analyzer expects a local OpenAI-compatible vLLM endpoint. For a `gemma-4-31B
 - Model path: `/opt/models/gemma-4-31B-it`
 - Executor backend: `--distributed-executor-backend mp`
 
-Note: the repo's base `systemd/vllm.service` defaults to `gemma-4-31B-it`; keep `--model`, `--served-model-name`, and `LLM_MODEL_NAME` aligned if you override the model.
+Note: the repo's base `deploy/systemd/vllm.service` defaults to `gemma-4-31B-it`; keep `--model`, `--served-model-name`, and `LLM_MODEL_NAME` aligned if you override the model.
 
-If you use `install.sh`, it will create `/opt/vllm/venv` and install vLLM by default (using `python3.12` unless overridden; set `VLLM_SKIP_INSTALL=true` to skip).
-If you install vLLM elsewhere, set `VLLM_INSTALL_DIR` and `VLLM_VENV_DIR` when running `install.sh`; the installer patches the installed `/etc/systemd/system/vllm.service` `WorkingDirectory` and `ExecStart` automatically.
-Single-node loopback rendezvous settings (`VLLM_HOST_IP`, `MASTER_ADDR`, NCCL/Gloo loopback interface vars) are included directly in `systemd/vllm.service`; no extra drop-in is required for normal installs.
+If you use `scripts/install.sh`, it will create `/opt/vllm/venv` and install vLLM by default (using `python3.12` unless overridden; set `VLLM_SKIP_INSTALL=true` to skip).
+If you install vLLM elsewhere, set `VLLM_INSTALL_DIR` and `VLLM_VENV_DIR` when running `scripts/install.sh`; the installer patches the installed `/etc/systemd/system/vllm.service` `WorkingDirectory` and `ExecStart` automatically.
+Single-node loopback rendezvous settings (`VLLM_HOST_IP`, `MASTER_ADDR`, NCCL/Gloo loopback interface vars) are included directly in `deploy/systemd/vllm.service`; no extra drop-in is required for normal installs.
 
 Examples:
 
 ```bash
 # Default layout
-sudo bash install.sh
+sudo bash scripts/install.sh
 
 # Custom side-by-side vLLM path (optional)
-sudo VLLM_INSTALL_DIR=/opt/vllm312 VLLM_VENV_DIR=/opt/vllm312/venv VLLM_PYTHON_BIN=python3.12 bash install.sh
+sudo VLLM_INSTALL_DIR=/opt/vllm312 VLLM_VENV_DIR=/opt/vllm312/venv VLLM_PYTHON_BIN=python3.12 bash scripts/install.sh
 ```
 
 Note: During vLLM installation, the installer may appear idle for several minutes after creating `/opt/vllm/venv` while `pip` resolves/builds dependencies. This is expected on some hosts.
 
 ### Note on model weights directory
 
-`install.sh` will also **best-effort** create `/opt/models` (and the configured model path) and attempt to `chown` it to the invoking sudo user to make it easier to download/copy model weights. If this fails due to permissions, the install continues and you can create/chown the directory manually.
+`scripts/install.sh` will also **best-effort** create `/opt/models` (and the configured model path) and attempt to `chown` it to the invoking sudo user to make it easier to download/copy model weights. If this fails due to permissions, the install continues and you can create/chown the directory manually.
 
 ### Optional install.sh flags (quality-of-life)
 
-- **Skip vLLM install**: `sudo VLLM_SKIP_INSTALL=true bash install.sh` (useful for air-gapped hosts where you pre-stage wheels)
-- **Enable extra vLLM smoke checks**: `sudo VLLM_SMOKE_TEST=true bash install.sh` (non-fatal checks like `nvidia-smi` + model path presence)
-- **Download model weights (non-interactive)**: `sudo MODEL_DOWNLOAD=true HF_TOKEN=... bash install.sh`
+- **Skip vLLM install**: `sudo VLLM_SKIP_INSTALL=true bash scripts/install.sh` (useful for air-gapped hosts where you pre-stage wheels)
+- **Enable extra vLLM smoke checks**: `sudo VLLM_SMOKE_TEST=true bash scripts/install.sh` (non-fatal checks like `nvidia-smi` + model path presence)
+- **Download model weights (non-interactive)**: `sudo MODEL_DOWNLOAD=true HF_TOKEN=... bash scripts/install.sh`
   - Default: `MODEL_REPO=google/gemma-4-31B-it`
   - Notes: best-effort; uses `huggingface_hub` HTTP downloads (no `git lfs` required)
-- **Auto-start services after install (best-effort, default true)**: `sudo AUTO_START_SERVICES=true bash install.sh`
-- **Skip post-install service start**: `sudo AUTO_START_SERVICES=false bash install.sh`
-- **Run canned inference smoke test after auto-start (best-effort, default true)**: `sudo RUN_SMOKE_TEST=true bash install.sh`
-- **Skip canned inference smoke test**: `sudo RUN_SMOKE_TEST=false bash install.sh`
-- **Override vLLM health timeout (default: 420s)**: `sudo VLLM_HEALTH_TIMEOUT_SECONDS=420 bash install.sh`
-- **Override smoke test timeout (default: 240s)**: `sudo SMOKE_TEST_TIMEOUT_SECONDS=240 bash install.sh`
-- **Reset existing vLLM systemd drop-ins (recommended when standardizing)**: `sudo VLLM_RESET_OVERRIDES=true bash install.sh`
+- **Auto-start services after install (best-effort, default true)**: `sudo AUTO_START_SERVICES=true bash scripts/install.sh`
+- **Skip post-install service start**: `sudo AUTO_START_SERVICES=false bash scripts/install.sh`
+- **Run canned inference smoke test after auto-start (best-effort, default true)**: `sudo RUN_SMOKE_TEST=true bash scripts/install.sh`
+- **Skip canned inference smoke test**: `sudo RUN_SMOKE_TEST=false bash scripts/install.sh`
+- **Override vLLM health timeout (default: 420s)**: `sudo VLLM_HEALTH_TIMEOUT_SECONDS=420 bash scripts/install.sh`
+- **Override smoke test timeout (default: 240s)**: `sudo SMOKE_TEST_TIMEOUT_SECONDS=240 bash scripts/install.sh`
+- **Reset existing vLLM systemd drop-ins (recommended when standardizing)**: `sudo VLLM_RESET_OVERRIDES=true bash scripts/install.sh`
 
 ### Manual Inputs Still Required
 
@@ -170,14 +171,14 @@ Even with one-command install, these items remain environment-specific:
 - Set `SPL_QUERY_GENERATION_ENABLED=true` only when you want per-hypothesis SPL query generation in reports.
 - Set `INVESTIGATION_QUERY_EXECUTION_ENABLED=true` only when you want bounded read-only Splunk query execution and report enrichment.
 - Add SOAR public key(s) to `/var/sftp/soar/.ssh/authorized_keys` only if using SOAR SFTP ingest.
-- Review the final `install.sh` "Non-fatal issues encountered" summary and resolve items before production.
+- Review the final `scripts/install.sh` "Non-fatal issues encountered" summary and resolve items before production.
 
 ### Gemma 4 31B-it model setup
 
 The default model repository is `google/gemma-4-31B-it`, and the default served model name is `gemma-4-31B-it`:
 
 ```bash
-sudo MODEL_DOWNLOAD=true HF_TOKEN=... bash install.sh
+sudo MODEL_DOWNLOAD=true HF_TOKEN=... bash scripts/install.sh
 ```
 
 Then set the analyzer model name to match the served vLLM name:
@@ -194,7 +195,7 @@ For environments that require scanning/approving every installed component, gene
 
 ```bash
 cd /path/to/llm_notable_analysis_onprem_systemd
-sudo bash tools/generate_dependency_manifest.sh
+sudo bash scripts/tools/generate_dependency_manifest.sh
 ```
 
 This produces a timestamped folder (example: `dependency_manifest_20260117_033000/`) containing:
@@ -216,17 +217,17 @@ Recommended baseline: **Python 3.12**.
 Example (pin both venvs to Python 3.12):
 
 ```bash
-sudo ANALYZER_PYTHON_BIN=python3.12 VLLM_PYTHON_BIN=python3.12 bash install.sh
+sudo ANALYZER_PYTHON_BIN=python3.12 VLLM_PYTHON_BIN=python3.12 bash scripts/install.sh
 ```
 
-If the specified interpreter is not present on the host, `install.sh` will fail early (so you don’t end up with a partially working deployment).
+If the specified interpreter is not present on the host, `scripts/install.sh` will fail early (so you don’t end up with a partially working deployment).
 
 ## Freeform paragraphs mode (no JSON schema)
 
 If you want a report that is just a few paragraphs (to avoid schema/tooling fragility), you can run the alternative service:
 
 - systemd unit: `notable-analyzer-freeform.service`
-- entrypoint: `python -m onprem_service.freeform_main`
+- entrypoint: `python -m llm_notable_analysis_onprem_systemd.onprem_service.freeform_main`
 
 It writes reports as `*_freeform.md` into `REPORT_DIR` (default: `/var/notables/reports`).
 
@@ -254,8 +255,8 @@ sudo journalctl -u notable-analyzer -f
 
 The optional investigation/query-enrichment and ServiceNow features are implemented in both service entrypoints:
 
-- SDK path: `python -m onprem_service.onprem_main`
-- non-SDK path: `python -m onprem_service.onprem_main_nonsdk`
+- SDK path: `python -m llm_notable_analysis_onprem_systemd.onprem_service.onprem_main`
+- non-SDK path: `python -m llm_notable_analysis_onprem_systemd.onprem_service.onprem_main_nonsdk`
 
 ### Structured Output Mode (Optional)
 
@@ -376,13 +377,13 @@ Preflight recommendation before first service start:
 
 ```bash
 cd ~/llm_notable_analysis
-PYTHONPATH=llm_notable_analysis_onprem_systemd /opt/notable-analyzer/venv/bin/python -m unittest discover -s llm_notable_analysis_onprem_systemd/tests -p "test*.py" -v
+PYTHONPATH=llm_notable_analysis_onprem_systemd/src /opt/notable-analyzer/venv/bin/python -m unittest discover -s llm_notable_analysis_onprem_systemd/tests -p "test*.py" -v
 ```
 
 - Unit tests do not require `vllm` or `notable-analyzer` to be running.
 - Proceed to service startup only after a clean `OK` test result.
 
-Coverage details live in `TESTING.md`.
+Coverage details live in `docs/testing/TESTING.md`.
 
 ### File Drop Mode (Default)
 
@@ -437,10 +438,10 @@ The recommended pattern mirrors the cloud S3 workflow: **SOAR pulls notables fro
 
 Phantom/SOAR template assets in this repo:
 
-- Guide: [`SOAR_PLAYBOOK_PHANTOM.md`](SOAR_PLAYBOOK_PHANTOM.md)
-- Playbook template: [`soar_playbook/phantom_notable_to_analyzer.py`](soar_playbook/phantom_notable_to_analyzer.py)
-- Alternative guide: [`SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md`](SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md)
-- Alternative playbook template: [`soar_playbook/phantom_notable_index_to_analyzer.py`](soar_playbook/phantom_notable_index_to_analyzer.py)
+- Guide: [`docs/integrations/SOAR_PLAYBOOK_PHANTOM.md`](docs/integrations/SOAR_PLAYBOOK_PHANTOM.md)
+- Playbook template: [`src/llm_notable_analysis_onprem_systemd/soar_playbook/phantom_notable_to_analyzer.py`](src/llm_notable_analysis_onprem_systemd/soar_playbook/phantom_notable_to_analyzer.py)
+- Alternative guide: [`docs/integrations/SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md`](docs/integrations/SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md)
+- Alternative playbook template: [`src/llm_notable_analysis_onprem_systemd/soar_playbook/phantom_notable_index_to_analyzer.py`](src/llm_notable_analysis_onprem_systemd/soar_playbook/phantom_notable_index_to_analyzer.py)
 
 ### Transport Options
 
@@ -602,8 +603,8 @@ By default, retention runs **inside the analyzer service** (simplest setup). If 
 2. **Install the timer and oneshot service:**
 
    ```bash
-   sudo cp systemd/notable-retention.service /etc/systemd/system/
-   sudo cp systemd/notable-retention.timer /etc/systemd/system/
+   sudo cp deploy/systemd/notable-retention.service /etc/systemd/system/
+   sudo cp deploy/systemd/notable-retention.timer /etc/systemd/system/
    sudo systemctl daemon-reload
    sudo systemctl enable --now notable-retention.timer
    ```
@@ -671,35 +672,46 @@ Intel comparison note for the EPYC profile:
 ```
 llm_notable_analysis_onprem_systemd/
 ├── README.md                    # This file
-├── INSTALL.md                   # Detailed installation guide
-├── install.sh                   # Automated installer (run as root)
-├── install_mini_qwen_cpu_client.sh  # Mini/Qwen CPU client-mode installer
+├── pyproject.toml               # Package metadata for the src layout
 ├── requirements.txt             # Python dependencies
 ├── config.env.example           # Configuration template
-├── systemd/
-│   ├── notable-analyzer.service   # Analyzer systemd unit
-│   ├── vllm.service               # vLLM systemd unit
-│   ├── notable-retention.service  # Retention cleanup oneshot (optional)
-│   └── notable-retention.timer    # Daily timer for retention (optional)
-└── onprem_service/
-    ├── __init__.py              # Package init
-    ├── config.py                # Configuration loading
-    ├── logging_utils.py         # Structured JSON logging
-    ├── ttp_validator.py         # MITRE ATT&CK validation
-    ├── ingest.py                # File discovery and normalization
-    ├── sinks.py                 # Output writers (filesystem, Splunk REST)
-    ├── local_llm_client.py      # vLLM API client (SDK transport)
-    ├── local_llm_client_nonsdk.py # vLLM API client (requests transport)
-    ├── openai_transport_nonsdk.py # OpenAI-compatible HTTP transport helper
-    ├── spl_query_generation.py  # SPL-only prompt/validation helpers
-    ├── splunk_investigation.py  # Read-only Splunk query executors and policy checks
-    ├── query_result_enrichment.py # Deterministic query-result enrichment
-    ├── servicenow.py            # ServiceNow draft/create adapter
-    ├── markdown_generator.py    # Report generation
-    ├── retention.py             # Two-stage retention cleanup
-    ├── onprem_main.py           # Service entry point (SDK path)
-    ├── onprem_main_nonsdk.py    # Service entry point (non-SDK path)
-    └── enterprise_attack_v17.1_ids.json  # MITRE TTP IDs
+├── docs/
+│   ├── delivery_package/        # Executive workflow and release delivery docs
+│   ├── operations/              # Install, offline prestage, recovery docs
+│   ├── integrations/            # SOAR/Phantom integration guides
+│   ├── security/                # Security posture docs
+│   ├── testing/                 # Test catalog and validation docs
+│   ├── planning/                # Implementation plans
+│   ├── architecture/            # Architecture and alternatives docs
+│   └── technical_specs/         # Technical specifications
+├── scripts/
+│   ├── install.sh               # Automated installer (run as root)
+│   ├── install_mini_qwen_cpu_client.sh  # Mini/Qwen CPU client-mode installer
+│   └── tools/
+│       └── generate_dependency_manifest.sh
+├── deploy/
+│   └── systemd/
+│       ├── notable-analyzer.service   # Analyzer systemd unit
+│       ├── vllm.service               # vLLM systemd unit
+│       ├── notable-retention.service  # Retention cleanup oneshot (optional)
+│       └── notable-retention.timer    # Daily timer for retention (optional)
+└── src/
+    └── llm_notable_analysis_onprem_systemd/
+        ├── __init__.py
+        ├── soar_playbook/         # Splunk SOAR / Phantom templates
+        └── onprem_service/
+            ├── config.py         # Configuration loading
+            ├── logging_utils.py  # Structured JSON logging
+            ├── ttp_validator.py  # MITRE ATT&CK validation
+            ├── ingest.py         # File discovery and normalization
+            ├── sinks.py          # Output writers (filesystem, Splunk REST)
+            ├── local_llm_client.py  # vLLM API client (SDK transport)
+            ├── splunk_investigation.py  # Read-only Splunk query execution
+            ├── servicenow.py     # ServiceNow draft/create adapter
+            ├── markdown_generator.py  # Report generation
+            ├── retention.py      # Two-stage retention cleanup
+            ├── onprem_main.py    # Service entry point (SDK path)
+            └── enterprise_attack_v17.1_ids.json  # MITRE TTP IDs
 ```
 
 ## Updating MITRE ATT&CK Data
@@ -708,7 +720,7 @@ To update TTP IDs in an air-gapped environment:
 
 1. On an internet-connected machine, run `extract_ttp_ids.py` to generate a new JSON file
 2. Transfer the JSON file to the air-gapped host via approved media
-3. Replace the JSON file at the path configured in `MITRE_IDS_PATH` (default: `/opt/notable-analyzer/onprem_service/enterprise_attack_v17.1_ids.json`)
+3. Replace the JSON file at the path configured in `MITRE_IDS_PATH` (default: `/opt/notable-analyzer/src/llm_notable_analysis_onprem_systemd/onprem_service/enterprise_attack_v17.1_ids.json`)
 4. Restart the service: `sudo systemctl restart notable-analyzer`
 
 ## Hardware Requirements
@@ -760,7 +772,7 @@ SPLUNK_CA_BUNDLE=/path/to/internal-ca.pem
 
 Recovery and restart semantics (including power-cut/reboot behavior and SDK-vs-app responsibilities) are documented in:
 
-- `RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`
+- `docs/operations/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`
 
 ### Service won't start
 

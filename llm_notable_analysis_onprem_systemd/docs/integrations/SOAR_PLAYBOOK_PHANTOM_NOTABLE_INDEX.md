@@ -6,7 +6,7 @@ uploads one JSON payload per notable to the analyzer host.
 
 Template code:
 
-- `llm_notable_analysis_onprem_systemd/soar_playbook/phantom_notable_index_to_analyzer.py`
+- `llm_notable_analysis_onprem_systemd/src/llm_notable_analysis_onprem_systemd/soar_playbook/phantom_notable_index_to_analyzer.py`
 
 ## When to use this pattern
 

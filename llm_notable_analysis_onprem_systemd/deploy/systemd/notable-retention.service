@@ -15,7 +15,7 @@ WorkingDirectory=/opt/notable-analyzer
 EnvironmentFile=/etc/notable-analyzer/config.env
 
 # Run retention cleanup via Python module
-ExecStart=/opt/notable-analyzer/venv/bin/python -c "from onprem_service.config import load_config; from onprem_service.retention import run_retention; import logging; logging.basicConfig(level=logging.INFO); stats = run_retention(load_config()); print(f'Retention: moved={stats.moved} deleted={stats.deleted} errors={stats.errors}')"
+ExecStart=/opt/notable-analyzer/venv/bin/python -c "from llm_notable_analysis_onprem_systemd.onprem_service.config import load_config; from llm_notable_analysis_onprem_systemd.onprem_service.retention import run_retention; import logging; logging.basicConfig(level=logging.INFO); stats = run_retention(load_config()); print(f'Retention: moved={stats.moved} deleted={stats.deleted} errors={stats.errors}')"
 
 # Security hardening
 NoNewPrivileges=yes

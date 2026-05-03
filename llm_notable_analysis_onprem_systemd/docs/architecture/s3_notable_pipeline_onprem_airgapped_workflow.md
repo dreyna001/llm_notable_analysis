@@ -364,7 +364,7 @@ SPLUNK_API_TOKEN=<secret>
 
 # === MITRE ATT&CK Data ===
 # Default path used by the packaged service (matches config.env.example)
-MITRE_IDS_PATH=/opt/notable-analyzer/onprem_service/enterprise_attack_v17.1_ids.json
+MITRE_IDS_PATH=/opt/notable-analyzer/src/llm_notable_analysis_onprem_systemd/onprem_service/enterprise_attack_v17.1_ids.json
 
 # === Output Sink ===
 SPLUNK_SINK_MODE=notable_rest  # Options: filesystem, notable_rest
@@ -401,7 +401,7 @@ INGEST_MODE = os.getenv('INGEST_MODE', 'file_drop')
 INCOMING_DIR = Path(os.getenv('INCOMING_DIR', '/var/notables/incoming'))
 LLM_API_URL = os.getenv('LLM_API_URL')
 SPLUNK_BASE_URL = os.getenv('SPLUNK_BASE_URL')
-MITRE_IDS_PATH = Path(os.getenv('MITRE_IDS_PATH', '/opt/notable-analyzer/onprem_service/enterprise_attack_v17.1_ids.json'))
+MITRE_IDS_PATH = Path(os.getenv('MITRE_IDS_PATH', '/opt/notable-analyzer/src/llm_notable_analysis_onprem_systemd/onprem_service/enterprise_attack_v17.1_ids.json'))
 ```
 
 ---
@@ -642,7 +642,7 @@ sudo chmod 440 /opt/notable-analyzer/data/enterprise_attack_v17.1_ids.json
 
 ### Automated test suite
 
-For the current on-prem automated `unittest` coverage and test catalog, see `TESTING.md`.
+For the current on-prem automated `unittest` coverage and test catalog, see `../testing/TESTING.md`.
 
 Run from repository root:
 

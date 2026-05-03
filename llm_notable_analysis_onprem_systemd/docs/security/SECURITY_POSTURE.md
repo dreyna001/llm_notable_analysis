@@ -161,7 +161,7 @@ Retention intervals are configurable in `/etc/notable-analyzer/config.env` (defa
 
 #### vLLM venv (`/opt/vllm/venv`)
 
-By default, `install.sh` installs vLLM from a **pinned** spec:
+By default, `scripts/install.sh` installs vLLM from a **pinned** spec:
 
 - `VLLM_PIP_SPEC` (default: `vllm==0.14.1`)
 
@@ -174,7 +174,7 @@ Override examples (air‑gapped):
 
 Run on the target host:
 
-- `sudo bash tools/generate_dependency_manifest.sh`
+- `sudo bash scripts/tools/generate_dependency_manifest.sh`
 
 This captures (at minimum):
 
@@ -197,7 +197,7 @@ This project supports evidence creation; **artifact signing is an org policy dec
 
 Recommended approach:
 
-1. Generate an evidence folder using `tools/generate_dependency_manifest.sh`
+1. Generate an evidence folder using `scripts/tools/generate_dependency_manifest.sh`
 2. Compute/retain SHA256s (already included for unit files + model files when `sha256sum` exists)
 3. Optionally sign the evidence bundle using org-approved tooling (GPG / enterprise signing systems)
 
