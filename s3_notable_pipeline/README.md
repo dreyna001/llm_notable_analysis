@@ -123,6 +123,8 @@ aws secretsmanager create-secret \
 - `scripts/` - deployment, test, and maintenance helpers
 - `data/test-notable.txt` - sample notable used by the test helper
 - `docs/delivery_package/EXECUTIVE_AWS_WORKFLOW.md` - executive end-to-end workflow overview
+- `docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_AWS_READINESS_OVERVIEW.md` - deployment readiness gateway (executive)
+- `docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_AWS_READINESS_ASSESSMENT.md` - readiness assessment (technical checklist)
 - `docs/operations/DEPLOYMENT_IMAGE_STEPS.md` - Lambda image build and ECR deployment notes
 - `docs/integrations/SOAR_PLAYBOOK_PHANTOM.md` - SOAR upload pattern
 - `docs/security/ATTACK_LLM_ANALYSIS.md` - ATT&CK grounding and validation approach
