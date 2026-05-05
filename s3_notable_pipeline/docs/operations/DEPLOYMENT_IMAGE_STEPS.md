@@ -118,6 +118,8 @@ You do not have to create a new ECR repository if one already exists. Use the ex
 
 Right now, `us-east-1` is not only an example region. `deploy/aws/template-sam.yaml` currently hard-codes the Bedrock inference profile ARN to `us-east-1`, so changing `AWS_REGION` without also updating the template can break deployment or runtime Bedrock calls.
 
+If Lambda fails with `not authorized to perform: bedrock:InvokeModel`, check the deployed Lambda role and `BEDROCK_MODEL_ID` together. The role policy must allow `bedrock:InvokeModel` on the exact model or inference profile ARN used by `BEDROCK_MODEL_ID`; if those differ, redeploy SAM with the corrected parameter/template before troubleshooting Bedrock model access.
+
 ```bash
 export AWS_REGION=us-east-1
 export AWS_ACCOUNT_ID=<account-id>
