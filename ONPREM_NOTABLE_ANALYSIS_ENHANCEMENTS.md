@@ -11,4 +11,12 @@
 - **Policy gates for actions**: allowlists, time bounds, query cost caps, read-only enforcement, and "no containment without approval."
 - **Memory only where useful**: not open-ended agent memory, but bounded case history and durable audit trail of prompts, tool calls, and outputs.
 
+## Leveraging VirusTotal (concise pattern)
+
+- **Placement**: after deterministic IOC extraction from the notable (hashes, domains, IPs, URLs); optional **default-off** capability behind env/config.
+- **Adapter**: thin HTTP client to VT’s lookup APIs; **timeouts**, **retries with backoff**, **rate-limit awareness**, and **response normalization** into a small structured `enrichment` object (scores, detection counts, verdicts, relevant metadata only).
+- **Caching**: cache VT responses by observable + time window to protect quotas and make reruns stable.
+- **Prompt contract**: pass notable facts as `direct_evidence`; pass VT output only under `enrichment` with explicit source label; forbid inventing VT facts in the LLM path.
+- **Ops**: API key from host secrets (not repo); minimal structured logging (no raw tokens); explicit **skipped / failed / rate_limited** states in outputs when VT is unavailable or policy blocks submission.
+
 Best next increment: **read-only enrichment + structured output contract**. After that, add **validated SIEM query execution**. That gives the most capability without jumping into risky autonomy.

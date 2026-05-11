@@ -21,4 +21,12 @@ Assumption: AWS notable analysis reaches planned feature parity with the on-prem
 - **Batch replay and evaluation harness**: replay historical notables through the AWS workflow to compare baseline vs enhanced analysis quality before enabling new capabilities in production.
 - **Degraded-mode handling**: explicitly report when Bedrock, Splunk, RAG, TI, Athena, or ServiceNow is unavailable, timed out, denied by policy, or skipped by configuration.
 
+## Leveraging VirusTotal (concise pattern)
+
+- **Placement**: same as on-prem—after deterministic IOC extraction; **default-off** flag; run before the Bedrock prompt is assembled (or as a bounded Step Functions branch if orchestration splits enrichment from analysis).
+- **Adapter**: outbound HTTPS from Lambda (or a small VPC-attached sidecar if required); **Secrets Manager / SSM** for the API key; **timeouts**, **bounded concurrency**, **retries with backoff**, and normalized **`enrichment`** payload for the model (not raw vendor dumps unless policy allows).
+- **Caching**: DynamoDB or S3-backed cache keyed by observable + TTL to control cost and VT quotas across high-volume ingest.
+- **Prompt contract**: `direct_evidence` vs `enrichment` separation; VT-only facts must trace to returned API fields; include **skipped / failed / rate_limited** in structured output when VT cannot run.
+- **Governance**: respect org rules on **what may be sent to third parties**; avoid shipping full notable blobs to VT—only **explicit observables** policy allows.
+
 Best next increment after parity: **AWS-native security context enrichment + account/asset lookup**. After that, add **Security Lake / Athena read-only investigation** with strict policy and cost gates.
