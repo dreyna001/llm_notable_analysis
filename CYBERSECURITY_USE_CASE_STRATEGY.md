@@ -47,6 +47,8 @@ The main choices are:
 
 These are not mutually exclusive, but choosing a primary posture helps avoid building an unfocused platform.
 
+**Explicit strategic target:** we are aligning the product direction to **posture 2** ([Integrate With Existing Tools](#posture-2-integrate-with-existing-tools)) and **posture 3** ([Augment Human Workflows](#posture-3-augment-human-workflows)) as **co‑primary intents**—integrations pull authoritative facts from existing platforms; augmentation addresses cross-tool prioritization, evidence packaging, and handoffs incumbent tools underserve. **Posture 1** (direct competition / replacement of major platforms) is **not** the default bet; **posture 4** (new coordination layer) may emerge indirectly but is not the named primary focus unless explicitly chosen later.
+
 ## Posture 1: Compete With Existing Tools
 
 This means building something that replaces or partially replaces tools teams already use.
@@ -185,6 +187,8 @@ The product value would be:
 This may offer the best balance of creativity, ROI, and adoption because it avoids replacing incumbent systems while still creating differentiated value.
 
 ## Current Strategic Bias
+
+This matches the **[explicit posture 2 and 3 target](#strategic-question)** above.
 
 The current working bias is:
 

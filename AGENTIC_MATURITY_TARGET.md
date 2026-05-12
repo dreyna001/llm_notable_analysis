@@ -66,7 +66,7 @@ Not limited to just these:
 
 1. **Ground SPL & output with RAG** over Splunk schema, indexes, fields, macros & SOPs.
 2. **Execute read-only SPL** against Splunk
-3. **Summarize results** back into confidence, disposition, and next steps (need to refine this)
+3. **Deterministically compress and merge results** into confidence, disposition cues, and report sections (aggregates-first, row caps—no extra LLM by default); an **optional** later bounded inference pass could refresh narrative prose using **only** that compressed evidence
 4. **Ticketing System Integration** such as Archer/SNOW to automate portions of ticket creating and data entry for each notable.
 
 ## Notes For Single-Call Design
