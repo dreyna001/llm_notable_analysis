@@ -9,7 +9,7 @@ Parameters:
   
   OutputBucketName:
     Type: String
-    Description: Name for the output S3 bucket (markdown reports for s3 and notable_rest modes)
+    Description: Name for the output S3 bucket (markdown + Bedrock JSON reports for s3 and notable_rest modes)
     Default: notable-output-bucket
   
   SplunkSinkMode:

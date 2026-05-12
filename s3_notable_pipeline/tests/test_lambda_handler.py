@@ -81,7 +81,12 @@ class NotableRestSinkTests(unittest.TestCase):
             patch.object(
                 self.lambda_handler,
                 "write_to_s3_sink",
-                return_value={"status": "success", "bucket": "out", "markdown_key": "reports/example.md"},
+                return_value={
+                    "status": "success",
+                    "bucket": "out",
+                    "markdown_key": "reports/example.md",
+                    "json_key": "reports/example.json",
+                },
             ) as mock_s3,
             patch.object(
                 self.lambda_handler,
@@ -235,8 +240,15 @@ class CompressedInputTests(unittest.TestCase):
             )
 
         self.assertEqual(result["markdown_key"], "reports/example.md")
-        mock_put.assert_called_once()
-        self.assertEqual(mock_put.call_args.kwargs["Key"], "reports/example.md")
+        self.assertEqual(result["json_key"], "reports/example.json")
+        self.assertEqual(mock_put.call_count, 2)
+        keys = [mock_put.call_args_list[i].kwargs["Key"] for i in range(2)]
+        self.assertEqual(set(keys), {"reports/example.md", "reports/example.json"})
+        md_call = next(c for c in mock_put.call_args_list if c.kwargs["Key"].endswith(".md"))
+        json_call = next(c for c in mock_put.call_args_list if c.kwargs["Key"].endswith(".json"))
+        self.assertEqual(md_call.kwargs["ContentType"], "text/markdown")
+        self.assertEqual(json_call.kwargs["ContentType"], "application/json")
+        self.assertEqual(json_call.kwargs["Body"], b"{}")
 
     def test_finding_id_strips_data_and_gzip_extensions(self) -> None:
         """Compressed source keys should derive the same finding ID as raw inputs."""

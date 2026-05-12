@@ -228,13 +228,13 @@ def extract_finding_id_from_s3_key(source_key: str) -> str:
 
 
 def write_to_s3_sink(source_key: str, markdown: str, analysis_result: Dict[str, Any]) -> Dict[str, Any]:
-    """Write markdown analysis report to S3 output bucket.
-    
+    """Write markdown analysis report and Bedrock JSON to S3 output bucket.
+
     Args:
         source_key: Original S3 key from input bucket.
         markdown: Generated markdown report.
-        analysis_result: Full analysis result (not written to S3, kept for signature compatibility).
-        
+        analysis_result: Full analysis result; ``llm_response`` is serialized as sibling ``.json``.
+
     Returns:
         Dict with sink operation status.
     """
@@ -249,7 +249,13 @@ def write_to_s3_sink(source_key: str, markdown: str, analysis_result: Dict[str, 
         # Generate output key based on source key
         base_name = source_key_stem(source_key)
         md_key = f"{output_prefix}/{base_name}.md"
-        
+        json_key = f"{output_prefix}/{base_name}.json"
+
+        llm_response = analysis_result.get("llm_response")
+        if llm_response is None:
+            llm_response = {}
+        json_body = json.dumps(llm_response, ensure_ascii=False, indent=2, default=str)
+
         # Write markdown report
         s3_client.put_object(
             Bucket=output_bucket,
@@ -258,10 +264,19 @@ def write_to_s3_sink(source_key: str, markdown: str, analysis_result: Dict[str, 
             ContentType='text/markdown'
         )
         logger.info(f"Wrote markdown report to s3://{output_bucket}/{md_key}")
-        
+
+        s3_client.put_object(
+            Bucket=output_bucket,
+            Key=json_key,
+            Body=json_body.encode('utf-8'),
+            ContentType="application/json",
+        )
+        logger.info(f"Wrote Bedrock JSON to s3://{output_bucket}/{json_key}")
+
         return {
             "status": "success",
             "markdown_key": md_key,
+            "json_key": json_key,
             "bucket": output_bucket
         }
         

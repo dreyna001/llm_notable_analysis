@@ -4,8 +4,8 @@ Minimal guide for new readers.
 
 This service processes security notables uploaded to S3, runs LLM-based ATT&CK analysis, and sends results to one of two sinks:
 
-- `s3` (test mode): write markdown reports back to S3
-- `notable_rest`: write the markdown report to S3 and update the Splunk notable comment via REST
+- `s3` (test mode): write markdown reports and Bedrock JSON (`llm_response`) back to S3
+- `notable_rest`: write the markdown and JSON to S3 and update the Splunk notable comment via REST
 
 ## 1) What You Need
 
@@ -87,8 +87,8 @@ This script:
 - Empty objects, folder markers, and placeholders are skipped.
 - Supported input payloads are UTF-8 text/JSON and single-payload gzip files such as `.json.gz` or `.txt.gz`. ZIP archives and multi-file compressed uploads are not supported.
 - Gzip input is decompressed before analysis and rejected if the decompressed payload exceeds `MAX_DECOMPRESSED_INPUT_BYTES` (default `1048576`).
-- In `s3` and `notable_rest` modes, markdown output is written to `s3://<output-bucket>/reports/<input-file-stem>.md`.
-- For gzip input, the report stem strips both extensions, for example `incoming/abc-123.json.gz` -> `reports/abc-123.md`.
+- In `s3` and `notable_rest` modes, outputs are written under `s3://<output-bucket>/reports/`: `<input-file-stem>.md` (report) and `<input-file-stem>.json` (parsed Bedrock structured payload as `llm_response`).
+- For gzip input, the report stem strips both extensions, for example `incoming/abc-123.json.gz` -> `reports/abc-123.md` and `reports/abc-123.json`.
 - In `notable_rest` mode, `finding_id` is derived from the filename stem:
   - `incoming/abc-123.json` -> `finding_id=abc-123`
   - `incoming/abc-123.json.gz` -> `finding_id=abc-123`
@@ -98,14 +98,14 @@ This script:
 ### `s3` (default test mode)
 
 - Required: `OUTPUT_BUCKET_NAME`
-- Output path: `s3://<output-bucket>/reports/<input-file-stem>.md`
+- Output paths: `s3://<output-bucket>/reports/<input-file-stem>.md` and `.json` (Bedrock `llm_response` only)
 
 ### `notable_rest`
 
 - Required parameters: `OUTPUT_BUCKET_NAME`, `SplunkBaseUrl`, `SplunkApiTokenSecretArn`
 - Optional parameters: `SplunkApiTokenSecretField` (default `token`), `SplunkNotableUpdatePath` (default `/services/notable_update`)
 - Runtime env vars populated from template: `SPLUNK_BASE_URL`, `SPLUNK_API_TOKEN_SECRET_ARN`, `SPLUNK_API_TOKEN_SECRET_FIELD`, `SPLUNK_NOTABLE_UPDATE_PATH`
-- Output path: `s3://<output-bucket>/reports/<input-file-stem>.md`
+- Output paths: `s3://<output-bucket>/reports/<input-file-stem>.md` and `.json` (Bedrock `llm_response` only)
 - Sends the same markdown to Splunk as a notable comment with `finding_id`
 
 Example secret creation (JSON field style):
