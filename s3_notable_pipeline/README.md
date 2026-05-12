@@ -59,6 +59,7 @@ If using guided deploy, start with:
 - `SplunkSinkMode=s3`
 - globally unique values for `InputBucketName` and `OutputBucketName`
 - `AwsAccountId`: your 12-digit AWS account ID (Bedrock inference profile ARN)
+- `MaxDecompressedInputBytes`: keep the default `1048576` unless expected gzip notable payloads need a larger decompressed size
 - if prompted for `ImageUri`, provide the **existing** ECR URI for this Lambda image (build + `docker push` first if you do not have one yet)
 - if using `notable_rest`, provide:
   - `SplunkBaseUrl`
@@ -84,9 +85,13 @@ This script:
 - Lambda triggers on `s3:ObjectCreated:*` under `incoming/` in the input bucket.
 - One uploaded object -> one analysis run.
 - Empty objects, folder markers, and placeholders are skipped.
+- Supported input payloads are UTF-8 text/JSON and single-payload gzip files such as `.json.gz` or `.txt.gz`. ZIP archives and multi-file compressed uploads are not supported.
+- Gzip input is decompressed before analysis and rejected if the decompressed payload exceeds `MAX_DECOMPRESSED_INPUT_BYTES` (default `1048576`).
 - In `s3` and `notable_rest` modes, markdown output is written to `s3://<output-bucket>/reports/<input-file-stem>.md`.
+- For gzip input, the report stem strips both extensions, for example `incoming/abc-123.json.gz` -> `reports/abc-123.md`.
 - In `notable_rest` mode, `finding_id` is derived from the filename stem:
   - `incoming/abc-123.json` -> `finding_id=abc-123`
+  - `incoming/abc-123.json.gz` -> `finding_id=abc-123`
 
 ## 5) Sink Modes
 
@@ -134,6 +139,7 @@ aws secretsmanager create-secret \
 - **No Lambda trigger:** verify object key is under `incoming/`.
 - **No output report:** check `OUTPUT_BUCKET_NAME` and CloudWatch logs.
 - **Bedrock permission errors:** verify `bedrock:InvokeModel` and model access.
+- **Compressed input errors:** only gzip is supported. Verify the object is valid gzip, contains UTF-8 text/JSON after decompression, and does not exceed `MAX_DECOMPRESSED_INPUT_BYTES`.
 - **Secrets access errors in notable_rest:** verify Lambda can call `secretsmanager:GetSecretValue` on `SplunkApiTokenSecretArn`.
 - **Splunk REST update fails:** verify the target endpoint accepts your identifier mapping (`finding_id` vs customer-specific IDs).
 - **`notable_rest` produced no report in S3:** check `OUTPUT_BUCKET_NAME` and CloudWatch logs; this mode now writes to S3 before calling Splunk REST.

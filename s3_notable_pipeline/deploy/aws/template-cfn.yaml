@@ -63,6 +63,12 @@ Parameters:
     MinValue: 1
     MaxValue: 365
 
+  MaxDecompressedInputBytes:
+    Type: Number
+    Description: Maximum decompressed bytes allowed for one gzip notable input
+    Default: 1048576
+    MinValue: 1
+
   AwsAccountId:
     Type: String
     AllowedPattern: '^[0-9]{12}$'
@@ -209,6 +215,7 @@ Resources:
           INPUT_BUCKET_NAME: !Ref InputBucketName
           OUTPUT_BUCKET_NAME: !Ref OutputBucketName
           OUTPUT_PREFIX: reports
+          MAX_DECOMPRESSED_INPUT_BYTES: !Ref MaxDecompressedInputBytes
   
   LambdaInvokePermission:
     Type: AWS::Lambda::Permission

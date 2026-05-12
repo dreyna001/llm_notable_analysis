@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import importlib
 import sys
 import types
@@ -24,7 +25,7 @@ def load_lambda_handler_module() -> types.ModuleType:
     def fake_client(service_name: str):
         if service_name == "secretsmanager":
             return types.SimpleNamespace(get_secret_value=lambda **_kwargs: {"SecretString": ""})
-        return object()
+        return types.SimpleNamespace(put_object=lambda **_kwargs: None)
 
     fake_boto3.client = fake_client
 
@@ -160,6 +161,89 @@ class NotableRestSinkTests(unittest.TestCase):
             token = self.lambda_handler.get_splunk_api_token()
 
         self.assertEqual(token, "json-secret-token")
+
+
+class CompressedInputTests(unittest.TestCase):
+    """Tests for gzip-aware S3 input decoding."""
+
+    def setUp(self) -> None:
+        self.lambda_handler = load_lambda_handler_module()
+
+    def test_uncompressed_json_still_decodes_as_json(self) -> None:
+        """Plain `.json` input should keep the existing JSON content hint."""
+        decoded = self.lambda_handler.decode_s3_notable_object(
+            "incoming/example.json",
+            b'{"finding_id":"abc-123"}',
+        )
+
+        self.assertEqual(decoded.content, '{"finding_id":"abc-123"}')
+        self.assertEqual(decoded.content_type, "json")
+        self.assertFalse(decoded.was_compressed)
+
+    def test_gzip_json_by_extension_decodes_inner_json_payload(self) -> None:
+        """`.json.gz` input should decompress and keep the JSON content hint."""
+        decoded = self.lambda_handler.decode_s3_notable_object(
+            "incoming/example.json.gz",
+            gzip.compress(b'{"finding_id":"abc-123"}'),
+        )
+
+        self.assertEqual(decoded.content, '{"finding_id":"abc-123"}')
+        self.assertEqual(decoded.content_type, "json")
+        self.assertTrue(decoded.was_compressed)
+
+    def test_gzip_text_by_content_encoding_decodes_payload(self) -> None:
+        """S3 `ContentEncoding: gzip` should trigger decompression without `.gz`."""
+        decoded = self.lambda_handler.decode_s3_notable_object(
+            "incoming/example.txt",
+            gzip.compress(b"plain notable text"),
+            "gzip",
+        )
+
+        self.assertEqual(decoded.content, "plain notable text")
+        self.assertEqual(decoded.content_type, "text")
+        self.assertTrue(decoded.was_compressed)
+
+    def test_malformed_gzip_returns_actionable_error(self) -> None:
+        """Malformed gzip input should fail before analysis."""
+        with self.assertRaisesRegex(ValueError, "Invalid gzip content"):
+            self.lambda_handler.decode_s3_notable_object(
+                "incoming/example.json.gz",
+                b"not gzip bytes",
+            )
+
+    def test_oversized_gzip_is_rejected_before_analysis(self) -> None:
+        """Decompressed payloads larger than the configured limit should be rejected."""
+        with (
+            patch.dict("os.environ", {"MAX_DECOMPRESSED_INPUT_BYTES": "10"}, clear=True),
+            self.assertRaisesRegex(ValueError, "Decompressed input exceeds"),
+        ):
+            self.lambda_handler.decode_s3_notable_object(
+                "incoming/example.txt.gz",
+                gzip.compress(b"this is too long"),
+            )
+
+    def test_report_key_strips_data_and_gzip_extensions(self) -> None:
+        """S3 report names should strip `.gz` and the inner data extension."""
+        with (
+            patch.dict("os.environ", {"OUTPUT_BUCKET_NAME": "out"}, clear=True),
+            patch.object(self.lambda_handler.s3_client, "put_object", create=True) as mock_put,
+        ):
+            result = self.lambda_handler.write_to_s3_sink(
+                "incoming/example.json.gz",
+                "# Report",
+                {"markdown": "# Report"},
+            )
+
+        self.assertEqual(result["markdown_key"], "reports/example.md")
+        mock_put.assert_called_once()
+        self.assertEqual(mock_put.call_args.kwargs["Key"], "reports/example.md")
+
+    def test_finding_id_strips_data_and_gzip_extensions(self) -> None:
+        """Compressed source keys should derive the same finding ID as raw inputs."""
+        self.assertEqual(
+            self.lambda_handler.extract_finding_id_from_s3_key("incoming/abc-123.json.gz"),
+            "abc-123",
+        )
 
 
 if __name__ == "__main__":

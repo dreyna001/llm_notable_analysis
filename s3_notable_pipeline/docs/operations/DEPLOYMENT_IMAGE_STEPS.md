@@ -120,11 +120,14 @@ Right now, `us-east-1` is not only an example region. `deploy/aws/template-sam.y
 
 If Lambda fails with `not authorized to perform: bedrock:InvokeModel`, check the deployed Lambda role and `BEDROCK_MODEL_ID` together. The role policy must allow `bedrock:InvokeModel` on the exact model or inference profile ARN used by `BEDROCK_MODEL_ID`; if those differ, redeploy SAM with the corrected parameter/template before troubleshooting Bedrock model access.
 
+Compressed input support is gzip-only. The Lambda accepts UTF-8 text/JSON directly, plus single-payload gzip inputs such as `.json.gz` and `.txt.gz`. It does not process ZIP archives or multi-file compressed uploads. Gzip input is rejected if the decompressed payload exceeds `MaxDecompressedInputBytes`.
+
 ```bash
 export AWS_REGION=us-east-1
 export AWS_ACCOUNT_ID=<account-id>
 export IMAGE_REPO=notable-analyzer-s3
 export IMAGE_TAG=latest
+export MAX_DECOMPRESSED_INPUT_BYTES=1048576
 export IMAGE_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$IMAGE_REPO:$IMAGE_TAG
 ```
 
@@ -174,6 +177,7 @@ sam deploy \
   --template-file .aws-sam/build/template.yaml \
   --parameter-overrides \
     AwsAccountId=$AWS_ACCOUNT_ID \
+    MaxDecompressedInputBytes=$MAX_DECOMPRESSED_INPUT_BYTES \
     ImageUri=$IMAGE_URI
 ```
 
@@ -190,6 +194,7 @@ sam deploy \
     OutputBucketName=<globally-unique-output-bucket-name> \
     SplunkSinkMode=s3 \
     AwsAccountId=$AWS_ACCOUNT_ID \
+    MaxDecompressedInputBytes=$MAX_DECOMPRESSED_INPUT_BYTES \
     ImageUri=$IMAGE_URI
 ```
 
@@ -372,6 +377,14 @@ Parameter `OutputRetentionDays`:
 ```
 
 Why: deletes generated reports after seven days.
+
+Parameter `MaxDecompressedInputBytes`:
+
+```text
+1048576
+```
+
+Why: caps the decompressed size of one gzip notable before Bedrock analysis. Increase only if the expected notable payloads require it.
 
 Confirm changes before deploy:
 

@@ -5,12 +5,16 @@ Processes notables from S3, analyzes with Bedrock, and outputs to
 configurable sinks (S3 or Splunk notable REST API).
 """
 
+import gzip
+import io
 import json
 import os
 import logging
 import time
 import traceback
+import zlib
 import boto3
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote_plus
 from typing import Dict, Any
@@ -27,6 +31,17 @@ secretsmanager_client = boto3.client('secretsmanager')
 
 # Placeholder filenames to skip (case-insensitive basename match)
 PLACEHOLDER_FILENAMES = frozenset({'.keep', '.gitkeep', '_success', '.placeholder'})
+DEFAULT_MAX_DECOMPRESSED_INPUT_BYTES = 1_048_576
+GZIP_CONTENT_ENCODINGS = frozenset({'gzip', 'x-gzip'})
+
+
+@dataclass(frozen=True)
+class DecodedNotable:
+    """Decoded notable content plus metadata needed by the analysis flow."""
+
+    content: str
+    content_type: str
+    was_compressed: bool
 
 
 def should_skip_object(key: str, size: int) -> tuple[bool, str]:
@@ -74,6 +89,132 @@ def normalize_notable(content: str, content_type: str = 'text') -> Any:
     return content
 
 
+def get_max_decompressed_input_bytes() -> int:
+    """Return the configured decompressed input byte limit.
+
+    Returns:
+        Positive byte limit used for gzip input.
+
+    Raises:
+        ValueError: If MAX_DECOMPRESSED_INPUT_BYTES is not a positive integer.
+    """
+    raw_limit = os.environ.get(
+        'MAX_DECOMPRESSED_INPUT_BYTES',
+        str(DEFAULT_MAX_DECOMPRESSED_INPUT_BYTES),
+    )
+    try:
+        limit = int(raw_limit)
+    except ValueError as exc:
+        raise ValueError("MAX_DECOMPRESSED_INPUT_BYTES must be an integer") from exc
+    if limit < 1:
+        raise ValueError("MAX_DECOMPRESSED_INPUT_BYTES must be greater than 0")
+    return limit
+
+
+def content_encoding_includes_gzip(content_encoding: str | None) -> bool:
+    """Check whether an S3 ContentEncoding value includes gzip."""
+    if not content_encoding:
+        return False
+    encodings = {part.strip().lower() for part in content_encoding.split(',')}
+    return bool(encodings & GZIP_CONTENT_ENCODINGS)
+
+
+def strip_gzip_suffix(filename: str) -> str:
+    """Remove one gzip suffix from a filename when present."""
+    lower_filename = filename.lower()
+    if lower_filename.endswith('.gzip'):
+        return filename[:-5]
+    if lower_filename.endswith('.gz'):
+        return filename[:-3]
+    return filename
+
+
+def source_key_stem(source_key: str) -> str:
+    """Derive a stable source stem, stripping one gzip suffix before the data extension."""
+    decoded_key = unquote_plus(source_key or "")
+    filename = PurePosixPath(decoded_key).name
+    if not filename:
+        return ""
+    return Path(strip_gzip_suffix(filename)).stem
+
+
+def is_gzip_input(source_key: str, content_encoding: str | None = None) -> bool:
+    """Return whether an S3 object should be treated as gzip-compressed input."""
+    decoded_key = unquote_plus(source_key or "")
+    lower_key = decoded_key.lower()
+    return (
+        lower_key.endswith('.gz')
+        or lower_key.endswith('.gzip')
+        or content_encoding_includes_gzip(content_encoding)
+    )
+
+
+def infer_content_type_from_key(source_key: str) -> str:
+    """Infer notable content type from the object key after removing gzip suffixes."""
+    decoded_key = unquote_plus(source_key or "")
+    filename = PurePosixPath(decoded_key).name
+    inner_filename = strip_gzip_suffix(filename).lower()
+    return 'json' if inner_filename.endswith('.json') else 'text'
+
+
+def decompress_gzip_bounded(raw_bytes: bytes, max_bytes: int) -> bytes:
+    """Decompress gzip bytes while enforcing a maximum decompressed size."""
+    chunks: list[bytes] = []
+    total_bytes = 0
+
+    with gzip.GzipFile(fileobj=io.BytesIO(raw_bytes)) as gzip_file:
+        while True:
+            chunk = gzip_file.read(64 * 1024)
+            if not chunk:
+                break
+            total_bytes += len(chunk)
+            if total_bytes > max_bytes:
+                raise ValueError(
+                    f"Decompressed input exceeds MAX_DECOMPRESSED_INPUT_BYTES ({max_bytes})"
+                )
+            chunks.append(chunk)
+
+    return b''.join(chunks)
+
+
+def decode_s3_notable_object(
+    source_key: str,
+    raw_bytes: bytes,
+    content_encoding: str | None = None,
+) -> DecodedNotable:
+    """Decode an S3 notable object, including bounded gzip decompression.
+
+    Args:
+        source_key: S3 object key used for compression and content-type detection.
+        raw_bytes: Raw object bytes read from S3.
+        content_encoding: Optional S3 ContentEncoding header.
+
+    Returns:
+        DecodedNotable with UTF-8 content and content type hint.
+
+    Raises:
+        ValueError: If gzip input is malformed, oversized, or not valid UTF-8.
+    """
+    was_compressed = is_gzip_input(source_key, content_encoding)
+    content_bytes = raw_bytes
+    if was_compressed:
+        try:
+            content_bytes = decompress_gzip_bounded(raw_bytes, get_max_decompressed_input_bytes())
+        except (gzip.BadGzipFile, EOFError, zlib.error) as exc:
+            raise ValueError(f"Invalid gzip content for S3 object {source_key!r}") from exc
+
+    try:
+        content = content_bytes.decode('utf-8')
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"S3 object {source_key!r} must contain UTF-8 text") from exc
+
+    return DecodedNotable(
+        content=content,
+        content_type=infer_content_type_from_key(source_key),
+        was_compressed=was_compressed,
+    )
+
+
 def extract_finding_id_from_s3_key(source_key: str) -> str:
     """Derive finding_id from S3 object filename (without extension).
 
@@ -83,11 +224,7 @@ def extract_finding_id_from_s3_key(source_key: str) -> str:
     Returns:
         Filename stem used as finding_id. Returns empty string if no basename.
     """
-    decoded_key = unquote_plus(source_key or "")
-    filename = PurePosixPath(decoded_key).name
-    if not filename:
-        return ""
-    return Path(filename).stem
+    return source_key_stem(source_key)
 
 
 def write_to_s3_sink(source_key: str, markdown: str, analysis_result: Dict[str, Any]) -> Dict[str, Any]:
@@ -110,7 +247,7 @@ def write_to_s3_sink(source_key: str, markdown: str, analysis_result: Dict[str, 
             return {"status": "error", "message": "OUTPUT_BUCKET_NAME not configured"}
         
         # Generate output key based on source key
-        base_name = source_key.split('/')[-1].rsplit('.', 1)[0]
+        base_name = source_key_stem(source_key)
         md_key = f"{output_prefix}/{base_name}.md"
         
         # Write markdown report
@@ -304,14 +441,23 @@ def handler(event, context):
             
             # Read object from S3
             response = s3_client.get_object(Bucket=bucket, Key=key)
-            content = response['Body'].read().decode('utf-8')
+            decoded_notable = decode_s3_notable_object(
+                key,
+                response['Body'].read(),
+                response.get('ContentEncoding'),
+            )
+            content = decoded_notable.content
             
-            logger.info(f"Read {len(content)} characters from S3")
+            logger.info(
+                "Read %d characters from S3%s",
+                len(content),
+                " after gzip decompression" if decoded_notable.was_compressed else "",
+            )
             
             # Keep the alert payload format-agnostic:
             # - valid JSON stays JSON
             # - text stays text
-            content_type = 'json' if key.lower().endswith('.json') else 'text'
+            content_type = decoded_notable.content_type
             alert_payload = normalize_notable(content, content_type)
             
             # Initialize analyzer
