@@ -3,6 +3,12 @@ config.env
 __pycache__/
 *.py[cod]
 
+# Local venv / editable installs (root .gitignore also covers these)
+.venv/
+.venv-*/
+venv/
+*.egg-info/
+
 # Runtime/customer artifacts stay outside source control.
 dependency_manifest_*/
 data/runtime/
@@ -10,3 +16,4 @@ data/reports/
 data/notables/
 data/models/
 data/rag_indexes/
+data/rag_smoke_*/

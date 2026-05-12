@@ -1,6 +1,20 @@
 # Python bytecode / cache
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Virtual environments and local packaging (any subproject; never commit)
+.venv/
+.venv-*/
+venv/
+ENV/
+env/
+*.egg-info/
+pip-wheel-metadata/
+dist/
+build/
+*.egg
 
 ai_use_case_delivery_framework/AI_USE_CASE_DELIVERY_PROCESS.md
 
@@ -22,9 +36,6 @@ deploy/cpu_phi35_llamacpp/data/reports/*
 !deploy/cpu_phi35_llamacpp/data/reports/.gitkeep
 deploy/cpu_phi35_llamacpp/data/archive/*
 !deploy/cpu_phi35_llamacpp/data/archive/.gitkeep
-
-# WSL-local Python venv (Linux paths; keep out of repo)
-.venv-wsl/
 
 # Cursor IDE (local only; do not commit)
 .cursor/
