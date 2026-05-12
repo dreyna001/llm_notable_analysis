@@ -35,15 +35,15 @@ Use [`docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.m
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## VM walkthrough (unpacked tree → running with `onprem_qwen3_sudo_llamacpp_service`)
+## Client inference setup (existing `llama-server` / OpenAI-compatible endpoint)
 
-For a **single markdown** path from “code is on the VM” through `llama-server` on loopback **8000** and this service as client, see [`onprem_qwen3_sudo_llamacpp_service/docs/VM_WALKTHROUGH_UNPACKED_TO_RUNNING.md`](../onprem_qwen3_sudo_llamacpp_service/docs/VM_WALKTHROUGH_UNPACKED_TO_RUNNING.md).
+When inference is already reachable on loopback (**e.g.** `http://127.0.0.1:8000`), install this analyzer in **client-only** mode via [`docs/operations/INSTALL.md`](docs/operations/INSTALL.md).
 
-For a concise "what to download first" checklist for offline setup, see [`phi3.5_llamacpp_service/README.md`](../phi3.5_llamacpp_service/README.md#offline-pre-stage-checklist).
+For offline “what to download first,” see [`phi3.5_llamacpp_service/README.md`](../phi3.5_llamacpp_service/README.md#offline-pre-stage-checklist).
 
 ## Mini/Qwen CPU client one-command install
 
-If your inference layer is already provided by `onprem_qwen3_sudo_llamacpp_service`, install this package in **client mode** (no vLLM/GPU setup) with:
+If your inference layer is already provided by a compatible OpenAI-compatible **`llama-server`** on **`127.0.0.1:8000`** (for example a Qwen/`llama.cpp` CPU deployment), install this package in **client mode** (no vLLM/GPU setup) with:
 
 ```bash
 cd /path/to/llm_notable_analysis_onprem_systemd
@@ -685,7 +685,7 @@ llm_notable_analysis_onprem_systemd/
 │   ├── integrations/            # SOAR/Phantom integration guides
 │   ├── security/                # Security posture docs
 │   ├── testing/                 # Test catalog and validation docs
-│   ├── planning/                # Implementation plans
+│   ├── planning/                # Residual deployment plans; SPL query generation/grounding intent is in docs/architecture/feature_enhancements_architecture.md
 │   ├── architecture/            # Architecture and alternatives docs
 │   └── technical_specs/         # Technical specifications
 ├── scripts/
