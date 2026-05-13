@@ -21,28 +21,6 @@ ai_use_case_delivery_framework/AI_USE_CASE_DELIVERY_PROCESS.md
 # Local secrets / environment (never commit)
 llm_notable_analysis_onprem_systemd/config.env
 llm_notable_analysis_onprem_systemd/wsl-notable-data/
-deploy/cpu_phi35_llamacpp/.env
-deploy/cpu_phi35_llamacpp/config/config.env
-deploy/cpu_phi35_llamacpp/models/*.gguf
-
-# File-drop runtime data (keep only .gitkeep per subdirectory)
-deploy/cpu_phi35_llamacpp/data/incoming/*
-!deploy/cpu_phi35_llamacpp/data/incoming/.gitkeep
-deploy/cpu_phi35_llamacpp/data/processed/*
-!deploy/cpu_phi35_llamacpp/data/processed/.gitkeep
-deploy/cpu_phi35_llamacpp/data/quarantine/*
-!deploy/cpu_phi35_llamacpp/data/quarantine/.gitkeep
-deploy/cpu_phi35_llamacpp/data/reports/*
-!deploy/cpu_phi35_llamacpp/data/reports/.gitkeep
-deploy/cpu_phi35_llamacpp/data/archive/*
-!deploy/cpu_phi35_llamacpp/data/archive/.gitkeep
 
 # Cursor IDE (local only; do not commit)
 .cursor/
-
-# GPU Docker bundle — local secrets and runtime (never commit)
-deploy/gpu_gptoss120b_vllm/.env
-deploy/gpu_gptoss120b_vllm/config/config.env
-deploy/gpu_gptoss120b_vllm/.pytest_cache/
-deploy/gpu_gptoss120b_vllm/.ruff_cache/
-deploy/gpu_gptoss120b_vllm/models/*.gguf

@@ -7,6 +7,10 @@ Builds:
 - ingest_report.json
 """
 
+# Optional document/vector dependencies are imported only when their ingest path
+# needs them; ingestion should still import cleanly on minimal analyzer hosts.
+# pylint: disable=import-error,broad-exception-caught
+
 from __future__ import annotations
 
 import argparse
@@ -14,6 +18,7 @@ import hashlib
 import json
 import logging
 import os
+import shlex
 import shutil
 import tempfile
 import time
@@ -23,7 +28,7 @@ from typing import Iterable, List, Sequence, Tuple
 
 from .chunking import ChunkRecord, chunk_sections, split_into_sections
 from .keyword_index import reset_and_build_sqlite_index
-from .vector_index import build_faiss_index
+from .postgres_ingest import build_postgres_index
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +46,52 @@ def _configure_logging(verbose: bool) -> None:
         level=level,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+
+
+def _parse_config_env(path: Path) -> dict[str, str]:
+    """Parse a simple KEY=VALUE config.env file without shell execution.
+
+    Args:
+        path: Config file path.
+
+    Returns:
+        Parsed environment-style key/value pairs.
+
+    Raises:
+        ValueError: If a non-comment line is not a simple assignment.
+    """
+    values: dict[str, str] = {}
+    for line_number, raw_line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(),
+        1,
+    ):
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        try:
+            tokens = shlex.split(stripped, comments=True, posix=True)
+        except ValueError as exc:
+            raise ValueError(f"Invalid config.env line {line_number}: {exc}") from exc
+        if not tokens:
+            continue
+        if tokens[0] == "export":
+            tokens = tokens[1:]
+        if len(tokens) != 1 or "=" not in tokens[0]:
+            raise ValueError(
+                f"Invalid config.env line {line_number}: expected KEY=VALUE."
+            )
+        key, value = tokens[0].split("=", 1)
+        if not key.isidentifier():
+            raise ValueError(
+                f"Invalid config.env line {line_number}: invalid key {key!r}."
+            )
+        values[key] = value
+    return values
+
+
+def _config_default(config_values: dict[str, str], key: str, fallback: str) -> str:
+    """Return a CLI default from config.env, environment, or fallback."""
+    return config_values.get(key, os.getenv(key, fallback))
 
 
 def _read_txt(path: Path) -> str:
@@ -221,18 +272,36 @@ def ingest_corpus(
     *,
     source_dir: Path,
     index_dir: Path,
+    backend: str,
     embedding_model_name: str,
     target_words: int,
     overlap_words: int,
+    postgres_dsn: str = "postgresql://notable_analyzer@127.0.0.1:5432/notable_rag",
+    postgres_schema: str = "notable_rag",
+    postgres_chunks_table: str = "kb_chunks",
+    postgres_fts_config: str = "english",
+    vector_dimensions: int = 768,
+    embedding_batch_size: int = 64,
+    postgres_statement_timeout_ms: int = 0,
+    ensure_postgres_schema: bool = True,
 ) -> dict:
     """Ingest source docs and publish retrieval artifacts.
 
     Args:
         source_dir: Source-doc root directory.
         index_dir: Live artifact output directory.
+        backend: Retrieval backend (`sqlite_faiss` or `postgres`).
         embedding_model_name: sentence-transformers model name/path.
         target_words: Desired chunk size.
         overlap_words: Overlap size between adjacent chunks.
+        postgres_dsn: PostgreSQL DSN when `backend=postgres`.
+        postgres_schema: PostgreSQL schema for chunks table.
+        postgres_chunks_table: PostgreSQL chunks table name.
+        postgres_fts_config: PostgreSQL FTS config.
+        vector_dimensions: Embedding vector dimensions.
+        embedding_batch_size: Embedding batch size for Postgres ingestion.
+        postgres_statement_timeout_ms: Optional Postgres statement timeout for ingest.
+        ensure_postgres_schema: Create schema/table/indexes before Postgres ingest.
 
     Returns:
         Ingestion report dictionary.
@@ -245,6 +314,49 @@ def ingest_corpus(
         target_words=target_words,
         overlap_words=overlap_words,
     )
+    normalized_backend = (backend or "sqlite_faiss").strip().lower()
+
+    if normalized_backend == "postgres":
+        index_dir.mkdir(parents=True, exist_ok=True)
+        chunk_count = _write_chunks_jsonl(index_dir / "chunks.jsonl", chunks)
+        indexed_vectors = build_postgres_index(
+            chunks=chunks,
+            postgres_dsn=postgres_dsn,
+            postgres_schema=postgres_schema,
+            postgres_chunks_table=postgres_chunks_table,
+            postgres_fts_config=postgres_fts_config,
+            vector_dimensions=vector_dimensions,
+            embedding_model_name=embedding_model_name,
+            embedding_batch_size=embedding_batch_size,
+            postgres_statement_timeout_ms=postgres_statement_timeout_ms,
+            ensure_schema=ensure_postgres_schema,
+        )
+        report = {
+            "status": "success",
+            "backend": "postgres",
+            "source_dir": str(source_dir),
+            "index_dir": str(index_dir),
+            "embedding_model": embedding_model_name,
+            "embedding_batch_size": embedding_batch_size,
+            "postgres_schema": postgres_schema,
+            "postgres_chunks_table": postgres_chunks_table,
+            "postgres_fts_config": postgres_fts_config,
+            "postgres_statement_timeout_ms": postgres_statement_timeout_ms,
+            "ensure_postgres_schema": ensure_postgres_schema,
+            "vector_dimensions": vector_dimensions,
+            "source_file_count": len(files),
+            "chunk_count": chunk_count,
+            "vector_count": indexed_vectors,
+            "warnings": warnings,
+            "elapsed_seconds": round(time.time() - started, 3),
+        }
+        (index_dir / "ingest_report.json").write_text(
+            json.dumps(report, indent=2), encoding="utf-8"
+        )
+        return report
+
+    if normalized_backend != "sqlite_faiss":
+        raise ValueError("backend must be either 'sqlite_faiss' or 'postgres'.")
 
     build_root = Path(
         tempfile.mkdtemp(prefix="kb_build_", dir=str(index_dir.parent if index_dir.parent else Path(".")))
@@ -258,6 +370,8 @@ def ingest_corpus(
 
     try:
         reset_and_build_sqlite_index(sqlite_tmp, chunks)
+        from .vector_index import build_faiss_index
+
         indexed_vectors = build_faiss_index(
             sqlite_path=sqlite_tmp,
             faiss_path=faiss_tmp,
@@ -267,6 +381,7 @@ def ingest_corpus(
 
         report = {
             "status": "success",
+            "backend": "sqlite_faiss",
             "source_dir": str(source_dir),
             "index_dir": str(index_dir),
             "embedding_model": embedding_model_name,
@@ -286,7 +401,24 @@ def ingest_corpus(
 
 def _parse_args() -> argparse.Namespace:
     """Parse CLI arguments for corpus ingestion command."""
-    parser = argparse.ArgumentParser(description="Rebuild on-prem retrieval artifacts.")
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument(
+        "--config-env",
+        type=Path,
+        default=None,
+        help="Optional config.env file to read for RAG_* defaults.",
+    )
+    pre_args, _remaining = pre_parser.parse_known_args()
+    config_values = (
+        _parse_config_env(pre_args.config_env)
+        if pre_args.config_env is not None
+        else {}
+    )
+
+    parser = argparse.ArgumentParser(
+        description="Rebuild on-prem retrieval artifacts.",
+        parents=[pre_parser],
+    )
     parser.add_argument(
         "--source-dir",
         type=Path,
@@ -300,13 +432,77 @@ def _parse_args() -> argparse.Namespace:
         help="Output directory for kb.sqlite3/kb.faiss/chunks.jsonl/ingest_report.json.",
     )
     parser.add_argument(
+        "--backend",
+        choices=("sqlite_faiss", "postgres"),
+        default=(
+            _config_default(config_values, "RAG_BACKEND", "postgres").strip().lower()
+            or "postgres"
+        ),
+        help="Retrieval backend to populate.",
+    )
+    parser.add_argument(
         "--embedding-model",
         type=str,
-        default="sentence-transformers/all-MiniLM-L6-v2",
+        default=_config_default(
+            config_values,
+            "RAG_EMBEDDING_MODEL",
+            "BAAI/bge-base-en-v1.5",
+        ),
         help="Local sentence-transformers model identifier/path.",
     )
     parser.add_argument("--target-words", type=int, default=500)
     parser.add_argument("--overlap-words", type=int, default=50)
+    parser.add_argument(
+        "--postgres-dsn",
+        type=str,
+        default=_config_default(
+            config_values,
+            "RAG_POSTGRES_DSN",
+            "postgresql://notable_analyzer@127.0.0.1:5432/notable_rag",
+        ),
+        help=(
+            "PostgreSQL DSN when --backend postgres. Defaults to "
+            "RAG_POSTGRES_DSN when set."
+        ),
+    )
+    parser.add_argument(
+        "--postgres-schema",
+        type=str,
+        default=_config_default(config_values, "RAG_POSTGRES_SCHEMA", "notable_rag"),
+    )
+    parser.add_argument(
+        "--postgres-chunks-table",
+        type=str,
+        default=_config_default(
+            config_values,
+            "RAG_POSTGRES_CHUNKS_TABLE",
+            "kb_chunks",
+        ),
+    )
+    parser.add_argument(
+        "--postgres-fts-config",
+        type=str,
+        default=_config_default(config_values, "RAG_POSTGRES_FTS_CONFIG", "english"),
+    )
+    parser.add_argument(
+        "--vector-dimensions",
+        type=int,
+        default=int(_config_default(config_values, "RAG_VECTOR_DIMENSIONS", "768")),
+    )
+    parser.add_argument(
+        "--postgres-statement-timeout-ms",
+        type=int,
+        default=int(
+            _config_default(config_values, "RAG_POSTGRES_STATEMENT_TIMEOUT_MS", "0")
+        ),
+        help="PostgreSQL statement timeout for ingest/rebuild queries; 0 disables it.",
+    )
+    parser.add_argument(
+        "--skip-postgres-schema-setup",
+        action="store_true",
+        help="Skip Postgres extension/schema/table/index DDL during ingest.",
+    )
+    parser.add_argument("--embedding-batch-size", type=int, default=64)
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args()
 
@@ -323,9 +519,18 @@ def main() -> int:
         report = ingest_corpus(
             source_dir=args.source_dir,
             index_dir=args.index_dir,
+            backend=args.backend,
             embedding_model_name=args.embedding_model,
             target_words=args.target_words,
             overlap_words=args.overlap_words,
+            postgres_dsn=args.postgres_dsn,
+            postgres_schema=args.postgres_schema,
+            postgres_chunks_table=args.postgres_chunks_table,
+            postgres_fts_config=args.postgres_fts_config,
+            vector_dimensions=args.vector_dimensions,
+            embedding_batch_size=args.embedding_batch_size,
+            postgres_statement_timeout_ms=args.postgres_statement_timeout_ms,
+            ensure_postgres_schema=not args.skip_postgres_schema_setup,
         )
         logger.info(
             "Ingestion succeeded: files=%s chunks=%s vectors=%s",
@@ -341,4 +546,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

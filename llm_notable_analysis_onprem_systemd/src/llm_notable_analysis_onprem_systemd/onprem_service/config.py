@@ -21,20 +21,37 @@ class Config:
         REPORT_DIR: Directory for generated markdown reports.
         ARCHIVE_DIR: Directory used by retention staging.
         POLL_INTERVAL: Polling interval in seconds.
-        LLM_API_URL: Local vLLM/OpenAI-compatible endpoint URL.
+        LLM_API_URL: Local LiteLLM/OpenAI-compatible endpoint URL.
         LLM_API_TOKEN: Optional bearer token for LLM API authentication.
         LLM_MODEL_NAME: Model identifier used for analysis.
         LLM_STRUCTURED_OUTPUT_MODE: Structured output strategy (`prompt_json` or `tool_call`).
         LLM_MAX_TOKENS: Per-request generation token cap.
         LLM_TIMEOUT: Request timeout in seconds.
         RAG_ENABLED: Enables retrieval-augmented prompt grounding.
+        RAG_BACKEND: Retrieval backend (`sqlite_faiss` or `postgres`).
+        RAG_FAIL_CLOSED: Raises analysis errors when configured RAG is unavailable.
         RAG_SQLITE_PATH: SQLite path for lexical retrieval index.
         RAG_FAISS_PATH: FAISS path for vector retrieval index.
         RAG_EMBEDDING_MODEL: Embedding model name/path.
+        RAG_RERANK_ENABLED: Enables second-stage reranking for retrieval hits.
+        RAG_RERANK_MODEL: Reranker model name/path.
+        RAG_POSTGRES_DSN: PostgreSQL DSN for Postgres-backed RAG.
+        RAG_POSTGRES_SCHEMA: PostgreSQL schema for retrieval tables.
+        RAG_POSTGRES_CHUNKS_TABLE: PostgreSQL chunks table name.
+        RAG_POSTGRES_FTS_CONFIG: PostgreSQL text search configuration.
+        RAG_POSTGRES_STATEMENT_TIMEOUT_MS: Per-query timeout for Postgres RAG.
+        RAG_VECTOR_DIMENSIONS: Embedding vector dimensions for pgvector.
         RAG_MAX_SNIPPETS_120B: Max RAG snippets for 120b profile.
         RAG_MAX_SNIPPETS_20B: Max RAG snippets for 20b profile.
         RAG_CONTEXT_BUDGET_CHARS_120B: Context char budget for 120b profile.
         RAG_CONTEXT_BUDGET_CHARS_20B: Context char budget for 20b profile.
+        RAG_FUSED_RANK_LIMIT_120B: Max fused retrieval rank accepted for 120b profile.
+        RAG_FUSED_RANK_LIMIT_20B: Max fused retrieval rank accepted for 20b profile.
+        RAG_NEAR_DUPLICATE_SIMILARITY_THRESHOLD: Similarity threshold for dedupe.
+        RAG_LEXICAL_TOP_K: PostgreSQL/SQLite FTS candidate pull size.
+        RAG_VECTOR_TOP_K: pgvector/FAISS candidate pull size.
+        RAG_CANDIDATE_POOL_LIMIT: Candidate cap before quality gates.
+        RAG_RRF_K: Reciprocal-rank-fusion smoothing constant.
         SPLUNK_BASE_URL: Splunk base URL for notable update sink.
         SPLUNK_API_TOKEN: Splunk token for REST sink authentication.
         SPLUNK_NOTABLE_UPDATE_PATH: Splunk notable update endpoint path.
@@ -86,16 +103,18 @@ class Config:
     # Polling interval (seconds) for file_drop mode
     POLL_INTERVAL: int = 5
 
-    # Local LLM (vLLM)
-    LLM_API_URL: str = "http://127.0.0.1:8000/v1/chat/completions"
+    # Local LLM gateway (LiteLLM -> vLLM by default)
+    LLM_API_URL: str = "http://127.0.0.1:4000/v1/chat/completions"
     LLM_API_TOKEN: str = ""
     LLM_MODEL_NAME: str = "gemma-4-31B-it"
     LLM_STRUCTURED_OUTPUT_MODE: str = "prompt_json"
     LLM_MAX_TOKENS: int = 4096
-    LLM_TIMEOUT: int = 360  # seconds
+    LLM_TIMEOUT: int = 120  # seconds
 
     # Optional retrieval grounding (RAG)
     RAG_ENABLED: bool = False
+    RAG_BACKEND: str = "postgres"
+    RAG_FAIL_CLOSED: bool = False
     RAG_SQLITE_PATH: Path = field(
         default_factory=lambda: Path(
             "/opt/llm-notable-analysis/knowledge_base/index/kb.sqlite3"
@@ -106,11 +125,26 @@ class Config:
             "/opt/llm-notable-analysis/knowledge_base/index/kb.faiss"
         )
     )
-    RAG_EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
+    RAG_EMBEDDING_MODEL: str = "BAAI/bge-base-en-v1.5"
+    RAG_RERANK_ENABLED: bool = False
+    RAG_RERANK_MODEL: str = "BAAI/bge-reranker-base"
+    RAG_POSTGRES_DSN: str = "postgresql://notable_analyzer@127.0.0.1:5432/notable_rag"
+    RAG_POSTGRES_SCHEMA: str = "notable_rag"
+    RAG_POSTGRES_CHUNKS_TABLE: str = "kb_chunks"
+    RAG_POSTGRES_FTS_CONFIG: str = "english"
+    RAG_POSTGRES_STATEMENT_TIMEOUT_MS: int = 5000
+    RAG_VECTOR_DIMENSIONS: int = 768
     RAG_MAX_SNIPPETS_120B: int = 5
     RAG_MAX_SNIPPETS_20B: int = 4
     RAG_CONTEXT_BUDGET_CHARS_120B: int = 2200
     RAG_CONTEXT_BUDGET_CHARS_20B: int = 1600
+    RAG_FUSED_RANK_LIMIT_120B: int = 8
+    RAG_FUSED_RANK_LIMIT_20B: int = 6
+    RAG_NEAR_DUPLICATE_SIMILARITY_THRESHOLD: float = 0.80
+    RAG_LEXICAL_TOP_K: int = 30
+    RAG_VECTOR_TOP_K: int = 30
+    RAG_CANDIDATE_POOL_LIMIT: int = 40
+    RAG_RRF_K: int = 60
 
     # Splunk integration (optional)
     SPLUNK_BASE_URL: str = ""
@@ -186,7 +220,7 @@ def load_config() -> Config:
         ARCHIVE_DIR=Path(os.getenv("ARCHIVE_DIR", "/var/notables/archive")),
         POLL_INTERVAL=int(os.getenv("POLL_INTERVAL", "5")),
         LLM_API_URL=os.getenv(
-            "LLM_API_URL", "http://127.0.0.1:8000/v1/chat/completions"
+            "LLM_API_URL", "http://127.0.0.1:4000/v1/chat/completions"
         ),
         LLM_API_TOKEN=os.getenv("LLM_API_TOKEN", ""),
         LLM_MODEL_NAME=os.getenv("LLM_MODEL_NAME", "gemma-4-31B-it"),
@@ -197,6 +231,10 @@ def load_config() -> Config:
         LLM_MAX_TOKENS=int(os.getenv("LLM_MAX_TOKENS", "4096")),
         LLM_TIMEOUT=int(os.getenv("LLM_TIMEOUT", "120")),
         RAG_ENABLED=os.getenv("RAG_ENABLED", "false").lower() in ("true", "1", "yes"),
+        RAG_BACKEND=os.getenv("RAG_BACKEND", "postgres").strip().lower()
+        or "postgres",
+        RAG_FAIL_CLOSED=os.getenv("RAG_FAIL_CLOSED", "false").lower()
+        in ("true", "1", "yes"),
         RAG_SQLITE_PATH=Path(
             os.getenv(
                 "RAG_SQLITE_PATH",
@@ -210,7 +248,23 @@ def load_config() -> Config:
             )
         ),
         RAG_EMBEDDING_MODEL=os.getenv(
-            "RAG_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
+            "RAG_EMBEDDING_MODEL", "BAAI/bge-base-en-v1.5"
+        ),
+        RAG_RERANK_ENABLED=os.getenv("RAG_RERANK_ENABLED", "false").lower()
+        in ("true", "1", "yes"),
+        RAG_RERANK_MODEL=os.getenv("RAG_RERANK_MODEL", "BAAI/bge-reranker-base"),
+        RAG_POSTGRES_DSN=os.getenv(
+            "RAG_POSTGRES_DSN",
+            "postgresql://notable_analyzer@127.0.0.1:5432/notable_rag",
+        ),
+        RAG_POSTGRES_SCHEMA=os.getenv("RAG_POSTGRES_SCHEMA", "notable_rag"),
+        RAG_POSTGRES_CHUNKS_TABLE=os.getenv("RAG_POSTGRES_CHUNKS_TABLE", "kb_chunks"),
+        RAG_POSTGRES_FTS_CONFIG=os.getenv("RAG_POSTGRES_FTS_CONFIG", "english"),
+        RAG_POSTGRES_STATEMENT_TIMEOUT_MS=int(
+            os.getenv("RAG_POSTGRES_STATEMENT_TIMEOUT_MS", "5000")
+        ),
+        RAG_VECTOR_DIMENSIONS=int(
+            os.getenv("RAG_VECTOR_DIMENSIONS", "768")
         ),
         RAG_MAX_SNIPPETS_120B=int(os.getenv("RAG_MAX_SNIPPETS_120B", "5")),
         RAG_MAX_SNIPPETS_20B=int(os.getenv("RAG_MAX_SNIPPETS_20B", "4")),
@@ -220,6 +274,15 @@ def load_config() -> Config:
         RAG_CONTEXT_BUDGET_CHARS_20B=int(
             os.getenv("RAG_CONTEXT_BUDGET_CHARS_20B", "1600")
         ),
+        RAG_FUSED_RANK_LIMIT_120B=int(os.getenv("RAG_FUSED_RANK_LIMIT_120B", "8")),
+        RAG_FUSED_RANK_LIMIT_20B=int(os.getenv("RAG_FUSED_RANK_LIMIT_20B", "6")),
+        RAG_NEAR_DUPLICATE_SIMILARITY_THRESHOLD=float(
+            os.getenv("RAG_NEAR_DUPLICATE_SIMILARITY_THRESHOLD", "0.80")
+        ),
+        RAG_LEXICAL_TOP_K=int(os.getenv("RAG_LEXICAL_TOP_K", "30")),
+        RAG_VECTOR_TOP_K=int(os.getenv("RAG_VECTOR_TOP_K", "30")),
+        RAG_CANDIDATE_POOL_LIMIT=int(os.getenv("RAG_CANDIDATE_POOL_LIMIT", "40")),
+        RAG_RRF_K=int(os.getenv("RAG_RRF_K", "60")),
         SPLUNK_BASE_URL=os.getenv("SPLUNK_BASE_URL", ""),
         SPLUNK_API_TOKEN=os.getenv("SPLUNK_API_TOKEN", ""),
         SPLUNK_NOTABLE_UPDATE_PATH=os.getenv(

@@ -941,23 +941,71 @@ class LocalLLMClient:
         """
         if not bool(getattr(self.config, "RAG_ENABLED", False)):
             return None
+        rag_backend = str(getattr(self.config, "RAG_BACKEND", "postgres")).strip().lower()
         try:
             from onprem_rag_notable_analysis.future.rag_config import RAGConfig
-            from onprem_rag_notable_analysis.future.retrieval import RAGContextProvider
 
             rag_cfg = RAGConfig(
                 enabled=True,
+                backend=rag_backend,
+                fail_closed=self.config.RAG_FAIL_CLOSED,
                 sqlite_path=self.config.RAG_SQLITE_PATH,
                 faiss_path=self.config.RAG_FAISS_PATH,
+                postgres_dsn=self.config.RAG_POSTGRES_DSN,
+                postgres_schema=self.config.RAG_POSTGRES_SCHEMA,
+                postgres_chunks_table=self.config.RAG_POSTGRES_CHUNKS_TABLE,
+                postgres_fts_config=self.config.RAG_POSTGRES_FTS_CONFIG,
+                postgres_statement_timeout_ms=(
+                    self.config.RAG_POSTGRES_STATEMENT_TIMEOUT_MS
+                ),
+                vector_dimensions=self.config.RAG_VECTOR_DIMENSIONS,
                 embedding_model_name=self.config.RAG_EMBEDDING_MODEL,
+                rerank_enabled=self.config.RAG_RERANK_ENABLED,
+                rerank_model_name=self.config.RAG_RERANK_MODEL,
                 max_snippets_120b=self.config.RAG_MAX_SNIPPETS_120B,
                 max_snippets_20b=self.config.RAG_MAX_SNIPPETS_20B,
                 context_budget_chars_120b=self.config.RAG_CONTEXT_BUDGET_CHARS_120B,
                 context_budget_chars_20b=self.config.RAG_CONTEXT_BUDGET_CHARS_20B,
+                fused_rank_limit_120b=self.config.RAG_FUSED_RANK_LIMIT_120B,
+                fused_rank_limit_20b=self.config.RAG_FUSED_RANK_LIMIT_20B,
+                near_duplicate_similarity_threshold=(
+                    self.config.RAG_NEAR_DUPLICATE_SIMILARITY_THRESHOLD
+                ),
+                lexical_top_k=self.config.RAG_LEXICAL_TOP_K,
+                vector_top_k=self.config.RAG_VECTOR_TOP_K,
+                candidate_pool_limit=self.config.RAG_CANDIDATE_POOL_LIMIT,
+                rrf_k=self.config.RAG_RRF_K,
             )
-            provider = RAGContextProvider.from_config(rag_cfg)
+            if rag_backend == "postgres":
+                from onprem_rag_notable_analysis.future.postgres_retrieval import (
+                    PostgresRAGContextProvider,
+                )
+
+                provider = PostgresRAGContextProvider.from_config(rag_cfg)
+            elif rag_backend == "sqlite_faiss":
+                from onprem_rag_notable_analysis.future.retrieval import RAGContextProvider
+
+                provider = RAGContextProvider.from_config(rag_cfg)
+            else:
+                logger.warning(
+                    "Unsupported RAG backend '%s'; continuing without RAG.",
+                    rag_backend,
+                )
+                if self.config.RAG_FAIL_CLOSED:
+                    raise ValueError(f"Unsupported RAG backend: {rag_backend}")
+                return None
             if provider is None:
                 logger.warning("RAG is enabled but provider initialization was skipped.")
+                if self.config.RAG_FAIL_CLOSED:
+                    raise RuntimeError(
+                        "RAG is enabled but provider initialization was skipped."
+                    )
+            elif rag_backend == "postgres":
+                logger.info(
+                    "RAG provider enabled with postgres schema=%s table=%s",
+                    rag_cfg.postgres_schema,
+                    rag_cfg.postgres_chunks_table,
+                )
             else:
                 logger.info(
                     "RAG provider enabled with sqlite=%s faiss=%s",
@@ -966,7 +1014,12 @@ class LocalLLMClient:
                 )
             return provider
         except Exception as exc:
-            logger.warning("Failed to initialize RAG provider; continuing without RAG: %s", exc)
+            logger.warning(
+                "Failed to initialize RAG provider; continuing without RAG: %s",
+                exc,
+            )
+            if self.config.RAG_FAIL_CLOSED:
+                raise
             return None
 
     def _build_soc_operational_context(self, alert_text: str) -> str:
@@ -985,7 +1038,12 @@ class LocalLLMClient:
                 alert_text=alert_text, llm_model_name=self.config.LLM_MODEL_NAME
             )
         except Exception as exc:
-            logger.warning("RAG context build failed; continuing without context: %s", exc)
+            logger.warning(
+                "RAG context build failed; continuing without context: %s",
+                exc,
+            )
+            if getattr(self.config, "RAG_FAIL_CLOSED", False):
+                raise
             return ""
 
     def _build_prompt(

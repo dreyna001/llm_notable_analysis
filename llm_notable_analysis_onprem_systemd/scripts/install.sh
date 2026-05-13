@@ -18,6 +18,9 @@ readonly VLLM_MODEL_PATH="${VLLM_MODEL_PATH:-/opt/models/gemma-4-31B-it}"
 readonly VLLM_SERVED_MODEL_NAME="${VLLM_SERVED_MODEL_NAME:-gemma-4-31B-it}"
 readonly VLLM_INSTALL_DIR="${VLLM_INSTALL_DIR:-/opt/vllm}"
 readonly VLLM_VENV_DIR="${VLLM_VENV_DIR:-$VLLM_INSTALL_DIR/venv}"
+readonly LITELLM_INSTALL_DIR="${LITELLM_INSTALL_DIR:-/opt/litellm}"
+readonly LITELLM_CONFIG_DIR="${LITELLM_CONFIG_DIR:-/etc/litellm}"
+readonly RAG_PACKAGE_INSTALL_DIR="$INSTALL_DIR/onprem_rag_notable_analysis"
 
 # vLLM install pinning (supply chain / reproducibility)
 # - Default pins to a known-good version.
@@ -26,6 +29,8 @@ readonly VLLM_VENV_DIR="${VLLM_VENV_DIR:-$VLLM_INSTALL_DIR/venv}"
 #     sudo VLLM_PIP_SPEC="vllm==0.14.1" bash scripts/install.sh
 #     sudo VLLM_PIP_SPEC="/mnt/media/wheels/vllm-0.14.1-*.whl" bash scripts/install.sh
 readonly VLLM_PIP_SPEC="${VLLM_PIP_SPEC:-vllm==0.14.1}"
+readonly LITELLM_PIP_SPEC="${LITELLM_PIP_SPEC:-litellm[proxy]==1.83.14}"
+readonly HUGGINGFACE_HUB_PIP_SPEC="${HUGGINGFACE_HUB_PIP_SPEC:-huggingface_hub==1.14.0}"
 
 # Python interpreter selection (pinning / reproducibility)
 #
@@ -40,6 +45,7 @@ readonly VLLM_PYTHON_BIN="${VLLM_PYTHON_BIN:-python3.12}"
 # Users
 readonly SVC_USER="notable-analyzer"
 readonly VLLM_USER="vllm"
+readonly LITELLM_USER="litellm"
 readonly SFTP_USER="soar-uploader"
 
 # Minimum Python version
@@ -66,6 +72,46 @@ strip_crlf_in_file_best_effort() {
     if [[ -f "$file" ]]; then
         sed -i 's/\r$//' "$file" 2>/dev/null || true
     fi
+}
+
+read_config_value_best_effort() {
+    # Parse one config.env value without shell-sourcing the file.
+    local config_file="$1"
+    local key="$2"
+    local fallback="$3"
+    python3 - "$config_file" "$key" "$fallback" <<'PY' 2>/dev/null || printf '%s\n' "$fallback"
+import shlex
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+target_key = sys.argv[2]
+fallback = sys.argv[3]
+
+try:
+    lines = path.read_text(encoding="utf-8").splitlines()
+except OSError:
+    print(fallback)
+    raise SystemExit(0)
+
+for raw_line in lines:
+    stripped = raw_line.strip()
+    if not stripped or stripped.startswith("#"):
+        continue
+    try:
+        tokens = shlex.split(stripped, comments=True, posix=True)
+    except ValueError:
+        continue
+    if tokens and tokens[0] == "export":
+        tokens = tokens[1:]
+    if len(tokens) == 1 and "=" in tokens[0]:
+        key, value = tokens[0].split("=", 1)
+        if key == target_key:
+            print(value)
+            raise SystemExit(0)
+
+print(fallback)
+PY
 }
 
 download_model_best_effort() {
@@ -99,7 +145,7 @@ download_model_best_effort() {
         return 0
     fi
 
-    "$INSTALL_DIR/venv/bin/pip" install --quiet "huggingface_hub>=0.23.0" \
+    "$INSTALL_DIR/venv/bin/pip" install --quiet "$HUGGINGFACE_HUB_PIP_SPEC" \
         || { warn "Failed to install huggingface_hub; skipping model download"; return 0; }
 
     mkdir -p "$model_dir" 2>/dev/null || true
@@ -188,15 +234,15 @@ wait_for_http_200_best_effort() {
 
     while true; do
         if command -v curl &>/dev/null; then
-            if curl -fsS "$url" &>/dev/null; then
+            if curl -fsS --max-time 5 "$url" &>/dev/null; then
                 return 0
             fi
         else
             # Fallback to Python if curl is not installed
-            python3 - <<PY >/dev/null 2>&1 || true
+            python3 - "$url" <<'PY' >/dev/null 2>&1 || true
 import sys, urllib.request
 try:
-    urllib.request.urlopen("$url", timeout=2).read()
+    urllib.request.urlopen(sys.argv[1], timeout=2).read()
     sys.exit(0)
 except Exception:
     sys.exit(1)
@@ -233,15 +279,22 @@ smoke_test_inference_best_effort() {
         return 0
     fi
 
-    # shellcheck disable=SC1090
-    source "$config_file" 2>/dev/null || true
-    incoming_dir="${INCOMING_DIR:-$default_incoming}"
-    report_dir="${REPORT_DIR:-$default_reports}"
+    incoming_dir="$(read_config_value_best_effort "$config_file" INCOMING_DIR "$default_incoming")"
+    report_dir="$(read_config_value_best_effort "$config_file" REPORT_DIR "$default_reports")"
     payload_file="$incoming_dir/${smoke_id}.json"
     report_file="$report_dir/${smoke_id}.md"
+    local tmp_payload
+    tmp_payload="$(mktemp "$incoming_dir/.${smoke_id}.json.tmp.XXXXXX")" || {
+        record_issue "Smoke test skipped: could not create temp payload in $incoming_dir"
+        return 0
+    }
 
     if ! systemctl is-active --quiet vllm; then
         record_issue "Smoke test skipped: vllm.service is not active"
+        return 0
+    fi
+    if ! systemctl is-active --quiet litellm; then
+        record_issue "Smoke test skipped: litellm.service is not active"
         return 0
     fi
     if ! systemctl is-active --quiet notable-analyzer; then
@@ -257,9 +310,15 @@ smoke_test_inference_best_effort() {
         return 0
     fi
 
-    cat > "$payload_file" <<EOF
+    cat > "$tmp_payload" <<EOF
 {"notable_id":"$smoke_id","summary":"Suspicious login from unusual IP","ip_address":"203.0.113.45","user":"admin"}
 EOF
+    chmod 660 "$tmp_payload" 2>/dev/null || true
+    mv "$tmp_payload" "$payload_file" || {
+        rm -f "$tmp_payload" 2>/dev/null || true
+        record_issue "Smoke test failed: could not atomically publish payload to $payload_file"
+        return 0
+    }
 
     if [[ ! -f "$payload_file" ]]; then
         record_issue "Smoke test failed: could not write payload to $payload_file"
@@ -362,6 +421,7 @@ check_python_version "$VLLM_PYTHON_BIN" "vLLM"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+RAG_PACKAGE_SRC_DIR="$(cd "$REPO_DIR/.." && pwd)/onprem_rag_notable_analysis"
 
 # Verify required files exist
 for f in requirements.txt config.env.example; do
@@ -370,6 +430,8 @@ done
 [[ -f "$REPO_DIR/pyproject.toml" ]] || err "Missing required file: $REPO_DIR/pyproject.toml"
 [[ -d "$REPO_DIR/src/llm_notable_analysis_onprem_systemd/onprem_service" ]] || err "Missing package directory: $REPO_DIR/src/llm_notable_analysis_onprem_systemd/onprem_service"
 [[ -d "$REPO_DIR/deploy/systemd" ]] || err "Missing directory: $REPO_DIR/deploy/systemd"
+[[ -f "$RAG_PACKAGE_SRC_DIR/pyproject.toml" ]] || err "Missing RAG package metadata: $RAG_PACKAGE_SRC_DIR/pyproject.toml"
+[[ -d "$RAG_PACKAGE_SRC_DIR/future" ]] || err "Missing RAG package directory: $RAG_PACKAGE_SRC_DIR/future"
 
 echo ""
 
@@ -380,10 +442,11 @@ echo "[1/8] Creating system users..."
 
 create_user_if_missing "$SVC_USER" "$INSTALL_DIR"
 create_user_if_missing "$VLLM_USER" "$VLLM_INSTALL_DIR"
+create_user_if_missing "$LITELLM_USER" "$LITELLM_INSTALL_DIR"
 create_user_if_missing "$SFTP_USER" "$SFTP_CHROOT"
 
 # Add SFTP user to service group for shared write access
-if ! groups "$SFTP_USER" | grep -q "$SVC_USER"; then
+if ! id -nG "$SFTP_USER" | tr ' ' '\n' | grep -Fxq "$SVC_USER"; then
     usermod -aG "$SVC_USER" "$SFTP_USER" \
         || warn "Could not add $SFTP_USER to group $SVC_USER"
     info "Added $SFTP_USER to group $SVC_USER"
@@ -397,11 +460,16 @@ echo "[2/8] Creating directories..."
 # Application directories
 ensure_dir "$INSTALL_DIR" "$SVC_USER:$SVC_USER" 755
 ensure_dir "$CONFIG_DIR" "$SVC_USER:$SVC_USER" 750
+ensure_dir "$LITELLM_INSTALL_DIR" "$LITELLM_USER:$LITELLM_USER" 755
+ensure_dir "$LITELLM_CONFIG_DIR" "$LITELLM_USER:$LITELLM_USER" 750
 
 # Data directories (service user owns)
 for subdir in processed quarantine reports; do
     ensure_dir "$DATA_DIR/$subdir" "$SVC_USER:$SVC_USER" 750
 done
+ensure_dir "$DATA_DIR/cache" "$SVC_USER:$SVC_USER" 750
+ensure_dir "$DATA_DIR/cache/huggingface" "$SVC_USER:$SVC_USER" 750
+ensure_dir "$DATA_DIR/cache/sentence-transformers" "$SVC_USER:$SVC_USER" 750
 
 # Archive subdirs
 for subdir in processed quarantine reports; do
@@ -452,7 +520,8 @@ else
 fi
 
 # Regardless of ownership, ensure the vLLM service user will be able to read files (if present).
-chmod -R a+rX "$VLLM_MODEL_PATH" 2>/dev/null || true
+chgrp -R "$VLLM_USER" "$VLLM_MODEL_PATH" 2>/dev/null || true
+chmod -R g+rX,o-rwx "$VLLM_MODEL_PATH" 2>/dev/null || true
 
 #------------------------------------------------------------------------------
 # 3. Handle SELinux (RHEL)
@@ -481,9 +550,23 @@ fi
 #------------------------------------------------------------------------------
 echo "[4/8] Copying application code..."
 
-rm -rf "$INSTALL_DIR/onprem_service" "$INSTALL_DIR/src"
+rm -rf "$INSTALL_DIR/onprem_service" "$INSTALL_DIR/src" "$RAG_PACKAGE_INSTALL_DIR"
 cp -a "$REPO_DIR/src" "$INSTALL_DIR/" \
     || err "Failed to copy src package tree to $INSTALL_DIR"
+mkdir -p "$RAG_PACKAGE_INSTALL_DIR"
+cp "$RAG_PACKAGE_SRC_DIR/pyproject.toml" "$RAG_PACKAGE_INSTALL_DIR/" \
+    || err "Failed to copy RAG pyproject.toml"
+cp "$RAG_PACKAGE_SRC_DIR/__init__.py" "$RAG_PACKAGE_INSTALL_DIR/" \
+    || err "Failed to copy RAG package __init__.py"
+cp -a "$RAG_PACKAGE_SRC_DIR/future" "$RAG_PACKAGE_INSTALL_DIR/" \
+    || err "Failed to copy RAG package modules"
+if [[ -f "$RAG_PACKAGE_SRC_DIR/README.md" ]]; then
+    cp "$RAG_PACKAGE_SRC_DIR/README.md" "$RAG_PACKAGE_INSTALL_DIR/"
+fi
+rm -rf "$RAG_PACKAGE_INSTALL_DIR/__pycache__" \
+       "$RAG_PACKAGE_INSTALL_DIR/future/__pycache__" \
+       "$RAG_PACKAGE_INSTALL_DIR/build" \
+       "$RAG_PACKAGE_INSTALL_DIR"/*.egg-info 2>/dev/null || true
 cp "$REPO_DIR/pyproject.toml" "$INSTALL_DIR/" \
     || err "Failed to copy pyproject.toml"
 cp "$REPO_DIR/requirements.txt" "$INSTALL_DIR/" \
@@ -491,6 +574,7 @@ cp "$REPO_DIR/requirements.txt" "$INSTALL_DIR/" \
 
 chown -R "$SVC_USER:$SVC_USER" "$INSTALL_DIR"
 info "Code installed at $INSTALL_DIR/src/llm_notable_analysis_onprem_systemd"
+info "RAG package installed at $RAG_PACKAGE_INSTALL_DIR"
 
 #------------------------------------------------------------------------------
 # 5. Create Python virtual environment
@@ -509,6 +593,8 @@ fi
     || err "Failed to upgrade pip"
 "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt" --quiet \
     || err "Failed to install requirements"
+"$INSTALL_DIR/venv/bin/pip" install --upgrade "$RAG_PACKAGE_INSTALL_DIR" --quiet \
+    || err "Failed to install onprem_rag_notable_analysis package"
 "$INSTALL_DIR/venv/bin/pip" install --upgrade "$INSTALL_DIR" --quiet \
     || err "Failed to install analyzer package"
 
@@ -567,6 +653,27 @@ else
 fi
 
 #------------------------------------------------------------------------------
+# 5c. Create LiteLLM virtual environment
+#------------------------------------------------------------------------------
+echo ""
+echo "[5c] Creating LiteLLM virtual environment..."
+
+if [[ -d "$LITELLM_INSTALL_DIR/venv" ]]; then
+    info "LiteLLM venv exists; upgrading dependencies..."
+else
+    "$ANALYZER_PYTHON_BIN" -m venv "$LITELLM_INSTALL_DIR/venv" \
+        || err "Failed to create LiteLLM virtual environment at $LITELLM_INSTALL_DIR/venv"
+    info "Created LiteLLM venv at $LITELLM_INSTALL_DIR/venv"
+fi
+
+"$LITELLM_INSTALL_DIR/venv/bin/pip" install --upgrade pip --quiet \
+    || err "Failed to upgrade pip in LiteLLM venv"
+"$LITELLM_INSTALL_DIR/venv/bin/pip" install "$LITELLM_PIP_SPEC" --quiet \
+    || err "Failed to install LiteLLM ($LITELLM_PIP_SPEC)"
+chown -R "$LITELLM_USER:$LITELLM_USER" "$LITELLM_INSTALL_DIR/venv"
+info "LiteLLM installed in $LITELLM_INSTALL_DIR/venv"
+
+#------------------------------------------------------------------------------
 # 6. Install configuration
 #------------------------------------------------------------------------------
 echo "[6/8] Installing configuration..."
@@ -582,6 +689,16 @@ else
     warn "EDIT THIS FILE before starting the service"
 fi
 
+if [[ -f "$LITELLM_CONFIG_DIR/config.yaml" ]]; then
+    info "LiteLLM config exists: $LITELLM_CONFIG_DIR/config.yaml (not overwritten)"
+else
+    cp "$REPO_DIR/deploy/litellm/config.yaml.example" "$LITELLM_CONFIG_DIR/config.yaml" \
+        || err "Failed to copy LiteLLM config.yaml.example"
+    chown "$LITELLM_USER:$LITELLM_USER" "$LITELLM_CONFIG_DIR/config.yaml"
+    chmod 600 "$LITELLM_CONFIG_DIR/config.yaml"
+    info "LiteLLM config installed: $LITELLM_CONFIG_DIR/config.yaml"
+fi
+
 #------------------------------------------------------------------------------
 # 7. Install systemd units
 #------------------------------------------------------------------------------
@@ -593,6 +710,7 @@ if [[ "${INSTALL_SYSTEMD_UNITS:-true}" == "true" ]]; then
     # Default units (stable baseline)
     units=(
         notable-analyzer.service
+        litellm.service
         vllm.service
         notable-retention.service
         notable-retention.timer
@@ -669,7 +787,9 @@ if [[ "${AUTO_START_SERVICES:-true}" == "true" ]]; then
         record_issue "Model not present at $VLLM_MODEL_PATH (missing config.json); skipping auto-start of vLLM"
     else
         local_vllm_ready="false"
+        local_litellm_ready="false"
         vllm_health_timeout_s="${VLLM_HEALTH_TIMEOUT_SECONDS:-420}"
+        litellm_health_timeout_s="${LITELLM_HEALTH_TIMEOUT_SECONDS:-120}"
         # Use restart (not start) so re-running install.sh applies updated unit files/venvs cleanly.
         systemctl enable vllm 2>/dev/null || true
         systemctl restart vllm 2>/dev/null || systemctl start vllm 2>/dev/null || record_issue "Could not start/restart vllm.service (check systemctl/journalctl)"
@@ -679,13 +799,21 @@ if [[ "${AUTO_START_SERVICES:-true}" == "true" ]]; then
         else
             record_issue "vLLM health check timed out; check: sudo journalctl -u vllm -n 200 --no-pager"
         fi
+        systemctl enable litellm 2>/dev/null || true
+        systemctl restart litellm 2>/dev/null || systemctl start litellm 2>/dev/null || record_issue "Could not start/restart litellm.service (check systemctl/journalctl)"
+        if wait_for_http_200_best_effort "http://127.0.0.1:4000/v1/models" "$litellm_health_timeout_s"; then
+            info "LiteLLM readiness check OK"
+            local_litellm_ready="true"
+        else
+            record_issue "LiteLLM readiness check timed out; check: sudo journalctl -u litellm -n 200 --no-pager"
+        fi
         systemctl enable notable-analyzer 2>/dev/null || true
         systemctl restart notable-analyzer 2>/dev/null || systemctl start notable-analyzer 2>/dev/null || record_issue "Could not start/restart notable-analyzer.service (check systemctl/journalctl)"
-        if [[ "${RUN_SMOKE_TEST:-true}" == "true" && "$local_vllm_ready" == "true" ]]; then
+        if [[ "${RUN_SMOKE_TEST:-true}" == "true" && "$local_vllm_ready" == "true" && "$local_litellm_ready" == "true" ]]; then
             info "RUN_SMOKE_TEST=true: running canned inference smoke test (best-effort)"
             smoke_test_inference_best_effort
         elif [[ "${RUN_SMOKE_TEST:-true}" == "true" ]]; then
-            record_issue "Skipping canned smoke test because vLLM was not healthy during post-install checks"
+            record_issue "Skipping canned smoke test because vLLM/LiteLLM was not healthy during post-install checks"
         else
             info "RUN_SMOKE_TEST=false: skipping canned inference smoke test"
         fi
@@ -708,11 +836,12 @@ echo "  4. Restart sshd:      sudo systemctl restart sshd"
 echo ""
 echo "Start services:"
 echo "  sudo systemctl enable --now vllm"
+echo "  sudo systemctl enable --now litellm"
 echo "  sudo systemctl enable --now notable-analyzer"
 echo "  sudo systemctl enable --now notable-retention.timer  # optional"
 echo ""
 echo "Verify:"
-echo "  sudo systemctl status vllm notable-analyzer"
+echo "  sudo systemctl status vllm litellm notable-analyzer"
 echo "  sudo journalctl -u notable-analyzer -f"
 echo ""
 echo "Troubleshooting vLLM:"

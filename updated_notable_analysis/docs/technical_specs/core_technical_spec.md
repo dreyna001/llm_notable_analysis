@@ -64,7 +64,7 @@ The Diff 2 implementation assumes:
 - `updated_notable_analysis` is still a parallel path, not yet the active runtime
 - the first useful code move is to stabilize contracts and validators before moving workflow code
 - the product remains a bounded notable-analysis system rather than a generic incident-response platform
-- `SQLite + FAISS` remains the preferred first retrieval backend, but only the core contract boundary is in scope here
+- the active on-prem runtime now defaults to Postgres/pgvector RAG; the shared core remains retrieval-backend neutral in this slice
 - `Splunk MCP` is the first planned read-only query adapter and `Splunk REST API` is the second, but only the execution contract boundary is in scope here
 - `ServiceNow` is the first planned ticketing target, but only the draft and writeback contract boundary is in scope here
 - on-prem runtime may later use `LiteLLM -> vLLM -> gemma-4-31B-it`, but runtime wiring is out of scope for this slice

@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "onprem-rag-notable-analysis"
+version = "0.1.0"
+description = "Optional retrieval grounding helpers for the on-prem notable analyzer"
+requires-python = ">=3.12"
+dependencies = [
+    "psycopg[binary]==3.3.4",
+    "pgvector==0.4.2",
+    "faiss-cpu==1.13.2",
+    "sentence-transformers==5.4.1",
+    "numpy==2.4.4",
+    "python-docx==1.2.0",
+    "docx2txt==0.9",
+]
+
+[tool.setuptools]
+packages = [
+    "onprem_rag_notable_analysis",
+    "onprem_rag_notable_analysis.future",
+]
+
+[tool.setuptools.package-dir]
+onprem_rag_notable_analysis = "."
+"onprem_rag_notable_analysis.future" = "future"

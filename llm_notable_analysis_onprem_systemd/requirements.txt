@@ -1,16 +1,17 @@
 # On-prem notable analysis service dependencies
-# Python 3.10+ required
+# Python 3.12 required
 
 # HTTP client for LLM API calls
 requests==2.32.5
 
-# Shared local vLLM transport/runtime contract
+# Shared local OpenAI-compatible transport/runtime contract
 onprem-llm-sdk==0.1.0
 
 # Retrieval grounding stack (on-prem RAG)
-faiss-cpu
-sentence-transformers
-numpy
-python-docx
-docx2txt
-
+psycopg[binary]==3.3.4
+pgvector==0.4.2
+faiss-cpu==1.13.2
+sentence-transformers==5.4.1
+numpy==2.4.4
+python-docx==1.2.0
+docx2txt==0.9

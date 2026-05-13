@@ -1,48 +1,51 @@
 # On-Prem Test Guide
 
-This project includes a minimal automated `unittest` suite for the on-prem service.
+Run commands from the repository root.
 
-## Run the suite
-
-From repository root:
+## Unit Tests
 
 ```bash
-python -m unittest discover -s llm_notable_analysis_onprem_systemd/tests -p "test*.py" -v
+PYTHONPATH=.:llm_notable_analysis_onprem_systemd/src:onprem-llm-sdk/src \
+  llm_notable_analysis_onprem_systemd/.venv/bin/python -m unittest discover \
+  -s llm_notable_analysis_onprem_systemd/tests -p "test_*.py"
 ```
 
-## What is covered
+Expected result: `Ran 120 tests ... OK`.
 
-- `tests/onprem_service/test_markdown_generator.py`
-  - Section order contract for markdown output:
-    1. Alert Reconciliation
-    2. Competing Hypotheses & Pivots
-    3. Evidence vs Inference
-    4. Indicators of Compromise (IOCs)
-    5. Scored TTPs
-  - Alert reconciliation rendering with missing optional fields
-  - Deterministic markdown rendering for stable inputs
+The unit suite uses mocks for vLLM, LiteLLM, Splunk, ServiceNow, and Postgres.
+It covers analyzer contracts, RAG SQL construction, Postgres ingest/retrieval
+branches, deployment files, installer contracts, and operator helper scripts.
 
-- `tests/onprem_service/test_local_llm_client_contract.py`
-  - Response schema/default normalization checks
-  - `alert_reconciliation` type/list coercion
-  - JSON extraction cleanup behavior
-  - Content policy validation guards (URL/placeholder constraints)
-  - Scored TTP score normalization
+## Shell Checks
 
-- `tests/onprem_service/test_ingest_and_formatting.py`
-  - Ingest normalization for JSON and text inputs
-  - Notable ID extraction/sanitization behavior
-  - LLM alert input formatting behavior
-  - FIFO file discovery ordering
+```bash
+find llm_notable_analysis_onprem_systemd/scripts onprem-llm-sdk/scripts \
+  -type f -name "*.sh" -print |
+  sort |
+  while IFS= read -r script; do bash -n "$script" || exit 1; done
+```
 
-- `tests/onprem_service/test_integration_mocks.py`
-  - Mocked `LocalLLMClient.analyze_alert()` success path
-  - Mocked timeout/retry error path
-  - Mocked repair-flow path (initial invalid response, then valid repaired response)
-  - Real TTP filtering behavior with a temporary MITRE IDs file
-  - Mocked Splunk sink payload build path and branch behavior (`disabled`, `search_name` fallback, request error)
+## Docker-Backed pgvector Smoke
 
-## Notes
+Run this when Docker is available on a validation workstation or release host:
 
-- Tests are isolated from external systems (vLLM, Splunk, network) via mocks.
-- This suite focuses on high-value regression coverage while keeping maintenance overhead low.
+```bash
+llm_notable_analysis_onprem_systemd/scripts/smoke_postgres_rag.sh
+```
+
+The smoke starts a disposable `pgvector/pgvector:pg16` container, runs the real
+Postgres schema/ingest/retrieval path with deterministic smoke embeddings, and
+removes the container afterward. Docker is only the test harness; production uses
+the configured host PostgreSQL/pgvector service.
+
+This proves the database, pgvector extension, schema/table DDL, insert/upsert,
+and retrieval context path. It does not prove BGE model loading or reranking.
+
+## Full Service Chain
+
+After vLLM, LiteLLM, and `notable-analyzer` are running on a host:
+
+```bash
+sudo bash llm_notable_analysis_onprem_systemd/scripts/smoke_service_chain.sh \
+  --config-env /etc/notable-analyzer/config.env
+```

@@ -278,6 +278,10 @@ class RAGContextProvider:
                 config.sqlite_path,
                 config.faiss_path,
             )
+            if config.fail_closed:
+                raise RuntimeError(
+                    "RAG is enabled but fallback index artifacts are missing."
+                )
             return None
         return cls(config)
 
@@ -464,7 +468,8 @@ class RAGContextProvider:
             cue_tokens = _unique_non_stop_tokens(alert_text)
             # Query term order: high-signal first, then remaining cues.
             query_tokens = _ordered_unique(
-                list(high_signal_terms) + list(cue_tokens), max_items=64
+                sorted(high_signal_terms) + sorted(cue_tokens),
+                max_items=64,
             )
             if not query_tokens:
                 return ""
@@ -505,5 +510,7 @@ class RAGContextProvider:
             return rendered.text
         except Exception as exc:
             logger.warning("RAG context build failed; continuing without context: %s", exc)
+            if self.config.fail_closed:
+                raise
             return ""
 

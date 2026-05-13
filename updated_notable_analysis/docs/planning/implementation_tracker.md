@@ -36,7 +36,7 @@ Single place to record **what is done** vs **what is left** for `updated_notable
 | AWS default report sink is S3 output | [x] | Deployment-specific default |
 | First read-only query adapter is `Splunk MCP` | [x] | Backend-agnostic seam still required |
 | Second read-only query adapter is `Splunk REST API` | [x] | Required for non-MCP environments |
-| Preferred first retrieval backend is `SQLite + FAISS` | [x] | Seam remains open for later backends |
+| Active on-prem retrieval backend is Postgres/pgvector | [x] | Shared core seam remains backend-neutral |
 | On-prem runtime target is `LiteLLM -> vLLM -> gemma-4-31B-it` | [x] | Deployment choice, not business capability |
 | On-prem analyzer runtime is a long-running `systemd` worker | [x] | Locked next-step runtime shape around the reusable local processor |
 | On-prem analyzer targets LiteLLM on loopback by default | [x] | Default analyzer-facing endpoint is `127.0.0.1:4000`, not direct vLLM calls |

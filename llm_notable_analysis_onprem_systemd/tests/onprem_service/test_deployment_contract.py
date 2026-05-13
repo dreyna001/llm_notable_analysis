@@ -1,0 +1,277 @@
+from pathlib import Path
+import unittest
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+class TestDeploymentContract(unittest.TestCase):
+    def test_analyzer_depends_on_litellm_service(self) -> None:
+        """Analyzer startup should be gated on the LiteLLM proxy."""
+        service_text = (
+            PROJECT_ROOT / "deploy" / "systemd" / "notable-analyzer.service"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("After=network.target litellm.service", service_text)
+        self.assertIn("Requires=litellm.service", service_text)
+        self.assertIn("HF_HOME=/var/notables/cache/huggingface", service_text)
+        self.assertIn(
+            "SENTENCE_TRANSFORMERS_HOME=/var/notables/cache/sentence-transformers",
+            service_text,
+        )
+        self.assertIn(
+            "ReadWritePaths=/var/notables /var/notables/cache /var/sftp/soar",
+            service_text,
+        )
+
+        freeform_text = (
+            PROJECT_ROOT / "deploy" / "systemd" / "notable-analyzer-freeform.service"
+        ).read_text(encoding="utf-8")
+        self.assertIn("After=network.target litellm.service", freeform_text)
+        self.assertIn("Requires=litellm.service", freeform_text)
+        self.assertIn("HF_HOME=/var/notables/cache/huggingface", freeform_text)
+        self.assertIn(
+            "SENTENCE_TRANSFORMERS_HOME=/var/notables/cache/sentence-transformers",
+            freeform_text,
+        )
+        self.assertIn(
+            "ReadWritePaths=/var/notables /var/notables/cache /var/sftp/soar",
+            freeform_text,
+        )
+
+    def test_litellm_service_is_loopback_only(self) -> None:
+        """LiteLLM should bind only to loopback in the default unit."""
+        service_text = (
+            PROJECT_ROOT / "deploy" / "systemd" / "litellm.service"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("--host 127.0.0.1", service_text)
+        self.assertIn("--port 4000", service_text)
+        self.assertIn("User=litellm", service_text)
+        self.assertIn("Wants=vllm.service", service_text)
+        self.assertNotIn("Requires=vllm.service", service_text)
+
+    def test_litellm_config_routes_default_model_to_local_vllm(self) -> None:
+        """Default LiteLLM config should route analyzer model name to local vLLM."""
+        config_text = (
+            PROJECT_ROOT / "deploy" / "litellm" / "config.yaml.example"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("model_name: gemma-4-31B-it", config_text)
+        self.assertIn("model: hosted_vllm/gemma-4-31B-it", config_text)
+        self.assertIn("api_base: http://127.0.0.1:8000/v1", config_text)
+
+    def test_installer_packages_rag_helpers_into_analyzer_venv(self) -> None:
+        """Installer should install RAG helpers so runtime imports work on host."""
+        install_text = (PROJECT_ROOT / "scripts" / "install.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("RAG_PACKAGE_SRC_DIR", install_text)
+        self.assertIn("RAG_PACKAGE_INSTALL_DIR", install_text)
+        self.assertIn("onprem_rag_notable_analysis package", install_text)
+        self.assertIn("$DATA_DIR/cache/huggingface", install_text)
+        self.assertIn("$DATA_DIR/cache/sentence-transformers", install_text)
+        self.assertIn("future/__pycache__", install_text)
+        self.assertIn("*.egg-info", install_text)
+
+        pyproject_text = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertIn('"onprem-rag-notable-analysis==0.1.0"', pyproject_text)
+
+    def test_installer_smoke_does_not_source_config_env(self) -> None:
+        """Installer smoke should parse config.env without executing shell."""
+        install_text = (PROJECT_ROOT / "scripts" / "install.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("read_config_value_best_effort", install_text)
+        self.assertIn("curl -fsS --max-time 5", install_text)
+        self.assertIn("mktemp \"$incoming_dir/.", install_text)
+        self.assertIn("litellm[proxy]==", install_text)
+        self.assertIn("huggingface_hub==", install_text)
+        self.assertNotIn('source "$config_file"', install_text)
+
+    def test_postgres_rag_helper_uses_config_env_and_ingest_module(self) -> None:
+        """Postgres helper should keep RAG setup and ingest config-bound."""
+        script_text = (PROJECT_ROOT / "scripts" / "setup_postgres_rag.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("--config-env", script_text)
+        self.assertIn('"$ANALYZER_PYTHON" - "$CONFIG_ENV"', script_text)
+        self.assertIn("CREATE EXTENSION IF NOT EXISTS vector", script_text)
+        self.assertIn("onprem_rag_notable_analysis.future.corpus_ingest", script_text)
+        self.assertNotIn("--skip-postgres-schema-setup", script_text)
+        self.assertIn('< "$file"', script_text)
+        self.assertNotIn('source "$CONFIG_ENV"', script_text)
+        self.assertNotIn('-f "$file"', script_text)
+
+    def test_direct_python_dependencies_are_pinned(self) -> None:
+        """On-prem installs should avoid drifting direct Python dependencies."""
+        requirements_text = (PROJECT_ROOT / "requirements.txt").read_text(
+            encoding="utf-8"
+        )
+        pyproject_text = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        expected_pins = [
+            "requests==2.32.5",
+            "onprem-llm-sdk==0.1.0",
+            "psycopg[binary]==3.3.4",
+            "pgvector==0.4.2",
+            "faiss-cpu==1.13.2",
+            "sentence-transformers==5.4.1",
+            "numpy==2.4.4",
+            "python-docx==1.2.0",
+            "docx2txt==0.9",
+        ]
+
+        for pin in expected_pins:
+            self.assertIn(pin, requirements_text)
+            self.assertIn(pin, pyproject_text)
+
+        unpinned_requirements = [
+            line
+            for line in requirements_text.splitlines()
+            if line and not line.startswith("#") and "==" not in line
+        ]
+        self.assertEqual(unpinned_requirements, [])
+
+    def test_python_projects_target_python_312_and_rag_has_metadata(self) -> None:
+        """Python package metadata should match the supported runtime."""
+        pyproject_text = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        rag_pyproject_text = (
+            PROJECT_ROOT.parent / "onprem_rag_notable_analysis" / "pyproject.toml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('requires-python = ">=3.12"', pyproject_text)
+        self.assertIn('requires-python = ">=3.12"', rag_pyproject_text)
+        self.assertIn("psycopg[binary]==3.3.4", rag_pyproject_text)
+        self.assertIn("sentence-transformers==5.4.1", rag_pyproject_text)
+
+    def test_service_chain_smoke_targets_default_litellm_path(self) -> None:
+        """Service smoke should verify vLLM, LiteLLM, and analyzer file-drop."""
+        script_text = (PROJECT_ROOT / "scripts" / "smoke_service_chain.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("http://127.0.0.1:8000/health", script_text)
+        self.assertIn("http://127.0.0.1:4000/v1/models", script_text)
+        self.assertIn("gemma-4-31B-it", script_text)
+        self.assertIn("service-chain-smoke", script_text)
+        self.assertIn('-H "@$auth_header_file"', script_text)
+        self.assertIn("mv \"$tmp_payload\" \"$payload_file\"", script_text)
+        self.assertIn("ALLOW_NON_LOOPBACK_HTTP", script_text)
+        self.assertNotIn('-H "Authorization: Bearer $LLM_API_TOKEN"', script_text)
+
+    def test_config_example_exposes_rag_runtime_contract(self) -> None:
+        """Example config should stay aligned with code defaults and RAG knobs."""
+        config_text = (PROJECT_ROOT / "config.env.example").read_text(encoding="utf-8")
+
+        self.assertIn("LLM_MAX_TOKENS=4096", config_text)
+        self.assertIn("RAG_FAIL_CLOSED=false", config_text)
+        self.assertIn("HF_HOME=/var/notables/cache/huggingface", config_text)
+        self.assertIn("RAG_FUSED_RANK_LIMIT_120B=8", config_text)
+        self.assertIn("RAG_RRF_K=60", config_text)
+
+    def test_postgres_rag_smoke_uses_disposable_pgvector_container(self) -> None:
+        """Live RAG smoke should validate pgvector without host psql."""
+        script_text = (PROJECT_ROOT / "scripts" / "smoke_postgres_rag.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("pgvector/pgvector:pg16", script_text)
+        self.assertIn(
+            'psql -v ON_ERROR_STOP=1 -U postgres -d "$POSTGRES_DB" -c "SELECT 1"',
+            script_text,
+        )
+        self.assertIn("build_postgres_index", script_text)
+        self.assertIn("PostgresRAGContextProvider", script_text)
+        self.assertIn("secrets.token_urlsafe", script_text)
+        self.assertIn("assert \"SOC_OPERATIONAL_CONTEXT\" in context", script_text)
+        self.assertNotIn(
+            'POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-postgres}"',
+            script_text,
+        )
+        self.assertIn('rm -f "$CONTAINER_NAME"', script_text)
+        self.assertIn("SMOKE_SCHEMA must be a simple PostgreSQL identifier", script_text)
+
+    def test_kb_operations_doc_covers_document_lifecycle(self) -> None:
+        """KB operations doc should explain content updates and rebuilds."""
+        doc_text = (
+            PROJECT_ROOT / "docs" / "operations" / "KNOWLEDGE_BASE_OPERATIONS.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("Add Or Update Documents", doc_text)
+        self.assertIn("Content Best Practices", doc_text)
+        self.assertIn("setup_postgres_rag.sh", doc_text)
+        self.assertIn("ingest_report.json", doc_text)
+        self.assertIn("Rollback", doc_text)
+
+    def test_docs_do_not_reference_removed_kb_rebuild_units(self) -> None:
+        """Docs should not point operators at removed KB systemd units."""
+        docs_root = PROJECT_ROOT / "docs"
+        offenders = []
+        for path in docs_root.rglob("*.md"):
+            text = path.read_text(encoding="utf-8")
+            if "kb-rebuild.service" in text or "kb-rebuild.timer" in text:
+                offenders.append(path.relative_to(PROJECT_ROOT).as_posix())
+
+        self.assertEqual(offenders, [])
+
+    def test_architecture_doc_uses_module_entrypoint(self) -> None:
+        """Architecture doc should not show the obsolete script-style entrypoint."""
+        doc_text = (
+            PROJECT_ROOT
+            / "docs"
+            / "architecture"
+            / "s3_notable_pipeline_onprem_airgapped_workflow.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "-m llm_notable_analysis_onprem_systemd.onprem_service.onprem_main",
+            doc_text,
+        )
+        self.assertNotIn("python onprem_main.py", doc_text)
+        self.assertNotIn("gpt-oss-20b", doc_text)
+        self.assertIn("gemma-4-31B-it", doc_text)
+        self.assertIn("After=network.target litellm.service", doc_text)
+
+    def test_stale_container_plan_is_removed_from_active_docs(self) -> None:
+        """The old Docker/llama.cpp plan should not remain in active systemd docs."""
+        self.assertFalse(
+            (
+                PROJECT_ROOT
+                / "docs"
+                / "planning"
+                / "CONTAINERIZED_DEPLOYMENT_PLAN.md"
+            ).exists()
+        )
+
+    def test_legacy_docker_docs_are_not_presented_as_current_runtime(self) -> None:
+        """Legacy Docker paths should not look equivalent to the systemd runtime."""
+        analyzer_readme = (
+            PROJECT_ROOT.parent / "llm_notable_analysis_analyzer_image" / "README.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("not production-equivalent", analyzer_readme)
+        self.assertIn("PostgreSQL/pgvector RAG", analyzer_readme)
+
+    def test_readme_uses_current_sftp_chroot_contract(self) -> None:
+        """README SFTP guidance should match installer-created paths."""
+        readme_text = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("Chroot: `/var/sftp/soar`", readme_text)
+        self.assertIn("/var/notables/incoming -> /var/sftp/soar/incoming", readme_text)
+        self.assertNotIn("ChrootDirectory /var/notables", readme_text)
+
+    def test_dependency_manifest_captures_litellm_unit_and_venv(self) -> None:
+        """Dependency evidence should include the LiteLLM proxy after refactor."""
+        manifest_text = (
+            PROJECT_ROOT / "scripts" / "tools" / "generate_dependency_manifest.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('freeze_venv "/opt/litellm/venv" "litellm_venv"', manifest_text)
+        self.assertIn('litellm.service" "systemd/litellm.service"', manifest_text)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -10,7 +10,7 @@ This document describes the **security posture implemented in `llm_notable_analy
 
 - **On-prem, single-host deployment** (RHEL 8/9 or compatible).
 - **Air-gapped capable**: the analyzer can run without internet access.
-- **Local-only LLM**: inference is performed via a local OpenAI-compatible vLLM endpoint on the same host.
+- **Local-only LLM**: inference is performed via a local OpenAI-compatible LiteLLM endpoint on the same host, with vLLM behind it by default.
 - **Primary ingest path**: file-drop into an incoming directory (commonly via SFTP chroot upload from a SOAR host).
 - Optional integration: Splunk REST writeback (customer-controlled network path and credentials).
 
@@ -19,6 +19,7 @@ This document describes the **security posture implemented in `llm_notable_analy
 The installer creates **non-login** system users to isolate responsibilities:
 
 - **`notable-analyzer`**: runs the Python analyzer service
+- **`litellm`**: runs the local LiteLLM proxy
 - **`vllm`**: runs the vLLM inference server
 - **`soar-uploader`**: SFTP-only user for file delivery
 
@@ -29,12 +30,12 @@ Notes:
 
 ## Network exposure minimization
 
-- **vLLM binds to loopback only** (`127.0.0.1:8000`), preventing remote access unless the unit is modified:
+- **LiteLLM and vLLM bind to loopback only** (`127.0.0.1:4000` and `127.0.0.1:8000`), preventing remote access unless units are modified:
   - `--host 127.0.0.1`
-  - default client URL: `LLM_API_URL=http://127.0.0.1:8000/v1/chat/completions`
+  - default client URL: `LLM_API_URL=http://127.0.0.1:4000/v1/chat/completions`
 
 - The analyzer only makes outbound HTTP calls to:
-  - **local vLLM** (loopback) by default
+  - **local LiteLLM** (loopback) by default
   - **Splunk REST** only when enabled (`SPLUNK_SINK_ENABLED=true`)
 
 ## Systemd sandboxing / service hardening
@@ -161,13 +162,17 @@ Retention intervals are configurable in `/etc/notable-analyzer/config.env` (defa
 
 #### vLLM venv (`/opt/vllm/venv`)
 
-By default, `scripts/install.sh` installs vLLM from a **pinned** spec:
+By default, `scripts/install.sh` installs runtime helper packages from
+**pinned** specs:
 
 - `VLLM_PIP_SPEC` (default: `vllm==0.14.1`)
+- `LITELLM_PIP_SPEC` (default: `litellm[proxy]==1.83.14`)
+- `HUGGINGFACE_HUB_PIP_SPEC` (default: `huggingface_hub==1.14.0`, used only when `MODEL_DOWNLOAD=true`)
 
 Override examples (air‑gapped):
 
 - `VLLM_PIP_SPEC="vllm==0.14.1"` (internal mirror)
+- `LITELLM_PIP_SPEC="litellm[proxy]==1.83.14"` (internal mirror)
 - `VLLM_PIP_SPEC="/mnt/media/wheels/vllm-0.14.1-*.whl"` (offline media)
 
 ### Evidence-based dependency manifest (recommended)

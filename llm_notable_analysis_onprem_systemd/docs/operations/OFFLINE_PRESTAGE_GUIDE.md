@@ -5,6 +5,7 @@ Goal: list exactly what to download before installing on an offline host.
 ## 1) Download source bundles
 
 - `llm_notable_analysis_onprem_systemd/` (this package)
+- `onprem_rag_notable_analysis/` source bundle (installed into the analyzer venv)
 - `onprem-llm-sdk/` source bundle (recommended for offline)
 
 ## 2) Download Python artifacts (wheelhouse)
@@ -15,13 +16,33 @@ Required pins from this package:
 
 - `requests==2.32.5`
 - `onprem-llm-sdk==0.1.0` (or install from local `onprem-llm-sdk/` source)
+- `psycopg[binary]==3.3.4`
+- `pgvector==0.4.2`
+- `faiss-cpu==1.13.2`
+- `sentence-transformers==5.4.1`
+- `numpy==2.4.4`
+- `python-docx==1.2.0`
+- `docx2txt==0.9`
+- `litellm[proxy]==1.83.14` (default installer pin; installed into `/opt/litellm/venv`)
+- `huggingface_hub==1.14.0` (default installer pin for optional model download helper)
 - `vllm==0.14.1` (default installer pin; includes transitive dependencies)
 
 Example:
 
 ```bash
 mkdir -p wheelhouse
-python3 -m pip download -d wheelhouse requests==2.32.5 vllm==0.14.1
+python3 -m pip download -d wheelhouse \
+  requests==2.32.5 \
+  'psycopg[binary]==3.3.4' \
+  pgvector==0.4.2 \
+  faiss-cpu==1.13.2 \
+  sentence-transformers==5.4.1 \
+  numpy==2.4.4 \
+  python-docx==1.2.0 \
+  docx2txt==0.9 \
+  'litellm[proxy]==1.83.14' \
+  huggingface_hub==1.14.0 \
+  vllm==0.14.1
 ```
 
 For `onprem-llm-sdk`, either:
@@ -37,6 +58,16 @@ Default service path expects:
 - model repo used by installer helper defaults: `google/gemma-4-31B-it`
 
 Pre-download model files and transfer them so `config.json` exists under `/opt/models/gemma-4-31B-it`.
+
+If RAG is enabled, also stage the local embedding/reranking model artifacts
+needed by `sentence-transformers`:
+
+- embedder: `BAAI/bge-base-en-v1.5`
+- reranker: `BAAI/bge-reranker-base` when `RAG_RERANK_ENABLED=true`
+
+Keep model artifacts outside the repo, record checksums where local policy
+requires it, and update `config.env` if local model paths are used instead of
+Hub-style identifiers.
 
 ## 4) Download OS-level dependencies (RPMs)
 
@@ -58,12 +89,19 @@ Minimum commands used by installer:
 Commonly needed in practice:
 
 - `python3-venv` / `python3-devel` (depends on distro packaging)
-- `git`, `curl`, `openssh-server`
+- `git`, `curl`, `openssh-server`, `sudo`
 - `policycoreutils-python-utils` (for `semanage`, optional but recommended on SELinux hosts)
+- PostgreSQL server/client packages when using `RAG_BACKEND=postgres`
+- pgvector extension package compatible with the staged PostgreSQL version
 
 For full vLLM mode, also stage:
 
 - NVIDIA driver + CUDA runtime/toolkit compatible with your GPU
+
+For PostgreSQL RAG mode, also stage:
+
+- approved `.txt` / `.docx` KB source documents
+- PostgreSQL data-directory backup/restore process if rollback auditability is required
 
 ## 5) Offline install modes
 
@@ -82,6 +120,9 @@ sudo PIP_NO_INDEX=1 \
 ```
 
 `PIP_NO_INDEX/PIP_FIND_LINKS` make installer `pip install` steps use the local wheelhouse only.
+The installer also installs the sibling `onprem_rag_notable_analysis/` source
+bundle into `/opt/notable-analyzer/venv`, so keep that directory next to
+`llm_notable_analysis_onprem_systemd/` in the transferred source bundle.
 
 ### B) Client-only mode (using `onprem_qwen3_sudo_llamacpp_service`)
 

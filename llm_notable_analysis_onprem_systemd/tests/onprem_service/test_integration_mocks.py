@@ -96,7 +96,7 @@ class TestIntegrationMocks(unittest.TestCase):
         mock_post.side_effect = [first_response, second_response]
 
         config = Config(
-            LLM_API_URL="http://127.0.0.1:8000/v1/chat/completions",
+            LLM_API_URL="http://127.0.0.1:4000/v1/chat/completions",
             SPL_QUERY_GENERATION_ENABLED=True,
             LLM_STRUCTURED_OUTPUT_MODE="tool_call",
         )
@@ -148,7 +148,7 @@ class TestIntegrationMocks(unittest.TestCase):
         mock_post.side_effect = [tool_response_missing_tool_call, prompt_json_response]
 
         config = Config(
-            LLM_API_URL="http://127.0.0.1:8000/v1/chat/completions",
+            LLM_API_URL="http://127.0.0.1:4000/v1/chat/completions",
             LLM_STRUCTURED_OUTPUT_MODE="tool_call",
         )
         client = LocalLLMClient(config=config, ttp_validator=_DummyValidator())
@@ -198,7 +198,7 @@ class TestIntegrationMocks(unittest.TestCase):
         mock_post.return_value = response
 
         with tempfile.TemporaryDirectory():
-            config = Config(LLM_API_URL="http://127.0.0.1:8000/v1/chat/completions")
+            config = Config(LLM_API_URL="http://127.0.0.1:4000/v1/chat/completions")
             client = LocalLLMClient(config=config, ttp_validator=_DummyValidator())
             result = client.analyze_alert("alert_text", "2026-01-01T00:00:00Z")
 
@@ -333,7 +333,7 @@ class TestIntegrationMocks(unittest.TestCase):
         mock_post.side_effect = [first_response, second_response]
 
         config = Config(
-            LLM_API_URL="http://127.0.0.1:8000/v1/chat/completions",
+            LLM_API_URL="http://127.0.0.1:4000/v1/chat/completions",
             SPL_QUERY_GENERATION_ENABLED=True,
         )
         client = LocalLLMClient(config=config, ttp_validator=_DummyValidator())
@@ -410,7 +410,7 @@ class TestIntegrationMocks(unittest.TestCase):
         mock_post.side_effect = responses
 
         config = Config(
-            LLM_API_URL="http://127.0.0.1:8000/v1/chat/completions",
+            LLM_API_URL="http://127.0.0.1:4000/v1/chat/completions",
             SPL_QUERY_GENERATION_ENABLED=True,
         )
         client = LocalLLMClient(config=config, ttp_validator=_DummyValidator())
@@ -489,7 +489,7 @@ class TestIntegrationMocks(unittest.TestCase):
         }
         mock_post.side_effect = [invalid_response, repaired_response]
 
-        config = Config(LLM_API_URL="http://127.0.0.1:8000/v1/chat/completions")
+        config = Config(LLM_API_URL="http://127.0.0.1:4000/v1/chat/completions")
         client = LocalLLMClient(config=config, ttp_validator=_DummyValidator())
         result = client.analyze_alert("alert_text")
 
@@ -527,7 +527,7 @@ class TestIntegrationMocks(unittest.TestCase):
 
         body = json.dumps(policy_bad)
         mock_post.side_effect = [_resp(body), _resp(body)]
-        config = Config(LLM_API_URL="http://127.0.0.1:8000/v1/chat/completions")
+        config = Config(LLM_API_URL="http://127.0.0.1:4000/v1/chat/completions")
         client = LocalLLMClient(config=config, ttp_validator=_DummyValidator())
         result = client.analyze_alert("alert_text")
 
@@ -549,7 +549,7 @@ class TestIntegrationMocks(unittest.TestCase):
         self, mock_post: MagicMock, _mock_sleep: MagicMock
     ) -> None:
         config = Config(
-            LLM_API_URL="http://127.0.0.1:8000/v1/chat/completions", LLM_TIMEOUT=1
+            LLM_API_URL="http://127.0.0.1:4000/v1/chat/completions", LLM_TIMEOUT=1
         )
         client = LocalLLMClient(config=config, ttp_validator=_DummyValidator())
 
@@ -702,7 +702,7 @@ class TestIntegrationMocks(unittest.TestCase):
             ids_path.write_text(json.dumps(["T1110"]), encoding="utf-8")
             validator = TTPValidator(ids_path)
             client = LocalLLMClient(
-                config=Config(LLM_API_URL="http://127.0.0.1:8000/v1/chat/completions"),
+                config=Config(LLM_API_URL="http://127.0.0.1:4000/v1/chat/completions"),
                 ttp_validator=validator,
             )
             result = client.analyze_alert("alert_text")

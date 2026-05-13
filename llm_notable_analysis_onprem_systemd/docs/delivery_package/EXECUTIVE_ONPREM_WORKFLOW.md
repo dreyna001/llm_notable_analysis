@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document explains the on-premises notable-analysis workflow end to end for executive and program stakeholders. It covers the file-drop operating model, local LLM inference through vLLM, optional RAG grounding, optional SPL generation and read-only execution, optional Splunk writeback, and optional ServiceNow incident draft/create behavior.
+This document explains the on-premises notable-analysis workflow end to end for executive and program stakeholders. It covers the file-drop operating model, local LLM inference through LiteLLM routing to vLLM, optional RAG grounding, optional SPL generation and read-only execution, optional Splunk writeback, and optional ServiceNow incident draft/create behavior.
 
 The workflow is designed for a customer-controlled environment where notable data can remain on premises or in an air-gapped enclave. The default model configuration is `gemma-4-31B-it`, and the same service can be pointed at a GPT-OSS model when it is served through a compatible local OpenAI-style endpoint.
 
@@ -12,7 +12,7 @@ The on-prem workflow provides a bounded local analysis path for security notable
 
 1. SOAR, SFTP, NFS, or an operator drops one `.json` or `.txt` notable into the incoming directory.
 2. A `systemd` service polls the directory and processes eligible files in FIFO order.
-3. The service normalizes the notable as JSON or text and sends it to a local vLLM endpoint.
+3. The service normalizes the notable as JSON or text and sends it to a local LiteLLM endpoint.
 4. The local model produces structured alert analysis, including verdict, evidence, hypotheses, IOCs, and ATT&CK mappings.
 5. The service parses, repairs when possible, validates, and filters the model output.
 6. Optional RAG injects SOC operating context from local SOPs, data dictionaries, Splunk index references, and related knowledge-base documents.
@@ -60,10 +60,10 @@ The default processing mode is sequential. Optional bounded concurrency can be e
 
 ### 3. Local Inference Runtime
 
-The inference layer is a local OpenAI-compatible endpoint, normally served by vLLM on loopback:
+The inference layer is a local OpenAI-compatible endpoint, normally served by LiteLLM on loopback and routed to vLLM:
 
 ```text
-http://127.0.0.1:8000/v1/chat/completions
+http://127.0.0.1:4000/v1/chat/completions
 ```
 
 The default systemd unit serves:
@@ -75,7 +75,7 @@ gemma-4-31B-it
 GPT-OSS can be used when the local inference server exposes the same OpenAI-compatible chat-completions contract. Operators must keep these values aligned:
 
 - vLLM model path.
-- vLLM served model name.
+- LiteLLM model alias and vLLM served model name.
 - `LLM_MODEL_NAME` in `/etc/notable-analyzer/config.env`.
 - Tool-call parser or chat template settings when `LLM_STRUCTURED_OUTPUT_MODE=tool_call`.
 
@@ -97,7 +97,7 @@ The base output contract includes alert reconciliation, competing hypotheses, ev
 
 ### 5. RAG Grounding
 
-When `RAG_ENABLED=true`, the service attempts to initialize a local RAG provider backed by SQLite, FTS5, FAISS, and a local embedding model. The knowledge base can include SOPs, index and sourcetype references, field mapping notes, investigation playbooks, query examples, and local operating guidance.
+When `RAG_ENABLED=true`, the service attempts to initialize a local RAG provider. The default production-oriented backend is PostgreSQL with PostgreSQL FTS, pgvector, BGE embeddings, and optional BGE reranking. SQLite FTS5 + FAISS remains available as a local fallback for smaller or lab deployments. The knowledge base can include SOPs, index and sourcetype references, field mapping notes, investigation playbooks, query examples, and local operating guidance.
 
 RAG context is rendered into a `SOC_OPERATIONAL_CONTEXT` block. It is advisory context only. The workflow explicitly prevents retrieved guidance from being treated as current-alert evidence unless the same fact appears in the notable itself.
 
@@ -185,13 +185,13 @@ Retention can run inside the analyzer service or be moved to a systemd timer.
 
 The core deployment uses a single-host RHEL-oriented architecture:
 
-- `vllm.service` serves the local model on loopback.
+- `vllm.service` serves the local model on loopback, with `litellm.service` exposing the analyzer-facing OpenAI-compatible gateway.
 - `notable-analyzer.service` polls for notable files and orchestrates analysis.
 - `/etc/notable-analyzer/config.env` controls runtime capabilities.
 - `/var/notables/incoming` receives inputs.
 - `/var/notables/reports` stores generated markdown reports.
 - `/var/notables/processed`, `/var/notables/quarantine`, and `/var/notables/archive` support operations and retention.
-- Optional local RAG artifacts live under `/opt/llm-notable-analysis/knowledge_base/index`.
+- Optional RAG source documents and ingest reports live under `/opt/llm-notable-analysis/knowledge_base`; production retrieval uses the configured PostgreSQL/pgvector table.
 - Optional Splunk and ServiceNow integrations use outbound HTTPS from the analyzer host.
 
 ## Operating Modes

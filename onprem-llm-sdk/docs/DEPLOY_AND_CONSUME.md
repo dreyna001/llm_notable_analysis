@@ -135,25 +135,25 @@ python -c "import onprem_llm_sdk; print(onprem_llm_sdk.__version__)"
 Operational procedures (health checks, scripts, testing, troubleshooting, security controls)
 are in `docs/OPERATIONS_RUNBOOK.md`.
 
-## 8) Docker: quick path
+## 8) Current on-prem deployment path
 
-Use this decision:
+The old root-level Docker bundles under `deploy/` have been removed from the
+active runtime path. For the current on-prem analyzer deployment, use the
+systemd package under `llm_notable_analysis_onprem_systemd/`.
 
-- Want only RAG in `deploy/cpu_phi35_llamacpp`:
-  - keep default entrypoint (`onprem_main_nonsdk`)
-  - set RAG values in `config/config.env`
-  - keep `kb/index` mount
-  - `onprem_rag_notable_analysis` is a Python package used by the analyzer (not a standalone service); see `onprem_rag_notable_analysis/README.md`
-  - SDK is not required
-- Want SDK transport:
-  - install `onprem-llm-sdk` in the image
-  - run `python -m onprem_service.onprem_main`
-  - RAG settings stay the same
+Current default chain:
 
-Build context (important):
+- `notable-analyzer.service`
+- `litellm.service` on `127.0.0.1:4000`
+- `vllm.service` behind LiteLLM
+- optional Postgres/pgvector RAG through `onprem_rag_notable_analysis`
+
+`onprem-llm-sdk` remains the transport client library used by analyzer code and
+other local callers. It is not a standalone deployment stack.
+
+Docker build context note for legacy/image follow-up:
 
 - To use `COPY onprem-llm-sdk ...`, `onprem-llm-sdk/` must be inside the folder Docker is building from.
-- Easiest path: run `docker build` from the repo root so both the app folder and `onprem-llm-sdk/` are included.
 - If `onprem-llm-sdk/` is not in that folder, Docker cannot copy it into the image.
 
 Example that works:

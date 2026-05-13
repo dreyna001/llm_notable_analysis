@@ -34,9 +34,13 @@ sudo bash scripts/install.sh
 # sudo VLLM_HEALTH_TIMEOUT_SECONDS=420 SMOKE_TEST_TIMEOUT_SECONDS=240 bash scripts/install.sh
 ```
 
-## Mini/Qwen CPU client-mode install (with mini llama.cpp service)
+## Non-Default Mini/Qwen CPU Client-Mode Install
 
-Use this when your inference service is already running from `onprem_qwen3_sudo_llamacpp_service` on `127.0.0.1:8000` and you only need the notable-analysis client setup.
+This is a lab/CPU alternate path, not the default production deployment. Use
+the main `install.sh` path for the standard `vLLM -> LiteLLM -> analyzer`
+systemd chain. Use this mini path only when your inference service is already
+running from `onprem_qwen3_sudo_llamacpp_service` on `127.0.0.1:8000` and you
+only need the notable-analysis client setup.
 
 ```bash
 # Expected sibling layout:
@@ -52,7 +56,7 @@ Behavior highlights:
 - Installs analyzer runtime into `/opt/notable-analyzer`.
 - Installs local SDK from `../onprem-llm-sdk` (override with `SDK_SOURCE_DIR=...`).
 - Writes/updates `/etc/notable-analyzer/config.env` for:
-  - `LLM_API_URL=http://127.0.0.1:8000/v1/chat/completions`
+  - `LLM_API_URL=http://127.0.0.1:8000/v1/chat/completions` (mini direct mode, bypasses LiteLLM)
   - `LLM_MODEL_NAME=Qwen3-4B-Q4_K_M.gguf`
 - Creates launcher: `/usr/local/bin/notable-analyzer-mini-run`
 
@@ -80,13 +84,13 @@ After install completes, these may still require operator input:
 
 | Step | Action | Failure Handling |
 |------|--------|------------------|
-| 1 | Create system users (`notable-analyzer`, `vllm`, `soar-uploader`) | Skips if user exists |
+| 1 | Create system users (`notable-analyzer`, `litellm`, `vllm`, `soar-uploader`) | Skips if user exists |
 | 2 | Create directories with correct ownership/permissions | Fails with path on error |
 | 3 | Configure SELinux contexts (if enabled) | Warns if semanage missing |
 | 4 | Copy application code to `/opt/notable-analyzer` | Fails if source missing |
 | 5 | Create Python venv and install dependencies | Fails with pip output |
 | 6 | Install config template to `/etc/notable-analyzer/config.env` | Skips if exists |
-| 7 | Install systemd units | Fails if unit file missing |
+| 7 | Install systemd units, including `litellm.service` | Fails if unit file missing |
 | 8 | Configure SFTP chroot in `/etc/ssh/sshd_config` | Skips if already present |
 | 9 | Post-install auto-start + canned inference smoke test | Best-effort (non-fatal) |
 
@@ -103,6 +107,9 @@ After install completes, these may still require operator input:
 
 /etc/notable-analyzer/
 └── config.env               # Runtime configuration (mode 600)
+
+/etc/litellm/
+└── config.yaml              # LiteLLM proxy configuration (mode 600)
 
 /var/notables/
 ├── incoming -> /var/sftp/soar/incoming  # Symlink to SFTP drop
@@ -127,6 +134,7 @@ After install completes, these may still require operator input:
 | User | Purpose | Shell | Home |
 |------|---------|-------|------|
 | `notable-analyzer` | Runs Python service | `/sbin/nologin` | `/opt/notable-analyzer` |
+| `litellm` | Runs LiteLLM proxy | `/sbin/nologin` | `/opt/litellm` |
 | `vllm` | Runs vLLM inference | `/sbin/nologin` | `/opt/vllm` |
 | `soar-uploader` | SFTP-only for SOAR | `/sbin/nologin` | `/var/sftp/soar` |
 
@@ -172,13 +180,26 @@ sudo vi /etc/notable-analyzer/config.env
 ```
 
 Required settings:
-- `LLM_API_URL` — vLLM endpoint (default: `http://127.0.0.1:8000/v1/chat/completions`)
-- `LLM_MODEL_NAME` — Model name matching vLLM `--served-model-name`
+- `LLM_API_URL` — LiteLLM endpoint (default: `http://127.0.0.1:4000/v1/chat/completions`)
+- `LLM_MODEL_NAME` — Model name exposed by LiteLLM and routed to the local backend
 - `SPLUNK_BASE_URL` / `SPLUNK_API_TOKEN` — If Splunk writeback enabled
+
+The packaged analyzer units set `HF_HOME=/var/notables/cache/huggingface` and
+`SENTENCE_TRANSFORMERS_HOME=/var/notables/cache/sentence-transformers` so BGE
+model caches remain writable under `ProtectSystem=strict`. Keep those paths
+under `/var/notables/cache` unless you also update the unit `ReadWritePaths`.
 
 ### 2. Install vLLM (if not already installed)
 
-The analyzer talks to an OpenAI-compatible local endpoint (vLLM). The included `vllm.service` expects vLLM to be installed in:
+The analyzer talks to an OpenAI-compatible local LiteLLM endpoint, which routes
+to vLLM by default. The included `litellm.service` expects config at
+`/etc/litellm/config.yaml`; the installer copies
+`deploy/litellm/config.yaml.example` there on first install.
+The unit `Wants=vllm.service` for the default local backend but does not
+`Require=` it, so operators can replace `/etc/litellm/config.yaml` with a
+remote backend route without editing the service dependency graph.
+
+The included `vllm.service` expects vLLM to be installed in:
 
 - `/opt/vllm/venv` (Python venv)
 
@@ -263,14 +284,70 @@ Expected result:
 
 Unit tests do not require `vllm` or `notable-analyzer` to be running.
 
-### 7. Start Services
+### 7. Optional: Build PostgreSQL RAG Corpus
+
+If `RAG_BACKEND=postgres`, populate the configured Postgres table with the same
+values operators set in `/etc/notable-analyzer/config.env`, including
+`RAG_POSTGRES_DSN`, `RAG_POSTGRES_SCHEMA`, `RAG_POSTGRES_CHUNKS_TABLE`,
+`RAG_POSTGRES_FTS_CONFIG`, `RAG_POSTGRES_STATEMENT_TIMEOUT_MS`, and
+`RAG_VECTOR_DIMENSIONS`:
+
+Recommended operator helper:
 
 ```bash
-# Start vLLM first (analyzer depends on it)
+sudo bash scripts/setup_postgres_rag.sh \
+  --config-env /etc/notable-analyzer/config.env \
+  --source-dir /opt/llm-notable-analysis/knowledge_base/source_docs \
+  --index-dir /opt/llm-notable-analysis/knowledge_base/index
+```
+
+This helper creates the configured local PostgreSQL role/database when needed,
+creates the `vector` extension and configured schema, then runs corpus ingest
+through the analyzer venv.
+
+Before adding content, review the KB operations runbook:
+
+- `docs/operations/KNOWLEDGE_BASE_OPERATIONS.md`
+
+Manual ingest-only command:
+
+```bash
+/opt/notable-analyzer/venv/bin/python -m onprem_rag_notable_analysis.future.corpus_ingest \
+  --config-env /etc/notable-analyzer/config.env \
+  --backend postgres \
+  --source-dir /opt/llm-notable-analysis/knowledge_base/source_docs \
+  --index-dir /opt/llm-notable-analysis/knowledge_base/index
+```
+
+This creates/updates the pgvector schema, replaces rows in the configured chunks
+table, and writes `chunks.jsonl` plus `ingest_report.json` under `--index-dir`.
+The command reads `config.env` as simple `KEY=VALUE` text instead of sourcing it
+as shell code, so database DSNs do not need to be placed on the process command
+line.
+
+For release validation, run the Docker-backed pgvector smoke when Docker is
+available:
+
+```bash
+bash scripts/smoke_postgres_rag.sh
+```
+
+This uses a disposable pgvector container and validates the real schema, ingest,
+and retrieval code path without requiring host `psql`. Docker is not part of the
+production runtime; production uses the configured host PostgreSQL/pgvector
+service.
+
+### 8. Start Services
+
+```bash
+# Start vLLM first (LiteLLM depends on it)
 sudo systemctl enable --now vllm
 
 # Wait for vLLM to load model (check logs)
 sudo journalctl -u vllm -f
+
+# Start LiteLLM
+sudo systemctl enable --now litellm
 
 # Start analyzer
 sudo systemctl enable --now notable-analyzer
@@ -285,7 +362,12 @@ sudo systemctl enable --now notable-retention.timer
 
 ```bash
 # Service status
-sudo systemctl status vllm notable-analyzer
+sudo systemctl status vllm litellm notable-analyzer
+
+# Full local service-chain smoke:
+# vLLM health -> LiteLLM models/chat -> analyzer file-drop report
+sudo bash scripts/smoke_service_chain.sh \
+  --config-env /etc/notable-analyzer/config.env
 
 # Test SFTP from another host
 sftp -i /path/to/private_key soar-uploader@<analyzer-host>
@@ -357,4 +439,3 @@ For multi-host or enterprise deployments, consider converting `scripts/install.s
 | SSH config | `ansible.builtin.blockinfile` |
 
 Benefits: idempotency, `--check` dry-run, Ansible Vault for secrets, inventory for multiple hosts.
-

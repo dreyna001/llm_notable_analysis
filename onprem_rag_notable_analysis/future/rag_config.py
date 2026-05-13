@@ -12,9 +12,19 @@ class RAGConfig:
 
     Attributes:
         enabled: Enables retrieval context injection.
+        backend: Retrieval backend (`sqlite_faiss` or `postgres`).
+        fail_closed: Raises retrieval errors instead of returning empty context.
         sqlite_path: SQLite path for lexical/chunk metadata.
         faiss_path: FAISS index path for vector retrieval.
+        postgres_dsn: PostgreSQL DSN for Postgres-backed retrieval.
+        postgres_schema: PostgreSQL schema for retrieval tables.
+        postgres_chunks_table: PostgreSQL chunks table name.
+        postgres_fts_config: PostgreSQL FTS configuration.
+        postgres_statement_timeout_ms: Per-query timeout for Postgres retrieval.
+        vector_dimensions: Embedding vector dimension for pgvector.
         embedding_model_name: Local embedding model identifier/path.
+        rerank_enabled: Enables cross-encoder reranking after hybrid retrieval.
+        rerank_model_name: Local reranker model identifier/path.
         max_snippets_120b: Max snippets for 120b profile.
         max_snippets_20b: Max snippets for 20b profile.
         context_budget_chars_120b: Prompt context char budget for 120b profile.
@@ -30,13 +40,24 @@ class RAGConfig:
     """
 
     enabled: bool = False
+    backend: str = "postgres"
+    fail_closed: bool = False
 
     sqlite_path: Path = Path(
         "/opt/llm-notable-analysis/knowledge_base/index/kb.sqlite3"
     )
     faiss_path: Path = Path("/opt/llm-notable-analysis/knowledge_base/index/kb.faiss")
 
-    embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
+    postgres_dsn: str = "postgresql://notable_analyzer@127.0.0.1:5432/notable_rag"
+    postgres_schema: str = "notable_rag"
+    postgres_chunks_table: str = "kb_chunks"
+    postgres_fts_config: str = "english"
+    postgres_statement_timeout_ms: int = 5000
+    vector_dimensions: int = 768
+
+    embedding_model_name: str = "BAAI/bge-base-en-v1.5"
+    rerank_enabled: bool = False
+    rerank_model_name: str = "BAAI/bge-reranker-base"
 
     max_snippets_120b: int = 5
     max_snippets_20b: int = 4
@@ -58,6 +79,11 @@ class RAGConfig:
 
     @property
     def is_valid(self) -> bool:
-        """Return True when both required retrieval artifacts exist."""
-        return self.sqlite_path.exists() and self.faiss_path.exists()
+        """Return True when required backend configuration is present."""
+        backend = (self.backend or "postgres").strip().lower()
+        if backend == "postgres":
+            return bool((self.postgres_dsn or "").strip())
+        if backend == "sqlite_faiss":
+            return self.sqlite_path.exists() and self.faiss_path.exists()
+        return False
 

@@ -85,14 +85,14 @@ This sizing assumes **~300 notables/day** (about **12.5/hour average**) with nor
 
 ## Fixed Infrastructure Cost Estimates
 
-These are **rough order-of-magnitude estimates** for a single-host deployment running **gpt-oss-20b** on **Red Hat Enterprise Linux (RHEL)**. Actual costs vary by vendor, procurement channel, and support tier.
+These are **rough order-of-magnitude estimates** for a single-host deployment running a local model such as **gemma-4-31B-it** on **Red Hat Enterprise Linux (RHEL)**. Actual costs vary by vendor, procurement channel, and support tier.
 
 ### Hardware (One-Time Cost)
 
 | Profile | Server + GPU | Estimated Cost (USD) |
 |---------|--------------|---------------------|
-| **Minimum (CPU-only, gpt-oss-20b)** | 16-core server, 64 GB RAM, 500 GB NVMe, no GPU | $5,000–$10,000 |
-| **Recommended (gpt-oss-20b)** | 32-core server, 128 GB RAM, 1 TB NVMe, 1× RTX PRO 6000 (96 GB VRAM) | $18,000–$35,000 |
+| **Minimum (CPU-only, small local model)** | 16-core server, 64 GB RAM, 500 GB NVMe, no GPU | $5,000–$10,000 |
+| **Recommended (gemma-4-31B-it example)** | 32-core server, 128 GB RAM, 1 TB NVMe, 1× RTX PRO 6000 (96 GB VRAM) | $18,000–$35,000 |
 | **High headroom (faster inference / future upgrades)** | 64-core server, 256 GB RAM, 2 TB NVMe, 1× RTX PRO 6000 (96 GB VRAM) or H100-class | $35,000–$80,000+ |
 
 **Recommended profile (one-time) itemized estimate:**
@@ -113,7 +113,7 @@ These are **rough order-of-magnitude estimates** for a single-host deployment ru
 |------|----------------------------|
 | **Red Hat Enterprise Linux** (Standard or Premium subscription, 1 server) | $800–$2,000/year |
 | **Splunk Enterprise** (if not already licensed) | Per existing customer agreement |
-| **LLM model weights** (gpt-oss-20b) | $0 (open-weights) |
+| **LLM model weights** (local approved model) | Depends on selected model/license |
 | **vLLM / Ollama / TGI** | $0 (open-source) |
 | **Python + dependencies** | $0 (open-source) |
 
@@ -189,7 +189,7 @@ These are **rough order-of-magnitude estimates** for a single-host deployment ru
 2. The service sends HTTP POST to the local LLM endpoint (localhost, no TLS needed):
    ```json
    {
-     "model": "gpt-oss-20b",
+    "model": "gemma-4-31B-it",
      "messages": [
        {"role": "user", "content": "<formatted_alert_text>"}
      ],
@@ -212,13 +212,13 @@ These are **rough order-of-magnitude estimates** for a single-host deployment ru
 For this use case (security alert analysis, MITRE ATT&CK TTP identification, structured reasoning), we recommend:
 
 | Model | Context | Notes |
-|-------|------------|---------------|-------|
-| **gpt-oss-20b** (recommended) | **131,072 tokens (128k)** | Open-weight model; well-suited for on-prem deployment with vLLM |
+|-------|---------|-------|
+| **gemma-4-31B-it** (default example) | Model/runtime dependent | Current default example model for this systemd deployment |
 
-**Why gpt-oss-20b:**
+**Why this model shape:**
 - Strong reasoning for security analysis tasks
 - On-prem friendly with modern serving stacks
-- Large context window (**128k**) for long alerts/enrichment context
+- Enough capacity for first-pass alert analysis while staying deployable on a single GPU host
 
 ### Recommended LLM Serving Stack
 
@@ -229,14 +229,14 @@ For this use case (security alert analysis, MITRE ATT&CK TTP identification, str
 | Text Generation Inference (TGI) | Production alternative | HuggingFace-backed, production-ready, good documentation |
 | llama.cpp | CPU-only deployments | Lower resource requirements, slower inference |
 
-**Recommended stack:** **vLLM** with **gpt-oss-20b**
+**Recommended stack:** **vLLM** behind **LiteLLM** with **gemma-4-31B-it** as the default example model.
 
-**vLLM exposes an OpenAI-compatible API**, so your service calls:
+**LiteLLM exposes the analyzer-facing OpenAI-compatible API**, so the service calls:
 ```bash
-POST http://localhost:8000/v1/chat/completions
-# or
-POST http://localhost:8000/v1/chat/completions
+POST http://127.0.0.1:4000/v1/chat/completions
 ```
+
+vLLM remains bound to loopback behind LiteLLM, typically at `http://127.0.0.1:8000/v1`.
 
 This simplifies integration and allows swapping models without code changes.
 
@@ -355,7 +355,7 @@ PROCESSED_DIR=/var/notables/processed
 QUARANTINE_DIR=/var/notables/quarantine
 
 # === Local LLM ===
-LLM_API_URL=http://127.0.0.1:8000/v1/chat/completions
+LLM_API_URL=http://127.0.0.1:4000/v1/chat/completions
 LLM_API_TOKEN=<secret>
 
 # === Splunk Integration ===
@@ -381,7 +381,7 @@ RETENTION_RUN_INTERVAL_SECONDS=86400
 # === Concurrency (optional) ===
 # Python multithreading via ThreadPoolExecutor (not asyncio)
 CONCURRENCY_ENABLED=false
-# A100 + gpt-oss-20b profile for Xeon Gold:
+# Gemma/vLLM baseline profile for Xeon Gold:
 MAX_WORKERS=4
 MAX_QUEUE_DEPTH=32
 # Xeon Platinum profile:
@@ -499,33 +499,31 @@ The service validates TTPs against a **local JSON file** (`enterprise_attack_vXX
 
 #### Install Python and Dependencies (RHEL)
 ```bash
-# RHEL 9 (Python 3.9 is default)
-sudo dnf install python3 python3-pip
-
-# RHEL 8 (install Python 3.9 explicitly)
-sudo dnf install python39 python39-pip
+# Install Python 3.12 where available from approved OS/appstream sources.
+sudo dnf install python3.12 python3.12-pip
 
 # Create virtual environment
-python3.9 -m venv /opt/notable-analyzer/venv
+python3.12 -m venv /opt/notable-analyzer/venv
 source /opt/notable-analyzer/venv/bin/activate
-pip install requests
+pip install -r /opt/notable-analyzer/requirements.txt
 ```
 
 #### Deploy Application Code
 ```bash
-# Copy files from s3_notable_pipeline/ to /opt/notable-analyzer/
+# Copy the packaged systemd service tree to /opt/notable-analyzer/
 # Required files:
-#   - ttp_analyzer.py
-#   - markdown_generator.py
+#   - src/llm_notable_analysis_onprem_systemd/onprem_service/
+#   - onprem_rag_notable_analysis/
 #   - enterprise_attack_v17.1_ids.json
-#   - onprem_main.py (new entrypoint; adapt lambda_handler.py)
-#   - config.ini (or .env)
+#   - pyproject.toml
+#   - requirements.txt
+#   - config.env
 ```
 
 #### Create Directories
 ```bash
 sudo mkdir -p /var/notables/{incoming,reports,processed,quarantine}
-sudo chown notable-service:notable-service /var/notables/*
+sudo chown notable-analyzer:notable-analyzer /var/notables/*
 sudo chmod 750 /var/notables/*
 ```
 
@@ -536,16 +534,17 @@ sudo chmod 750 /var/notables/*
 # /etc/systemd/system/notable-analyzer.service
 [Unit]
 Description=Notable Analysis Service (On-Prem)
-After=network.target
+After=network.target litellm.service
+Requires=litellm.service
 
 [Service]
 Type=simple
-User=notable-service
-Group=notable-service
+User=notable-analyzer
+Group=notable-analyzer
 WorkingDirectory=/opt/notable-analyzer
 Environment="PATH=/opt/notable-analyzer/venv/bin"
-EnvironmentFile=/opt/notable-analyzer/config.env
-ExecStart=/opt/notable-analyzer/venv/bin/python onprem_main.py
+EnvironmentFile=/etc/notable-analyzer/config.env
+ExecStart=/opt/notable-analyzer/venv/bin/python -m llm_notable_analysis_onprem_systemd.onprem_service.onprem_main
 Restart=on-failure
 RestartSec=10
 
@@ -561,49 +560,50 @@ sudo systemctl start notable-analyzer
 sudo systemctl status notable-analyzer
 ```
 
-### 3. Configure Local LLM Endpoint (vLLM + gpt-oss-20b)
+### 3. Configure Local LLM Endpoint (vLLM + LiteLLM)
 
-**Recommended setup:** vLLM serving gpt-oss-20b on the same host.
+**Recommended setup:** vLLM serves `gemma-4-31B-it` on loopback and LiteLLM exposes the analyzer-facing gateway on `127.0.0.1:4000`.
 
 #### Install vLLM (RHEL)
 ```bash
 # Ensure NVIDIA drivers and CUDA are installed (customer-specific)
 # Install vLLM in a separate virtual environment
-python3.9 -m venv /opt/vllm/venv
+python3.12 -m venv /opt/vllm/venv
 source /opt/vllm/venv/bin/activate
-pip install vllm
+pip install vllm==0.14.1
 ```
 
-#### Download gpt-oss-20b model weights
+#### Stage gemma-4-31B-it model weights
 **On a connected machine** (outside the air-gap):
-- Download model weights from OpenAI's official distribution
+- Download model weights from the approved model source
 - Transfer to the air-gapped host via approved media transfer process
 
-Place model weights in `/opt/vllm/models/gpt-oss-20b/`
+Place model weights in `/opt/models/gemma-4-31B-it/`
 
 #### Start vLLM server
 ```bash
 # Start vLLM with OpenAI-compatible API
 source /opt/vllm/venv/bin/activate
 python -m vllm.entrypoints.openai.api_server \
-  --model /opt/vllm/models/gpt-oss-20b \
+  --model /opt/models/gemma-4-31B-it \
+  --served-model-name gemma-4-31B-it \
   --host 127.0.0.1 \
   --port 8000 \
   --api-key "<your-api-key>" \
   --tensor-parallel-size 1
 ```
 
-For production, create a systemd service for vLLM (similar to the analyzer service).
+For production, use the packaged `vllm.service` and `litellm.service` units.
 
 #### Test connectivity
 ```bash
-curl -X POST http://127.0.0.1:8000/v1/chat/completions \
+curl -X POST http://127.0.0.1:4000/v1/chat/completions \
   -H "Authorization: Bearer <your-api-key>" \
   -H "Content-Type: application/json" \
-  -d '{"model":"gpt-oss-20b","messages":[{"role":"user","content":"Test prompt"}],"max_tokens":100}'
+  -d '{"model":"gemma-4-31B-it","messages":[{"role":"user","content":"Test prompt"}],"max_tokens":100}'
 ```
 
-**Note:** vLLM exposes an **OpenAI-compatible API** at `/v1/chat/completions` (primary). The analyzer service should call this endpoint.
+**Note:** LiteLLM exposes an **OpenAI-compatible API** at `/v1/chat/completions` (primary). LiteLLM should route to the local vLLM backend.
 
 ### 4. Configure Splunk Integration (Optional)
 
@@ -626,13 +626,13 @@ curl -X POST http://127.0.0.1:8000/v1/chat/completions \
 
 ```bash
 # Copy enterprise_attack_v17.1_ids.json to the Single Host
-scp enterprise_attack_v17.1_ids.json notable-service@single-host:/opt/notable-analyzer/data/
+scp enterprise_attack_v17.1_ids.json notable-analyzer@single-host:/opt/notable-analyzer/data/
 
 # Verify file integrity
 sha256sum /opt/notable-analyzer/data/enterprise_attack_v17.1_ids.json
 
 # Set permissions
-sudo chown notable-service:notable-service /opt/notable-analyzer/data/enterprise_attack_v17.1_ids.json
+sudo chown notable-analyzer:notable-analyzer /opt/notable-analyzer/data/enterprise_attack_v17.1_ids.json
 sudo chmod 440 /opt/notable-analyzer/data/enterprise_attack_v17.1_ids.json
 ```
 

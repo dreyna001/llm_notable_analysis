@@ -1,0 +1,11 @@
+# Copy to /etc/litellm/config.yaml.
+#
+# Default posture: loopback-only proxy with no committed master key. If you
+# enable LiteLLM auth, set the key in host-managed configuration and also set
+# LLM_API_TOKEN in /etc/notable-analyzer/config.env.
+
+model_list:
+  - model_name: gemma-4-31B-it
+    litellm_params:
+      model: hosted_vllm/gemma-4-31B-it
+      api_base: http://127.0.0.1:8000/v1

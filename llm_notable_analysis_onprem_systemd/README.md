@@ -1,6 +1,6 @@
 # On-Prem/Air-Gapped Notable Analysis Service Architecture
 
-Air-gapped, single-host deployment for security notable analysis using local LLM inference (vLLM + gemma-4-31B-it) and MITRE ATT&CK TTP validation. We don't assume the customer has any of the hardware/software resources; keep that in mind when looking at cost & setup.
+Air-gapped, single-host deployment for security notable analysis using local LLM inference (LiteLLM -> vLLM + gemma-4-31B-it) and MITRE ATT&CK TTP validation. We don't assume the customer has any of the hardware/software resources; keep that in mind when looking at cost & setup.
 
 ## Notes / Clarifications
 
@@ -24,7 +24,7 @@ Use [`docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.m
 │                               │                                 │
 │                               ▼                                 │
 │                      ┌────────────────┐                         │
-│                      │  vLLM Server   │                         │
+│                      │ LiteLLM -> vLLM│                         │
 │                      │(gemma-4-31B-it)│                         │
 │                      └────────────────┘                         │
 │                               │                                 │
@@ -37,13 +37,18 @@ Use [`docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.m
 
 ## Client inference setup (existing `llama-server` / OpenAI-compatible endpoint)
 
-When inference is already reachable on loopback (**e.g.** `http://127.0.0.1:8000`), install this analyzer in **client-only** mode via [`docs/operations/INSTALL.md`](docs/operations/INSTALL.md).
+When inference is already reachable through a loopback OpenAI-compatible gateway (**default:** `http://127.0.0.1:4000`), install this analyzer in **client-only** mode via [`docs/operations/INSTALL.md`](docs/operations/INSTALL.md).
 
-For offline “what to download first,” see [`phi3.5_llamacpp_service/README.md`](../phi3.5_llamacpp_service/README.md#offline-pre-stage-checklist).
+For offline “what to download first,” see [`docs/operations/OFFLINE_PRESTAGE_GUIDE.md`](docs/operations/OFFLINE_PRESTAGE_GUIDE.md).
 
-## Mini/Qwen CPU client one-command install
+## Non-Default Mini/Qwen CPU Client Install
 
-If your inference layer is already provided by a compatible OpenAI-compatible **`llama-server`** on **`127.0.0.1:8000`** (for example a Qwen/`llama.cpp` CPU deployment), install this package in **client mode** (no vLLM/GPU setup) with:
+This is a lab/CPU alternate path, not the default production deployment. Use the
+main `install.sh` path for the standard `vLLM -> LiteLLM -> analyzer` systemd
+chain. If your inference layer is already provided by a compatible
+OpenAI-compatible **`llama-server`** on **`127.0.0.1:8000`** (for example a
+Qwen/`llama.cpp` CPU deployment), install this package in **client mode** (no
+vLLM/GPU setup) with:
 
 ```bash
 cd /path/to/llm_notable_analysis_onprem_systemd
@@ -56,7 +61,7 @@ What this script does:
 - Creates `/opt/notable-analyzer/venv` and installs dependencies.
 - Installs the local SDK from `../onprem-llm-sdk` by default.
 - Creates/updates `/etc/notable-analyzer/config.env` for mini defaults:
-  - `LLM_API_URL=http://127.0.0.1:8000/v1/chat/completions`
+  - `LLM_API_URL=http://127.0.0.1:8000/v1/chat/completions` (mini direct mode, bypasses LiteLLM)
   - `LLM_MODEL_NAME=Qwen3-4B-Q4_K_M.gguf`
 - Creates `/usr/local/bin/notable-analyzer-mini-run` launcher.
 - Optionally installs a `systemd` unit when runtime support is available.
@@ -113,16 +118,21 @@ sudo chown -R notable-analyzer:notable-analyzer /var/notables
 
 ```bash
 sudo cp deploy/systemd/notable-analyzer.service /etc/systemd/system/
+sudo cp deploy/systemd/litellm.service /etc/systemd/system/
 sudo cp deploy/systemd/vllm.service /etc/systemd/system/
+sudo mkdir -p /etc/litellm
+sudo cp deploy/litellm/config.yaml.example /etc/litellm/config.yaml
 sudo systemctl daemon-reload
-sudo systemctl enable notable-analyzer vllm
+sudo systemctl enable notable-analyzer litellm vllm
 sudo systemctl start vllm
+sudo systemctl start litellm
 sudo systemctl start notable-analyzer
 ```
 
-### Note on vLLM installation
+### Note on LiteLLM / vLLM installation
 
-The analyzer expects a local OpenAI-compatible vLLM endpoint. For a `gemma-4-31B-it` deployment, use:
+The analyzer expects a local OpenAI-compatible LiteLLM endpoint that routes to
+vLLM. For a `gemma-4-31B-it` vLLM backend, use:
 
 - Interpreter: `/opt/vllm/venv/bin/python`
 - Model path: `/opt/models/gemma-4-31B-it`
@@ -350,13 +360,18 @@ Notes:
 ## Knowledge Base Ingestion (RAG)
 
 When `RAG_ENABLED=true`, the analyzer can inject SOC-specific operational context
-from local retrieval artifacts. Build/update those artifacts manually:
+from local retrieval artifacts. The default production backend is PostgreSQL FTS
++ pgvector with BGE embeddings and optional BGE reranking. SQLite FTS5 + FAISS
+remains available as a local fallback for lab use or smaller deployments.
+
+Fallback SQLite/FAISS ingestion, only when `RAG_BACKEND=sqlite_faiss`:
 
 ```bash
 python3 -m onprem_rag_notable_analysis.future.corpus_ingest \
+  --backend sqlite_faiss \
   --source-dir /opt/llm-notable-analysis/knowledge_base/source_docs \
   --index-dir /opt/llm-notable-analysis/knowledge_base/index \
-  --embedding-model sentence-transformers/all-MiniLM-L6-v2
+  --embedding-model BAAI/bge-base-en-v1.5
 ```
 
 Supported source formats in `source_docs`:
@@ -368,6 +383,51 @@ Generated artifacts in `index`:
 - `kb.faiss` (vector index)
 - `chunks.jsonl` (debug/exportable chunk corpus)
 - `ingest_report.json` (ingestion summary)
+
+PostgreSQL-backed RAG is the default production-oriented path:
+`RAG_BACKEND=postgres`, `RAG_POSTGRES_DSN`, PostgreSQL FTS,
+`RAG_POSTGRES_STATEMENT_TIMEOUT_MS`, pgvector embeddings, and optional
+`RAG_RERANK_ENABLED=true` with
+`BAAI/bge-reranker-base`. The runtime provider expects a populated
+`RAG_POSTGRES_SCHEMA`.`RAG_POSTGRES_CHUNKS_TABLE` table matching the pgvector
+schema generated by `onprem_rag_notable_analysis.future.postgres_index`.
+
+PostgreSQL ingestion using the same values from `config.env`:
+
+```bash
+bash llm_notable_analysis_onprem_systemd/scripts/setup_postgres_rag.sh \
+  --config-env /etc/notable-analyzer/config.env \
+  --source-dir /opt/llm-notable-analysis/knowledge_base/source_docs \
+  --index-dir /opt/llm-notable-analysis/knowledge_base/index
+```
+
+Ingest-only command if PostgreSQL role/database/schema already exist:
+
+```bash
+python3 -m onprem_rag_notable_analysis.future.corpus_ingest \
+  --config-env /etc/notable-analyzer/config.env \
+  --backend postgres \
+  --source-dir /opt/llm-notable-analysis/knowledge_base/source_docs \
+  --index-dir /opt/llm-notable-analysis/knowledge_base/index
+```
+
+The command parses `config.env` as simple `KEY=VALUE` text instead of sourcing
+it as shell code. It writes `chunks.jsonl` and `ingest_report.json` to
+`--index-dir` for handoff/debugging and populates PostgreSQL for runtime
+retrieval.
+
+For document lifecycle, content quality, rebuild cadence, and rollback guidance,
+see [`docs/operations/KNOWLEDGE_BASE_OPERATIONS.md`](docs/operations/KNOWLEDGE_BASE_OPERATIONS.md).
+
+Service-chain smoke test after startup:
+
+```bash
+sudo bash llm_notable_analysis_onprem_systemd/scripts/smoke_service_chain.sh \
+  --config-env /etc/notable-analyzer/config.env
+```
+
+This checks the local `vLLM` health endpoint, the `LiteLLM` models and chat
+completion path, and a file-drop report from `notable-analyzer`.
 
 ## Automated Tests
 
@@ -452,37 +512,38 @@ Phantom/SOAR template assets in this repo:
 #### SFTP (Recommended)
 
 SFTP is the simplest and most secure transport for SOAR → analyzer file delivery.
+The installer creates this path by default:
+
+- Chroot: `/var/sftp/soar`
+- Upload directory visible to SOAR: `/incoming`
+- Analyzer input path: `/var/notables/incoming`
+- Default link: `/var/notables/incoming -> /var/sftp/soar/incoming`
 
 **Setup on analyzer host (RHEL):**
 
 ```bash
-# Create dedicated SFTP user (no shell access)
-sudo useradd -m -s /sbin/nologin soar-uploader
-sudo mkdir -p /var/notables/incoming
-sudo chown soar-uploader:notable-analyzer /var/notables/incoming
-sudo chmod 770 /var/notables/incoming
-
-# Configure SSH for chroot SFTP
-sudo nano /etc/ssh/sshd_config
+# Recommended: let the installer create users, directories, symlink, and sshd Match block.
+sudo bash scripts/install.sh
 ```
 
-Add to `/etc/ssh/sshd_config`:
+The installer appends this SFTP block to `/etc/ssh/sshd_config`:
 
 ```
 Match User soar-uploader
-    ChrootDirectory /var/notables
+    ChrootDirectory /var/sftp/soar
     ForceCommand internal-sftp
     AllowTcpForwarding no
     X11Forwarding no
+    PasswordAuthentication no
 ```
 
 ```bash
-# Fix ownership for chroot (root must own chroot dir)
-sudo chown root:root /var/notables
-sudo chmod 755 /var/notables
-sudo chown soar-uploader:notable-analyzer /var/notables/incoming
+# Verify expected permissions
+ls -ld /var/sftp /var/sftp/soar /var/sftp/soar/incoming
+# drwxr-xr-x root root /var/sftp
+# drwxr-xr-x root root /var/sftp/soar
+# drwxrwxr-x soar-uploader notable-analyzer /var/sftp/soar/incoming
 
-# Restart SSH
 sudo systemctl restart sshd
 ```
 
@@ -784,7 +845,8 @@ Recovery and restart semantics (including power-cut/reboot behavior and SDK-vs-a
 # Check logs
 sudo journalctl -u notable-analyzer -n 50
 
-# Verify vLLM is running
+# Verify LiteLLM is reachable, then check vLLM if needed
+curl http://127.0.0.1:4000/v1/models
 curl http://127.0.0.1:8000/health
 ```
 
@@ -803,4 +865,3 @@ Reduce vLLM memory utilization in `/etc/systemd/system/vllm.service`:
 ```
 --gpu-memory-utilization 0.8
 ```
-

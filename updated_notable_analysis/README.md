@@ -264,7 +264,7 @@ Advisory retrieval settings:
 - retrieval limits
 - context budget
 - provenance requirements
-- preferred initial backend: `SQLite + FAISS`
+- active on-prem default backend: Postgres/pgvector; shared-core config remains backend-neutral
 
 ### 6. Query policy config
 
@@ -468,7 +468,7 @@ Acceptance target:
 - the first planned query adapter is `Splunk MCP`
 - the second planned query adapter is `Splunk REST API`
 - the design must support customer environments where `MCP` is not available
-- the preferred first vector backend is `SQLite + FAISS`
+- the active on-prem runtime defaults to Postgres/pgvector RAG, while the shared core keeps the retrieval boundary backend-neutral
 - the on-prem runtime contract should use `notable-analyzer -> LiteLLM -> vLLM -> gemma-4-31B-it`
 - the on-prem analyzer should run as a long-running `systemd` worker
 - the analyzer-facing default local endpoint should be LiteLLM on loopback rather than direct vLLM calls

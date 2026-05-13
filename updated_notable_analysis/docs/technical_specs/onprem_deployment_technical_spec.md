@@ -181,7 +181,7 @@ Provider rules:
 - malformed configured files fail closed with `ValueError`
 - retrieval limit and context budget enforcement remains owned by shared core context normalization
 
-SQLite + FAISS remains the preferred later retrieval backend, but it is not implemented in this local JSON bridge slice.
+The active on-prem runtime now defaults to Postgres/pgvector RAG, but this local JSON bridge slice remains backend-neutral and does not implement retrieval execution.
 
 ## 8. Local File Transport Contract
 

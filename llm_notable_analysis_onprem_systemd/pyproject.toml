@@ -6,15 +6,18 @@ build-backend = "setuptools.build_meta"
 name = "llm-notable-analysis-onprem-systemd"
 version = "0.1.0"
 description = "On-prem systemd notable analysis service with local LLM inference"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "requests==2.32.5",
     "onprem-llm-sdk==0.1.0",
-    "faiss-cpu",
-    "sentence-transformers",
-    "numpy",
-    "python-docx",
-    "docx2txt",
+    "onprem-rag-notable-analysis==0.1.0",
+    "psycopg[binary]==3.3.4",
+    "pgvector==0.4.2",
+    "faiss-cpu==1.13.2",
+    "sentence-transformers==5.4.1",
+    "numpy==2.4.4",
+    "python-docx==1.2.0",
+    "docx2txt==0.9",
 ]
 
 [tool.setuptools.packages.find]

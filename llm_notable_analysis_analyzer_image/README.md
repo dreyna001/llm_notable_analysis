@@ -1,5 +1,12 @@
 # Shared analyzer image build target
 
+Status: legacy/reference Docker build path, not production-equivalent to the
+current systemd deployment. The default on-prem refactor path is
+`llm_notable_analysis_onprem_systemd/` with host `systemd`, `LiteLLM`, `vLLM`,
+PostgreSQL/pgvector RAG, and `gemma-4-31B-it`. Do not use this image path for
+the new Postgres RAG/LiteLLM runtime contract until it is refreshed in a
+separate Docker-specific change.
+
 This directory defines the shared Docker build target for the
 `notable-analyzer-service` image.
 

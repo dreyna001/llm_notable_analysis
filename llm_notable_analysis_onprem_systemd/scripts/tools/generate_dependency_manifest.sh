@@ -7,6 +7,7 @@
 # - Captures Python + venv package inventories (pip freeze) for:
 #     - /opt/notable-analyzer/venv
 #     - /opt/vllm/venv
+#     - /opt/litellm/venv
 # - Captures systemd unit file contents + hashes (if present)
 # - Captures model directory inventory + SHA256 hashes (if present)
 #
@@ -114,15 +115,17 @@ freeze_venv() {
 
 freeze_venv "/opt/notable-analyzer/venv" "notable_analyzer_venv"
 freeze_venv "/opt/vllm/venv" "vllm_venv"
+freeze_venv "/opt/litellm/venv" "litellm_venv"
 
 # --- systemd unit files + hashes (if present) ---
 if [[ -d /etc/systemd/system ]]; then
   write_file_copy "/etc/systemd/system/notable-analyzer.service" "systemd/notable-analyzer.service"
   write_file_copy "/etc/systemd/system/vllm.service" "systemd/vllm.service"
+  write_file_copy "/etc/systemd/system/litellm.service" "systemd/litellm.service"
   write_file_copy "/etc/systemd/system/notable-retention.service" "systemd/notable-retention.service"
   write_file_copy "/etc/systemd/system/notable-retention.timer" "systemd/notable-retention.timer"
   if have sha256sum; then
-    write_cmd "systemd_sha256" bash -lc 'cd /etc/systemd/system && sha256sum notable-analyzer.service vllm.service notable-retention.service notable-retention.timer 2>/dev/null || true'
+    write_cmd "systemd_sha256" bash -lc 'cd /etc/systemd/system && sha256sum notable-analyzer.service vllm.service litellm.service notable-retention.service notable-retention.timer 2>/dev/null || true'
   fi
 fi
 

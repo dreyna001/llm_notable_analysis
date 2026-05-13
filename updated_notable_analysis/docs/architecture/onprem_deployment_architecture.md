@@ -49,7 +49,7 @@ The first on-prem runtime shape is locked as:
 - **Worker model**: long-running `systemd`-managed worker loop around the local file-ingest processor
 - **Local inference direction**: `notable-analyzer -> LiteLLM -> vLLM -> gemma-4-31B-it`
 
-This aligns with the existing on-prem repository direction already documented in `llm_notable_analysis_onprem_systemd/README.md` and `glab_vllm_litellm_kb_host_setup/HOST_DEPLOY_GLAB.md`.
+This aligns with the existing on-prem repository direction already documented in `llm_notable_analysis_onprem_systemd/README.md` and `llm_notable_analysis_onprem_systemd/docs/operations/INSTALL.md`.
 
 ## Architecture Boundary
 
