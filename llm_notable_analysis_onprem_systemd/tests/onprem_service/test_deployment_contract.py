@@ -3,6 +3,7 @@ import unittest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+WORKSPACE_ROOT = PROJECT_ROOT.parent
 
 
 class TestDeploymentContract(unittest.TestCase):
@@ -139,13 +140,15 @@ class TestDeploymentContract(unittest.TestCase):
         """Python package metadata should match the supported runtime."""
         pyproject_text = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         rag_pyproject_text = (
-            PROJECT_ROOT.parent / "onprem_rag_notable_analysis" / "pyproject.toml"
+            WORKSPACE_ROOT / "onprem_rag_notable_analysis" / "pyproject.toml"
         ).read_text(encoding="utf-8")
 
         self.assertIn('requires-python = ">=3.12"', pyproject_text)
         self.assertIn('requires-python = ">=3.12"', rag_pyproject_text)
         self.assertIn("psycopg[binary]==3.3.4", rag_pyproject_text)
         self.assertIn("sentence-transformers==5.4.1", rag_pyproject_text)
+        self.assertIn("[project.optional-dependencies]", pyproject_text)
+        self.assertIn("litellm[proxy]==1.83.14", pyproject_text)
 
     def test_service_chain_smoke_targets_default_litellm_path(self) -> None:
         """Service smoke should verify vLLM, LiteLLM, and analyzer file-drop."""
@@ -249,7 +252,7 @@ class TestDeploymentContract(unittest.TestCase):
     def test_legacy_docker_docs_are_not_presented_as_current_runtime(self) -> None:
         """Legacy Docker paths should not look equivalent to the systemd runtime."""
         analyzer_readme = (
-            PROJECT_ROOT.parent / "llm_notable_analysis_analyzer_image" / "README.md"
+            WORKSPACE_ROOT / "llm_notable_analysis_analyzer_image" / "README.md"
         ).read_text(encoding="utf-8")
 
         self.assertIn("not production-equivalent", analyzer_readme)

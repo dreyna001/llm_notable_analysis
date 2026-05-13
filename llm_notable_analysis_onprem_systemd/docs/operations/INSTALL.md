@@ -199,6 +199,11 @@ The unit `Wants=vllm.service` for the default local backend but does not
 `Require=` it, so operators can replace `/etc/litellm/config.yaml` with a
 remote backend route without editing the service dependency graph.
 
+`scripts/install.sh` installs LiteLLM into its own service venv using
+`LITELLM_PIP_SPEC` (default `litellm[proxy]==1.83.14`). For pip-only lab
+installs that do not run the installer, the analyzer package exposes the same
+proxy dependency as an optional extra: `pip install ".[proxy]"`.
+
 The included `vllm.service` expects vLLM to be installed in:
 
 - `/opt/vllm/venv` (Python venv)

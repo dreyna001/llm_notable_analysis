@@ -161,6 +161,15 @@ class TestConfigRuntimeContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unsupported RAG backend"):
             client._init_rag_provider()
 
+    def test_local_llm_client_fails_closed_when_provider_missing_at_request_time(self) -> None:
+        """Fail-closed RAG should not silently drop context when provider is missing."""
+        client = object.__new__(LocalLLMClient)
+        client.config = Config(RAG_ENABLED=True, RAG_FAIL_CLOSED=True)
+        client._rag_provider = None
+
+        with self.assertRaisesRegex(RuntimeError, "provider is unavailable"):
+            client._build_soc_operational_context("PowerShell alert")
+
     def test_nonsdk_local_llm_client_selects_postgres_rag_provider(self) -> None:
         """Non-SDK client should keep RAG wiring parity with the SDK client."""
         client = object.__new__(NonSDKLocalLLMClient)
@@ -190,6 +199,15 @@ class TestConfigRuntimeContract(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "Unsupported RAG backend"):
             client._init_rag_provider()
+
+    def test_nonsdk_local_llm_client_fails_closed_when_provider_missing(self) -> None:
+        """Non-SDK fail-closed RAG should also reject missing providers."""
+        client = object.__new__(NonSDKLocalLLMClient)
+        client.config = Config(RAG_ENABLED=True, RAG_FAIL_CLOSED=True)
+        client._rag_provider = None
+
+        with self.assertRaisesRegex(RuntimeError, "provider is unavailable"):
+            client._build_soc_operational_context("PowerShell alert")
 
 
 if __name__ == "__main__":

@@ -9,7 +9,31 @@ from onprem_rag_notable_analysis.future.rag_config import RAGConfig
 class _FakeEmbeddingModel:
     def encode(self, texts, show_progress_bar=False, convert_to_numpy=True):
         del show_progress_bar, convert_to_numpy
-        return [[1.0, 0.0, 0.0] for _text in texts]
+        vectors = []
+        for text in texts:
+            lowered = str(text).lower()
+            if "second" in lowered:
+                vectors.append([0.0, 1.0, 0.0])
+            elif "authentication" in lowered or "general" in lowered:
+                vectors.append([0.0, 0.0, 1.0])
+            else:
+                vectors.append([1.0, 0.0, 0.0])
+        return vectors
+
+
+class _DuplicateAwareEmbeddingModel:
+    def encode(self, texts, show_progress_bar=False, convert_to_numpy=True):
+        del show_progress_bar, convert_to_numpy
+        vectors = []
+        for text in texts:
+            lowered = str(text).lower()
+            if "duplicate-a" in lowered or "duplicate-b" in lowered:
+                vectors.append([1.0, 0.0, 0.0])
+            elif "unique" in lowered:
+                vectors.append([0.0, 1.0, 0.0])
+            else:
+                vectors.append([0.0, 0.0, 1.0])
+        return vectors
 
 
 class _WrongDimensionEmbeddingModel:
@@ -248,6 +272,48 @@ class TestPostgresRetrieval(unittest.TestCase):
 
         self.assertNotIn("general.md", context)
         self.assertIn("powershell.md", context)
+
+    def test_build_context_dedupes_near_duplicate_snippets(self) -> None:
+        """Postgres RAG should honor the near-duplicate similarity threshold."""
+        rows = [
+            {
+                "section_path": "Duplicate A",
+                "source_file": "duplicate_a.md",
+                "text": "PowerShell encodedcommand duplicate-a triage procedure.",
+            },
+            {
+                "section_path": "Duplicate B",
+                "source_file": "duplicate_b.md",
+                "text": "PowerShell encodedcommand duplicate-b triage procedure.",
+            },
+            {
+                "section_path": "Unique",
+                "source_file": "unique.md",
+                "text": "PowerShell encodedcommand unique escalation procedure.",
+            },
+        ]
+        connection = _FakeConnection(rows)
+        provider = PostgresRAGContextProvider(
+            RAGConfig(
+                enabled=True,
+                backend="postgres",
+                vector_dimensions=3,
+                postgres_statement_timeout_ms=0,
+                near_duplicate_similarity_threshold=0.80,
+                max_snippets_120b=3,
+            ),
+            connect=lambda _dsn: connection,
+            embedding_model=_DuplicateAwareEmbeddingModel(),
+        )
+
+        context = provider.build_context(
+            alert_text="PowerShell EncodedCommand alert",
+            llm_model_name="gemma-4-31B-it",
+        )
+
+        self.assertIn("duplicate_a.md", context)
+        self.assertNotIn("duplicate_b.md", context)
+        self.assertIn("unique.md", context)
 
     def test_build_context_returns_empty_for_empty_alert(self) -> None:
         """Empty input should not load models or query Postgres."""

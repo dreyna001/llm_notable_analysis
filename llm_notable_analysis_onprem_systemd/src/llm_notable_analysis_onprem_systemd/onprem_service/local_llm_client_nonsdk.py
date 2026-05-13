@@ -1032,6 +1032,11 @@ class LocalLLMClient:
             Rendered `SOC_OPERATIONAL_CONTEXT` block or an empty string.
         """
         if self._rag_provider is None:
+            if (
+                bool(getattr(self.config, "RAG_ENABLED", False))
+                and bool(getattr(self.config, "RAG_FAIL_CLOSED", False))
+            ):
+                raise RuntimeError("RAG is enabled but provider is unavailable.")
             return ""
         try:
             return self._rag_provider.build_context(

@@ -217,6 +217,16 @@ def _l2_normalize_vector(values: Sequence[float]) -> list[float]:
     return [float(v) / norm for v in values]
 
 
+def _vector_rows(values: Any) -> list[list[float]]:
+    """Normalize common embedding outputs into a list of float vectors."""
+    data = values.tolist() if hasattr(values, "tolist") else values
+    if not data:
+        return []
+    if not isinstance(data[0], (list, tuple)):
+        data = [data]
+    return [[float(v) for v in row] for row in data]
+
+
 def _row_value(row: Any, key: str, index: int) -> Any:
     """Read a value from a mapping or tuple-like database row."""
     if isinstance(row, Mapping):
@@ -371,6 +381,55 @@ class PostgresRAGContextProvider:
             )
         return snippets
 
+    def _encode_snippet_texts(self, texts: Sequence[str]) -> list[list[float]]:
+        """Encode and normalize snippet excerpts for duplicate detection."""
+        if not texts:
+            return []
+        model = self._embedding_model_instance()
+        vectors = model.encode(
+            list(texts),
+            show_progress_bar=False,
+            convert_to_numpy=True,
+        )
+        return [_l2_normalize_vector(vector) for vector in _vector_rows(vectors)]
+
+    def _dedupe_snippets(self, snippets: Sequence[ContextSnippet]) -> list[ContextSnippet]:
+        """Remove near-duplicate snippets using the configured embedding threshold."""
+        if not snippets:
+            return []
+        try:
+            excerpted = [
+                (snippet, (snippet.excerpt or "").strip())
+                for snippet in snippets
+                if (snippet.excerpt or "").strip()
+            ]
+            if not excerpted:
+                return []
+            vectors = self._encode_snippet_texts(
+                [excerpt for _snippet, excerpt in excerpted]
+            )
+            if len(vectors) != len(excerpted):
+                raise ValueError("Snippet embedding count did not match snippet count.")
+            kept: list[ContextSnippet] = []
+            kept_vectors: list[list[float]] = []
+            for (snippet, _excerpt), candidate in zip(excerpted, vectors):
+                max_similarity = (
+                    max(
+                        sum(a * b for a, b in zip(existing, candidate))
+                        for existing in kept_vectors
+                    )
+                    if kept_vectors
+                    else 0.0
+                )
+                if max_similarity >= self.config.near_duplicate_similarity_threshold:
+                    continue
+                kept.append(snippet)
+                kept_vectors.append(candidate)
+            return kept
+        except Exception as exc:
+            logger.warning("RAG snippet dedupe failed; using undeduped snippets: %s", exc)
+            return list(snippets)
+
     def _row_passes_quality_gate(
         self,
         *,
@@ -466,6 +525,7 @@ class PostgresRAGContextProvider:
             )
             snippets = self._rows_to_snippets(rows)
             snippets = self._rerank_snippets(query_text=query_text, snippets=snippets)
+            snippets = self._dedupe_snippets(snippets)
 
             max_snippets, budget_chars = self._profile_limits(
                 profile
