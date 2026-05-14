@@ -2,6 +2,28 @@
 
 This document defines restart/recovery semantics for `llm_notable_analysis_onprem_systemd` and clarifies which reliability behavior is implemented by `onprem-llm-sdk` versus the notable-analysis application layer.
 
+## What This Controls
+
+This guide controls operational expectations when processing is interrupted:
+restart behavior, duplicate processing risk, report/writeback ordering, and who
+owns recovery tasks. It does not change runtime behavior.
+
+## Recommended Starting Posture
+
+- Keep the file-drop workflow simple and observable before enabling optional
+  writebacks.
+- Treat quarantine review as an operator responsibility.
+- Validate restart behavior with a known-good file-drop smoke before production.
+- Document who decides whether to replay or archive a failed input.
+
+## Customer Decisions
+
+- Who owns service restart, log review, and quarantine triage?
+- Which artifacts are authoritative after partial failure: local report,
+  Splunk comment, ServiceNow incident, or input file?
+- What duplicate-processing risk is acceptable after host power loss?
+- Who approves manual replay from `INCOMING_DIR` or `QUARANTINE_DIR`?
+
 ## Scope
 
 - Deployment model: single-host service with file-drop ingest.

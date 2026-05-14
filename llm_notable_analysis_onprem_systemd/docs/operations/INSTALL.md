@@ -1,5 +1,31 @@
 # Installation Guide
 
+## What This Controls
+
+This guide controls host bring-up: users, directories, virtual environments,
+systemd units, model service startup, LiteLLM/vLLM wiring, and post-install
+smoke checks. Per-feature tuning belongs in the area-specific operations guides
+in this folder.
+
+## Recommended Starting Posture
+
+- Use the main `scripts/install.sh` path for the standard production-shaped
+  systemd chain.
+- Pin Python to 3.12 in regulated environments.
+- Leave post-install smoke checks enabled unless debugging installer behavior.
+- Keep service endpoints on loopback.
+- Review `config.env` with the area guides before enabling optional
+  integrations.
+
+## Customer Decisions
+
+- Which RHEL-compatible host and GPU profile is approved?
+- Which Python interpreter is the supported runtime?
+- Are model weights and wheelhouse artifacts pre-staged for offline install?
+- Should services auto-start during install or be started manually after config
+  review?
+- Who owns post-install smoke testing and rollback?
+
 ## Prerequisites
 
 | Requirement | Details |

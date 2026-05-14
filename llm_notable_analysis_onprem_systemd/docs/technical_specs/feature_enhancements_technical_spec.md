@@ -41,7 +41,7 @@ This block must preserve the current default file-drop analysis path.
 - The current service remains a file-drop `systemd` analyzer.
 - `RAG_ENABLED` already injects local SOC context into the prompt.
 - `SPL_QUERY_GENERATION_ENABLED` runs a second bounded LLM call for SPL query fields only; it does not execute SPL.
-- When `RAG_ENABLED=true`, RAG context may include data dictionary and SOP guidance used by query generation and response wording.
+- When `RAG_ENABLED=true`, `SOC_OPERATIONAL_CONTEXT` may include runbooks/SOP/schema-style guidance used for **general** analyst reasoning; deterministic SPL grounding for environment-specific tokens uses **`SPL_QUERY_RAG_ENABLED`** plus **`SPL_QUERY_GROUNDING_CONTEXT`** into that same SPL call (separate Postgres table).
 - Existing Splunk notable writeback through `SPLUNK_SINK_ENABLED` remains separate from read-only investigation.
 - All new behavior is optional and off by default.
 
@@ -59,6 +59,7 @@ This block must preserve the current default file-drop analysis path.
 Required new implementation files:
 
 - `src/llm_notable_analysis_onprem_systemd/onprem_service/spl_query_generation.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/spl_query_grounding.py`
 - `src/llm_notable_analysis_onprem_systemd/onprem_service/splunk_investigation.py`
 - `src/llm_notable_analysis_onprem_systemd/onprem_service/query_result_enrichment.py`
 - `src/llm_notable_analysis_onprem_systemd/onprem_service/servicenow.py`
@@ -109,6 +110,15 @@ SERVICENOW_API_TOKEN=
 SERVICENOW_ASSIGNMENT_GROUP=
 SERVICENOW_TIMEOUT_SECONDS=15
 LLM_STRUCTURED_OUTPUT_MODE=prompt_json
+
+# Optional SPL-dedicated Postgres KB grounding (defaults off).
+SPL_QUERY_RAG_ENABLED=false
+SPL_QUERY_RAG_SOURCE_DIR=/opt/llm-notable-analysis/knowledge_base/spl_query_source_docs
+SPL_QUERY_RAG_INDEX_DIR=/opt/llm-notable-analysis/knowledge_base/spl_query_index
+SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE=spl_query_chunks
+SPL_QUERY_RAG_MAX_SNIPPETS=4
+SPL_QUERY_RAG_CONTEXT_BUDGET_CHARS=1600
+SPL_QUERY_RAG_FAILURE_MODE=suppress
 ```
 
 ### 6.2 Config validation rules
@@ -368,7 +378,7 @@ Wire enabled optional features into the existing processing flow.
 Processing order:
 
 1. Run current LLM analysis.
-2. If `SPL_QUERY_GENERATION_ENABLED=true`, run second LLM call to generate SPL query fields for the 6 hypotheses.
+2. If `SPL_QUERY_GENERATION_ENABLED=true`, run second LLM call to generate SPL query fields for the 6 hypotheses. If `SPL_QUERY_RAG_ENABLED=true`, retrieval adds `SPL_QUERY_GROUNDING_CONTEXT` before that SPL call using `SPL_QUERY_RAG_*` Postgres table settings (fail-soft per `SPL_QUERY_RAG_FAILURE_MODE`).
 3. If query execution is enabled, validate and execute up to 6 eligible generated SPL queries.
 4. Enrich the LLM response with query results.
 5. Render markdown.

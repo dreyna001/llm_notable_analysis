@@ -34,12 +34,19 @@ llm_notable_analysis_onprem_systemd/scripts/smoke_postgres_rag.sh
 ```
 
 The smoke starts a disposable `pgvector/pgvector:pg16` container, runs the real
-Postgres schema/ingest/retrieval path with deterministic smoke embeddings, and
-removes the container afterward. Docker is only the test harness; production uses
-the configured host PostgreSQL/pgvector service.
+Postgres schema/ingest/retrieval path twice (general KB snippets into the default
+`kb_chunks`-style smoke table **and** separate SPL grounding snippets into
+`spl_query_chunks`), validates both `SOC_OPERATIONAL_CONTEXT` and
+`SPL_QUERY_GROUNDING_CONTEXT` retrieval with deterministic smoke embeddings, and
+removes the container afterward. Override table names via `SMOKE_TABLE` /
+`SMOKE_SPL_TABLE` if needed.
+
+Docker is only the test harness; production uses the configured host
+PostgreSQL/pgvector service.
 
 This proves the database, pgvector extension, schema/table DDL, insert/upsert,
-and retrieval context path. It does not prove BGE model loading or reranking.
+and both retrieval-context code paths used by analyzers (`SOC_OPERATIONAL_CONTEXT`
+and SPL query grounding). It does not prove BGE model loading or reranking.
 
 ## Full Service Chain
 

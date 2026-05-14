@@ -51,7 +51,7 @@ The current service:
 - reads `.json` and `.txt` files from `INCOMING_DIR`
 - sends one structured prompt to the local LLM client
 - optionally adds RAG/SOC context with `RAG_ENABLED`
-- when `SPL_QUERY_GENERATION_ENABLED=true`, runs a second bounded LLM call for SPL query fields using the alert, the six hypotheses, and SOC/RAG context
+- when `SPL_QUERY_GENERATION_ENABLED=true`, runs a second bounded LLM call for SPL query fields using the alert, the six hypotheses, optional **`SOC_OPERATIONAL_CONTEXT`**, and optional **`SPL_QUERY_GROUNDING_CONTEXT`** (`SPL_QUERY_RAG_ENABLED=true`)
 - validates and normalizes the LLM response
 - renders markdown to `REPORT_DIR`
 - optionally writes markdown back to Splunk notable comments with `SPLUNK_SINK_ENABLED`
@@ -212,15 +212,15 @@ This section **supersedes** the former standalone files `docs/planning/SPL_QUERY
 - No invented indexes, sourcetypes, CIM/datamodel names, macros; alert JSON keys are not assumed to be Splunk field names unless validated.
 - Disallow placeholders (`<INDEX>`, `<SOURCETYPE>`, …) and pseudo-queries (`search …` scaffolding); prefer generic-yet-real SPL from alert-visible facts unless environment context explicitly allows otherwise.
 
-**Environmental context roadmap (later / separate from general `RAG_ENABLED`):**
+**Environmental context (Splunk facts for SPL):**
 
-- Indexes, sourcetypes, CIM/datamodel refs, macros, approved saved searches—inform query quality via retrieval or configs (see **SPL RAG grounding** below).
+- Indexes, sourcetypes, CIM/datamodel refs, macros, approved saved searches ground the optional **`SPL_QUERY_GROUNDING_CONTEXT`** path when `SPL_QUERY_RAG_ENABLED=true` (see **SPL RAG grounding** below). General `RAG_ENABLED` remains separate.
 
 **Markdown:** Query block under **each hypothesis** (fenced SPL); SPL-unavailable short note after failed repair—not silent omission without explanation where helpful.
 
 **On‑prem v1 implementation surface (historic target files):**
 
-- `onprem_service/config.py`, `onprem_service/local_llm_client.py`, `onprem_service/local_llm_client_nonsdk.py`, `onprem_service/spl_query_generation.py`, `onprem_service/markdown_generator.py`, `config.env.example`, tests mirroring **`test_spl_query_generation.py`** / **`test_markdown_generator.py`** contract coverage.
+- `onprem_service/config.py`, `onprem_service/local_llm_client.py`, `onprem_service/local_llm_client_nonsdk.py`, `onprem_service/spl_query_generation.py`, `onprem_service/spl_query_grounding.py`, `onprem_service/markdown_generator.py`, `config.env.example`, tests mirroring **`test_spl_query_generation.py`** / **`test_markdown_generator.py`** contract coverage.
 
 **Out of explicit v1 plan scope:**
 
@@ -230,47 +230,70 @@ This section **supersedes** the former standalone files `docs/planning/SPL_QUERY
 
 ### SPL RAG grounding (`SPL_QUERY_RAG_ENABLED`)
 
-**Purpose (optional backlog beyond stateless SPL gen):** When both `SPL_QUERY_GENERATION_ENABLED` and **`SPL_QUERY_RAG_ENABLED`** are true—retrieve from a **Splunk-focused corpus**, then perform a **dedicated bounded LLM pass** emitting **grounded SPL** plus **explicit KB section references** proving environment-specific tokens.
+**Purpose (optional shipped mode beyond stateless SPL gen):** When both `SPL_QUERY_GENERATION_ENABLED` and **`SPL_QUERY_RAG_ENABLED`** are true—retrieve from a **Splunk-focused corpus**, then pass **`SPL_QUERY_GROUNDING_CONTEXT`** into the bounded SPL-generation call. The output can include **explicit KB section references** proving environment-specific tokens.
 
 **Effective flag matrix:**
 
 | `SPL_QUERY_GENERATION_ENABLED` | `SPL_QUERY_RAG_ENABLED` | Behavior |
 |---|---|---|
 | `false` | any | SPL fields off entirely; SPL RAG meaningless |
-| `true` | `false` | Stateless SPL-generation path only (today’s auxiliary second-call SPL merge pattern where implemented) |
-| `true` | `true` | Retrieve → **`SPL_QUERY_GROUNDING_CONTEXT`** → bounded grounded-SPL inference with **per-hypothesis grounding summary + grounding refs** |
+| `true` | `false` | Stateless SPL-generation path only; generated SPL may not assume environment-specific indexes, sourcetypes, macros, or datamodels |
+| `true` | `true` | Retrieve → **`SPL_QUERY_GROUNDING_CONTEXT`** → bounded grounded-SPL inference with **per-hypothesis grounding refs** when SPL KB material is used |
 
 **Retrieval corpus (illustrative on‑prem hosting):**
 
 - Source documents (e.g. `.docx`, `.txt`): `knowledge_base/spl_query_source_docs/` (example host root: **`/opt/llm-notable-analysis/knowledge_base/spl_query_source_docs`**).
 
-- Indexes: **`SPL_QUERY_RAG_SQLITE_PATH`**, **`SPL_QUERY_RAG_FAISS_PATH`** (separate SQLite/FAISS pair from generic `RAG_SQLITE_PATH`/`RAG_FAISS_PATH`); optional tuning knobs `SPL_QUERY_RAG_MAX_SNIPPETS`, `SPL_QUERY_RAG_CONTEXT_BUDGET_CHARS`.
+- Runtime backend: the existing PostgreSQL FTS + pgvector retrieval machinery,
+  using a separate table configured by
+  **`SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE`** (default `spl_query_chunks`).
+  Ingest artifacts live under **`SPL_QUERY_RAG_INDEX_DIR`**. Optional tuning
+  knobs include `SPL_QUERY_RAG_MAX_SNIPPETS`,
+  `SPL_QUERY_RAG_CONTEXT_BUDGET_CHARS`, and
+  `SPL_QUERY_RAG_FAILURE_MODE`.
 
 - Retrieved content spans index inventories, sourcetype catalogs, macros, saved-search exemplars, field-mapping notes—themes already listed above.
 
 **Architectural separation from general SOC RAG:**
 
-- Do **not** overload `SOC_OPERATIONAL_CONTEXT`; introduce parallel **`SPL_QUERY_GROUNDING_CONTEXT`** helpers/renderers in retrieval layer (**`build_spl_query_context(...)`**, structured snippets + refs).
+- Do **not** overload `SOC_OPERATIONAL_CONTEXT`; use parallel
+  **`SPL_QUERY_GROUNDING_CONTEXT`** helpers/renderers backed by the SPL-focused
+  Postgres table.
 
 **Suggested extra hypothesis payload fields:**
 
 - `primary_spl_query_grounding_refs[]` `{ "source_file", "section_path" }`.
-- `primary_spl_query_grounding_summary` (short linkage narrative).
+- `primary_spl_query_grounding_summary` (future optional linkage narrative).
 
-User-visible citations come from SQLite chunk **`source_file` + `section_path`** metadata—**never** cite raw FAISS IDs as prose truth.
+User-visible citations come from chunk **`source_file` + `section_path`**
+metadata—**never** cite raw vector IDs as prose truth.
 
 **Relaxed hallucination gates when grounded:**
 
 - Splunk-environment tokens permissible **only** if present in grounding snippets **or** explicit alert facts—validator cross-checks claims vs retrieved corpus.
 
-**Failures:** If grounding-required contract fails—in **suppress grounded SPL/report subsection** posture; preserve safe analysis skeleton; omit fabricated citations.
+**Failures:** If grounding-required retrieval or validation fails, default to
+**suppress grounded SPL/report subsection** posture. Operators may explicitly set
+`SPL_QUERY_RAG_FAILURE_MODE=fallback_to_ungrounded` to allow alert-only SPL
+generation during SPL KB outages.
 
-**Suggested implementation sequencing:**
+**Implemented boundaries:**
 
-1. Config + dual SPL-index plumbing + **`build_spl_query_context`** returning structured snippets/refs.
-2. Prompt/schema contract + `SPL_QUERY_GROUNDING_CONTEXT`.
-3. Validators enforcing ref existence / token allowance against retrieved context.
-4. Markdown rendering grounding summary/ref lists (no gratuitous dumping of raw excerpts by default).
+- Config + dual-table Postgres plumbing.
+- Prompt contract with `SPL_QUERY_GROUNDING_CONTEXT`.
+- Validators enforcing token allowance against alert text plus retrieved SPL
+  context.
+- Deterministic `primary_spl_query_grounding_refs` for queries that use SPL KB
+  material.
+
+**Future (optional): observability without markdown bloat.** If a deployment
+needs stronger **audit or SIEM correlation** for SPL grounding, a follow-on
+change can add **structured log lines** (e.g., per-alert summary of grounding
+availability, ref counts, or redacted `source_file` / `section_path` lists) and/or
+**additional fields on the analysis `metadata` object** beside the existing
+`spl_query_rag_*` flags. That path keeps **human-facing markdown** (and Splunk
+comment writeback) lean: provenance stays in machine-oriented channels unless
+policy explicitly requires citations in the narrative report.
 
 **Corpus authoring guidance:** Maintain clearly headed sections (“Authentication › Failed Logons”, …) enabling meaningful provenance—not monolithic unstructured dumps.
 
@@ -308,9 +331,9 @@ Controls:
 
 RAG guidance:
 
-- when `RAG_ENABLED=true`, query generation should use retrieved data dictionary context where available
-- generated SPL may use RAG-grounded index names, sourcetypes, fields, macros, and query examples
-- RAG context remains advisory and must not be treated as direct alert evidence
+- SPL generation may attach **`SOC_OPERATIONAL_CONTEXT`** when `RAG_ENABLED=true`; that block informs analyst wording but **does not by itself authorize** environment-specific SPL tokens (`index=`, sourcetypes, macros, datamodel names).
+- **Grounded SPL tokens** align with deterministic validation against the alert text and **`SPL_QUERY_GROUNDING_CONTEXT`** when `SPL_QUERY_RAG_ENABLED=true`.
+- Retrieval and SPL grounding text remain advisory and must not be treated as direct alert evidence.
 
 ### Query-result enrichment
 
@@ -400,7 +423,7 @@ New flags should follow the existing `config.env.example` and `Config` style:
 - `SPLUNK_SEARCH_TIMEOUT_SECONDS=20`
 - `SPLUNK_MCP_TOOL_NAME=splunk_search`
 - `SPL_QUERY_GENERATION_ENABLED=false` (bounded second-call SPL field generation—see section **SPL query generation & SPL grounding (canonical implementation plans)** earlier in this document)
-- `SPL_QUERY_RAG_ENABLED=false` plus optional `SPL_QUERY_RAG_SQLITE_PATH`, `SPL_QUERY_RAG_FAISS_PATH`, snippet/budget knobs when the SPL-grounded retrieval milestone lands (prior standalone planning markdown files were consolidated into that section)
+- `SPL_QUERY_RAG_ENABLED=false` plus `SPL_QUERY_RAG_SOURCE_DIR`, `SPL_QUERY_RAG_INDEX_DIR`, `SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE`, snippet/budget knobs, and `SPL_QUERY_RAG_FAILURE_MODE` for the optional SPL-focused KB path
 - `SERVICENOW_DRAFT_ENABLED=false`
 - `SERVICENOW_CREATE_ENABLED=false`
 - `SERVICENOW_CREATE_REQUIRES_APPROVAL=true`

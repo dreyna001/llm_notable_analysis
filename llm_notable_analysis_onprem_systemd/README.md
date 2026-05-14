@@ -1,867 +1,129 @@
-# On-Prem/Air-Gapped Notable Analysis Service Architecture
+# On-Prem Notable Analysis Service
 
-Air-gapped, single-host deployment for security notable analysis using local LLM inference (LiteLLM -> vLLM + gemma-4-31B-it) and MITRE ATT&CK TTP validation. We don't assume the customer has any of the hardware/software resources; keep that in mind when looking at cost & setup.
+Air-gapped-capable, single-host notable analysis service for SOC workflows. The
+default deployment runs local inference through **LiteLLM -> vLLM** and uses a
+file-drop workflow for incoming `.json` or `.txt` notables.
 
-## Notes / Clarifications
+This root README is intentionally a **jumping board**. Detailed setup,
+operations, tuning, security, and integration guidance lives under
+[`docs/`](docs/).
 
-- **Doc intent / naming**: This doc is meant to capture the **architecture + service design** for an **on-prem / air-gapped** operating model (not only “how to deploy”).
-- **Why `src/` exists**: `src/llm_notable_analysis_onprem_systemd/` is the installable Python package root, so imports and service entrypoints stay stable after deployment.
+## What This Package Provides
 
-## Deployment readiness
+- A `systemd`-managed analyzer service that watches an incoming directory and
+  writes markdown reports.
+- Local OpenAI-compatible inference through LiteLLM/vLLM by default.
+- Optional RAG grounding from a local knowledge base.
+- Optional SPL generation, read-only Splunk search execution, and Splunk
+  notable writeback.
+- Optional ServiceNow incident draft/create behavior with approval-gated create.
+- MITRE ATT&CK TTP validation.
+- Operator docs for install, offline prestage, recovery, security, and
+  per-customer tuning.
 
-Use [`docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.md`](docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.md) as the executive gateway, and [`docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_ASSESSMENT.md`](docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_ASSESSMENT.md) for the full technical checklist and assumptions.
+## Start Here
 
-## Architecture
+| Need | Read this |
+|------|-----------|
+| New to the project | [`docs/README.md`](docs/README.md) |
+| End-to-end behavior | [`docs/delivery_package/EXECUTIVE_ONPREM_WORKFLOW.md`](docs/delivery_package/EXECUTIVE_ONPREM_WORKFLOW.md) |
+| Customer tuning by area | [`docs/operations/README.md`](docs/operations/README.md) |
+| Install on a host | [`docs/operations/INSTALL.md`](docs/operations/INSTALL.md) |
+| Offline or air-gapped prep | [`docs/operations/OFFLINE_PRESTAGE_GUIDE.md`](docs/operations/OFFLINE_PRESTAGE_GUIDE.md) |
+| Runtime config values | [`config.env.example`](config.env.example) |
+| Tests and validation | [`docs/testing/TESTING.md`](docs/testing/TESTING.md) |
+| Security posture | [`docs/operations/SECURITY_OPERATIONS.md`](docs/operations/SECURITY_OPERATIONS.md) and [`docs/security/SECURITY_POSTURE.md`](docs/security/SECURITY_POSTURE.md) |
+| Deployment readiness | [`docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.md`](docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.md) |
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Single Host (RHEL)                       │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐     ┌──────────────────┐     ┌─────────────┐   │
-│  │  Incoming   │────>│  notable-analyzer│────>│   Reports   │   │
-│  │  Directory  │     │     Service      │     │  Directory  │   │
-│  └─────────────┘     └────────┬─────────┘     └─────────────┘   │
-│                               │                                 │
-│                               ▼                                 │
-│                      ┌────────────────┐                         │
-│                      │ LiteLLM -> vLLM│                         │
-│                      │(gemma-4-31B-it)│                         │
-│                      └────────────────┘                         │
-│                               │                                 │
-│                      ┌────────────────┐                         │
-│                      │  RTX PRO 6000  │                         │
-│                      │    (96 GB)     │                         │
-│                      └────────────────┘                         │
-└─────────────────────────────────────────────────────────────────┘
-```
+## Customer Operations Guides
 
-## Client inference setup (existing `llama-server` / OpenAI-compatible endpoint)
+These are the config-focused pages customers should use to tune shipped
+behavior without changing code.
 
-When inference is already reachable through a loopback OpenAI-compatible gateway (**default:** `http://127.0.0.1:4000`), install this analyzer in **client-only** mode via [`docs/operations/INSTALL.md`](docs/operations/INSTALL.md).
+| Area | Guide |
+|------|-------|
+| SPL generation and read-only execution | [`docs/operations/SPL_OPERATIONS.md`](docs/operations/SPL_OPERATIONS.md) |
+| Knowledge base content lifecycle | [`docs/operations/KNOWLEDGE_BASE_OPERATIONS.md`](docs/operations/KNOWLEDGE_BASE_OPERATIONS.md) |
+| RAG retrieval tuning | [`docs/operations/RAG_OPERATIONS.md`](docs/operations/RAG_OPERATIONS.md) |
+| LLM inference tuning | [`docs/operations/LLM_INFERENCE_OPERATIONS.md`](docs/operations/LLM_INFERENCE_OPERATIONS.md) |
+| File drop, payloads, retention, concurrency | [`docs/operations/FILE_DROP_AND_RETENTION_OPERATIONS.md`](docs/operations/FILE_DROP_AND_RETENTION_OPERATIONS.md) |
+| Splunk notable writeback | [`docs/operations/SPLUNK_WRITEBACK_OPERATIONS.md`](docs/operations/SPLUNK_WRITEBACK_OPERATIONS.md) |
+| ServiceNow draft/create | [`docs/operations/SERVICENOW_OPERATIONS.md`](docs/operations/SERVICENOW_OPERATIONS.md) |
+| MITRE ATT&CK/TTP validation | [`docs/operations/MITRE_TTP_OPERATIONS.md`](docs/operations/MITRE_TTP_OPERATIONS.md) |
+| Recovery behavior | [`docs/operations/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`](docs/operations/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md) |
 
-For offline “what to download first,” see [`docs/operations/OFFLINE_PRESTAGE_GUIDE.md`](docs/operations/OFFLINE_PRESTAGE_GUIDE.md).
+## Default Runtime Shape
 
-## Non-Default Mini/Qwen CPU Client Install
-
-This is a lab/CPU alternate path, not the default production deployment. Use the
-main `install.sh` path for the standard `vLLM -> LiteLLM -> analyzer` systemd
-chain. If your inference layer is already provided by a compatible
-OpenAI-compatible **`llama-server`** on **`127.0.0.1:8000`** (for example a
-Qwen/`llama.cpp` CPU deployment), install this package in **client mode** (no
-vLLM/GPU setup) with:
-
-```bash
-cd /path/to/llm_notable_analysis_onprem_systemd
-sudo bash scripts/install_mini_qwen_cpu_client.sh
-```
-
-What this script does:
-
-- Installs the package source tree into `/opt/notable-analyzer/src`.
-- Creates `/opt/notable-analyzer/venv` and installs dependencies.
-- Installs the local SDK from `../onprem-llm-sdk` by default.
-- Creates/updates `/etc/notable-analyzer/config.env` for mini defaults:
-  - `LLM_API_URL=http://127.0.0.1:8000/v1/chat/completions` (mini direct mode, bypasses LiteLLM)
-  - `LLM_MODEL_NAME=Qwen3-4B-Q4_K_M.gguf`
-- Creates `/usr/local/bin/notable-analyzer-mini-run` launcher.
-- Optionally installs a `systemd` unit when runtime support is available.
-
-`onprem-llm-sdk` is the shared Python transport package this service uses to call local/OpenAI-compatible LLM endpoints with consistent retries, timeouts, and error handling. It is installed into the analyzer venv (`site-packages`); it is not a standalone daemon.
-
-If your SDK is not at `../onprem-llm-sdk`, set:
-
-```bash
-sudo SDK_SOURCE_DIR=/path/to/onprem-llm-sdk bash scripts/install_mini_qwen_cpu_client.sh
+```text
+SOAR/SFTP/operator file drop
+  -> notable-analyzer systemd service
+  -> LiteLLM -> vLLM local model
+  -> markdown report
+  -> processed/quarantine movement
+  -> optional Splunk/ServiceNow outputs
 ```
 
-## Quick Start
-
-### 1. Install Dependencies
-
-```bash
-# Create installation directory
-sudo mkdir -p /opt/notable-analyzer
-sudo chown $USER:$USER /opt/notable-analyzer
-
-# Copy files
-cp -r src /opt/notable-analyzer/
-cp pyproject.toml requirements.txt /opt/notable-analyzer/
-
-# Create virtual environment
-cd /opt/notable-analyzer
-python3.10 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-pip install /opt/notable-analyzer
-```
-
-### 2. Configure
-
-```bash
-# Create config directory
-sudo mkdir -p /etc/notable-analyzer
-
-# Copy and edit configuration
-sudo cp config.env.example /etc/notable-analyzer/config.env
-sudo chmod 600 /etc/notable-analyzer/config.env
-sudo nano /etc/notable-analyzer/config.env
-```
-
-### 3. Create Directories
-
-```bash
-sudo mkdir -p /var/notables/{incoming,processed,quarantine,reports}
-sudo chown -R notable-analyzer:notable-analyzer /var/notables
-```
-
-### 4. Install Systemd Services
-
-```bash
-sudo cp deploy/systemd/notable-analyzer.service /etc/systemd/system/
-sudo cp deploy/systemd/litellm.service /etc/systemd/system/
-sudo cp deploy/systemd/vllm.service /etc/systemd/system/
-sudo mkdir -p /etc/litellm
-sudo cp deploy/litellm/config.yaml.example /etc/litellm/config.yaml
-sudo systemctl daemon-reload
-sudo systemctl enable notable-analyzer litellm vllm
-sudo systemctl start vllm
-sudo systemctl start litellm
-sudo systemctl start notable-analyzer
-```
-
-### Note on LiteLLM / vLLM installation
-
-The analyzer expects a local OpenAI-compatible LiteLLM endpoint that routes to
-vLLM. For a `gemma-4-31B-it` vLLM backend, use:
-
-- Interpreter: `/opt/vllm/venv/bin/python`
-- Model path: `/opt/models/gemma-4-31B-it`
-- Executor backend: `--distributed-executor-backend mp`
-
-Note: the repo's base `deploy/systemd/vllm.service` defaults to `gemma-4-31B-it`; keep `--model`, `--served-model-name`, and `LLM_MODEL_NAME` aligned if you override the model.
-
-If you use `scripts/install.sh`, it will create `/opt/vllm/venv` and install vLLM by default (using `python3.12` unless overridden; set `VLLM_SKIP_INSTALL=true` to skip).
-If you install vLLM elsewhere, set `VLLM_INSTALL_DIR` and `VLLM_VENV_DIR` when running `scripts/install.sh`; the installer patches the installed `/etc/systemd/system/vllm.service` `WorkingDirectory` and `ExecStart` automatically.
-Single-node loopback rendezvous settings (`VLLM_HOST_IP`, `MASTER_ADDR`, NCCL/Gloo loopback interface vars) are included directly in `deploy/systemd/vllm.service`; no extra drop-in is required for normal installs.
-
-Examples:
-
-```bash
-# Default layout
-sudo bash scripts/install.sh
-
-# Custom side-by-side vLLM path (optional)
-sudo VLLM_INSTALL_DIR=/opt/vllm312 VLLM_VENV_DIR=/opt/vllm312/venv VLLM_PYTHON_BIN=python3.12 bash scripts/install.sh
-```
-
-Note: During vLLM installation, the installer may appear idle for several minutes after creating `/opt/vllm/venv` while `pip` resolves/builds dependencies. This is expected on some hosts.
-
-### Note on model weights directory
-
-`scripts/install.sh` will also **best-effort** create `/opt/models` (and the configured model path) and attempt to `chown` it to the invoking sudo user to make it easier to download/copy model weights. If this fails due to permissions, the install continues and you can create/chown the directory manually.
-
-### Optional install.sh flags (quality-of-life)
-
-- **Skip vLLM install**: `sudo VLLM_SKIP_INSTALL=true bash scripts/install.sh` (useful for air-gapped hosts where you pre-stage wheels)
-- **Enable extra vLLM smoke checks**: `sudo VLLM_SMOKE_TEST=true bash scripts/install.sh` (non-fatal checks like `nvidia-smi` + model path presence)
-- **Download model weights (non-interactive)**: `sudo MODEL_DOWNLOAD=true HF_TOKEN=... bash scripts/install.sh`
-  - Default: `MODEL_REPO=google/gemma-4-31B-it`
-  - Notes: best-effort; uses `huggingface_hub` HTTP downloads (no `git lfs` required)
-- **Auto-start services after install (best-effort, default true)**: `sudo AUTO_START_SERVICES=true bash scripts/install.sh`
-- **Skip post-install service start**: `sudo AUTO_START_SERVICES=false bash scripts/install.sh`
-- **Run canned inference smoke test after auto-start (best-effort, default true)**: `sudo RUN_SMOKE_TEST=true bash scripts/install.sh`
-- **Skip canned inference smoke test**: `sudo RUN_SMOKE_TEST=false bash scripts/install.sh`
-- **Override vLLM health timeout (default: 420s)**: `sudo VLLM_HEALTH_TIMEOUT_SECONDS=420 bash scripts/install.sh`
-- **Override smoke test timeout (default: 240s)**: `sudo SMOKE_TEST_TIMEOUT_SECONDS=240 bash scripts/install.sh`
-- **Reset existing vLLM systemd drop-ins (recommended when standardizing)**: `sudo VLLM_RESET_OVERRIDES=true bash scripts/install.sh`
-
-### Manual Inputs Still Required
-
-Even with one-command install, these items remain environment-specific:
-
-- Confirm model weights are present at `/opt/models/gemma-4-31B-it` (or set your chosen path in `vllm.service`).
-- Set `LLM_API_TOKEN` only if your vLLM command includes `--api-key`.
-- Set `SPLUNK_BASE_URL` / `SPLUNK_API_TOKEN` only when `SPLUNK_SINK_ENABLED=true`.
-- Set `SPL_QUERY_GENERATION_ENABLED=true` only when you want per-hypothesis SPL query generation in reports.
-- Set `INVESTIGATION_QUERY_EXECUTION_ENABLED=true` only when you want bounded read-only Splunk query execution and report enrichment.
-- Add SOAR public key(s) to `/var/sftp/soar/.ssh/authorized_keys` only if using SOAR SFTP ingest.
-- Review the final `scripts/install.sh` "Non-fatal issues encountered" summary and resolve items before production.
-
-### Gemma 4 31B-it model setup
-
-The default model repository is `google/gemma-4-31B-it`, and the default served model name is `gemma-4-31B-it`:
-
-```bash
-sudo MODEL_DOWNLOAD=true HF_TOKEN=... bash scripts/install.sh
-```
-
-Then set the analyzer model name to match the served vLLM name:
-
-```bash
-LLM_MODEL_NAME=gemma-4-31B-it
-```
-
-This analyzer currently sends text-only prompts, so Gemma 4's multimodal capabilities are not used here unless the application contract is extended.
-
-## Compliance / Gov-ready: generating a dependency manifest (what was installed)
-
-For environments that require scanning/approving every installed component, generate an evidence-based manifest on the target host:
-
-```bash
-cd /path/to/llm_notable_analysis_onprem_systemd
-sudo bash scripts/tools/generate_dependency_manifest.sh
-```
-
-This produces a timestamped folder (example: `dependency_manifest_20260117_033000/`) containing:
-- OS/kernel info
-- GPU driver/runtime info (`nvidia-smi` if present)
-- System package inventory (RPM or DPKG, depending on distro)
-- Python venv inventories (`pip freeze`) for `/opt/notable-analyzer/venv` and `/opt/vllm/venv`
-- systemd unit file copies + hashes
-- Model directory inventory + SHA256 hashes (if present at your configured model path, for example `/opt/models/gemma-4-31B-it`)
-
-This is generally more accurate than a hand-written list because it reflects the *actual* host state after install.
-
-## Reproducibility: pinning Python for the venvs (recommended for regulated envs)
-
-For the highest-confidence installs over time, pin the Python interpreter used for each virtualenv.
-
-Recommended baseline: **Python 3.12**.
-
-Example (pin both venvs to Python 3.12):
-
-```bash
-sudo ANALYZER_PYTHON_BIN=python3.12 VLLM_PYTHON_BIN=python3.12 bash scripts/install.sh
-```
-
-If the specified interpreter is not present on the host, `scripts/install.sh` will fail early (so you don’t end up with a partially working deployment).
-
-## Freeform paragraphs mode (no JSON schema)
-
-If you want a report that is just a few paragraphs (to avoid schema/tooling fragility), you can run the alternative service:
-
-- systemd unit: `notable-analyzer-freeform.service`
-- entrypoint: `python -m llm_notable_analysis_onprem_systemd.onprem_service.freeform_main`
-
-It writes reports as `*_freeform.md` into `REPORT_DIR` (default: `/var/notables/reports`).
-
-Enable it (make sure `vllm` is running first):
-
-```bash
-sudo systemctl enable --now notable-analyzer-freeform
-sudo journalctl -u notable-analyzer-freeform -f
-```
-
-Note: Do not run both the structured analyzer and freeform analyzer against the same `INCOMING_DIR` at the same time.
-
-### 5. Verify
-
-```bash
-# Check service status
-sudo systemctl status notable-analyzer
-sudo systemctl status vllm
-
-# View logs
-sudo journalctl -u notable-analyzer -f
-```
-
-## Usage
-
-The optional investigation/query-enrichment and ServiceNow features are implemented in both service entrypoints:
-
-- SDK path: `python -m llm_notable_analysis_onprem_systemd.onprem_service.onprem_main`
-- non-SDK path: `python -m llm_notable_analysis_onprem_systemd.onprem_service.onprem_main_nonsdk`
-
-### Structured Output Mode (Optional)
-
-Structured output can run in prompt-json mode (default) or OpenAI-compatible tool-call mode:
-
-```bash
-LLM_STRUCTURED_OUTPUT_MODE=prompt_json
-# LLM_STRUCTURED_OUTPUT_MODE=tool_call
-```
-
-Notes:
-- `prompt_json` keeps the current prompt + parse + repair behavior.
-- `tool_call` requests function/tool-call shaped output for both the main analysis call and SPL-only second call.
-- If tool-call parsing fails for a request, the service falls back to `prompt_json` behavior for that request.
-- For `tool_call` mode with vLLM, your model/server must be launched with the correct tool parser/template settings (for example, `openai` parser for gpt-oss and `gemma4` parser/template for gemma-4-31B-it).
-
-### Hypothesis SPL Query Generation (Optional)
-
-When `SPL_QUERY_GENERATION_ENABLED=true`, the structured analyzer attempts to add one
-primary SPL query per hypothesis in the "Competing Hypotheses & Pivots" report
-section. When disabled, no SPL query fields are requested or rendered.
-
-### Investigation Query Execution (Optional)
-
-When `INVESTIGATION_QUERY_EXECUTION_ENABLED=true`, the structured analyzer executes
-bounded read-only SPL queries generated per hypothesis and adds a compact
-"Query Results" section to the report.
-
-Enable in `/etc/notable-analyzer/config.env`:
-
-```bash
-INVESTIGATION_QUERY_EXECUTION_ENABLED=true
-INVESTIGATION_QUERY_EXECUTOR=rest
-INVESTIGATION_MAX_QUERIES_PER_ALERT=6
-INVESTIGATION_MAX_CONCURRENT_QUERIES=3
-SPLUNK_SEARCH_ENDPOINT_PATH=/services/search/jobs/oneshot
-SPLUNK_SEARCH_ALLOWED_INDEXES=main,notable,risk
-SPLUNK_SEARCH_ALLOWED_COMMANDS=search,stats,table,fields,where,head
-SPLUNK_SEARCH_DENIED_COMMANDS=delete,collect,outputlookup,sendemail,map,rest,script,dbxquery
-SPLUNK_SEARCH_MAX_TIME_RANGE=24h
-SPLUNK_SEARCH_MAX_ROWS=100
-SPLUNK_SEARCH_TIMEOUT_SECONDS=20
-```
-
-Notes:
-- Query execution is read-only and policy-validated before transport execution.
-- `INVESTIGATION_QUERY_EXECUTOR=rest` uses `SPLUNK_BASE_URL` and `SPLUNK_API_TOKEN`.
-- `INVESTIGATION_QUERY_EXECUTOR=mcp` expects an injected MCP client path in code.
-- Query results stay separate from `evidence_vs_inference.evidence`.
-
-### ServiceNow Draft/Create (Optional)
-
-When ServiceNow flags are enabled, the analyzer can build incident drafts from
-the report and optionally create incidents with approval gating.
-
-Enable in `/etc/notable-analyzer/config.env`:
-
-```bash
-SERVICENOW_DRAFT_ENABLED=true
-SERVICENOW_CREATE_ENABLED=false
-SERVICENOW_CREATE_REQUIRES_APPROVAL=true
-SERVICENOW_BASE_URL=https://your-instance.service-now.com
-SERVICENOW_CREATE_PATH=/api/now/table/incident
-SERVICENOW_API_TOKEN=
-SERVICENOW_ASSIGNMENT_GROUP=
-SERVICENOW_TIMEOUT_SECONDS=15
-```
-
-Approval metadata for create should be present in incoming JSON payload:
-
-```json
-{
-  "servicenow_create_approval": {
-    "approved": true,
-    "approved_by": "analyst@example.com",
-    "approval_ref": "SNOW-CHANGE-123",
-    "approved_at": "2026-04-29T18:00:00Z"
-  }
-}
-```
-
-Notes:
-- Draft and create status are recorded in report metadata.
-- Create fails closed when approval is missing/invalid and approval is required.
-- Uses standard ServiceNow incident table endpoint and fields.
-
-## Knowledge Base Ingestion (RAG)
-
-When `RAG_ENABLED=true`, the analyzer can inject SOC-specific operational context
-from local retrieval artifacts. The default production backend is PostgreSQL FTS
-+ pgvector with BGE embeddings and optional BGE reranking. SQLite FTS5 + FAISS
-remains available as a local fallback for lab use or smaller deployments.
-
-Fallback SQLite/FAISS ingestion, only when `RAG_BACKEND=sqlite_faiss`:
-
-```bash
-python3 -m onprem_rag_notable_analysis.future.corpus_ingest \
-  --backend sqlite_faiss \
-  --source-dir /opt/llm-notable-analysis/knowledge_base/source_docs \
-  --index-dir /opt/llm-notable-analysis/knowledge_base/index \
-  --embedding-model BAAI/bge-base-en-v1.5
-```
-
-Supported source formats in `source_docs`:
-- `.docx`
-- `.txt`
-
-Generated artifacts in `index`:
-- `kb.sqlite3` (chunk metadata + FTS5)
-- `kb.faiss` (vector index)
-- `chunks.jsonl` (debug/exportable chunk corpus)
-- `ingest_report.json` (ingestion summary)
-
-PostgreSQL-backed RAG is the default production-oriented path:
-`RAG_BACKEND=postgres`, `RAG_POSTGRES_DSN`, PostgreSQL FTS,
-`RAG_POSTGRES_STATEMENT_TIMEOUT_MS`, pgvector embeddings, and optional
-`RAG_RERANK_ENABLED=true` with
-`BAAI/bge-reranker-base`. The runtime provider expects a populated
-`RAG_POSTGRES_SCHEMA`.`RAG_POSTGRES_CHUNKS_TABLE` table matching the pgvector
-schema generated by `onprem_rag_notable_analysis.future.postgres_index`.
-
-PostgreSQL ingestion using the same values from `config.env`:
-
-```bash
-bash llm_notable_analysis_onprem_systemd/scripts/setup_postgres_rag.sh \
-  --config-env /etc/notable-analyzer/config.env \
-  --source-dir /opt/llm-notable-analysis/knowledge_base/source_docs \
-  --index-dir /opt/llm-notable-analysis/knowledge_base/index
-```
-
-Ingest-only command if PostgreSQL role/database/schema already exist:
-
-```bash
-python3 -m onprem_rag_notable_analysis.future.corpus_ingest \
-  --config-env /etc/notable-analyzer/config.env \
-  --backend postgres \
-  --source-dir /opt/llm-notable-analysis/knowledge_base/source_docs \
-  --index-dir /opt/llm-notable-analysis/knowledge_base/index
-```
-
-The command parses `config.env` as simple `KEY=VALUE` text instead of sourcing
-it as shell code. It writes `chunks.jsonl` and `ingest_report.json` to
-`--index-dir` for handoff/debugging and populates PostgreSQL for runtime
-retrieval.
-
-For document lifecycle, content quality, rebuild cadence, and rollback guidance,
-see [`docs/operations/KNOWLEDGE_BASE_OPERATIONS.md`](docs/operations/KNOWLEDGE_BASE_OPERATIONS.md).
-
-Service-chain smoke test after startup:
-
-```bash
-sudo bash llm_notable_analysis_onprem_systemd/scripts/smoke_service_chain.sh \
-  --config-env /etc/notable-analyzer/config.env
-```
-
-This checks the local `vLLM` health endpoint, the `LiteLLM` models and chat
-completion path, and a file-drop report from `notable-analyzer`.
-
-## Automated Tests
-
-Run the on-prem unittest suite from repo root:
-
-```bash
-python -m unittest discover -s llm_notable_analysis_onprem_systemd/tests -p "test*.py" -v
-```
-
-Preflight recommendation before first service start:
-
-```bash
-cd ~/llm_notable_analysis
-PYTHONPATH=llm_notable_analysis_onprem_systemd/src /opt/notable-analyzer/venv/bin/python -m unittest discover -s llm_notable_analysis_onprem_systemd/tests -p "test*.py" -v
-```
-
-- Unit tests do not require `vllm` or `notable-analyzer` to be running.
-- Proceed to service startup only after a clean `OK` test result.
-
-Coverage details live in `docs/testing/TESTING.md`.
-
-### File Drop Mode (Default)
-
-Drop JSON or text files into `/var/notables/incoming`:
-
-```bash
-# Example: Submit a notable for analysis
-echo '{"summary": "Suspicious login from unusual IP", "ip_address": "203.0.113.45", "user": "admin"}' > /var/notables/incoming/notable_001.json
-```
-
-Reports appear in `/var/notables/reports`:
-
-```bash
-ls /var/notables/reports/
-# notable_001.md
-```
-
-### Splunk REST Integration (Optional)
-
-When enabled, the analyzer updates Splunk ES notables with the generated markdown analysis.
-
-**Enable in `/etc/notable-analyzer/config.env`:**
-
-```bash
-SPLUNK_SINK_ENABLED=true
-SPLUNK_BASE_URL=https://splunk.internal:8089
-SPLUNK_API_TOKEN=your_token_here
-SPLUNK_NOTABLE_UPDATE_PATH=/services/notable_update
-# SPLUNK_CA_BUNDLE=/path/to/internal-ca.pem  # If using internal CA (see Security Notes)
-```
-
-**Current implementation (placeholder):**
-
-| Setting | Value |
-|---------|-------|
-| Endpoint | `POST {SPLUNK_BASE_URL}{SPLUNK_NOTABLE_UPDATE_PATH}` |
-| Auth | `Authorization: Bearer {SPLUNK_API_TOKEN}` |
-| Content-Type | `application/x-www-form-urlencoded` |
-| Payload | `finding_id={filename_stem}&comment={markdown}&status=2` |
-
-> **Note:** Splunk ES deployments can differ by customer. Confirm endpoint path and identifier contract with the customer's Splunk team before go-live.
-
-**Current writeback identifier behavior:**
-- The service derives `finding_id` from the dropped filename stem (for example, `/incoming/abc-123.json` -> `finding_id=abc-123`).
-- This mirrors the current cloud pipeline behavior for identifier correlation.
-
----
-
-## SOAR Integration (Recommended Workflow)
-
-The recommended pattern mirrors the cloud S3 workflow: **SOAR pulls notables from Splunk ES and pushes them to the analyzer's incoming directory**. This keeps Splunk credentials in SOAR (not the analyzer) and preserves the existing operational model.
-
-Phantom/SOAR template assets in this repo:
-
-- Guide: [`docs/integrations/SOAR_PLAYBOOK_PHANTOM.md`](docs/integrations/SOAR_PLAYBOOK_PHANTOM.md)
-- Playbook template: [`src/llm_notable_analysis_onprem_systemd/soar_playbook/phantom_notable_to_analyzer.py`](src/llm_notable_analysis_onprem_systemd/soar_playbook/phantom_notable_to_analyzer.py)
-- Alternative guide: [`docs/integrations/SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md`](docs/integrations/SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md)
-- Alternative playbook template: [`src/llm_notable_analysis_onprem_systemd/soar_playbook/phantom_notable_index_to_analyzer.py`](src/llm_notable_analysis_onprem_systemd/soar_playbook/phantom_notable_index_to_analyzer.py)
-
-### Transport Options
-
-#### SFTP (Recommended)
-
-SFTP is the simplest and most secure transport for SOAR → analyzer file delivery.
-The installer creates this path by default:
-
-- Chroot: `/var/sftp/soar`
-- Upload directory visible to SOAR: `/incoming`
-- Analyzer input path: `/var/notables/incoming`
-- Default link: `/var/notables/incoming -> /var/sftp/soar/incoming`
-
-**Setup on analyzer host (RHEL):**
-
-```bash
-# Recommended: let the installer create users, directories, symlink, and sshd Match block.
-sudo bash scripts/install.sh
-```
-
-The installer appends this SFTP block to `/etc/ssh/sshd_config`:
-
-```
-Match User soar-uploader
-    ChrootDirectory /var/sftp/soar
-    ForceCommand internal-sftp
-    AllowTcpForwarding no
-    X11Forwarding no
-    PasswordAuthentication no
-```
-
-```bash
-# Verify expected permissions
-ls -ld /var/sftp /var/sftp/soar /var/sftp/soar/incoming
-# drwxr-xr-x root root /var/sftp
-# drwxr-xr-x root root /var/sftp/soar
-# drwxrwxr-x soar-uploader notable-analyzer /var/sftp/soar/incoming
-
-sudo systemctl restart sshd
-```
-
-**SOAR playbook configuration:**
-- Host: `<analyzer-host>`
-- Port: `22`
-- User: `soar-uploader`
-- Auth: SSH key (recommended) or password
-- Remote path: `/incoming/<finding_id>.json`
-
-**Avoid partial reads (recommended):**
-- Upload to a temporary filename that does **not** match `*.json` / `*.txt` (example: `/incoming/<finding_id>.json.tmp`)
-- Atomically rename to `/incoming/<finding_id>.json` after the upload completes
-
-**Hardening checklist:**
-- Key-based auth only (disable password in `sshd_config` for this user)
-- Firewall: allow only SOAR host(s) → analyzer host on port 22
-- Audit: SSH logs provide transfer audit trail
-
-#### NFS (Alternative)
-
-Use NFS if the organization already has a managed NFS infrastructure and prefers it over SFTP.
-
-**What would need to change:**
-1. Export `/var/notables/incoming` from analyzer host (or mount from shared NFS server)
-2. Configure exports in `/etc/exports`:
-
-   ```
-   /var/notables/incoming  soar-host.internal(rw,sync,no_subtree_check,root_squash)
-   ```
-
-3. Firewall: allow NFS ports (2049, plus rpcbind if NFSv3) from SOAR host only
-4. Ensure `notable-analyzer` user can read files written by SOAR's NFS client UID (match UIDs or use `all_squash` + `anonuid`/`anongid`)
-5. No code changes needed—the analyzer watches `INCOMING_DIR` the same way
-
-**NFS tradeoffs vs SFTP:**
-- (+) May integrate better with existing enterprise storage
-- (-) More complex permissions/UID mapping
-- (-) Broader network surface (NFS ports + rpcbind)
-- (-) Less granular audit trail than SSH
-
-**Recommendation:** Use SFTP unless NFS is already standard and hardened in the environment.
-
----
-
-## Notable Payload Contract (What SOAR Should Send)
-
-The analyzer processes files matching `*.json` or `*.txt` in `INCOMING_DIR`.
-
-### JSON (Recommended)
-
-- **File format**: UTF-8 JSON object
-- **Current behavior:** `.json` notables are passed to the LLM as raw JSON, and `.txt` notables are passed as raw text. The service does not require a fixed customer JSON schema for prompt input.
-
-**Required (minimum):**
-- `summary` (string): short description of the notable
-
-**Strongly recommended (for correlation + writeback):**
-- `notable_id` (string): stable notable identifier (retained for context/audit)
-- `event_id` (string): if available
-- `search_name` (string): detection rule name / correlation search name
-- `finding_id` (string): SOAR correlation ID; should match filename stem used for writeback
-- `risk_score` (number or string)
-- `threat_category` (string)
-- `alert_time` (string): ISO-8601 preferred
-- `raw_event` (string): optional full notable JSON serialized as a string (so it appears in the prompt)
-
-**SOAR/Splunk ID mapping note (customer integration):**
-- In many customer workflows, SOAR uses `finding_id` while Splunk notable workflows refer to the same correlation value as `event_id`.
-- During integration, ensure the SOAR playbook preserves and forwards that correlation ID consistently so writeback targets the same notable.
-- Confirm exact field naming with the customer's Splunk team before go-live (`finding_id`, `event_id`, or another contract-specific field).
-
-Example payload:
-
-```json
-{
-  "notable_id": "12345678-90ab-cdef-1234-567890abcdef",
-  "search_name": "Suspicious Authentication Pattern",
-  "summary": "Multiple failed logins followed by success",
-  "alert_time": "2025-12-12T01:23:45Z",
-  "user": "DOMAIN\\\\admin",
-  "src_ip": "203.0.113.45",
-  "dest_host": "DC-01",
-  "risk_score": 80,
-  "threat_category": "Credential Access",
-  "raw_event": "{\"_time\":\"...\",\"ruleUID\":\"...\",\"events\":[...]}"
-}
-```
-
-### Text (Fallback)
-
-If SOAR can only emit text, write a `.txt` file. The analyzer will treat the full file contents as raw alert text.
-
----
-
-## Retention Policy (Archive Then Delete)
-
-The service applies two-stage retention to reduce disk usage while keeping a short audit window:
-
-- **Stage 1 (move to archive):**
-  - Files in `PROCESSED_DIR` and `QUARANTINE_DIR` older than `INPUT_RETENTION_DAYS` are moved to `ARCHIVE_DIR/processed` and `ARCHIVE_DIR/quarantine`.
-  - Reports in `REPORT_DIR` older than `REPORT_RETENTION_DAYS` are moved to `ARCHIVE_DIR/reports`.
-- **Stage 2 (delete from archive):**
-  - Files in `ARCHIVE_DIR/*` older than `ARCHIVE_RETENTION_DAYS` (time spent in archive) are deleted.
-
-Notes:
-- The archive move resets the file timestamp so archive deletion represents **time in archive**, not time since creation.
-- Housekeeping runs every `RETENTION_RUN_INTERVAL_SECONDS` (default: daily).
-
-### Switching to systemd Timer Retention (Optional)
-
-By default, retention runs **inside the analyzer service** (simplest setup). If you prefer the more Linux-native approach (decoupled from the service), you can switch to **systemd timer-based retention**:
-
-**What to change:**
-
-1. **Disable in-service retention** — set a very large interval in `/etc/notable-analyzer/config.env`:
-
-   ```bash
-   RETENTION_RUN_INTERVAL_SECONDS=999999999
-   ```
-
-2. **Install the timer and oneshot service:**
-
-   ```bash
-   sudo cp deploy/systemd/notable-retention.service /etc/systemd/system/
-   sudo cp deploy/systemd/notable-retention.timer /etc/systemd/system/
-   sudo systemctl daemon-reload
-   sudo systemctl enable --now notable-retention.timer
-   ```
-
-3. **Verify:**
-
-   ```bash
-   # Check timer is active
-   sudo systemctl list-timers | grep notable-retention
-
-   # Manually test the oneshot
-   sudo systemctl start notable-retention.service
-   sudo journalctl -u notable-retention -n 20
-   ```
-
-**Why you might prefer this:**
-- Runs even if the analyzer is stopped
-- Clear success/failure status in systemd
-- Easier ops (standard `systemctl` / `journalctl` workflow)
-
----
-
-## Concurrency (Optional)
-
-By default the service processes one notable at a time (sequential mode). To enable bounded concurrent processing (Python multithreading via `ThreadPoolExecutor`):
-
-```bash
-# In /etc/notable-analyzer/config.env
-CONCURRENCY_ENABLED=true
-MAX_WORKERS=1            # Gemma 4 31B-it conservative start
-MAX_QUEUE_DEPTH=8        # Gemma 4 31B-it conservative start
-```
-
-Recommended starting profiles (concise):
-- **Gemma 4 31B-it**: start `1/8`; increase only after validating sustained GPU, CPU, and queue headroom under production-like load.
-
-Intel comparison note for the EPYC profile:
-- Treat this EPYC VM baseline as a conservative starting tier for this service.
-- Increase toward the higher profile only after validating sustained CPU headroom and queue behavior in production-like load tests.
-
-**SDK/App setting precedence for this service:**
-- `MAX_WORKERS` and `MAX_QUEUE_DEPTH` in `/etc/notable-analyzer/config.env` are the effective concurrency controls for this app.
-- The app maps `MAX_WORKERS` into SDK inflight capacity internally for each worker.
-- SDK transport retries are intentionally disabled for this app (`llm_max_retries=0`) so legacy app retry/backoff semantics are preserved.
-- SDK env vars such as `LLM_MAX_INFLIGHT` and `LLM_MAX_RETRIES` are not the source of truth for this service's runtime behavior.
-
-                                         **How it works (multithreading):**
-- Discovered files are dispatched to a ThreadPoolExecutor
-- If in-flight jobs reach `MAX_QUEUE_DEPTH`, new files wait until next poll cycle (backpressure)
-- Each job maintains its own correlation ID in logs
-- On shutdown, the service waits for in-flight jobs to complete
-
-**When to enable:**
-- Bursty SFTP drops that build a backlog
-- LLM latency is acceptable and GPU/CPU can handle parallelism
-
-**When to keep sequential:**
-- LLM is already at saturation (more parallelism won't help)
-- Simpler debugging and log ordering
-
----
-
-## File Structure
-
-```
+Default host paths and feature flags are documented in
+[`config.env.example`](config.env.example). The app package lives under
+[`src/llm_notable_analysis_onprem_systemd/`](src/llm_notable_analysis_onprem_systemd/)
+so installed imports and service entrypoints stay stable.
+
+For SFTP file-drop deployments, the installer-created chroot contract is:
+Chroot: `/var/sftp/soar`; incoming symlink:
+`/var/notables/incoming -> /var/sftp/soar/incoming`.
+
+## Optional Capabilities
+
+- **RAG grounding:** enable with `RAG_ENABLED=true`; tune with
+  [`docs/operations/RAG_OPERATIONS.md`](docs/operations/RAG_OPERATIONS.md).
+- **SPL generation:** enable with `SPL_QUERY_GENERATION_ENABLED=true`; tune
+  generation/execution controls with
+  [`docs/operations/SPL_OPERATIONS.md`](docs/operations/SPL_OPERATIONS.md).
+- **SPL-dedicated KB grounding:** enable with `SPL_QUERY_RAG_ENABLED=true`
+  after curated Splunk facts have been ingested into the separate SPL KB table.
+- **Read-only Splunk execution:** enable with
+  `INVESTIGATION_QUERY_EXECUTION_ENABLED=true` after allowlists and load bounds
+  are agreed with Splunk owners.
+- **Splunk writeback:** enable with `SPLUNK_SINK_ENABLED=true`; validate
+  endpoint and identifier mapping first.
+- **ServiceNow:** enable draft first, then create only with approval metadata and
+  customer sign-off.
+- **Freeform analyzer mode:** documented in
+  [`docs/operations/LLM_INFERENCE_OPERATIONS.md`](docs/operations/LLM_INFERENCE_OPERATIONS.md);
+  do not run it against the same incoming directory as the structured analyzer.
+
+All optional integrations are disabled by default.
+
+## Validation Quick Links
+
+- Unit and smoke test guide: [`docs/testing/TESTING.md`](docs/testing/TESTING.md)
+- Postgres/pgvector RAG smoke:
+  [`scripts/smoke_postgres_rag.sh`](scripts/smoke_postgres_rag.sh)
+- Full service-chain smoke:
+  [`scripts/smoke_service_chain.sh`](scripts/smoke_service_chain.sh)
+- Dependency manifest evidence:
+  [`scripts/tools/generate_dependency_manifest.sh`](scripts/tools/generate_dependency_manifest.sh)
+
+## Repository Map
+
+```text
 llm_notable_analysis_onprem_systemd/
-├── README.md                    # This file
-├── pyproject.toml               # Package metadata for the src layout
-├── requirements.txt             # Python dependencies
-├── config.env.example           # Configuration template
-├── docs/
-│   ├── delivery_package/        # Executive workflow, readiness, release delivery docs
-│   ├── operations/              # Install, offline prestage, recovery docs
-│   ├── integrations/            # SOAR/Phantom integration guides
-│   ├── security/                # Security posture docs
-│   ├── testing/                 # Test catalog and validation docs
-│   ├── planning/                # Residual deployment plans; SPL query generation/grounding intent is in docs/architecture/feature_enhancements_architecture.md
-│   ├── architecture/            # Architecture and alternatives docs
-│   └── technical_specs/         # Technical specifications
-├── scripts/
-│   ├── install.sh               # Automated installer (run as root)
-│   ├── install_mini_qwen_cpu_client.sh  # Mini/Qwen CPU client-mode installer
-│   └── tools/
-│       └── generate_dependency_manifest.sh
-├── deploy/
-│   └── systemd/
-│       ├── notable-analyzer.service   # Analyzer systemd unit
-│       ├── vllm.service               # vLLM systemd unit
-│       ├── notable-retention.service  # Retention cleanup oneshot (optional)
-│       └── notable-retention.timer    # Daily timer for retention (optional)
-└── src/
-    └── llm_notable_analysis_onprem_systemd/
-        ├── __init__.py
-        ├── soar_playbook/         # Splunk SOAR / Phantom templates
-        └── onprem_service/
-            ├── config.py         # Configuration loading
-            ├── logging_utils.py  # Structured JSON logging
-            ├── ttp_validator.py  # MITRE ATT&CK validation
-            ├── ingest.py         # File discovery and normalization
-            ├── sinks.py          # Output writers (filesystem, Splunk REST)
-            ├── local_llm_client.py  # vLLM API client (SDK transport)
-            ├── splunk_investigation.py  # Read-only Splunk query execution
-            ├── servicenow.py     # ServiceNow draft/create adapter
-            ├── markdown_generator.py  # Report generation
-            ├── retention.py      # Two-stage retention cleanup
-            ├── onprem_main.py    # Service entry point (SDK path)
-            └── enterprise_attack_v17.1_ids.json  # MITRE TTP IDs
+  config.env.example       # Runtime configuration template
+  deploy/                  # systemd and LiteLLM assets
+  docs/                    # Operator, architecture, security, testing docs
+  scripts/                 # Install, smoke, RAG setup, evidence helpers
+  src/                     # Installable Python package
+  tests/                   # Unit and contract tests
 ```
 
-## Updating MITRE ATT&CK Data
+## Important Boundaries
 
-To update TTP IDs in an air-gapped environment:
+- This package does not contain production notables, model weights, KB indexes,
+  wheelhouses, or secrets.
+- RAG content is advisory context, not direct alert evidence.
+- Generated SPL is policy-checked before execution, but Splunk remains the final
+  authority on SPL syntax.
+- ServiceNow create is approval-gated by default.
+- Live Splunk and ServiceNow validation requires customer-controlled lab or
+  production-like systems.
 
-1. On an internet-connected machine, run `extract_ttp_ids.py` to generate a new JSON file
-2. Transfer the JSON file to the air-gapped host via approved media
-3. Replace the JSON file at the path configured in `MITRE_IDS_PATH` (default: `/opt/notable-analyzer/src/llm_notable_analysis_onprem_systemd/onprem_service/enterprise_attack_v17.1_ids.json`)
-4. Restart the service: `sudo systemctl restart notable-analyzer`
-
-## Hardware Requirements
-
-| Component | Minimum | Recommended |
-|-----------|---------|-------------|
-| CPU | 8 cores | 16 cores (Xeon/EPYC) |
-| RAM | 64 GB | 128 GB |
-| GPU | RTX 4090 (24 GB) | RTX PRO 6000 (96 GB) |
-| Storage | 500 GB NVMe | 1 TB NVMe |
-
-## Security Notes
-
-### vLLM --trust-remote-code (DISABLED by default)
-
-The `--trust-remote-code` flag allows vLLM to execute arbitrary Python code bundled with model artifacts during loading. This is **disabled by default** for security hardening.
-
-**When to enable:**
-- Only if the model requires custom architecture code (some models ship `modeling_*.py` files)
-- AND you have verified model artifacts via checksum from a trusted, controlled offline import process
-
-**To enable:** Edit `/etc/systemd/system/vllm.service` and add `--trust-remote-code` to the `ExecStart` line, then run:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl restart vllm
-```
-
-### Splunk TLS with Internal CA
-
-If your Splunk instance uses a private/internal CA:
-
-**Option A (recommended):** Install the CA into the RHEL system trust store:
-
-```bash
-sudo cp internal-ca.pem /etc/pki/ca-trust/source/anchors/
-sudo update-ca-trust
-```
-
-**Option B:** Set the CA bundle path in config:
-
-```bash
-SPLUNK_CA_BUNDLE=/path/to/internal-ca.pem
-```
-
----
-
-## Troubleshooting
-
-Recovery and restart semantics (including power-cut/reboot behavior and SDK-vs-app responsibilities) are documented in:
-
-- `docs/operations/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`
-
-### Service won't start
-
-```bash
-# Check logs
-sudo journalctl -u notable-analyzer -n 50
-
-# Verify LiteLLM is reachable, then check vLLM if needed
-curl http://127.0.0.1:4000/v1/models
-curl http://127.0.0.1:8000/health
-```
-
-### LLM timeouts
-
-Increase timeout in config:
-
-```bash
-LLM_TIMEOUT=300
-```
-
-### GPU memory errors
-
-Reduce vLLM memory utilization in `/etc/systemd/system/vllm.service`:
-
-```
---gpu-memory-utilization 0.8
-```

@@ -16,7 +16,7 @@ The on-prem workflow provides a bounded local analysis path for security notable
 4. The local model produces structured alert analysis, including verdict, evidence, hypotheses, IOCs, and ATT&CK mappings.
 5. The service parses, repairs when possible, validates, and filters the model output.
 6. Optional RAG injects SOC operating context from local SOPs, data dictionaries, Splunk index references, and related knowledge-base documents.
-7. Optional SPL generation adds one investigation query per hypothesis.
+7. Optional SPL generation adds one investigation query per hypothesis (second bounded LLM call when `SPL_QUERY_GENERATION_ENABLED=true`). When `SPL_QUERY_RAG_ENABLED=true`, Splunk-focused retrieval adds `SPL_QUERY_GROUNDING_CONTEXT` for that SPL call only.
 8. Optional read-only Splunk query execution validates and runs bounded investigation searches, then summarizes results in the report.
 9. Optional ServiceNow logic builds incident drafts and can create incidents only when enabled and approved.
 10. The service writes a markdown report, moves successful input files to processed storage, and quarantines failed inputs.
@@ -101,6 +101,8 @@ When `RAG_ENABLED=true`, the service attempts to initialize a local RAG provider
 
 RAG context is rendered into a `SOC_OPERATIONAL_CONTEXT` block. It is advisory context only. The workflow explicitly prevents retrieved guidance from being treated as current-alert evidence unless the same fact appears in the notable itself.
 
+`SOC_OPERATIONAL_CONTEXT` informs analyst wording and reasoning, but **it does not authorize environment-specific SPL tokens** in generated queries (`index=`, `sourcetype=`, macros, datamodel names). Splunk-environment tokens must come from **the notable text** or, when enabled, from the separate SPL query grounding block (`SPL_QUERY_GROUNDING_CONTEXT`; see SPL query RAG settings in [`config.env.example`](../../config.env.example)).
+
 If RAG initialization or retrieval fails, the analyzer continues without RAG rather than stopping the service.
 
 ### 6. SPL Query Generation
@@ -115,7 +117,11 @@ Each generated query must be tied to a hypothesis and include:
 - Result pattern that would support the hypothesis.
 - Result pattern that would weaken the hypothesis.
 
-The SPL-generation prompt tells the model not to invent environment-specific indexes, sourcetypes, macros, or CIM data models unless they appear in the alert or retrieved SOC context. Generated SPL fields are validated and merged back into the report only when the contract passes.
+When `SPL_QUERY_RAG_ENABLED=true`, retrieval from the **Splunk-focused SPL knowledge base** renders a **`SPL_QUERY_GROUNDING_CONTEXT`** block only for this second SPL call (separate Postgres table from general KB). Operators curate indexes, sourcetypes, macros, datamodel notes, fields, saved searches, and example queries into that SPL KB (`SPL_QUERY_RAG_*` paths in [`config.env.example`](../../config.env.example)).
+
+The model must not invent environment-specific indexes, sourcetypes, macros, or CIM data models unless they appear in the **alert** or **`SPL_QUERY_GROUNDING_CONTEXT`**. Validator checks strip or reject SPL that cites tokens not grounded there. Structured results can include **`primary_spl_query_grounding_refs`** (`source_file`, `section_path`) when SPL KB snippets supported the emitted tokens.
+
+For per-customer tuning (SPL query KB, ingestion, failure mode, Splunk investigation policy), see **[`../operations/SPL_OPERATIONS.md`](../operations/SPL_OPERATIONS.md)** and **[`../operations/KNOWLEDGE_BASE_OPERATIONS.md`](../operations/KNOWLEDGE_BASE_OPERATIONS.md)**.
 
 ### 7. Read-Only Splunk Query Execution
 
@@ -136,6 +142,8 @@ Before execution, each query is checked against deterministic policy:
 
 Execution results are summarized separately in the report. Query results are not promoted into direct evidence for the original notable.
 
+Operator-facing guidance on allowlists, load limits, and staged enablement lives in **[`../operations/SPL_OPERATIONS.md`](../operations/SPL_OPERATIONS.md)**.
+
 ### 8. Report Generation
 
 The service generates a markdown report under `REPORT_DIR`, which defaults to:
@@ -148,7 +156,7 @@ The report can include:
 
 - Alert reconciliation.
 - Competing hypotheses and pivots.
-- Optional SPL query details.
+- Optional SPL query details per hypothesis. When SPL query RAG is enabled, `primary_spl_query_grounding_refs` are attached to the **structured** result only (not rendered into markdown); optional future exposure via logs/metadata is described in [`SPL_OPERATIONS.md`](../operations/SPL_OPERATIONS.md).
 - Optional query result summaries.
 - Optional ServiceNow draft/create status.
 - Evidence versus inference.
@@ -191,7 +199,7 @@ The core deployment uses a single-host RHEL-oriented architecture:
 - `/var/notables/incoming` receives inputs.
 - `/var/notables/reports` stores generated markdown reports.
 - `/var/notables/processed`, `/var/notables/quarantine`, and `/var/notables/archive` support operations and retention.
-- Optional RAG source documents and ingest reports live under `/opt/llm-notable-analysis/knowledge_base`; production retrieval uses the configured PostgreSQL/pgvector table.
+- Optional RAG source documents and ingest reports live under `/opt/llm-notable-analysis/knowledge_base`; production retrieval uses the configured PostgreSQL/pgvector table (`RAG_POSTGRES_CHUNKS_TABLE`). Optional SPL query KB source and index dirs use `SPL_QUERY_RAG_*` (default table `spl_query_chunks`).
 - Optional Splunk and ServiceNow integrations use outbound HTTPS from the analyzer host.
 
 ## Operating Modes
@@ -206,7 +214,7 @@ RAG mode adds local operational context from SOPs, Splunk references, and other 
 
 ### SPL Generation Mode
 
-SPL generation mode adds one query per hypothesis for analyst investigation. It does not execute the queries by itself.
+SPL generation mode adds one query per hypothesis for analyst investigation. It does not execute the queries by itself. Optionally, **SPL query RAG** (`SPL_QUERY_RAG_ENABLED=true`) adds `SPL_QUERY_GROUNDING_CONTEXT` from a dedicated Splunk fact corpus before that second LLM call.
 
 ### Read-Only Investigation Mode
 
@@ -280,4 +288,4 @@ A successful end-to-end run is complete when:
 
 ## Current Recommended Rollout Path
 
-Start with base analysis mode using local Gemma or GPT-OSS through vLLM. Validate report quality, service stability, file movement, retention, and logs with representative notables. Then enable RAG with curated SOP and Splunk reference documents. After RAG quality is validated, enable SPL generation. Enable read-only Splunk execution only after query policy has been reviewed with the Splunk team. Enable Splunk writeback and ServiceNow draft/create as separate steps, with ServiceNow create left approval-gated.
+Start with base analysis mode using local Gemma or GPT-OSS through vLLM. Validate report quality, service stability, file movement, retention, and logs with representative notables. Then enable RAG with curated SOP and Splunk reference documents. After RAG quality is validated, enable SPL generation. Optionally ingest **[`KNOWLEDGE_BASE_OPERATIONS.md`](../operations/KNOWLEDGE_BASE_OPERATIONS.md)** SPL query KB docs and enable `SPL_QUERY_RAG_*` once Splunk owners approve grounded indexes and macros for generated SPL. Enable read-only Splunk execution only after query policy has been reviewed with the Splunk team. Enable Splunk writeback and ServiceNow draft/create as separate steps, with ServiceNow create left approval-gated.

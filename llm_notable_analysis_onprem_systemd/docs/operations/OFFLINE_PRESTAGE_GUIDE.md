@@ -2,6 +2,27 @@
 
 Goal: list exactly what to download before installing on an offline host.
 
+## What This Controls
+
+This guide controls offline readiness: source bundles, wheelhouse artifacts,
+model weights, vLLM/LiteLLM runtime dependencies, and transfer checks before an
+air-gapped install.
+
+## Recommended Starting Posture
+
+- Build the wheelhouse from the same OS/Python profile used by the target host
+  when practical.
+- Pre-stage model weights and tokenizer artifacts before installation day.
+- Keep checksums or manifests for transferred artifacts.
+- Do not pre-stage customer secrets in source bundles or wheelhouses.
+
+## Customer Decisions
+
+- Which exact package pins and model artifacts are approved for the environment?
+- Who owns artifact download, malware scanning, checksum capture, and transfer?
+- Where are offline artifacts stored and retained?
+- Which runtime path will model weights use on the target host?
+
 ## 1) Download source bundles
 
 - `llm_notable_analysis_onprem_systemd/` (this package)
