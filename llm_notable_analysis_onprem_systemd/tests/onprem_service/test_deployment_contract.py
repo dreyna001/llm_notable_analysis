@@ -102,6 +102,8 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn('"$ANALYZER_PYTHON" - "$CONFIG_ENV"', script_text)
         self.assertIn("CREATE EXTENSION IF NOT EXISTS vector", script_text)
         self.assertIn("onprem_rag_notable_analysis.future.corpus_ingest", script_text)
+        self.assertIn("--spl-query-rag", script_text)
+        self.assertIn("SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE_CONFIG", script_text)
         self.assertNotIn("--skip-postgres-schema-setup", script_text)
         self.assertIn('< "$file"', script_text)
         self.assertNotIn('source "$CONFIG_ENV"', script_text)
@@ -174,6 +176,9 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("HF_HOME=/var/notables/cache/huggingface", config_text)
         self.assertIn("RAG_FUSED_RANK_LIMIT_120B=8", config_text)
         self.assertIn("RAG_RRF_K=60", config_text)
+        self.assertIn("SPL_QUERY_RAG_ENABLED=false", config_text)
+        self.assertIn("SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE=spl_query_chunks", config_text)
+        self.assertIn("SPL_QUERY_RAG_FAILURE_MODE=suppress", config_text)
 
     def test_postgres_rag_smoke_uses_disposable_pgvector_container(self) -> None:
         """Live RAG smoke should validate pgvector without host psql."""
@@ -190,6 +195,8 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("PostgresRAGContextProvider", script_text)
         self.assertIn("secrets.token_urlsafe", script_text)
         self.assertIn("assert \"SOC_OPERATIONAL_CONTEXT\" in context", script_text)
+        self.assertIn("SPL_QUERY_GROUNDING_CONTEXT", script_text)
+        self.assertIn("SMOKE_SPL_TABLE", script_text)
         self.assertNotIn(
             'POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-postgres}"',
             script_text,

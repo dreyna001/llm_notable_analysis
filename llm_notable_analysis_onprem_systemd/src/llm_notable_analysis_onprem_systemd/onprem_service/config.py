@@ -57,6 +57,13 @@ class Config:
         SPLUNK_NOTABLE_UPDATE_PATH: Splunk notable update endpoint path.
         SPLUNK_SINK_ENABLED: Enables Splunk writeback sink.
         SPL_QUERY_GENERATION_ENABLED: Enables per-hypothesis SPL query generation.
+        SPL_QUERY_RAG_ENABLED: Enables SPL-dedicated grounding for SPL generation.
+        SPL_QUERY_RAG_SOURCE_DIR: Source docs for SPL-dedicated KB ingest.
+        SPL_QUERY_RAG_INDEX_DIR: Ingest artifacts for SPL-dedicated KB.
+        SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE: Postgres table for SPL KB chunks.
+        SPL_QUERY_RAG_MAX_SNIPPETS: Max SPL grounding snippets in SPL prompt.
+        SPL_QUERY_RAG_CONTEXT_BUDGET_CHARS: Character budget for SPL grounding.
+        SPL_QUERY_RAG_FAILURE_MODE: `suppress` or `fallback_to_ungrounded`.
         SPLUNK_CA_BUNDLE: Optional CA bundle for TLS verification.
         INVESTIGATION_QUERY_EXECUTION_ENABLED: Enables read-only query execution.
         INVESTIGATION_QUERY_EXECUTOR: Query executor mode (`rest` or `mcp`).
@@ -152,6 +159,21 @@ class Config:
     SPLUNK_NOTABLE_UPDATE_PATH: str = "/services/notable_update"
     SPLUNK_SINK_ENABLED: bool = False
     SPL_QUERY_GENERATION_ENABLED: bool = False
+    SPL_QUERY_RAG_ENABLED: bool = False
+    SPL_QUERY_RAG_SOURCE_DIR: Path = field(
+        default_factory=lambda: Path(
+            "/opt/llm-notable-analysis/knowledge_base/spl_query_source_docs"
+        )
+    )
+    SPL_QUERY_RAG_INDEX_DIR: Path = field(
+        default_factory=lambda: Path(
+            "/opt/llm-notable-analysis/knowledge_base/spl_query_index"
+        )
+    )
+    SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE: str = "spl_query_chunks"
+    SPL_QUERY_RAG_MAX_SNIPPETS: int = 4
+    SPL_QUERY_RAG_CONTEXT_BUDGET_CHARS: int = 1600
+    SPL_QUERY_RAG_FAILURE_MODE: str = "suppress"
     SPLUNK_CA_BUNDLE: str = (
         ""  # Path to PEM CA bundle for Splunk TLS; empty = system trust store
     )
@@ -294,6 +316,31 @@ def load_config() -> Config:
             "SPL_QUERY_GENERATION_ENABLED", "false"
         ).lower()
         in ("true", "1", "yes"),
+        SPL_QUERY_RAG_ENABLED=os.getenv("SPL_QUERY_RAG_ENABLED", "false").lower()
+        in ("true", "1", "yes"),
+        SPL_QUERY_RAG_SOURCE_DIR=Path(
+            os.getenv(
+                "SPL_QUERY_RAG_SOURCE_DIR",
+                "/opt/llm-notable-analysis/knowledge_base/spl_query_source_docs",
+            )
+        ),
+        SPL_QUERY_RAG_INDEX_DIR=Path(
+            os.getenv(
+                "SPL_QUERY_RAG_INDEX_DIR",
+                "/opt/llm-notable-analysis/knowledge_base/spl_query_index",
+            )
+        ),
+        SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE=os.getenv(
+            "SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE", "spl_query_chunks"
+        ),
+        SPL_QUERY_RAG_MAX_SNIPPETS=int(os.getenv("SPL_QUERY_RAG_MAX_SNIPPETS", "4")),
+        SPL_QUERY_RAG_CONTEXT_BUDGET_CHARS=int(
+            os.getenv("SPL_QUERY_RAG_CONTEXT_BUDGET_CHARS", "1600")
+        ),
+        SPL_QUERY_RAG_FAILURE_MODE=(
+            os.getenv("SPL_QUERY_RAG_FAILURE_MODE", "suppress").strip().lower()
+            or "suppress"
+        ),
         SPLUNK_CA_BUNDLE=os.getenv("SPLUNK_CA_BUNDLE", ""),
         INVESTIGATION_QUERY_EXECUTION_ENABLED=os.getenv(
             "INVESTIGATION_QUERY_EXECUTION_ENABLED", "false"

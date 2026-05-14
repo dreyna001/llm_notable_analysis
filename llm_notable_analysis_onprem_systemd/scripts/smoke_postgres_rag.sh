@@ -18,6 +18,7 @@ POSTGRES_DB="${POSTGRES_DB:-notable_rag}"
 KEEP_CONTAINER="${KEEP_CONTAINER:-false}"
 SMOKE_SCHEMA="${SMOKE_SCHEMA:-notable_rag_smoke}"
 SMOKE_TABLE="${SMOKE_TABLE:-kb_chunks}"
+SMOKE_SPL_TABLE="${SMOKE_SPL_TABLE:-spl_query_chunks}"
 STATEMENT_TIMEOUT_MS="${STATEMENT_TIMEOUT_MS:-5000}"
 ANALYZER_PYTHON="${ANALYZER_PYTHON:-}"
 
@@ -37,7 +38,7 @@ Options:
 
 Environment overrides:
   DOCKER_BIN, DOCKER_IMAGE, CONTAINER_NAME, POSTGRES_PORT, POSTGRES_PASSWORD, POSTGRES_DB,
-  KEEP_CONTAINER, SMOKE_SCHEMA, SMOKE_TABLE, STATEMENT_TIMEOUT_MS,
+  KEEP_CONTAINER, SMOKE_SCHEMA, SMOKE_TABLE, SMOKE_SPL_TABLE, STATEMENT_TIMEOUT_MS,
   ANALYZER_PYTHON
 EOF
 }
@@ -150,6 +151,7 @@ export PYTHONPATH="$WORKSPACE_DIR:${PYTHONPATH:-}"
 export SMOKE_DSN="postgresql://postgres:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/${POSTGRES_DB}"
 export SMOKE_SCHEMA
 export SMOKE_TABLE
+export SMOKE_SPL_TABLE
 export STATEMENT_TIMEOUT_MS
 
 info "Running live ingest and retrieval smoke"
@@ -187,12 +189,15 @@ class SmokeEmbeddingModel:
 dsn = os.environ["SMOKE_DSN"]
 schema = os.environ["SMOKE_SCHEMA"]
 table = os.environ["SMOKE_TABLE"]
+spl_table = os.environ["SMOKE_SPL_TABLE"]
 timeout_ms = int(os.environ["STATEMENT_TIMEOUT_MS"])
 identifier_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 if not identifier_re.fullmatch(schema):
     raise SystemExit("SMOKE_SCHEMA must be a simple PostgreSQL identifier.")
 if not identifier_re.fullmatch(table):
     raise SystemExit("SMOKE_TABLE must be a simple PostgreSQL identifier.")
+if not identifier_re.fullmatch(spl_table):
+    raise SystemExit("SMOKE_SPL_TABLE must be a simple PostgreSQL identifier.")
 
 chunks = [
     ChunkRecord(
@@ -213,11 +218,35 @@ chunks = [
     ),
 ]
 
+spl_chunks = [
+    ChunkRecord(
+        doc_id="spl-reference",
+        chunk_id="spl-reference::authentication",
+        title="Splunk SPL Reference",
+        section_path="Authentication Index",
+        source_file="splunk_index_field_reference.txt",
+        text="Use index=wineventlog sourcetype=XmlWinEventLog for Windows authentication searches.",
+    ),
+]
+
 inserted = build_postgres_index(
     chunks=chunks,
     postgres_dsn=dsn,
     postgres_schema=schema,
     postgres_chunks_table=table,
+    postgres_fts_config="english",
+    vector_dimensions=3,
+    embedding_model_name="smoke-embedding",
+    embedding_batch_size=2,
+    postgres_statement_timeout_ms=timeout_ms,
+    ensure_schema=True,
+    embedding_model=SmokeEmbeddingModel(),
+)
+spl_inserted = build_postgres_index(
+    chunks=spl_chunks,
+    postgres_dsn=dsn,
+    postgres_schema=schema,
+    postgres_chunks_table=spl_table,
     postgres_fts_config="english",
     vector_dimensions=3,
     embedding_model_name="smoke-embedding",
@@ -233,6 +262,9 @@ with psycopg.connect(dsn, connect_timeout=5) as conn:
     ).fetchone()[0]
     row_count = conn.execute(
         f'SELECT count(*) FROM "{schema}"."{table}"'
+    ).fetchone()[0]
+    spl_row_count = conn.execute(
+        f'SELECT count(*) FROM "{schema}"."{spl_table}"'
     ).fetchone()[0]
 
 provider = PostgresRAGContextProvider(
@@ -255,16 +287,43 @@ context = provider.build_context(
     llm_model_name="gemma-4-31B-it",
 )
 
+spl_provider = PostgresRAGContextProvider(
+    RAGConfig(
+        enabled=True,
+        backend="postgres",
+        postgres_dsn=dsn,
+        postgres_schema=schema,
+        postgres_chunks_table=spl_table,
+        postgres_fts_config="english",
+        postgres_statement_timeout_ms=timeout_ms,
+        vector_dimensions=3,
+        max_snippets_120b=2,
+        context_budget_chars_120b=1200,
+        context_header="SPL_QUERY_GROUNDING_CONTEXT",
+    ),
+    embedding_model=SmokeEmbeddingModel(),
+)
+spl_context = spl_provider.build_context(
+    alert_text="Windows authentication admin logon investigation",
+    llm_model_name="gemma-4-31B-it",
+)
+
 assert extension == "vector", extension
 assert inserted == 2, inserted
 assert row_count == 2, row_count
 assert "SOC_OPERATIONAL_CONTEXT" in context, context
 assert "PowerShell encodedcommand triage procedure" in context, context
+assert spl_inserted == 1, spl_inserted
+assert spl_row_count == 1, spl_row_count
+assert "SPL_QUERY_GROUNDING_CONTEXT" in spl_context, spl_context
+assert "index=wineventlog" in spl_context, spl_context
 
 print("extension=vector")
 print("inserted=2")
 print("row_count=2")
 print("context=ok")
+print("spl_inserted=1")
+print("spl_context=ok")
 PY
 
 info "Postgres RAG smoke passed."

@@ -11,6 +11,9 @@ POSTGRES_ADMIN_USER="${POSTGRES_ADMIN_USER:-postgres}"
 POSTGRES_ADMIN_DB="${POSTGRES_ADMIN_DB:-postgres}"
 SKIP_DB_SETUP="${SKIP_DB_SETUP:-false}"
 SKIP_INGEST="${SKIP_INGEST:-false}"
+SPL_QUERY_RAG="${SPL_QUERY_RAG:-false}"
+SOURCE_DIR_SET="false"
+INDEX_DIR_SET="false"
 
 usage() {
     cat <<'EOF'
@@ -21,13 +24,14 @@ Options:
   --source-dir PATH       Knowledge-base source docs directory
   --index-dir PATH        Ingest artifact output directory
   --analyzer-python PATH  Analyzer venv Python
+  --spl-query-rag         Ingest SPL-focused source docs into the SPL query RAG table
   --skip-db-setup         Only run corpus ingest
   --skip-ingest           Only create database/schema/extension
   -h, --help              Show this help
 
 Environment overrides:
   CONFIG_ENV, SOURCE_DIR, INDEX_DIR, ANALYZER_PYTHON,
-  POSTGRES_ADMIN_USER, POSTGRES_ADMIN_DB, SKIP_DB_SETUP, SKIP_INGEST
+  POSTGRES_ADMIN_USER, POSTGRES_ADMIN_DB, SKIP_DB_SETUP, SKIP_INGEST, SPL_QUERY_RAG
 EOF
 }
 
@@ -60,11 +64,13 @@ while [[ $# -gt 0 ]]; do
         --source-dir)
             require_arg_value "$1" "${2:-}"
             SOURCE_DIR="$2"
+            SOURCE_DIR_SET="true"
             shift 2
             ;;
         --index-dir)
             require_arg_value "$1" "${2:-}"
             INDEX_DIR="$2"
+            INDEX_DIR_SET="true"
             shift 2
             ;;
         --analyzer-python)
@@ -74,6 +80,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-db-setup)
             SKIP_DB_SETUP="true"
+            shift
+            ;;
+        --spl-query-rag)
+            SPL_QUERY_RAG="true"
             shift
             ;;
         --skip-ingest)
@@ -153,6 +163,18 @@ def quote_literal(value: str) -> str:
 config = parse_config_env(config_path)
 dsn = config.get("RAG_POSTGRES_DSN", "postgresql://notable_analyzer@127.0.0.1:5432/notable_rag")
 schema = require_simple_identifier(config.get("RAG_POSTGRES_SCHEMA", "notable_rag"), "RAG_POSTGRES_SCHEMA")
+spl_query_table = require_simple_identifier(
+    config.get("SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE", "spl_query_chunks"),
+    "SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE",
+)
+spl_query_source_dir = config.get(
+    "SPL_QUERY_RAG_SOURCE_DIR",
+    "/opt/llm-notable-analysis/knowledge_base/spl_query_source_docs",
+)
+spl_query_index_dir = config.get(
+    "SPL_QUERY_RAG_INDEX_DIR",
+    "/opt/llm-notable-analysis/knowledge_base/spl_query_index",
+)
 parsed = urlparse(dsn)
 if parsed.scheme not in {"postgresql", "postgres"}:
     raise SystemExit("RAG_POSTGRES_DSN must use postgresql:// or postgres://.")
@@ -192,7 +214,18 @@ schema_statements = [
 
 admin_sql_path.write_text("\n".join(admin_statements) + "\n", encoding="utf-8")
 schema_sql_path.write_text("\n".join(schema_statements) + "\n", encoding="utf-8")
-meta_path.write_text(f"RAG_DATABASE={shlex.quote(database)}\n", encoding="utf-8")
+meta_path.write_text(
+    "\n".join(
+        [
+            f"RAG_DATABASE={shlex.quote(database)}",
+            f"SPL_QUERY_RAG_SOURCE_DIR_CONFIG={shlex.quote(spl_query_source_dir)}",
+            f"SPL_QUERY_RAG_INDEX_DIR_CONFIG={shlex.quote(spl_query_index_dir)}",
+            f"SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE_CONFIG={shlex.quote(spl_query_table)}",
+        ]
+    )
+    + "\n",
+    encoding="utf-8",
+)
 admin_sql_path.chmod(0o600)
 schema_sql_path.chmod(0o600)
 meta_path.chmod(0o600)
@@ -209,14 +242,17 @@ run_psql_as_admin() {
     fi
 }
 
+if [[ "$SKIP_DB_SETUP" != "true" || "$SPL_QUERY_RAG" == "true" ]]; then
+    generate_sql
+    # shellcheck disable=SC1091
+    source "$tmpdir/meta.env"
+fi
+
 if [[ "$SKIP_DB_SETUP" != "true" ]]; then
     require_command psql
     if [[ "$(id -un)" != "$POSTGRES_ADMIN_USER" ]]; then
         require_command sudo
     fi
-    generate_sql
-    # shellcheck disable=SC1091
-    source "$tmpdir/meta.env"
     info "Creating PostgreSQL role/database if needed"
     run_psql_as_admin "$POSTGRES_ADMIN_DB" "$tmpdir/admin.sql"
     info "Creating pgvector extension and configured schema"
@@ -226,6 +262,19 @@ else
 fi
 
 if [[ "$SKIP_INGEST" != "true" ]]; then
+    ingest_table_args=()
+    if [[ "$SPL_QUERY_RAG" == "true" ]]; then
+        if [[ "$SOURCE_DIR_SET" != "true" ]]; then
+            SOURCE_DIR="$SPL_QUERY_RAG_SOURCE_DIR_CONFIG"
+        fi
+        if [[ "$INDEX_DIR_SET" != "true" ]]; then
+            INDEX_DIR="$SPL_QUERY_RAG_INDEX_DIR_CONFIG"
+        fi
+        ingest_table_args=(
+            --postgres-chunks-table "$SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE_CONFIG"
+        )
+        info "SPL query RAG mode enabled; using table $SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE_CONFIG"
+    fi
     mkdir -p "$SOURCE_DIR" "$INDEX_DIR"
     info "Running Postgres RAG corpus ingest from $SOURCE_DIR"
     ingest_args=(
@@ -235,7 +284,8 @@ if [[ "$SKIP_INGEST" != "true" ]]; then
         --index-dir "$INDEX_DIR"
     )
     "$ANALYZER_PYTHON" -m onprem_rag_notable_analysis.future.corpus_ingest \
-        "${ingest_args[@]}"
+        "${ingest_args[@]}" \
+        "${ingest_table_args[@]}"
 else
     info "SKIP_INGEST=true; skipping corpus ingest"
 fi

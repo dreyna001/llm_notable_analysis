@@ -38,6 +38,11 @@ from .spl_query_generation import (
     normalize_competing_hypotheses,
     validate_spl_query_contract,
 )
+from .spl_query_grounding import (
+    build_spl_query_grounding_context,
+    init_spl_query_rag_provider,
+    spl_query_rag_failure_mode,
+)
 from .ttp_validator import TTPValidator
 
 logger = logging.getLogger(__name__)
@@ -427,9 +432,20 @@ def validate_competing_hypotheses_balance(
     return True, None
 
 
-def _validate_spl_query_contract(result: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+def _validate_spl_query_contract(
+    result: Dict[str, Any],
+    *,
+    alert_text: str = "",
+    spl_query_grounding_context: str = "",
+    require_spl_grounding: bool = False,
+) -> Tuple[bool, Optional[str]]:
     """Validate strict SPL query contract for per-hypothesis query generation."""
-    return validate_spl_query_contract(result)
+    return validate_spl_query_contract(
+        result,
+        alert_text=alert_text,
+        spl_query_grounding_context=spl_query_grounding_context,
+        require_spl_grounding=require_spl_grounding,
+    )
 
 
 def _normalize_competing_hypotheses(
@@ -961,6 +977,7 @@ class LocalLLMClient:
             session=self._http_session,
         )
         self._rag_provider = self._init_rag_provider()
+        self._spl_query_rag_provider = self._init_spl_query_rag_provider()
 
     def _init_rag_provider(self):
         """Initialize optional RAG context provider (best-effort).
@@ -1051,6 +1068,10 @@ class LocalLLMClient:
                 raise
             return None
 
+    def _init_spl_query_rag_provider(self):
+        """Initialize optional SPL-dedicated RAG provider."""
+        return init_spl_query_rag_provider(self.config)
+
     def _build_soc_operational_context(self, alert_text: str) -> str:
         """Build SOC operational context block from retrieval layer.
 
@@ -1079,6 +1100,25 @@ class LocalLLMClient:
             if getattr(self.config, "RAG_FAIL_CLOSED", False):
                 raise
             return ""
+
+    def _build_spl_query_grounding_context(
+        self,
+        *,
+        alert_text: str,
+        hypotheses: List[Dict[str, Any]],
+    ) -> str:
+        """Build SPL-dedicated grounding context for SPL generation."""
+        if not bool(getattr(self.config, "SPL_QUERY_RAG_ENABLED", False)):
+            return ""
+        provider = getattr(self, "_spl_query_rag_provider", None)
+        if provider is None:
+            raise RuntimeError("SPL query RAG is enabled but provider is unavailable.")
+        return build_spl_query_grounding_context(
+            provider=provider,
+            config=self.config,
+            alert_text=alert_text,
+            hypotheses=hypotheses,
+        )
 
     def _build_prompt(
         self,
@@ -1268,6 +1308,10 @@ SECURITY ALERT INPUT:
         spl_query_generation_enabled = bool(
             getattr(self.config, "SPL_QUERY_GENERATION_ENABLED", False)
         )
+        spl_query_rag_enabled = bool(
+            getattr(self.config, "SPL_QUERY_RAG_ENABLED", False)
+        )
+        spl_query_rag_mode = spl_query_rag_failure_mode(self.config)
 
         def _annotate_metadata(
             result_obj: Dict[str, Any],
@@ -1282,6 +1326,9 @@ SECURITY ALERT INPUT:
             spl_generation_inference_time_seconds: float = 0.0,
             spl_generation_prompt_length: int = 0,
             spl_generation_repair_attempted: bool = False,
+            spl_query_rag_included: bool = False,
+            spl_query_rag_context_chars: int = 0,
+            spl_query_rag_unavailable_reason: Optional[str] = None,
         ) -> Dict[str, Any]:
             metadata: Dict[str, Any] = {
                 "model": self.config.LLM_MODEL_NAME,
@@ -1298,12 +1345,20 @@ SECURITY ALERT INPUT:
                 "spl_query_generation_inference_time_seconds": spl_generation_inference_time_seconds,
                 "spl_query_generation_prompt_length": spl_generation_prompt_length,
                 "spl_query_generation_repair_attempted": spl_generation_repair_attempted,
+                "spl_query_rag_enabled": spl_query_rag_enabled,
+                "spl_query_rag_included": spl_query_rag_included,
+                "spl_query_rag_context_chars": spl_query_rag_context_chars,
+                "spl_query_rag_failure_mode": spl_query_rag_mode,
             }
             if repair_reason:
                 metadata["repair_reason"] = repair_reason
             if spl_unavailable_reason:
                 metadata["spl_query_generation_unavailable_reason"] = (
                     str(spl_unavailable_reason)[:600]
+                )
+            if spl_query_rag_unavailable_reason:
+                metadata["spl_query_rag_unavailable_reason"] = (
+                    str(spl_query_rag_unavailable_reason)[:600]
                 )
             result_obj["metadata"] = metadata
             return result_obj
@@ -1376,20 +1431,54 @@ SECURITY ALERT INPUT:
             return True, None, parsed
 
         def _check_spl_query_contract(
-            result_obj: Dict[str, Any]
+            result_obj: Dict[str, Any], *, spl_query_grounding_context: str
         ) -> Tuple[bool, Optional[str]]:
             if not spl_query_generation_enabled:
                 return True, None
-            return _validate_spl_query_contract(result_obj)
+            return _validate_spl_query_contract(
+                result_obj,
+                alert_text=alert_text,
+                spl_query_grounding_context=spl_query_grounding_context,
+                require_spl_grounding=bool(spl_query_grounding_context.strip()),
+            )
 
         def _generate_spl_queries_for_alert(
             result_obj: Dict[str, Any], *, alert_time_value: Optional[str]
-        ) -> Tuple[bool, Optional[str], Dict[str, Any], float, int, bool]:
+        ) -> Tuple[bool, Optional[str], Dict[str, Any], float, int, bool, str, Optional[str]]:
             """Run bounded second LLM call for SPL query fields only."""
+            spl_grounding_context = ""
+            spl_grounding_unavailable_reason: Optional[str] = None
+            if spl_query_rag_enabled:
+                try:
+                    spl_grounding_context = self._build_spl_query_grounding_context(
+                        alert_text=alert_text,
+                        hypotheses=result_obj.get("competing_hypotheses", []),
+                    )
+                    if not spl_grounding_context.strip():
+                        raise RuntimeError("SPL query RAG returned no grounding context.")
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    spl_grounding_unavailable_reason = str(exc)
+                    if spl_query_rag_mode == "suppress":
+                        return (
+                            False,
+                            f"SPL query RAG unavailable: {exc}",
+                            result_obj,
+                            0.0,
+                            0,
+                            False,
+                            "",
+                            spl_grounding_unavailable_reason,
+                        )
+                    logger.warning(
+                        "SPL query RAG unavailable; falling back to ungrounded SPL generation: %s",
+                        exc,
+                    )
+
             spl_prompt = build_spl_query_generation_prompt(
                 alert_text=alert_text,
                 hypotheses=result_obj.get("competing_hypotheses", []),
                 soc_operational_context=soc_context,
+                spl_query_grounding_context=spl_grounding_context,
                 alert_time=alert_time_value,
             )
             if _model_name_suggests_qwen(self.config.LLM_MODEL_NAME):
@@ -1404,8 +1493,12 @@ SECURITY ALERT INPUT:
                 merged_obj["competing_hypotheses"] = merge_spl_query_fields_by_position(
                     base_hypotheses=result_obj.get("competing_hypotheses", []),
                     generated_payload=parsed_obj,
+                    spl_query_grounding_context=spl_grounding_context,
                 )
-                spl_ok, spl_err = _check_spl_query_contract(merged_obj)
+                spl_ok, spl_err = _check_spl_query_contract(
+                    merged_obj,
+                    spl_query_grounding_context=spl_grounding_context,
+                )
                 return spl_ok, spl_err, merged_obj
 
             elapsed_total = 0.0
@@ -1419,7 +1512,16 @@ SECURITY ALERT INPUT:
                 spl_parsed = self._parse_llm_response(spl_text)
                 spl_ok, spl_err, spl_merged = _merge_and_validate_spl(spl_parsed)
                 if spl_ok:
-                    return True, None, spl_merged, elapsed_total, len(spl_prompt), False
+                    return (
+                        True,
+                        None,
+                        spl_merged,
+                        elapsed_total,
+                        len(spl_prompt),
+                        False,
+                        spl_grounding_context,
+                        spl_grounding_unavailable_reason,
+                    )
                 first_error = f"SPL query contract validation: {spl_err or 'unknown'}"
             except (
                 RequestTimeoutError,
@@ -1450,11 +1552,29 @@ SECURITY ALERT INPUT:
                 spl_parsed2 = self._parse_llm_response(spl_text2)
                 spl_ok2, spl_err2, spl_merged2 = _merge_and_validate_spl(spl_parsed2)
                 if spl_ok2:
-                    return True, None, spl_merged2, elapsed_total, len(spl_prompt), True
+                    return (
+                        True,
+                        None,
+                        spl_merged2,
+                        elapsed_total,
+                        len(spl_prompt),
+                        True,
+                        spl_grounding_context,
+                        spl_grounding_unavailable_reason,
+                    )
                 reason = (
                     f"{first_error}; repair SPL validation: {spl_err2 or 'unknown'}"
                 )
-                return False, reason, result_obj, elapsed_total, len(spl_prompt), True
+                return (
+                    False,
+                    reason,
+                    result_obj,
+                    elapsed_total,
+                    len(spl_prompt),
+                    True,
+                    spl_grounding_context,
+                    spl_grounding_unavailable_reason,
+                )
             except (
                 RequestTimeoutError,
                 TransportError,
@@ -1467,7 +1587,16 @@ SECURITY ALERT INPUT:
                 ResponseFormatError,
             ) as exc:
                 reason = f"{first_error}; repair SPL generation failed: {exc}"
-                return False, reason, result_obj, elapsed_total, len(spl_prompt), True
+                return (
+                    False,
+                    reason,
+                    result_obj,
+                    elapsed_total,
+                    len(spl_prompt),
+                    True,
+                    spl_grounding_context,
+                    spl_grounding_unavailable_reason,
+                )
 
         def _finalize_with_optional_spl(
             base_obj: Dict[str, Any],
@@ -1492,9 +1621,16 @@ SECURITY ALERT INPUT:
                 base_obj["raw_response"] = raw_response
                 return base_obj
 
-            spl_ok, spl_reason, spl_obj, spl_elapsed, spl_prompt_len, spl_repair = (
-                _generate_spl_queries_for_alert(base_obj, alert_time_value=alert_time)
-            )
+            (
+                spl_ok,
+                spl_reason,
+                spl_obj,
+                spl_elapsed,
+                spl_prompt_len,
+                spl_repair,
+                spl_grounding_context,
+                spl_grounding_reason,
+            ) = _generate_spl_queries_for_alert(base_obj, alert_time_value=alert_time)
             if spl_ok:
                 spl_obj = _annotate_metadata(
                     spl_obj,
@@ -1507,6 +1643,9 @@ SECURITY ALERT INPUT:
                     spl_generation_inference_time_seconds=spl_elapsed,
                     spl_generation_prompt_length=spl_prompt_len,
                     spl_generation_repair_attempted=spl_repair,
+                    spl_query_rag_included=bool(spl_grounding_context.strip()),
+                    spl_query_rag_context_chars=len(spl_grounding_context),
+                    spl_query_rag_unavailable_reason=spl_grounding_reason,
                 )
                 spl_obj["raw_response"] = raw_response
                 return spl_obj
@@ -1531,6 +1670,9 @@ SECURITY ALERT INPUT:
                 spl_generation_inference_time_seconds=spl_elapsed,
                 spl_generation_prompt_length=spl_prompt_len,
                 spl_generation_repair_attempted=spl_repair,
+                spl_query_rag_included=bool(spl_grounding_context.strip()),
+                spl_query_rag_context_chars=len(spl_grounding_context),
+                spl_query_rag_unavailable_reason=spl_grounding_reason,
             )
             suppressed_obj["raw_response"] = raw_response
             return suppressed_obj

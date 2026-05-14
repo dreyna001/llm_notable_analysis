@@ -39,6 +39,19 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.RAG_RRF_K, 60)
         self.assertEqual(config.LLM_MODEL_NAME, "gemma-4-31B-it")
         self.assertEqual(config.LLM_TIMEOUT, 120)
+        self.assertFalse(config.SPL_QUERY_RAG_ENABLED)
+        self.assertEqual(
+            config.SPL_QUERY_RAG_SOURCE_DIR.as_posix(),
+            "/opt/llm-notable-analysis/knowledge_base/spl_query_source_docs",
+        )
+        self.assertEqual(
+            config.SPL_QUERY_RAG_INDEX_DIR.as_posix(),
+            "/opt/llm-notable-analysis/knowledge_base/spl_query_index",
+        )
+        self.assertEqual(config.SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE, "spl_query_chunks")
+        self.assertEqual(config.SPL_QUERY_RAG_MAX_SNIPPETS, 4)
+        self.assertEqual(config.SPL_QUERY_RAG_CONTEXT_BUDGET_CHARS, 1600)
+        self.assertEqual(config.SPL_QUERY_RAG_FAILURE_MODE, "suppress")
 
     def test_postgres_rag_contract_loads_from_environment(self) -> None:
         """Postgres/pgvector RAG settings should be explicit env contract values."""
@@ -83,6 +96,32 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.RAG_CANDIDATE_POOL_LIMIT, 22)
         self.assertEqual(config.RAG_RRF_K, 50)
 
+    def test_spl_query_rag_contract_loads_from_environment(self) -> None:
+        """SPL-dedicated RAG should expose a separate config contract."""
+        env = {
+            "SPL_QUERY_RAG_ENABLED": "true",
+            "SPL_QUERY_RAG_SOURCE_DIR": "/kb/spl/source",
+            "SPL_QUERY_RAG_INDEX_DIR": "/kb/spl/index",
+            "SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE": "customer_spl_chunks",
+            "SPL_QUERY_RAG_MAX_SNIPPETS": "3",
+            "SPL_QUERY_RAG_CONTEXT_BUDGET_CHARS": "900",
+            "SPL_QUERY_RAG_FAILURE_MODE": "fallback_to_ungrounded",
+        }
+
+        with patch.dict(os.environ, env, clear=True):
+            config = load_config()
+
+        self.assertTrue(config.SPL_QUERY_RAG_ENABLED)
+        self.assertEqual(config.SPL_QUERY_RAG_SOURCE_DIR.as_posix(), "/kb/spl/source")
+        self.assertEqual(config.SPL_QUERY_RAG_INDEX_DIR.as_posix(), "/kb/spl/index")
+        self.assertEqual(
+            config.SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE,
+            "customer_spl_chunks",
+        )
+        self.assertEqual(config.SPL_QUERY_RAG_MAX_SNIPPETS, 3)
+        self.assertEqual(config.SPL_QUERY_RAG_CONTEXT_BUDGET_CHARS, 900)
+        self.assertEqual(config.SPL_QUERY_RAG_FAILURE_MODE, "fallback_to_ungrounded")
+
     def test_dataclass_defaults_match_loader_defaults(self) -> None:
         """Direct Config construction should match the runtime loader defaults."""
         with patch.dict(os.environ, {}, clear=True):
@@ -98,6 +137,10 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(
             direct.RAG_POSTGRES_STATEMENT_TIMEOUT_MS,
             loaded.RAG_POSTGRES_STATEMENT_TIMEOUT_MS,
+        )
+        self.assertEqual(
+            direct.SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE,
+            loaded.SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE,
         )
 
     def test_local_llm_client_selects_postgres_rag_provider(self) -> None:
@@ -134,6 +177,28 @@ class TestConfigRuntimeContract(unittest.TestCase):
 
         self.assertIs(provider, sentinel)
         from_config.assert_called_once()
+
+    def test_local_llm_client_selects_spl_query_rag_provider(self) -> None:
+        """SPL query RAG should use the configured separate Postgres table."""
+        client = object.__new__(LocalLLMClient)
+        client.config = Config(
+            SPL_QUERY_RAG_ENABLED=True,
+            SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE="customer_spl_chunks",
+        )
+        sentinel = object()
+
+        with patch(
+            "onprem_rag_notable_analysis.future.postgres_retrieval."
+            "PostgresRAGContextProvider.from_config",
+            return_value=sentinel,
+        ) as from_config:
+            provider = client._init_spl_query_rag_provider()
+
+        self.assertIs(provider, sentinel)
+        rag_config = from_config.call_args.args[0]
+        self.assertEqual(rag_config.context_header, "SPL_QUERY_GROUNDING_CONTEXT")
+        self.assertEqual(rag_config.postgres_chunks_table, "customer_spl_chunks")
+        self.assertTrue(rag_config.fail_closed)
 
     def test_local_llm_client_rejects_unsupported_rag_backend(self) -> None:
         """Unsupported RAG backends should fail open without provider setup."""
@@ -187,6 +252,27 @@ class TestConfigRuntimeContract(unittest.TestCase):
         rag_config = from_config.call_args.args[0]
         self.assertEqual(rag_config.backend, "postgres")
         self.assertEqual(rag_config.rrf_k, 55)
+
+    def test_nonsdk_local_llm_client_selects_spl_query_rag_provider(self) -> None:
+        """Non-SDK client should keep SPL query RAG wiring parity."""
+        client = object.__new__(NonSDKLocalLLMClient)
+        client.config = Config(
+            SPL_QUERY_RAG_ENABLED=True,
+            SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE="customer_spl_chunks",
+        )
+        sentinel = object()
+
+        with patch(
+            "onprem_rag_notable_analysis.future.postgres_retrieval."
+            "PostgresRAGContextProvider.from_config",
+            return_value=sentinel,
+        ) as from_config:
+            provider = client._init_spl_query_rag_provider()
+
+        self.assertIs(provider, sentinel)
+        rag_config = from_config.call_args.args[0]
+        self.assertEqual(rag_config.context_header, "SPL_QUERY_GROUNDING_CONTEXT")
+        self.assertEqual(rag_config.postgres_chunks_table, "customer_spl_chunks")
 
     def test_nonsdk_local_llm_client_can_fail_closed_for_bad_rag_backend(self) -> None:
         """Non-SDK client should also honor fail-closed RAG configuration."""

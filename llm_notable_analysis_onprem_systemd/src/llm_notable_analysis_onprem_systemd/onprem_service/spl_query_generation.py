@@ -18,6 +18,15 @@ SPL_QUERY_FIELDS = (
     "supports_if",
     "weakens_if",
 )
+SPL_QUERY_GROUNDING_FIELDS = ("primary_spl_query_grounding_refs",)
+
+_INDEX_RE = re.compile(r"\bindex\s*=\s*([A-Za-z0-9_\-*]+)", re.IGNORECASE)
+_SOURCETYPE_RE = re.compile(r"\bsourcetype\s*=\s*([A-Za-z0-9_\-.:*]+)", re.IGNORECASE)
+_MACRO_RE = re.compile(r"`([^`]+)`")
+_DATAMODEL_RE = re.compile(r"\bdatamodel\s*=\s*([A-Za-z0-9_\-.:]+)", re.IGNORECASE)
+_GROUNDING_LINE_RE = re.compile(
+    r"^\[\d+\]\s+\[(?P<source>.*?)\s+::\s+(?P<section>.*?)\]\s+(?P<excerpt>.*)$"
+)
 
 SPL_QUERY_GENERATION_RULES = """
 SPL QUERY GENERATION (Enabled):
@@ -31,14 +40,16 @@ SPL QUERY GENERATION (Enabled):
 - Focus each query on a decision-changing unknown or strongest contradiction.
 - Do not use placeholders such as <INDEX>, <SOURCETYPE>, or similar tokens.
 - Do not output pseudo-queries such as "search ...".
-- Do not invent environment-specific tokens (indexes/sourcetypes/macros/CIM data model names) unless explicitly present in SECURITY ALERT INPUT.
+- Do not invent environment-specific tokens (indexes/sourcetypes/macros/CIM data model names) unless explicitly present in SECURITY ALERT INPUT or SPL_QUERY_GROUNDING_CONTEXT.
 """.strip()
 
 SPL_QUERY_CONTEXT_RULES = """
 SPL QUERY CONTEXT RULES:
 - Treat SOC_OPERATIONAL_CONTEXT as advisory context only.
+- Treat SPL_QUERY_GROUNDING_CONTEXT as advisory Splunk-environment context only.
 - Never treat SOC_OPERATIONAL_CONTEXT as direct alert evidence.
-- Do not invent indexes, sourcetypes, macros, or CIM data models unless they appear in SECURITY ALERT INPUT or SOC_OPERATIONAL_CONTEXT.
+- Do not use indexes, sourcetypes, macros, or CIM data models unless they appear in SECURITY ALERT INPUT or SPL_QUERY_GROUNDING_CONTEXT.
+- SOC_OPERATIONAL_CONTEXT may explain analyst process, but it does not authorize environment-specific SPL tokens.
 - Keep each query bounded and decision-oriented.
 """.strip()
 
@@ -69,6 +80,7 @@ def build_spl_query_generation_prompt(
     alert_text: str,
     hypotheses: List[Dict[str, Any]],
     soc_operational_context: str = "",
+    spl_query_grounding_context: str = "",
     alert_time: Optional[str] = None,
 ) -> str:
     """Build a bounded second-call prompt for SPL query generation only.
@@ -77,6 +89,7 @@ def build_spl_query_generation_prompt(
         alert_text: The original alert text.
         hypotheses: Baseline competing hypotheses from the analysis call.
         soc_operational_context: Optional advisory context string from RAG.
+        spl_query_grounding_context: Optional SPL-dedicated grounding context.
         alert_time: Optional alert timestamp.
 
     Returns:
@@ -86,6 +99,9 @@ def build_spl_query_generation_prompt(
     soc_context_block = (soc_operational_context or "").strip()
     if not soc_context_block:
         soc_context_block = "SOC_OPERATIONAL_CONTEXT\n(none)\n"
+    spl_grounding_block = (spl_query_grounding_context or "").strip()
+    if not spl_grounding_block:
+        spl_grounding_block = "SPL_QUERY_GROUNDING_CONTEXT\n(none)\n"
 
     hypotheses_block = json.dumps(hypotheses, indent=2, ensure_ascii=True)
     return f"""You are a cybersecurity investigation assistant generating Splunk queries for predefined hypotheses.
@@ -104,6 +120,10 @@ INPUT_COMPETING_HYPOTHESES (ordered):
 
 {soc_context_block}
 
+---
+
+{spl_grounding_block}
+
 {SPL_QUERY_CONTEXT_RULES}
 
 ---
@@ -120,12 +140,14 @@ def merge_spl_query_fields_by_position(
     *,
     base_hypotheses: List[Dict[str, Any]],
     generated_payload: Dict[str, Any],
+    spl_query_grounding_context: str = "",
 ) -> List[Dict[str, Any]]:
     """Merge generated SPL query fields onto baseline hypotheses by list order.
 
     Args:
         base_hypotheses: Existing hypotheses from the base analysis call.
         generated_payload: Parsed payload from the SPL-only LLM call.
+        spl_query_grounding_context: Rendered SPL grounding block for provenance.
 
     Returns:
         Hypotheses with SPL query fields merged and normalized.
@@ -143,9 +165,77 @@ def merge_spl_query_fields_by_position(
             for field in SPL_QUERY_FIELDS:
                 if field in generated_item:
                     merged_item[field] = generated_item.get(field)
+            refs = build_spl_query_grounding_refs(
+                str(merged_item.get("primary_spl_query", "")),
+                spl_query_grounding_context,
+            )
+            if refs:
+                merged_item["primary_spl_query_grounding_refs"] = refs
         merged.append(merged_item)
 
     return normalize_competing_hypotheses(merged, spl_query_enabled=True)
+
+
+def _query_environment_tokens(query: str) -> List[Tuple[str, str]]:
+    """Extract environment-specific SPL tokens from a query."""
+    tokens: List[Tuple[str, str]] = []
+    for match in _INDEX_RE.finditer(query or ""):
+        tokens.append(("index", match.group(1).strip()))
+    for match in _SOURCETYPE_RE.finditer(query or ""):
+        tokens.append(("sourcetype", match.group(1).strip()))
+    for match in _MACRO_RE.finditer(query or ""):
+        tokens.append(("macro", match.group(1).strip()))
+    for match in _DATAMODEL_RE.finditer(query or ""):
+        tokens.append(("datamodel", match.group(1).strip()))
+    return [(kind, value) for kind, value in tokens if value]
+
+
+def _token_present(token: str, text: str) -> bool:
+    """Return whether token appears in text, case-insensitively."""
+    clean = (token or "").strip().casefold()
+    if not clean:
+        return False
+    return clean in (text or "").casefold()
+
+
+def build_spl_query_grounding_refs(
+    query: str,
+    spl_query_grounding_context: str,
+) -> List[Dict[str, str]]:
+    """Return source refs from SPL grounding snippets used by the query."""
+    tokens = [value for _kind, value in _query_environment_tokens(query)]
+    if not tokens or not spl_query_grounding_context:
+        return []
+
+    refs: List[Dict[str, str]] = []
+    seen = set()
+    for raw_line in spl_query_grounding_context.splitlines():
+        match = _GROUNDING_LINE_RE.match(raw_line.strip())
+        if not match:
+            continue
+        line_text = raw_line.casefold()
+        if not any(_token_present(token, line_text) for token in tokens):
+            continue
+        ref = {
+            "source_file": (match.group("source") or "unknown_source").strip(),
+            "section_path": (match.group("section") or "root").strip(),
+        }
+        key = (ref["source_file"], ref["section_path"])
+        if key not in seen:
+            refs.append(ref)
+            seen.add(key)
+    return refs
+
+
+def _environment_token_is_allowed(
+    *,
+    token: str,
+    alert_text: str,
+    spl_query_grounding_context: str,
+) -> bool:
+    return _token_present(token, alert_text) or _token_present(
+        token, spl_query_grounding_context
+    )
 
 
 def _validate_strict_hypothesis_balance(
@@ -182,7 +272,13 @@ def _validate_strict_hypothesis_balance(
     return True, None
 
 
-def validate_spl_query_contract(result: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+def validate_spl_query_contract(
+    result: Dict[str, Any],
+    *,
+    alert_text: str = "",
+    spl_query_grounding_context: str = "",
+    require_spl_grounding: bool = False,
+) -> Tuple[bool, Optional[str]]:
     """Validate strict SPL query contract for per-hypothesis query generation."""
     ch = result.get("competing_hypotheses")
     if not isinstance(ch, list):
@@ -216,25 +312,21 @@ def validate_spl_query_contract(result: Dict[str, Any]) -> Tuple[bool, Optional[
                 False,
                 f"competing_hypotheses[{i}].primary_spl_query contains pseudo-query ellipsis",
             )
-        if re.search(r"\bindex\s*=", primary_query, re.IGNORECASE):
+        for token_kind, token_value in _query_environment_tokens(primary_query):
+            if require_spl_grounding and _environment_token_is_allowed(
+                token=token_value,
+                alert_text=alert_text,
+                spl_query_grounding_context=spl_query_grounding_context,
+            ):
+                continue
+            if require_spl_grounding:
+                return (
+                    False,
+                    f"competing_hypotheses[{i}].primary_spl_query uses ungrounded {token_kind}: {token_value}",
+                )
             return (
                 False,
-                f"competing_hypotheses[{i}].primary_spl_query must not assume index names",
-            )
-        if re.search(r"\bsourcetype\s*=", primary_query, re.IGNORECASE):
-            return (
-                False,
-                f"competing_hypotheses[{i}].primary_spl_query must not assume sourcetypes",
-            )
-        if re.search(r"`[^`]+`", primary_query):
-            return (
-                False,
-                f"competing_hypotheses[{i}].primary_spl_query must not assume macros",
-            )
-        if re.search(r"\bdatamodel\s*=", primary_query, re.IGNORECASE):
-            return (
-                False,
-                f"competing_hypotheses[{i}].primary_spl_query must not assume CIM data models",
+                f"competing_hypotheses[{i}].primary_spl_query must not assume {token_kind} names",
             )
 
         for field in ("why_this_query", "supports_if", "weakens_if"):
@@ -269,7 +361,7 @@ def normalize_competing_hypotheses(
                 val = hyp.get(field, "")
                 hyp[field] = str(val).strip() if val is not None else ""
         else:
-            for field in SPL_QUERY_FIELDS:
+            for field in (*SPL_QUERY_FIELDS, *SPL_QUERY_GROUNDING_FIELDS):
                 hyp.pop(field, None)
         normalized.append(hyp)
     return normalized

@@ -17,6 +17,16 @@ class _DummyValidator:
         return scored_ttps
 
 
+class _SplGroundingProvider:
+    def build_context(self, *, alert_text: str, llm_model_name: str) -> str:
+        del alert_text, llm_model_name
+        return (
+            "SPL_QUERY_GROUNDING_CONTEXT\n"
+            "[1] [splunk_index_field_reference.txt :: Authentication] "
+            "Use index=wineventlog for Windows authentication searches.\n"
+        )
+
+
 class TestIntegrationMocks(unittest.TestCase):
     @patch("llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client.requests.post")
     def test_analyze_alert_tool_call_mode_uses_tools_for_main_and_spl(
@@ -353,6 +363,133 @@ class TestIntegrationMocks(unittest.TestCase):
         second_call_text = str(mock_post.call_args_list[1])
         self.assertNotIn("SPL QUERY GENERATION (Enabled)", first_call_text)
         self.assertIn("SPL QUERY GENERATION (Enabled)", second_call_text)
+
+    @patch("llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client.requests.post")
+    def test_analyze_alert_uses_spl_query_grounding_context(
+        self, mock_post: MagicMock
+    ) -> None:
+        base_payload = {
+            "alert_reconciliation": {
+                "verdict": "likely malicious",
+                "confidence": "0.84",
+                "one_sentence_summary": "Likely credential access in progress.",
+                "decision_drivers": ["failed logins then success"],
+                "recommended_actions": ["disable account"],
+            },
+            "competing_hypotheses": [
+                {"hypothesis_type": "benign", "hypothesis": "h1"},
+                {"hypothesis_type": "benign", "hypothesis": "h2"},
+                {"hypothesis_type": "benign", "hypothesis": "h3"},
+                {"hypothesis_type": "adversary", "hypothesis": "h4"},
+                {"hypothesis_type": "adversary", "hypothesis": "h5"},
+                {"hypothesis_type": "adversary", "hypothesis": "h6"},
+            ],
+            "evidence_vs_inference": {"evidence": ["user=admin"], "inferences": []},
+            "ioc_extraction": {"urls": []},
+            "ttp_analysis": [],
+        }
+        spl_payload = {
+            "competing_hypotheses": [
+                {
+                    "query_strategy": "resolve_unknown",
+                    "primary_spl_query": "search index=wineventlog user=admin | head 50",
+                    "why_this_query": "check approved authentication index",
+                    "supports_if": "matching events exist",
+                    "weakens_if": "no matching events exist",
+                }
+            ]
+            * 6
+        }
+
+        first_response = MagicMock()
+        first_response.raise_for_status.return_value = None
+        first_response.json.return_value = {"choices": [{"text": json.dumps(base_payload)}]}
+        second_response = MagicMock()
+        second_response.raise_for_status.return_value = None
+        second_response.json.return_value = {"choices": [{"text": json.dumps(spl_payload)}]}
+        mock_post.side_effect = [first_response, second_response]
+
+        config = Config(
+            LLM_API_URL="http://127.0.0.1:4000/v1/chat/completions",
+            SPL_QUERY_GENERATION_ENABLED=True,
+            SPL_QUERY_RAG_ENABLED=True,
+        )
+        with patch(
+            "llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client."
+            "init_spl_query_rag_provider",
+            return_value=_SplGroundingProvider(),
+        ):
+            client = LocalLLMClient(config=config, ttp_validator=_DummyValidator())
+        result = client.analyze_alert("alert_text", "2026-01-01T00:00:00Z")
+
+        self.assertNotIn("error", result)
+        self.assertEqual(mock_post.call_count, 2)
+        self.assertTrue(result["metadata"]["spl_query_rag_included"])
+        self.assertEqual(
+            result["competing_hypotheses"][0]["primary_spl_query"],
+            "search index=wineventlog user=admin | head 50",
+        )
+        self.assertEqual(
+            result["competing_hypotheses"][0]["primary_spl_query_grounding_refs"],
+            [
+                {
+                    "source_file": "splunk_index_field_reference.txt",
+                    "section_path": "Authentication",
+                }
+            ],
+        )
+        self.assertIn("SPL_QUERY_GROUNDING_CONTEXT", str(mock_post.call_args_list[1]))
+
+    @patch("llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client.requests.post")
+    def test_analyze_alert_suppresses_spl_when_spl_query_rag_missing(
+        self, mock_post: MagicMock
+    ) -> None:
+        base_payload = {
+            "alert_reconciliation": {
+                "verdict": "likely malicious",
+                "confidence": "0.84",
+                "one_sentence_summary": "Likely credential access in progress.",
+                "decision_drivers": ["failed logins then success"],
+                "recommended_actions": ["disable account"],
+            },
+            "competing_hypotheses": [
+                {"hypothesis_type": "benign", "hypothesis": "h1"},
+                {"hypothesis_type": "benign", "hypothesis": "h2"},
+                {"hypothesis_type": "benign", "hypothesis": "h3"},
+                {"hypothesis_type": "adversary", "hypothesis": "h4"},
+                {"hypothesis_type": "adversary", "hypothesis": "h5"},
+                {"hypothesis_type": "adversary", "hypothesis": "h6"},
+            ],
+            "evidence_vs_inference": {"evidence": ["user=admin"], "inferences": []},
+            "ioc_extraction": {"urls": []},
+            "ttp_analysis": [],
+        }
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {"choices": [{"text": json.dumps(base_payload)}]}
+        mock_post.return_value = response
+
+        config = Config(
+            LLM_API_URL="http://127.0.0.1:4000/v1/chat/completions",
+            SPL_QUERY_GENERATION_ENABLED=True,
+            SPL_QUERY_RAG_ENABLED=True,
+        )
+        with patch(
+            "llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client."
+            "init_spl_query_rag_provider",
+            return_value=None,
+        ):
+            client = LocalLLMClient(config=config, ttp_validator=_DummyValidator())
+        result = client.analyze_alert("alert_text", "2026-01-01T00:00:00Z")
+
+        self.assertNotIn("error", result)
+        self.assertEqual(mock_post.call_count, 1)
+        self.assertTrue(result["metadata"]["spl_query_generation_unavailable"])
+        self.assertIn(
+            "SPL query RAG unavailable",
+            result["metadata"]["spl_query_generation_unavailable_reason"],
+        )
+        self.assertFalse(result["metadata"]["spl_query_rag_included"])
 
     @patch("llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client.requests.post")
     def test_analyze_alert_suppresses_spl_when_second_call_contract_fails(
