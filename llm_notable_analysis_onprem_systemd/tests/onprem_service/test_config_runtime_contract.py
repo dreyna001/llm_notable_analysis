@@ -39,6 +39,7 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.RAG_RRF_K, 60)
         self.assertEqual(config.LLM_MODEL_NAME, "gemma-4-31B-it")
         self.assertEqual(config.LLM_TIMEOUT, 120)
+        self.assertFalse(config.HTML_REPORT_ENABLED)
         self.assertFalse(config.SPL_QUERY_RAG_ENABLED)
         self.assertEqual(
             config.SPL_QUERY_RAG_SOURCE_DIR.as_posix(),
@@ -56,6 +57,13 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS, 4000)
         self.assertEqual(config.QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS, 3)
         self.assertEqual(config.QUERY_RESULT_INTERPRETATION_MAX_TOKENS, 768)
+
+    def test_html_report_flag_loads_from_environment(self) -> None:
+        """HTML dashboard report generation should be opt-in by config."""
+        with patch.dict(os.environ, {"HTML_REPORT_ENABLED": "true"}, clear=True):
+            config = load_config()
+
+        self.assertTrue(config.HTML_REPORT_ENABLED)
 
     def test_postgres_rag_contract_loads_from_environment(self) -> None:
         """Postgres/pgvector RAG settings should be explicit env contract values."""

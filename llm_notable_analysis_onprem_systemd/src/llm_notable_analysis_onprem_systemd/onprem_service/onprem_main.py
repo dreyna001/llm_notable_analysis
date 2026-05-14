@@ -29,8 +29,9 @@ from .ingest import (
     move_to_processed,
     move_to_quarantine,
 )
-from .sinks import write_markdown_to_file, update_splunk_notable
+from .sinks import write_html_to_file, write_markdown_to_file, update_splunk_notable
 from .markdown_generator import generate_markdown_report
+from .html_generator import generate_html_report
 from .query_result_enrichment import enrich_analysis_with_query_results
 from .servicenow import (
     build_servicenow_incident_draft,
@@ -248,6 +249,11 @@ def process_notable(
         # Write to filesystem
         report_path = write_markdown_to_file(notable_id, markdown, config)
         logger.info(f"Wrote report: {report_path}")
+
+        if bool(getattr(config, "HTML_REPORT_ENABLED", False)):
+            html = generate_html_report(alert_text, llm_response, scored_ttps)
+            html_report_path = write_html_to_file(notable_id, html, config)
+            logger.info("Wrote HTML report: %s", html_report_path)
 
         # Optional: Update Splunk notable via REST API
         if config.SPLUNK_SINK_ENABLED:

@@ -32,7 +32,7 @@ class Config:
         INCOMING_DIR: Directory watched for incoming notables.
         PROCESSED_DIR: Directory for successfully processed notables.
         QUARANTINE_DIR: Directory for failed/invalid notables.
-        REPORT_DIR: Directory for generated markdown reports.
+        REPORT_DIR: Directory for generated markdown and HTML reports.
         ARCHIVE_DIR: Directory used by retention staging.
         POLL_INTERVAL: Polling interval in seconds.
         LLM_API_URL: Local LiteLLM/OpenAI-compatible endpoint URL.
@@ -41,6 +41,7 @@ class Config:
         LLM_STRUCTURED_OUTPUT_MODE: Structured output strategy (`prompt_json` or `tool_call`).
         LLM_MAX_TOKENS: Per-request generation token cap.
         LLM_TIMEOUT: Request timeout in seconds.
+        HTML_REPORT_ENABLED: Enables generated static HTML dashboard reports.
         RAG_ENABLED: Enables retrieval-augmented prompt grounding.
         RAG_BACKEND: Retrieval backend (`sqlite_faiss` or `postgres`).
         RAG_FAIL_CLOSED: Raises analysis errors when configured RAG is unavailable.
@@ -135,6 +136,7 @@ class Config:
     LLM_STRUCTURED_OUTPUT_MODE: str = "prompt_json"
     LLM_MAX_TOKENS: int = 4096
     LLM_TIMEOUT: int = 120  # seconds
+    HTML_REPORT_ENABLED: bool = False
 
     # Optional retrieval grounding (RAG)
     RAG_ENABLED: bool = False
@@ -274,6 +276,8 @@ def load_config() -> Config:
         ),
         LLM_MAX_TOKENS=int(os.getenv("LLM_MAX_TOKENS", "4096")),
         LLM_TIMEOUT=int(os.getenv("LLM_TIMEOUT", "120")),
+        HTML_REPORT_ENABLED=os.getenv("HTML_REPORT_ENABLED", "false").lower()
+        in ("true", "1", "yes"),
         RAG_ENABLED=os.getenv("RAG_ENABLED", "false").lower() in ("true", "1", "yes"),
         RAG_BACKEND=os.getenv("RAG_BACKEND", "postgres").strip().lower()
         or "postgres",

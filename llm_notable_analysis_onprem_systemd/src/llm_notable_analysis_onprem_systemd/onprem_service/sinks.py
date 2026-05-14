@@ -2,6 +2,7 @@
 
 Supports:
 - Filesystem sink (markdown reports to REPORT_DIR)
+- Filesystem sink (HTML dashboard reports to REPORT_DIR)
 - Splunk notable REST API update (optional)
 """
 
@@ -38,6 +39,32 @@ def write_markdown_to_file(notable_id: str, markdown: str, config: Config) -> Pa
 
     output_path.write_text(markdown, encoding="utf-8")
     logger.info(f"Wrote markdown report to {output_path}")
+    return output_path
+
+
+def write_html_to_file(notable_id: str, html: str, config: Config) -> Path:
+    """Write HTML dashboard report to filesystem.
+
+    Args:
+        notable_id: Sanitized notable ID for filename.
+        html: Generated HTML dashboard content.
+        config: Service configuration.
+
+    Returns:
+        Path to the written HTML file.
+    """
+    config.REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = config.REPORT_DIR / f"{notable_id}.html"
+
+    # Handle collision by appending suffix
+    if output_path.exists():
+        counter = 1
+        while output_path.exists():
+            output_path = config.REPORT_DIR / f"{notable_id}_{counter}.html"
+            counter += 1
+
+    output_path.write_text(html, encoding="utf-8")
+    logger.info("Wrote HTML report to %s", output_path)
     return output_path
 
 

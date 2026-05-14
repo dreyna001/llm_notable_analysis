@@ -5,6 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+# Tests run with PYTHONPATH pointing at the src layout.
+# pylint: disable=import-error,no-name-in-module
+
 from llm_notable_analysis_onprem_systemd.onprem_service.config import Config
 from llm_notable_analysis_onprem_systemd.onprem_service.onprem_main import process_notable
 from llm_notable_analysis_onprem_systemd.onprem_service.onprem_main_nonsdk import (
@@ -260,6 +263,68 @@ class TestOnpremMainInvestigation(unittest.TestCase):
             mock_execute.assert_not_called()
             report_text = (reports / "notable2.md").read_text(encoding="utf-8")
             self.assertNotIn("### Query Results", report_text)
+
+    def test_process_notable_writes_html_report_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            incoming = Path(td) / "incoming"
+            processed = Path(td) / "processed"
+            quarantine = Path(td) / "quarantine"
+            reports = Path(td) / "reports"
+            for d in (incoming, processed, quarantine, reports):
+                d.mkdir(parents=True, exist_ok=True)
+
+            notable_file = incoming / "notable-html.json"
+            notable_file.write_text(json.dumps({"summary": "alert"}), encoding="utf-8")
+
+            config = Config(
+                INCOMING_DIR=incoming,
+                PROCESSED_DIR=processed,
+                QUARANTINE_DIR=quarantine,
+                REPORT_DIR=reports,
+                HTML_REPORT_ENABLED=True,
+            )
+            llm_client = MagicMock()
+            llm_client.analyze_alert.return_value = self._make_base_llm_response()
+            logger = logging.getLogger("test_onprem_main_html")
+
+            ok = process_notable(notable_file, config, llm_client, logger)
+
+            self.assertTrue(ok)
+            self.assertTrue((reports / "notable-html.md").exists())
+            html_path = reports / "notable-html.html"
+            self.assertTrue(html_path.exists())
+            html_text = html_path.read_text(encoding="utf-8")
+            self.assertIn("<!DOCTYPE html>", html_text)
+            self.assertIn("Alert Reconciliation", html_text)
+
+    def test_process_notable_does_not_write_html_report_when_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            incoming = Path(td) / "incoming"
+            processed = Path(td) / "processed"
+            quarantine = Path(td) / "quarantine"
+            reports = Path(td) / "reports"
+            for d in (incoming, processed, quarantine, reports):
+                d.mkdir(parents=True, exist_ok=True)
+
+            notable_file = incoming / "notable-md-only.json"
+            notable_file.write_text(json.dumps({"summary": "alert"}), encoding="utf-8")
+
+            config = Config(
+                INCOMING_DIR=incoming,
+                PROCESSED_DIR=processed,
+                QUARANTINE_DIR=quarantine,
+                REPORT_DIR=reports,
+                HTML_REPORT_ENABLED=False,
+            )
+            llm_client = MagicMock()
+            llm_client.analyze_alert.return_value = self._make_base_llm_response()
+            logger = logging.getLogger("test_onprem_main_no_html")
+
+            ok = process_notable(notable_file, config, llm_client, logger)
+
+            self.assertTrue(ok)
+            self.assertTrue((reports / "notable-md-only.md").exists())
+            self.assertFalse((reports / "notable-md-only.html").exists())
 
 
 if __name__ == "__main__":

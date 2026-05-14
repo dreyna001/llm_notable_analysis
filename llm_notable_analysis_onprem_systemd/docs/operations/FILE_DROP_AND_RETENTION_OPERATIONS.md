@@ -6,14 +6,18 @@ polling, retention, and local concurrency settings without changing code.
 ## What This Controls
 
 The analyzer watches an incoming directory, processes supported files, writes
-reports, then moves inputs to processed or quarantine paths. Retention settings
-archive and later delete older runtime artifacts.
+reports, then moves inputs to processed or quarantine paths. Reports are
+markdown by default; when `HTML_REPORT_ENABLED=true`, a static `.html`
+dashboard is written next to the `.md` report in `REPORT_DIR`. Retention
+settings archive and later delete older runtime artifacts.
 
 ## Recommended Starting Posture
 
 - Keep `INGEST_MODE=file_drop`; it is the supported ingest mode.
 - Keep runtime paths under `/var/notables` unless the host has an approved
   storage layout.
+- Keep `HTML_REPORT_ENABLED=false` until operators have accepted the HTML
+  dashboard format.
 - Keep `POLL_INTERVAL=5` until file-drop volume is measured.
 - Start sequentially: `CONCURRENCY_ENABLED=false`, `MAX_WORKERS=1`.
 - Use conservative retention values until audit and evidence needs are agreed.
@@ -41,13 +45,13 @@ completes. This avoids partial reads.
 ### Where should files live?
 
 **Settings:** `INCOMING_DIR`, `PROCESSED_DIR`, `QUARANTINE_DIR`, `REPORT_DIR`,
-`ARCHIVE_DIR`
+`ARCHIVE_DIR`, `HTML_REPORT_ENABLED`
 
 - Keep all runtime outputs off the source tree.
 - Ensure directories match systemd `ReadWritePaths`.
 - If SFTP chroot is used, validate ownership and symlink behavior after install.
-- Size storage for peak incoming volume, generated reports, quarantined files,
-  and archive retention.
+- Size storage for peak incoming volume, generated `.md` and optional `.html`
+  reports, quarantined files, and archive retention.
 
 ### How quickly should the service poll?
 
@@ -89,7 +93,7 @@ patterns.
 | Area | Primary variables |
 |------|-------------------|
 | Ingest | `INGEST_MODE`, `POLL_INTERVAL` |
-| Runtime paths | `INCOMING_DIR`, `PROCESSED_DIR`, `QUARANTINE_DIR`, `REPORT_DIR`, `ARCHIVE_DIR` |
+| Runtime paths | `INCOMING_DIR`, `PROCESSED_DIR`, `QUARANTINE_DIR`, `REPORT_DIR`, `ARCHIVE_DIR`, `HTML_REPORT_ENABLED` |
 | Retention | `INPUT_RETENTION_DAYS`, `REPORT_RETENTION_DAYS`, `ARCHIVE_RETENTION_DAYS`, `RETENTION_RUN_INTERVAL_SECONDS` |
 | Concurrency | `CONCURRENCY_ENABLED`, `MAX_WORKERS`, `MAX_QUEUE_DEPTH` |
 | Payload correlation | Filename stem, `finding_id`, `event_id`, `notable_id` in incoming JSON |
