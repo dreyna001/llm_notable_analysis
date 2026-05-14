@@ -29,18 +29,18 @@ flowchart TB
 
   subgraph Package["C. Integration handoff (typical)"]
     SOAR[SOAR / playbook<br/>one JSON file per notable]
-    PUT[PUT to<br/>s3://INPUT/incoming/&lt;finding_id&gt;.json]
+    PUT["PUT to<br/>s3://INPUT/incoming/{finding_id}.json"]
   end
 
   subgraph AWS["D. Deployed AWS pipeline"]
-    EVT[S3 event: ObjectCreated<br/>prefix incoming/]
+    EVT["S3 event: ObjectCreated<br/>prefix: incoming/"]
     LAM[Lambda container<br/>notable-analyzer-s3]
     READ[Read + normalize JSON or plaintext]
     PRM[Prompt stack + output contract:<br/>doctrine, evidence-gate,<br/>stateless / unknown discipline,<br/>6-way competing hypotheses,<br/>analyze_notable tool JSON schema]
     BD[Bedrock Converse<br/>Claude inference profile]
-    VAL[Hallucination controls:<br/>required keys, parse + repair,<br/>content rules, ATT&amp;CK v17.1 allowlist<br/>raw fallback for human review]
+    VAL["Hallucination controls:<br/>required keys, parse + repair,<br/>content rules, ATT&CK v17.1 allowlist<br/>raw fallback for human review"]
     MD[Markdown report assembly]
-    OUT[(Output bucket<br/>reports/&lt;stem&gt;.md)]
+    OUT[("Output bucket<br/>reports/{stem}.md")]
     SPLK{{Splunk REST<br/>notable comment?}}
   end
 
@@ -92,7 +92,7 @@ flowchart TB
 flowchart LR
   subgraph Inputs["Inputs the customer must have or configure"]
     I1[(Per-notable bundle:<br/>threshold alert + correlation context)]
-    I2[(S3 input bucket<br/>prefix incoming/)]
+    I2[("S3 input bucket<br/>prefix: incoming/")]
     I3[Deploy-time params:<br/>bucket names, ImageUri, AwsAccountId,<br/>SplunkSinkMode, optional Splunk + secret ARN]
     I4[Runtime: Bedrock access in account]
     I5[Container image in ECR<br/>before sam deploy]
@@ -101,15 +101,15 @@ flowchart LR
   subgraph Middle["What happens in the middle"]
     M1[S3 notifies Lambda]
     M2[Lambda reads object body]
-    M3[Assemble bounded prompt + tool schema → Bedrock Converse]
-    M4[Validate, allowlist TTPs, repair, policies → markdown]
+    M3[Assemble bounded prompt + tool schema - Bedrock Converse]
+    M4[Validate, allowlist TTPs, repair, policies - markdown]
     M5[Markdown generator]
   end
 
   subgraph Outputs["Outputs"]
-    O1[(S3 reports/*.md — always for both modes)]
-    O2[(Splunk notable comment — only notable_rest)]
-    O3[CloudWatch Logs — traceability]
+    O1[("Markdown reports under S3 prefix reports/, all sink modes")]
+    O2[("Splunk notable comment, notable_rest mode only")]
+    O3[CloudWatch Logs - traceability]
   end
 
   I1 --> I2
@@ -133,8 +133,8 @@ Aligned with `deploy/aws/template-sam.yaml`: two buckets, image-based Lambda, `i
 flowchart TB
   subgraph Account["Customer AWS account"]
     subgraph Storage["S3"]
-      BIN[(Input bucket<br/>Lifecycle on incoming/)]
-      BOUT[(Output bucket<br/>Lifecycle on reports/)]
+      BIN[("Input bucket<br/>Lifecycle: prefix incoming/")]
+      BOUT[("Output bucket<br/>Lifecycle: prefix reports/")]
     end
 
     subgraph Compute["Compute"]
@@ -181,21 +181,21 @@ This is the **operational path** in the **customer's AWS account**: who builds t
 sequenceDiagram
   participant Dev as Development org<br/>ships code at milestone
   participant Eng as Customer engineer / platform team<br/>owns integration
-  participant IAM as AWS IAM & Bedrock access
+  participant IAM as AWS IAM and Bedrock access
   participant ECR as Amazon ECR
   participant SAM as SAM CLI + Docker
   participant CFN as CloudFormation stack
   participant S3 as S3 buckets
 
-  Dev->>Eng: Hand off source<br/>README, template-sam.yaml, Dockerfile; optional upstream for merges
-  Eng->>IAM: Confirm credentials, Bedrock model access,<br/>Secrets Manager if notable_rest
+  Dev->>Eng: Hand off source (README, template-sam.yaml, Dockerfile, optional upstream for merges)
+  Eng->>IAM: Confirm credentials, Bedrock model access, Secrets Manager if notable_rest
   Eng->>ECR: Create or choose repository
   Eng->>SAM: docker build + tag + push image to ECR
   Eng->>SAM: sam build -t deploy/aws/template-sam.yaml
-  Eng->>CFN: sam deploy (guided first time)<br/>ParameterOverrides: buckets, AwsAccountId, ImageUri, sink mode
+  Eng->>CFN: sam deploy guided, ParameterOverrides buckets AwsAccountId ImageUri sink mode
   CFN->>S3: Create buckets, notifications, lifecycle
   CFN->>CFN: Create Lambda function + IAM policies
-  Eng->>S3: Upload test notable to incoming/
+  Eng->>S3: Upload test notable to prefix incoming
   S3-->>Eng: Verify report under reports/ + CloudWatch logs
 ```
 
