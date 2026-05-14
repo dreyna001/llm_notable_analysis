@@ -1,5 +1,7 @@
 # AI Notable Analysis Pipeline — End-to-End Diagrams
 
+Pre-rendered SVG exports of each figure (same folder): `END_TO_END_DIAGRAMS.fig01-full-story.svg` through `END_TO_END_DIAGRAMS.fig04-deployment-sequence.svg`.
+
 These Mermaid diagrams summarize how work flows from **how customers build and fire notables** through **customer-side deployment** to **analyst-ready reports**.
 
 **Assumptions (planning, not a guarantee):**
@@ -127,7 +129,7 @@ flowchart LR
 
 ## 3. AWS runtime architecture (what the stack provisions)
 
-Aligned with `deploy/aws/template-sam.yaml`: two buckets, image-based Lambda, `incoming/` notifications, IAM for S3/Bedrock/logs, optional Secrets Manager. **Pick the AWS region** that fits policy and Bedrock access; if you change it, keep **Bedrock inference ARNs, IAM, and ECR** in `deploy/aws/template-sam.yaml` **in that region** (`docs/operations/DEPLOYMENT_IMAGE_STEPS.md`).
+Aligned with `../../../deploy/aws/template-sam.yaml`: two buckets, image-based Lambda, `incoming/` notifications, IAM for S3/Bedrock/logs, optional Secrets Manager. **Pick the AWS region** that fits policy and Bedrock access; if you change it, keep **Bedrock inference ARNs, IAM, and ECR** in `../../../deploy/aws/template-sam.yaml` **in that region** (`../../operations/DEPLOYMENT_IMAGE_STEPS.md`).
 
 ```mermaid
 flowchart TB
@@ -199,16 +201,16 @@ sequenceDiagram
   S3-->>Eng: Verify report under reports/ + CloudWatch logs
 ```
 
-**Important:** The SAM template **references** a pre-published `ImageUri`; it does not build or push the image for the customer. See `docs/operations/DEPLOYMENT_IMAGE_STEPS.md`.
+**Important:** The SAM template **references** a pre-published `ImageUri`; it does not build or push the image for the customer. See `../../operations/DEPLOYMENT_IMAGE_STEPS.md`.
 
-**Documentation** shipped with the solution includes, among others: **`README.md`** (deploy, sinks, test path), **`docs/delivery_package/EXECUTIVE_AWS_WORKFLOW.md`** (end-to-end narrative), **`docs/operations/DEPLOYMENT_IMAGE_STEPS.md`** (ECR and Lambda image order), **`docs/integrations/SOAR_PLAYBOOK_PHANTOM.md`** (SOAR → S3 pattern), **`docs/security/ATTACK_LLM_ANALYSIS.md`** (ATT&CK grounding and validation posture), and **`deploy/aws/template-sam.yaml`** (infrastructure contract).
+**Documentation** shipped with the solution includes, among others: **`../../../README.md`** (deploy, sinks, test path), **`../EXECUTIVE_AWS_WORKFLOW.md`** (end-to-end narrative), **`../../operations/DEPLOYMENT_IMAGE_STEPS.md`** (ECR and Lambda image order), **`../../integrations/SOAR_PLAYBOOK_PHANTOM.md`** (SOAR → S3 pattern), **`../../security/ATTACK_LLM_ANALYSIS.md`** (ATT&CK grounding and validation posture), and **`../../../deploy/aws/template-sam.yaml`** (infrastructure contract).
 
 ---
 
 ## Related docs in this package
 
-- `README.md` — quick deploy and sink modes
-- `docs/delivery_package/EXECUTIVE_AWS_WORKFLOW.md` — narrative executive overview
-- `docs/operations/DEPLOYMENT_IMAGE_STEPS.md` — ECR and Lambda image order of operations
-- `docs/integrations/SOAR_PLAYBOOK_PHANTOM.md` — SOAR → S3 payload pattern
-- `docs/security/ATTACK_LLM_ANALYSIS.md` — ATT&CK grounding, validation, and LLM trust boundaries
+- `../../../README.md` — quick deploy and sink modes
+- `../EXECUTIVE_AWS_WORKFLOW.md` — narrative executive overview
+- `../../operations/DEPLOYMENT_IMAGE_STEPS.md` — ECR and Lambda image order of operations
+- `../../integrations/SOAR_PLAYBOOK_PHANTOM.md` — SOAR → S3 payload pattern
+- `../../security/ATTACK_LLM_ANALYSIS.md` — ATT&CK grounding, validation, and LLM trust boundaries
