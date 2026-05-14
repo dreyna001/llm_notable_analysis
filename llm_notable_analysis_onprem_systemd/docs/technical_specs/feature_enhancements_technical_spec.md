@@ -8,7 +8,7 @@ If wording conflicts with `../architecture/feature_enhancements_architecture.md`
 
 ## 1. Purpose
 
-Implement optional read-only Splunk investigation, deterministic query-result enrichment, and ServiceNow draft/create support in the existing on-prem `systemd` analyzer.
+Implement optional read-only Splunk investigation, deterministic query-result enrichment, optional query-result interpretation, and ServiceNow draft/create support in the existing on-prem `systemd` analyzer.
 
 This block must preserve the current default file-drop analysis path.
 
@@ -20,6 +20,7 @@ This block must preserve the current default file-drop analysis path.
 - add read-only Splunk REST investigation execution
 - add read-only Splunk MCP investigation execution
 - add deterministic query-result enrichment before markdown rendering
+- add optional bounded LLM interpretation of deterministic query results
 - add ServiceNow incident draft building
 - add ServiceNow incident create with explicit approval
 - keep parity in `onprem_main_nonsdk.py` and `local_llm_client_nonsdk.py`
@@ -62,6 +63,7 @@ Required new implementation files:
 - `src/llm_notable_analysis_onprem_systemd/onprem_service/spl_query_grounding.py`
 - `src/llm_notable_analysis_onprem_systemd/onprem_service/splunk_investigation.py`
 - `src/llm_notable_analysis_onprem_systemd/onprem_service/query_result_enrichment.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/query_result_interpretation.py`
 - `src/llm_notable_analysis_onprem_systemd/onprem_service/servicenow.py`
 
 Expected modified files:
@@ -80,6 +82,7 @@ Required test files:
 - `tests/onprem_service/test_spl_query_generation.py`
 - `tests/onprem_service/test_splunk_investigation.py`
 - `tests/onprem_service/test_query_result_enrichment.py`
+- `tests/onprem_service/test_query_result_interpretation.py`
 - `tests/onprem_service/test_servicenow.py`
 - updates to existing orchestration and markdown tests as needed
 
@@ -92,6 +95,9 @@ INVESTIGATION_QUERY_EXECUTION_ENABLED=false
 INVESTIGATION_QUERY_EXECUTOR=rest
 INVESTIGATION_MAX_QUERIES_PER_ALERT=6
 INVESTIGATION_MAX_CONCURRENT_QUERIES=3
+QUERY_RESULT_INTERPRETATION_ENABLED=false
+QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS=4000
+QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS=3
 SPLUNK_SEARCH_ENDPOINT_PATH=/services/search/jobs/oneshot
 SPLUNK_SEARCH_ALLOWED_INDEXES=main,notable,risk
 SPLUNK_SEARCH_ALLOWED_COMMANDS=search,stats,table,fields,where,head
@@ -126,6 +132,8 @@ SPL_QUERY_RAG_FAILURE_MODE=suppress
 - `INVESTIGATION_QUERY_EXECUTOR` must be `rest` or `mcp`.
 - `INVESTIGATION_MAX_QUERIES_PER_ALERT` must be a positive integer and default to `6`.
 - `INVESTIGATION_MAX_CONCURRENT_QUERIES` must be a positive integer and default to `3`.
+- `QUERY_RESULT_INTERPRETATION_ENABLED` defaults to `false` and is effective only when query execution returns a `query_result_section`.
+- `QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS` and `QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS` must be positive integers.
 - Search timeout and max rows must be positive integers.
 - Allowed indexes and commands must parse to non-empty lists when query execution is enabled.
 - Denied commands must parse to a list.
@@ -293,6 +301,54 @@ Markdown rendering must:
 - Markdown renders query results.
 - Existing markdown tests still pass.
 
+## 9A. Optional Query-Result Interpretation
+
+### Objective
+
+Add a third, optional LLM call that interprets deterministic query execution
+results without changing the deterministic source record.
+
+### Files
+
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/query_result_interpretation.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/local_llm_client.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/local_llm_client_nonsdk.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/onprem_main.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/onprem_main_nonsdk.py`
+- `src/llm_notable_analysis_onprem_systemd/onprem_service/markdown_generator.py`
+- focused tests under `tests/onprem_service/`
+
+### Implementation
+
+When `QUERY_RESULT_INTERPRETATION_ENABLED=true` and deterministic query results
+exist, the service calls the model with a bounded prompt containing alert text,
+hypotheses, `supports_if` / `weakens_if`, and compact `query_result_section`
+facts. The model returns only `query_result_interpretation`.
+
+The model may produce:
+
+- `assessment`: `supports`, `weakens`, `inconclusive`, or `unknown`
+- `confidence_delta`: `increase`, `decrease`, `unchanged`, or `unknown`
+- rationale, key observations, remaining gaps, and source query references
+
+`confidence_delta` is an interpretation-only label. It must not mutate
+`alert_reconciliation.confidence`, `ttp_analysis[].score`,
+`ttp_analysis[].confidence_score`, hypothesis ordering, query status, result
+counts, or search references.
+
+Markdown must keep the deterministic **Query Results** section and render
+**Query Result Interpretation** separately after it.
+
+### Acceptance criteria
+
+- Default deterministic-only behavior is unchanged.
+- Enabled interpretation adds one bounded LLM call after query-result enrichment.
+- Malformed interpretation output fails soft and keeps deterministic query results.
+- Validator rejects invalid hypothesis indexes, unsupported enum values, and
+  source refs not present in deterministic query results.
+- Tests prove `confidence_delta` renders as confidence movement only and never
+  changes existing confidence/scoring fields.
+
 ## 10. Diff 4: ServiceNow Draft And Create
 
 ### Objective
@@ -380,11 +436,12 @@ Processing order:
 1. Run current LLM analysis.
 2. If `SPL_QUERY_GENERATION_ENABLED=true`, run second LLM call to generate SPL query fields for the 6 hypotheses. If `SPL_QUERY_RAG_ENABLED=true`, retrieval adds `SPL_QUERY_GROUNDING_CONTEXT` before that SPL call using `SPL_QUERY_RAG_*` Postgres table settings (fail-soft per `SPL_QUERY_RAG_FAILURE_MODE`).
 3. If query execution is enabled, validate and execute up to 6 eligible generated SPL queries.
-4. Enrich the LLM response with query results.
-5. Render markdown.
-6. If ServiceNow draft is enabled, build a draft.
-7. If ServiceNow create is enabled, require approval and create the incident.
-8. Write report and preserve existing processed/quarantine behavior.
+4. Enrich the LLM response with deterministic query results.
+5. If `QUERY_RESULT_INTERPRETATION_ENABLED=true`, add bounded LLM interpretation of query results.
+6. Render markdown.
+7. If ServiceNow draft is enabled, build a draft.
+8. If ServiceNow create is enabled, require approval and create the incident.
+9. Write report and preserve existing processed/quarantine behavior.
 
 ### Acceptance criteria
 

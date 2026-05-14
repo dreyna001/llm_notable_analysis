@@ -10,7 +10,7 @@ It is not the build-ready implementation contract. Locked implementation detail 
 
 ## Purpose
 
-Define the minimal on-prem architecture for adding optional read-only investigation, query-result enrichment, and ServiceNow ticketing support to the current `systemd` analyzer.
+Define the minimal on-prem architecture for adding optional read-only investigation, query-result enrichment, optional query-result interpretation, and ServiceNow ticketing support to the current `systemd` analyzer.
 
 This architecture answers:
 
@@ -27,6 +27,7 @@ This architecture answers:
 - Splunk MCP read-only query execution
 - Splunk REST read-only query execution for investigation queries
 - deterministic query-result report enrichment
+- optional bounded LLM interpretation of deterministic query results
 - ServiceNow incident draft creation
 - ServiceNow incident create with explicit approval
 - light extraction of SPL generation helpers from `local_llm_client.py`
@@ -58,7 +59,7 @@ The current service:
 - moves successful files to `PROCESSED_DIR`
 - moves failed files to `QUARANTINE_DIR`
 
-When **`INVESTIGATION_QUERY_EXECUTION_ENABLED=false`** (default): the analyzer does **not** execute generated SPL against Splunk, and does **not** run deterministic query-result enrichment. When **`SERVICENOW_*` drafts/create flags** are unset (default): it does **not** build incidents or POST to ServiceNow. When turned on with validated config, Splunk MCP/REST execution, deterministic `query_result` enrichment (see bounded policies above), ServiceNow draft, and approval-gated create follow the Locked Runtime Shape.
+When **`INVESTIGATION_QUERY_EXECUTION_ENABLED=false`** (default): the analyzer does **not** execute generated SPL against Splunk, and does **not** run deterministic query-result enrichment. When **`QUERY_RESULT_INTERPRETATION_ENABLED=false`** (default): executed query results remain deterministic-only in markdown. When **`SERVICENOW_*` drafts/create flags** are unset (default): it does **not** build incidents or POST to ServiceNow. When turned on with validated config, Splunk MCP/REST execution, deterministic `query_result` enrichment (see bounded policies above), optional bounded query-result interpretation, ServiceNow draft, and approval-gated create follow the Locked Runtime Shape.
 
 ## Locked Design Style
 
@@ -112,6 +113,7 @@ flowchart LR
 - Query execution may run one generated SPL query per hypothesis, up to 6 queries per alert.
 - Query execution may run with bounded parallelism, defaulting to 3 concurrent searches.
 - Query-result enrichment is part of query execution and does not get a separate flag.
+- Query-result interpretation is a separate optional third LLM call controlled by `QUERY_RESULT_INTERPRETATION_ENABLED`; it never changes deterministic query facts or existing confidence scores.
 - ServiceNow create approval comes from the incoming payload, not config.
 - Local report metadata records ServiceNow draft/create status even when create is skipped, denied, or fails.
 - Local structured-output mode is flag-gated and defaults to prompt-json.
@@ -345,10 +347,12 @@ Purpose:
 Rules:
 
 - deterministic code only
-- no LLM pass after Splunk/query execution for the first implementation (narrative is merged deterministically); this is separate from earlier optional calls such as dedicated SPL-field generation when that capability is enabled
-- future / explicit scope only: optional additional bounded LLM call could ingest **only** compressed query evidence to refresh verdict prose or hypotheses; baseline remains code-only enrichment
+- no LLM pass after Splunk/query execution unless `QUERY_RESULT_INTERPRETATION_ENABLED=true`
+- optional interpretation ingests **only** compressed query evidence and produces a separate `query_result_interpretation` section; baseline remains code-only enrichment
+- `confidence_delta` is an interpretation-only label (`increase`, `decrease`, `unchanged`, `unknown`) and never mutates `alert_reconciliation.confidence`, ATT&CK scores, query status, result counts, or hypothesis ordering
 - query results remain separate from direct alert facts and RAG context
 - enriched payload may include `query_result_section` for markdown rendering
+- interpreted payload may include `query_result_interpretation` for markdown rendering after the deterministic `Query Results` section
 
 ### ServiceNow incident draft
 
@@ -414,6 +418,9 @@ New flags should follow the existing `config.env.example` and `Config` style:
 - `INVESTIGATION_QUERY_EXECUTOR=rest`
 - `INVESTIGATION_MAX_QUERIES_PER_ALERT=6`
 - `INVESTIGATION_MAX_CONCURRENT_QUERIES=3`
+- `QUERY_RESULT_INTERPRETATION_ENABLED=false`
+- `QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS=4000`
+- `QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS=3`
 - `SPLUNK_SEARCH_ENDPOINT_PATH=/services/search/jobs/oneshot`
 - `SPLUNK_SEARCH_ALLOWED_INDEXES=main,notable,risk`
 - `SPLUNK_SEARCH_ALLOWED_COMMANDS=search,stats,table,fields,where,head`
@@ -441,6 +448,7 @@ Do not add `QUERY_RESULT_ENRICHMENT_ENABLED`.
 - Policy denial: skip execution, record structured denial in metadata, continue report.
 - Splunk query execution failure: record query failure metadata, continue report.
 - Query-result enrichment failure: quarantine only if the report would become malformed.
+- Query-result interpretation failure: keep deterministic query results, record metadata reason, omit interpretation.
 - ServiceNow draft failure: report still writes; metadata records draft error.
 - ServiceNow create disabled or approval missing: report still writes; metadata records skipped or denied status.
 - ServiceNow create failure: report still writes; metadata records create error.
@@ -453,6 +461,8 @@ Do not add `QUERY_RESULT_ENRICHMENT_ENABLED`.
 - Keep time range, row count, and timeout bounded.
 - Do not log Splunk or ServiceNow tokens.
 - Do not store raw Splunk result rows in report metadata by default.
+- Keep deterministic `Query Results` in markdown when interpretation is enabled; the LLM interpretation is additive and labeled as inference.
+- Treat `confidence_delta` as prose guidance only, not a score update.
 - Keep ServiceNow create behind explicit approval metadata.
 - Use HTTPS for ServiceNow.
 - Do not log ServiceNow bearer tokens or full auth headers.
@@ -462,6 +472,7 @@ Do not add `QUERY_RESULT_ENRICHMENT_ENABLED`.
 ## Known Decisions
 
 - Query-result enrichment is part of query execution, not a separate feature flag.
+- Query-result interpretation is separately flag-gated because it adds an LLM call and inference text.
 - ServiceNow draft and create live in one concrete `servicenow.py` module unless that file becomes hard to read.
 - Splunk REST and MCP execution live in one concrete `splunk_investigation.py` module unless that file becomes hard to read.
 - SPL generation extraction is allowed because it reduces pressure on `local_llm_client.py` without changing the app shape.

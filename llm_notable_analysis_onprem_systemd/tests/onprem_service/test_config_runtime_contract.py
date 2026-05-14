@@ -52,6 +52,9 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.SPL_QUERY_RAG_MAX_SNIPPETS, 4)
         self.assertEqual(config.SPL_QUERY_RAG_CONTEXT_BUDGET_CHARS, 1600)
         self.assertEqual(config.SPL_QUERY_RAG_FAILURE_MODE, "suppress")
+        self.assertFalse(config.QUERY_RESULT_INTERPRETATION_ENABLED)
+        self.assertEqual(config.QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS, 4000)
+        self.assertEqual(config.QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS, 3)
 
     def test_postgres_rag_contract_loads_from_environment(self) -> None:
         """Postgres/pgvector RAG settings should be explicit env contract values."""
@@ -122,6 +125,21 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.SPL_QUERY_RAG_CONTEXT_BUDGET_CHARS, 900)
         self.assertEqual(config.SPL_QUERY_RAG_FAILURE_MODE, "fallback_to_ungrounded")
 
+    def test_query_result_interpretation_contract_loads_from_environment(self) -> None:
+        """Query-result interpretation should be independently flag-gated."""
+        env = {
+            "QUERY_RESULT_INTERPRETATION_ENABLED": "true",
+            "QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS": "2500",
+            "QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS": "2",
+        }
+
+        with patch.dict(os.environ, env, clear=True):
+            config = load_config()
+
+        self.assertTrue(config.QUERY_RESULT_INTERPRETATION_ENABLED)
+        self.assertEqual(config.QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS, 2500)
+        self.assertEqual(config.QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS, 2)
+
     def test_dataclass_defaults_match_loader_defaults(self) -> None:
         """Direct Config construction should match the runtime loader defaults."""
         with patch.dict(os.environ, {}, clear=True):
@@ -141,6 +159,10 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(
             direct.SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE,
             loaded.SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE,
+        )
+        self.assertEqual(
+            direct.QUERY_RESULT_INTERPRETATION_ENABLED,
+            loaded.QUERY_RESULT_INTERPRETATION_ENABLED,
         )
 
     def test_local_llm_client_selects_postgres_rag_provider(self) -> None:

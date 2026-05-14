@@ -275,6 +275,64 @@ class TestMarkdownGenerator(unittest.TestCase):
         self.assertIn("Query result reference", markdown)
         self.assertIn("sid-123", markdown)
 
+    def test_query_result_interpretation_renders_after_deterministic_results(self) -> None:
+        llm_response = {
+            "alert_reconciliation": {"verdict": "uncertain"},
+            "competing_hypotheses": [
+                {
+                    "hypothesis_type": "adversary",
+                    "hypothesis": "periodic beaconing",
+                    "query_result_summary": "Query executed with 42 result(s).",
+                    "query_result_reference": "sid-beacon-1",
+                }
+            ],
+            "query_result_section": {
+                "summary": {
+                    "attempted": 1,
+                    "executed": 1,
+                    "denied": 0,
+                    "failed": 0,
+                    "skipped": 0,
+                },
+                "queries": [
+                    {
+                        "hypothesis_index": 0,
+                        "status": "executed",
+                        "query_strategy": "resolve_unknown",
+                        "query": "search index=proxy src_ip=10.0.0.5 | head 50",
+                        "result_count": 42,
+                        "sample_columns": ["src_ip", "dest_domain"],
+                        "search_reference": "sid-beacon-1",
+                    }
+                ],
+            },
+            "query_result_interpretation": [
+                {
+                    "hypothesis_index": 0,
+                    "assessment": "supports",
+                    "confidence_delta": "increase",
+                    "rationale": "Repeated proxy events support periodic beaconing.",
+                    "key_observations": ["42 matching proxy events"],
+                    "remaining_gaps": ["Endpoint process was not returned"],
+                    "source_query_refs": ["sid-beacon-1"],
+                }
+            ],
+            "evidence_vs_inference": {"evidence": [], "inferences": []},
+            "ioc_extraction": {},
+            "ttp_analysis": [],
+        }
+
+        markdown = generate_markdown_report("alert", llm_response, [])
+
+        self.assertIn("### Query Results", markdown)
+        self.assertIn("### Query Result Interpretation", markdown)
+        self.assertLess(
+            markdown.find("### Query Results"),
+            markdown.find("### Query Result Interpretation"),
+        )
+        self.assertIn("confidence movement=increase", markdown)
+        self.assertIn("Confidence movement is not a score update", markdown)
+
     def test_servicenow_section_renders_when_present(self) -> None:
         llm_response = {
             "alert_reconciliation": {"verdict": "uncertain"},

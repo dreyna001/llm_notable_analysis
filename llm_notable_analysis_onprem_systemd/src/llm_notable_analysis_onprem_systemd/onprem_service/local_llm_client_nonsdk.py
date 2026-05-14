@@ -36,6 +36,11 @@ from .spl_query_grounding import (
     init_spl_query_rag_provider,
     spl_query_rag_failure_mode,
 )
+from .query_result_interpretation import (
+    build_query_result_interpretation_prompt,
+    merge_query_result_interpretation,
+    validate_query_result_interpretation_payload,
+)
 from .ttp_validator import TTPValidator
 
 logger = logging.getLogger(__name__)
@@ -129,6 +134,7 @@ _COMMON_RESULT_WRAPPER_KEYS = (
 _STRUCTURED_OUTPUT_MODES = {"prompt_json", "tool_call"}
 _TOOL_ANALYZE_NOTABLE_NAME = "analyze_notable"
 _TOOL_GENERATE_SPL_NAME = "generate_spl_queries"
+_TOOL_INTERPRET_QUERY_RESULTS_NAME = "interpret_query_results"
 
 
 def _normalize_llm_result_shape(result: Any) -> Any:
@@ -232,6 +238,74 @@ def _spl_tool_spec() -> Dict[str, Any]:
                     }
                 },
                 "required": ["competing_hypotheses"],
+                "additionalProperties": True,
+            },
+        },
+    }
+
+
+def _query_result_interpretation_tool_spec() -> Dict[str, Any]:
+    """Build tool schema for query-result interpretation contract."""
+    return {
+        "type": "function",
+        "function": {
+            "name": _TOOL_INTERPRET_QUERY_RESULTS_NAME,
+            "description": "Interpret deterministic Splunk query results per hypothesis.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query_result_interpretation": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "hypothesis_index": {"type": "integer"},
+                                "assessment": {
+                                    "type": "string",
+                                    "enum": [
+                                        "supports",
+                                        "weakens",
+                                        "inconclusive",
+                                        "unknown",
+                                    ],
+                                },
+                                "confidence_delta": {
+                                    "type": "string",
+                                    "enum": [
+                                        "increase",
+                                        "decrease",
+                                        "unchanged",
+                                        "unknown",
+                                    ],
+                                },
+                                "rationale": {"type": "string"},
+                                "key_observations": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "remaining_gaps": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "source_query_refs": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                            },
+                            "required": [
+                                "hypothesis_index",
+                                "assessment",
+                                "confidence_delta",
+                                "rationale",
+                                "key_observations",
+                                "remaining_gaps",
+                                "source_query_refs",
+                            ],
+                            "additionalProperties": True,
+                        },
+                    }
+                },
+                "required": ["query_result_interpretation"],
                 "additionalProperties": True,
             },
         },
@@ -1201,6 +1275,178 @@ SECURITY ALERT INPUT:
                 f"Expected top-level JSON object, got {type(parsed).__name__}"
             )
         return parsed
+
+    def interpret_query_results(
+        self, alert_text: str, analysis_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Optionally add LLM interpretation of deterministic query results."""
+        if not bool(getattr(self.config, "QUERY_RESULT_INTERPRETATION_ENABLED", False)):
+            return analysis_result
+        if not isinstance(analysis_result.get("query_result_section"), dict):
+            return analysis_result
+
+        structured_mode = _structured_output_mode(self.config)
+        prompt = build_query_result_interpretation_prompt(
+            alert_text,
+            analysis_result,
+            context_budget_chars=int(
+                getattr(
+                    self.config,
+                    "QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS",
+                    4000,
+                )
+            ),
+            max_sample_rows=int(
+                getattr(self.config, "QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS", 3)
+            ),
+        )
+        if _model_name_suggests_qwen(self.config.LLM_MODEL_NAME):
+            prompt = (
+                "Output policy: Respond with a single JSON object only, no markdown fences, "
+                "no text before or after the object. /no_think\n\n"
+                + prompt
+            )
+
+        def _annotate(
+            result_obj: Dict[str, Any],
+            *,
+            attempted: bool,
+            available: bool,
+            elapsed: float = 0.0,
+            repair_attempted: bool = False,
+            failure_reason: Optional[str] = None,
+        ) -> Dict[str, Any]:
+            metadata = dict(result_obj.get("metadata", {}))
+            metadata.update(
+                {
+                    "query_result_interpretation_enabled": True,
+                    "query_result_interpretation_attempted": attempted,
+                    "query_result_interpretation_available": available,
+                    "query_result_interpretation_inference_time_seconds": elapsed,
+                    "query_result_interpretation_prompt_length": len(prompt),
+                    "query_result_interpretation_repair_attempted": repair_attempted,
+                }
+            )
+            if failure_reason:
+                metadata["query_result_interpretation_failure_reason"] = str(
+                    failure_reason
+                )[:600]
+            result_obj["metadata"] = metadata
+            return result_obj
+
+        def _call_interpretation(prompt_text: str) -> Tuple[str, float]:
+            self._semaphore.acquire()
+            try:
+                if structured_mode == "tool_call":
+                    try:
+                        return openai_chat_complete_tool_call(
+                            self._session,
+                            self.config,
+                            prompt=prompt_text,
+                            max_tokens=self.config.LLM_MAX_TOKENS,
+                            temperature=0.0,
+                            tool_spec=_query_result_interpretation_tool_spec(),
+                            tool_name=_TOOL_INTERPRET_QUERY_RESULTS_NAME,
+                            connect_timeout_sec=float(self.config.LLM_TIMEOUT),
+                            read_timeout_sec=float(self.config.LLM_TIMEOUT),
+                        )
+                    except (
+                        RequestTimeoutError,
+                        TransportError,
+                        RateLimitError,
+                        ServerError,
+                        ClientRequestError,
+                        ResponseFormatError,
+                    ) as exc:
+                        logger.warning(
+                            "Tool-call mode failed for query result interpretation; "
+                            "falling back to prompt_json for this call: %s",
+                            exc,
+                        )
+                return openai_chat_complete(
+                    self._session,
+                    self.config,
+                    prompt=prompt_text,
+                    max_tokens=self.config.LLM_MAX_TOKENS,
+                    temperature=0.0,
+                    connect_timeout_sec=float(self.config.LLM_TIMEOUT),
+                    read_timeout_sec=float(self.config.LLM_TIMEOUT),
+                )
+            finally:
+                self._semaphore.release()
+
+        elapsed_total = 0.0
+        try:
+            text, elapsed = _call_interpretation(prompt)
+            elapsed_total += elapsed
+            parsed = self._parse_llm_response(text)
+            ok, err, normalized = validate_query_result_interpretation_payload(
+                parsed, analysis_result
+            )
+            if ok:
+                merged = merge_query_result_interpretation(analysis_result, normalized)
+                return _annotate(merged, attempted=True, available=True, elapsed=elapsed_total)
+            first_error = err or "unknown validation error"
+        except (
+            RequestTimeoutError,
+            TransportError,
+            RateLimitError,
+            ServerError,
+            ClientRequestError,
+            json.JSONDecodeError,
+            ValueError,
+            SyntaxError,
+            ResponseFormatError,
+        ) as exc:
+            first_error = f"query result interpretation failed: {exc}"
+            text = ""
+
+        repair_prompt = REPAIR_PROMPT_TEMPLATE_RAW_JSON.format(
+            error=first_error,
+            prior_output=(text or "")[:4000],
+        )
+        try:
+            text2, elapsed2 = _call_interpretation(repair_prompt)
+            elapsed_total += elapsed2
+            parsed2 = self._parse_llm_response(text2)
+            ok2, err2, normalized2 = validate_query_result_interpretation_payload(
+                parsed2, analysis_result
+            )
+            if ok2:
+                merged2 = merge_query_result_interpretation(analysis_result, normalized2)
+                return _annotate(
+                    merged2,
+                    attempted=True,
+                    available=True,
+                    elapsed=elapsed_total,
+                    repair_attempted=True,
+                )
+            reason = f"{first_error}; repair validation: {err2 or 'unknown'}"
+        except (
+            RequestTimeoutError,
+            TransportError,
+            RateLimitError,
+            ServerError,
+            ClientRequestError,
+            json.JSONDecodeError,
+            ValueError,
+            SyntaxError,
+            ResponseFormatError,
+        ) as exc:
+            reason = f"{first_error}; repair failed: {exc}"
+
+        logger.warning(
+            "Query result interpretation unavailable; keeping deterministic results: %s",
+            reason,
+        )
+        return _annotate(
+            analysis_result,
+            attempted=True,
+            available=False,
+            elapsed=elapsed_total,
+            repair_attempted=True,
+            failure_reason=reason,
+        )
 
     def analyze_alert(
         self, alert_text: str, alert_time: Optional[str] = None

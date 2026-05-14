@@ -17,9 +17,10 @@ The on-prem workflow provides a bounded local analysis path for security notable
 5. The service parses, repairs when possible, validates, and filters the model output.
 6. Optional RAG injects SOC operating context from local SOPs, data dictionaries, Splunk index references, and related knowledge-base documents.
 7. Optional SPL generation adds one investigation query per hypothesis (second bounded LLM call when `SPL_QUERY_GENERATION_ENABLED=true`). When `SPL_QUERY_RAG_ENABLED=true`, Splunk-focused retrieval adds `SPL_QUERY_GROUNDING_CONTEXT` for that SPL call only.
-8. Optional read-only Splunk query execution validates and runs bounded investigation searches, then summarizes results in the report.
-9. Optional ServiceNow logic builds incident drafts and can create incidents only when enabled and approved.
-10. The service writes a markdown report, moves successful input files to processed storage, and quarantines failed inputs.
+8. Optional read-only Splunk query execution validates and runs bounded investigation searches, then summarizes deterministic results in the report.
+9. Optional query-result interpretation adds a third bounded LLM call that explains whether those deterministic results support, weaken, or leave hypotheses inconclusive.
+10. Optional ServiceNow logic builds incident drafts and can create incidents only when enabled and approved.
+11. The service writes a markdown report, moves successful input files to processed storage, and quarantines failed inputs.
 
 The design keeps the LLM focused on synthesis and explanation. File movement, validation, ATT&CK filtering, query policy, writeback, approval checks, retention, and service operation remain deterministic.
 
@@ -33,7 +34,8 @@ The workflow gives analysts an on-prem first-pass investigation package without 
 - Extracted indicators of compromise.
 - Validated MITRE ATT&CK techniques and confidence scores.
 - Optional SPL queries tied to specific hypotheses.
-- Optional query result summaries from read-only Splunk execution.
+- Optional deterministic query result summaries from read-only Splunk execution.
+- Optional query-result interpretation when enabled.
 - Optional ServiceNow incident draft or approved incident creation result.
 
 The system supports analyst decision-making. It is not intended to autonomously close, suppress, escalate, or contain alerts.
@@ -142,6 +144,14 @@ Before execution, each query is checked against deterministic policy:
 
 Execution results are summarized separately in the report. Query results are not promoted into direct evidence for the original notable.
 
+When `QUERY_RESULT_INTERPRETATION_ENABLED=true`, the service runs a separate
+bounded LLM call after deterministic query-result enrichment. That call receives
+only compact query facts and produces a distinct **Query Result Interpretation**
+section. It may label whether results support or weaken a hypothesis, but its
+`confidence_delta` is prose guidance only; it does **not** change existing
+confidence scores, ATT&CK scores, query status, result counts, or search
+references.
+
 Operator-facing guidance on allowlists, load limits, and staged enablement lives in **[`../operations/SPL_OPERATIONS.md`](../operations/SPL_OPERATIONS.md)**.
 
 ### 8. Report Generation
@@ -157,7 +167,8 @@ The report can include:
 - Alert reconciliation.
 - Competing hypotheses and pivots.
 - Optional SPL query details per hypothesis. When SPL query RAG is enabled, `primary_spl_query_grounding_refs` are attached to the **structured** result only (not rendered into markdown); optional future exposure via logs/metadata is described in [`SPL_OPERATIONS.md`](../operations/SPL_OPERATIONS.md).
-- Optional query result summaries.
+- Optional deterministic query result summaries.
+- Optional query-result interpretation; the deterministic `Query Results` section remains the audit trail.
 - Optional ServiceNow draft/create status.
 - Evidence versus inference.
 - Indicators of compromise.
@@ -218,7 +229,7 @@ SPL generation mode adds one query per hypothesis for analyst investigation. It 
 
 ### Read-Only Investigation Mode
 
-Read-only investigation mode executes policy-approved generated queries and adds compact query result summaries to the report.
+Read-only investigation mode executes policy-approved generated queries and adds compact deterministic query result summaries to the report. Optional query-result interpretation can add a model-written narrative after those results, without changing scores or deterministic query facts.
 
 ### Splunk Writeback Mode
 

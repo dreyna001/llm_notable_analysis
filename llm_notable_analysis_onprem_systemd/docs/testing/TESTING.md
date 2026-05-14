@@ -10,11 +10,12 @@ PYTHONPATH=.:llm_notable_analysis_onprem_systemd/src:onprem-llm-sdk/src \
   -s llm_notable_analysis_onprem_systemd/tests -p "test_*.py"
 ```
 
-Expected result: `Ran 120 tests ... OK`.
+Expected result for the on-prem service suite: `117 passed`.
 
 The unit suite uses mocks for vLLM, LiteLLM, Splunk, ServiceNow, and Postgres.
 It covers analyzer contracts, RAG SQL construction, Postgres ingest/retrieval
-branches, deployment files, installer contracts, and operator helper scripts.
+branches, deployment files, installer contracts, query-result interpretation,
+and operator helper scripts.
 
 ## Shell Checks
 

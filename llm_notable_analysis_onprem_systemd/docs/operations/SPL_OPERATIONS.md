@@ -24,6 +24,12 @@ environment.
    locally, then submits the search. Policy is not a full Splunk SPL grammar
    check; malformed SPL may still be rejected by Splunk at runtime.
 
+3. **Query-result interpretation (`QUERY_RESULT_INTERPRETATION_ENABLED`)**
+   The service may run a third bounded LLM call after deterministic query
+   execution to explain whether results support, weaken, or leave hypotheses
+   inconclusive. This is disabled by default and does not change query status,
+   result counts, search references, or existing confidence scores.
+
 Tune each feature independently: many teams ship generation on long before
 execution on.
 
@@ -33,6 +39,8 @@ execution on.
   `INVESTIGATION_QUERY_EXECUTION_ENABLED=false`.
 - Review generated SPL in reports with Splunk admins before allowing execution.
 - Enable execution first in a lab or non-prod Splunk scope.
+- Keep `QUERY_RESULT_INTERPRETATION_ENABLED=false` until deterministic query
+  execution quality is accepted.
 - Keep allowed indexes and commands narrow until denied/error rates are known.
 - Use REST unless your environment requires an MCP broker or gateway.
 
@@ -125,6 +133,24 @@ observability without markdown bloat** note in
 - Keep query caps aligned with the number of hypotheses that actually carry
   executable SPL in your workflow.
 
+### Should the LLM interpret query results?
+
+**Settings:** `QUERY_RESULT_INTERPRETATION_ENABLED`,
+`QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS`,
+`QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS`
+
+- Leave disabled for deterministic-only reports. The markdown still includes
+  `Query Results` with status, result counts, sample columns, and search refs.
+- Enable only when operators want an additional analyst narrative under
+  `Query Result Interpretation`.
+- The deterministic `Query Results` section is always preserved when
+  interpretation is enabled.
+- `confidence_delta` is model-generated prose guidance (`increase`, `decrease`,
+  `unchanged`, `unknown`) and never changes `alert_reconciliation.confidence`,
+  ATT&CK scores, query status, result counts, search refs, or hypothesis order.
+- If interpretation fails validation, the report keeps deterministic results and
+  omits interpretation.
+
 ### REST or MCP?
 
 **Setting:** `INVESTIGATION_QUERY_EXECUTOR=rest|mcp`
@@ -141,6 +167,7 @@ observability without markdown bloat** note in
 | Generation | `SPL_QUERY_GENERATION_ENABLED` |
 | SPL grounding KB | `SPL_QUERY_RAG_ENABLED`, `SPL_QUERY_RAG_SOURCE_DIR`, `SPL_QUERY_RAG_INDEX_DIR`, `SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE`, `SPL_QUERY_RAG_MAX_SNIPPETS`, `SPL_QUERY_RAG_CONTEXT_BUDGET_CHARS`, `SPL_QUERY_RAG_FAILURE_MODE` |
 | Execution | `INVESTIGATION_QUERY_EXECUTION_ENABLED`, `INVESTIGATION_QUERY_EXECUTOR`, `INVESTIGATION_MAX_QUERIES_PER_ALERT`, `INVESTIGATION_MAX_CONCURRENT_QUERIES` |
+| Result interpretation | `QUERY_RESULT_INTERPRETATION_ENABLED`, `QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS`, `QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS` |
 | Splunk connectivity | `SPLUNK_BASE_URL`, `SPLUNK_API_TOKEN`, `SPLUNK_CA_BUNDLE`, `SPLUNK_SEARCH_ENDPOINT_PATH` |
 | Policy | `SPLUNK_SEARCH_ALLOWED_INDEXES`, `SPLUNK_SEARCH_ALLOWED_COMMANDS`, `SPLUNK_SEARCH_DENIED_COMMANDS`, `SPLUNK_SEARCH_MAX_TIME_RANGE`, `SPLUNK_SEARCH_MAX_ROWS`, `SPLUNK_SEARCH_TIMEOUT_SECONDS` |
 | MCP | `SPLUNK_MCP_TOOL_NAME` plus injected MCP wiring in code |

@@ -86,6 +86,61 @@ def _render_query_results_section(lines: List[str], query_result_section: Dict[s
         lines.append("\n")
 
 
+def _render_query_result_interpretation_section(
+    lines: List[str],
+    interpretation_items: Any,
+) -> None:
+    """Render LLM interpretation of deterministic query execution results."""
+    if not isinstance(interpretation_items, list) or not interpretation_items:
+        return
+
+    lines.append("### Query Result Interpretation\n\n")
+    lines.append(
+        "Interpretation below is model-generated from the deterministic query "
+        "results above. Confidence movement is not a score update.\n\n"
+    )
+    for item in interpretation_items:
+        if not isinstance(item, dict):
+            continue
+        idx = item.get("hypothesis_index")
+        idx_label = "n/a" if not isinstance(idx, int) else str(idx + 1)
+        assessment = str(item.get("assessment", "unknown")).strip() or "unknown"
+        confidence_delta = (
+            str(item.get("confidence_delta", "unknown")).strip() or "unknown"
+        )
+        rationale = str(item.get("rationale", "")).strip()
+        observations = item.get("key_observations", [])
+        if not isinstance(observations, list):
+            observations = []
+        gaps = item.get("remaining_gaps", [])
+        if not isinstance(gaps, list):
+            gaps = []
+        refs = item.get("source_query_refs", [])
+        if not isinstance(refs, list):
+            refs = []
+
+        lines.append(
+            f"**Hypothesis {idx_label}:** assessment={assessment}, "
+            f"confidence movement={confidence_delta}\n"
+        )
+        if rationale:
+            lines.append(f"  - **Rationale:** {rationale}\n")
+        if observations:
+            lines.append("  - **Key observations:**\n")
+            for observation in observations:
+                lines.append(f"    - {observation}\n")
+        if gaps:
+            lines.append("  - **Remaining gaps:**\n")
+            for gap in gaps:
+                lines.append(f"    - {gap}\n")
+        if refs:
+            lines.append(
+                "  - **Source query refs:** "
+                f"{', '.join(str(ref) for ref in refs)}\n"
+            )
+        lines.append("\n")
+
+
 def _render_servicenow_section(lines: List[str], servicenow_section: Dict[str, Any]) -> None:
     """Render ServiceNow draft/create status details."""
     draft = servicenow_section.get("draft", {})
@@ -241,6 +296,11 @@ def generate_markdown_report(
 
     if isinstance(llm_response.get("query_result_section"), dict):
         _render_query_results_section(lines, llm_response["query_result_section"])
+
+    _render_query_result_interpretation_section(
+        lines,
+        llm_response.get("query_result_interpretation"),
+    )
 
     if isinstance(llm_response.get("servicenow_section"), dict):
         _render_servicenow_section(lines, llm_response["servicenow_section"])

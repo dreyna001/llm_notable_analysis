@@ -84,6 +84,10 @@ Chroot: `/var/sftp/soar`; incoming symlink:
 - **Read-only Splunk execution:** enable with
   `INVESTIGATION_QUERY_EXECUTION_ENABLED=true` after allowlists and load bounds
   are agreed with Splunk owners.
+- **Query-result interpretation:** enable with
+  `QUERY_RESULT_INTERPRETATION_ENABLED=true` after deterministic query execution
+  quality is accepted; this adds narrative interpretation without changing
+  confidence scores or deterministic query facts.
 - **Splunk writeback:** enable with `SPLUNK_SINK_ENABLED=true`; validate
   endpoint and identifier mapping first.
 - **ServiceNow:** enable draft first, then create only with approval metadata and

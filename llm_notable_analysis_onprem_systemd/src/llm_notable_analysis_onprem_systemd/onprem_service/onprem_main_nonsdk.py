@@ -137,6 +137,27 @@ def process_notable(
                         summary.get("failed", 0),
                         summary.get("skipped", 0),
                     )
+                    if bool(
+                        getattr(config, "QUERY_RESULT_INTERPRETATION_ENABLED", False)
+                    ):
+                        llm_response = llm_client.interpret_query_results(
+                            alert_text,
+                            llm_response,
+                        )
+                        metadata = llm_response.get("metadata", {})
+                        if not isinstance(metadata, dict):
+                            metadata = {}
+                        logger.info(
+                            "Query result interpretation: attempted=%s available=%s",
+                            metadata.get(
+                                "query_result_interpretation_attempted",
+                                False,
+                            ),
+                            metadata.get(
+                                "query_result_interpretation_available",
+                                False,
+                            ),
+                        )
                 else:
                     logger.info("Investigation query execution enabled; no query attempts were produced")
             except (ValueError, RuntimeError, TypeError) as exc:

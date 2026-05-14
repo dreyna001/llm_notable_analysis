@@ -69,6 +69,9 @@ class Config:
         INVESTIGATION_QUERY_EXECUTOR: Query executor mode (`rest` or `mcp`).
         INVESTIGATION_MAX_QUERIES_PER_ALERT: Max queries attempted per alert.
         INVESTIGATION_MAX_CONCURRENT_QUERIES: Max concurrent query execution.
+        QUERY_RESULT_INTERPRETATION_ENABLED: Enables optional LLM interpretation of query results.
+        QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS: Prompt budget for query-result interpretation.
+        QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS: Max sample rows supplied to interpretation prompt.
         SPLUNK_SEARCH_ENDPOINT_PATH: Splunk REST search endpoint path.
         SPLUNK_SEARCH_ALLOWED_INDEXES: CSV allowlist of query index names.
         SPLUNK_SEARCH_ALLOWED_COMMANDS: CSV allowlist of SPL commands.
@@ -181,6 +184,9 @@ class Config:
     INVESTIGATION_QUERY_EXECUTOR: str = "rest"
     INVESTIGATION_MAX_QUERIES_PER_ALERT: int = 6
     INVESTIGATION_MAX_CONCURRENT_QUERIES: int = 3
+    QUERY_RESULT_INTERPRETATION_ENABLED: bool = False
+    QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS: int = 4000
+    QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS: int = 3
     SPLUNK_SEARCH_ENDPOINT_PATH: str = "/services/search/jobs/oneshot"
     SPLUNK_SEARCH_ALLOWED_INDEXES: str = "main,notable,risk"
     SPLUNK_SEARCH_ALLOWED_COMMANDS: str = "search,stats,table,fields,where,head"
@@ -355,6 +361,16 @@ def load_config() -> Config:
         ),
         INVESTIGATION_MAX_CONCURRENT_QUERIES=int(
             os.getenv("INVESTIGATION_MAX_CONCURRENT_QUERIES", "3")
+        ),
+        QUERY_RESULT_INTERPRETATION_ENABLED=os.getenv(
+            "QUERY_RESULT_INTERPRETATION_ENABLED", "false"
+        ).lower()
+        in ("true", "1", "yes"),
+        QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS=int(
+            os.getenv("QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS", "4000")
+        ),
+        QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS=int(
+            os.getenv("QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS", "3")
         ),
         SPLUNK_SEARCH_ENDPOINT_PATH=os.getenv(
             "SPLUNK_SEARCH_ENDPOINT_PATH", "/services/search/jobs/oneshot"
