@@ -148,7 +148,11 @@ def process_notable(
                         if not isinstance(metadata, dict):
                             metadata = {}
                         logger.info(
-                            "Query result interpretation: attempted=%s available=%s",
+                            (
+                                "Query result interpretation: attempted=%s "
+                                "available=%s elapsed=%.3f prompt_length=%s "
+                                "repair_attempted=%s failure_reason=%s"
+                            ),
                             metadata.get(
                                 "query_result_interpretation_attempted",
                                 False,
@@ -156,6 +160,25 @@ def process_notable(
                             metadata.get(
                                 "query_result_interpretation_available",
                                 False,
+                            ),
+                            float(
+                                metadata.get(
+                                    "query_result_interpretation_inference_time_seconds",
+                                    0.0,
+                                )
+                                or 0.0
+                            ),
+                            metadata.get(
+                                "query_result_interpretation_prompt_length",
+                                0,
+                            ),
+                            metadata.get(
+                                "query_result_interpretation_repair_attempted",
+                                False,
+                            ),
+                            metadata.get(
+                                "query_result_interpretation_failure_reason",
+                                "",
                             ),
                         )
                 else:

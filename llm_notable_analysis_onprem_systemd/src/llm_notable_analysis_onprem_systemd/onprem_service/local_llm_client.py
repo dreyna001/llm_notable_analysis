@@ -45,6 +45,7 @@ from .spl_query_grounding import (
 )
 from .query_result_interpretation import (
     build_query_result_interpretation_prompt,
+    build_query_result_interpretation_repair_prompt,
     merge_query_result_interpretation,
     validate_query_result_interpretation_payload,
 )
@@ -1319,26 +1320,10 @@ SECURITY ALERT INPUT:
             return analysis_result
 
         structured_mode = _structured_output_mode(self.config)
-        prompt = build_query_result_interpretation_prompt(
-            alert_text,
-            analysis_result,
-            context_budget_chars=int(
-                getattr(
-                    self.config,
-                    "QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS",
-                    4000,
-                )
-            ),
-            max_sample_rows=int(
-                getattr(self.config, "QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS", 3)
-            ),
+        interpretation_max_tokens = int(
+            getattr(self.config, "QUERY_RESULT_INTERPRETATION_MAX_TOKENS", 768)
         )
-        if _model_name_suggests_qwen(self.config.LLM_MODEL_NAME):
-            prompt = (
-                "Output policy: Respond with a single JSON object only, no markdown fences, "
-                "no text before or after the object. /no_think\n\n"
-                + prompt
-            )
+        prompt = ""
 
         def _annotate(
             result_obj: Dict[str, Any],
@@ -1374,7 +1359,7 @@ SECURITY ALERT INPUT:
                         self._http_session,
                         self.config,
                         prompt=prompt_text,
-                        max_tokens=self.config.LLM_MAX_TOKENS,
+                        max_tokens=interpretation_max_tokens,
                         temperature=0.0,
                         tool_spec=_query_result_interpretation_tool_spec(),
                         tool_name=_TOOL_INTERPRET_QUERY_RESULTS_NAME,
@@ -1396,7 +1381,7 @@ SECURITY ALERT INPUT:
                     )
             result = self._sdk_client.complete(
                 prompt_text,
-                max_tokens=self.config.LLM_MAX_TOKENS,
+                max_tokens=interpretation_max_tokens,
                 temperature=0.0,
                 connect_timeout_sec=float(self.config.LLM_TIMEOUT),
                 read_timeout_sec=float(self.config.LLM_TIMEOUT),
@@ -1405,8 +1390,64 @@ SECURITY ALERT INPUT:
 
         elapsed_total = 0.0
         try:
+            prompt = build_query_result_interpretation_prompt(
+                alert_text,
+                analysis_result,
+                context_budget_chars=int(
+                    getattr(
+                        self.config,
+                        "QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS",
+                        4000,
+                    )
+                ),
+                max_sample_rows=int(
+                    getattr(self.config, "QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS", 3)
+                ),
+            )
+            if _model_name_suggests_qwen(self.config.LLM_MODEL_NAME):
+                prompt = (
+                    "Output policy: Respond with a single JSON object only, no markdown fences, "
+                    "no text before or after the object. /no_think\n\n"
+                    + prompt
+                )
+        except (TypeError, ValueError) as exc:
+            reason = f"query result interpretation prompt build failed: {exc}"
+            logger.warning(
+                "Query result interpretation unavailable; keeping deterministic results: %s",
+                reason,
+            )
+            return _annotate(
+                analysis_result,
+                attempted=True,
+                available=False,
+                failure_reason=reason,
+            )
+
+        try:
             text, elapsed = _call_interpretation(prompt)
             elapsed_total += elapsed
+        except (
+            RequestTimeoutError,
+            TransportError,
+            RateLimitError,
+            ServerError,
+            ClientRequestError,
+            ResponseFormatError,
+        ) as exc:
+            reason = f"query result interpretation transport failed: {exc}"
+            logger.warning(
+                "Query result interpretation unavailable; keeping deterministic results: %s",
+                reason,
+            )
+            return _annotate(
+                analysis_result,
+                attempted=True,
+                available=False,
+                elapsed=elapsed_total,
+                failure_reason=reason,
+            )
+
+        try:
             parsed = self._parse_llm_response(text)
             ok, err, normalized = validate_query_result_interpretation_payload(
                 parsed, analysis_result
@@ -1415,23 +1456,13 @@ SECURITY ALERT INPUT:
                 merged = merge_query_result_interpretation(analysis_result, normalized)
                 return _annotate(merged, attempted=True, available=True, elapsed=elapsed_total)
             first_error = err or "unknown validation error"
-        except (
-            RequestTimeoutError,
-            TransportError,
-            RateLimitError,
-            ServerError,
-            ClientRequestError,
-            json.JSONDecodeError,
-            ValueError,
-            SyntaxError,
-            ResponseFormatError,
-        ) as exc:
+        except (json.JSONDecodeError, ValueError, SyntaxError) as exc:
             first_error = f"query result interpretation failed: {exc}"
-            text = ""
 
-        repair_prompt = REPAIR_PROMPT_TEMPLATE_RAW_JSON.format(
-            error=first_error,
-            prior_output=(text or "")[:4000],
+        repair_prompt = build_query_result_interpretation_repair_prompt(
+            original_prompt=prompt,
+            validation_error=first_error,
+            prior_output=text or "",
         )
         try:
             text2, elapsed2 = _call_interpretation(repair_prompt)
@@ -1456,12 +1487,11 @@ SECURITY ALERT INPUT:
             RateLimitError,
             ServerError,
             ClientRequestError,
-            json.JSONDecodeError,
-            ValueError,
-            SyntaxError,
             ResponseFormatError,
         ) as exc:
             reason = f"{first_error}; repair failed: {exc}"
+        except (json.JSONDecodeError, ValueError, SyntaxError) as exc:
+            reason = f"{first_error}; repair parse failed: {exc}"
 
         logger.warning(
             "Query result interpretation unavailable; keeping deterministic results: %s",

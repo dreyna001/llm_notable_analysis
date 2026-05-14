@@ -26,6 +26,7 @@ operations, tuning, security, and integration guidance lives under
 | Need | Read this |
 |------|-----------|
 | New to the project | [`docs/README.md`](docs/README.md) |
+| Executive on-prem build summary | [`docs/delivery_package/EXECUTIVE_ONPREM_BUILD_WRITEUP.md`](docs/delivery_package/EXECUTIVE_ONPREM_BUILD_WRITEUP.md) |
 | End-to-end behavior | [`docs/delivery_package/EXECUTIVE_ONPREM_WORKFLOW.md`](docs/delivery_package/EXECUTIVE_ONPREM_WORKFLOW.md) |
 | Customer tuning by area | [`docs/operations/README.md`](docs/operations/README.md) |
 | Install on a host | [`docs/operations/INSTALL.md`](docs/operations/INSTALL.md) |

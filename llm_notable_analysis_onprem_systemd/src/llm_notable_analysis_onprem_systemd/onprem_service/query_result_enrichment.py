@@ -27,6 +27,36 @@ def _extract_query_reference(item: Dict[str, Any]) -> str:
     return ""
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _clean_string_list(value: Any) -> List[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _clean_sample_rows(value: Any) -> List[Dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    out: List[Dict[str, str]] = []
+    for row in value:
+        if not isinstance(row, dict):
+            continue
+        clean_row = {
+            str(key).strip(): str(row.get(key, "")).strip()
+            for key in row
+            if str(key).strip()
+        }
+        if clean_row:
+            out.append(clean_row)
+    return out
+
+
 def _build_query_entries(query_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     entries: List[Dict[str, Any]] = []
     for item in query_results:
@@ -38,11 +68,14 @@ def _build_query_entries(query_results: List[Dict[str, Any]]) -> List[Dict[str, 
             "query_strategy": str(item.get("query_strategy", "")).strip().lower(),
             "query": str(item.get("query", "")).strip(),
             "status": normalized_status,
-            "result_count": int(item.get("result_count", 0) or 0),
-            "sample_columns": list(item.get("sample_columns", []) or []),
+            "result_count": _safe_int(item.get("result_count")),
+            "sample_columns": _clean_string_list(item.get("sample_columns", [])),
             "search_reference": _extract_query_reference(item),
             "message": str(item.get("message", "")).strip(),
         }
+        sample_rows = _clean_sample_rows(item.get("sample_rows", []))
+        if sample_rows:
+            entry["sample_rows"] = sample_rows
         entries.append(entry)
     return entries
 

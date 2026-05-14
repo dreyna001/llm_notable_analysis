@@ -9,6 +9,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+def _positive_int_env(name: str, default: int, *, max_value: int | None = None) -> int:
+    """Read a positive integer env var with an optional upper bound."""
+    raw = os.getenv(name, str(default))
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    if max_value is not None and value > max_value:
+        raise ValueError(f"{name} must be <= {max_value}")
+    return value
+
+
 @dataclass
 class Config:
     """Service configuration container.
@@ -72,6 +86,7 @@ class Config:
         QUERY_RESULT_INTERPRETATION_ENABLED: Enables optional LLM interpretation of query results.
         QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS: Prompt budget for query-result interpretation.
         QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS: Max sample rows supplied to interpretation prompt.
+        QUERY_RESULT_INTERPRETATION_MAX_TOKENS: Token cap for query-result interpretation output.
         SPLUNK_SEARCH_ENDPOINT_PATH: Splunk REST search endpoint path.
         SPLUNK_SEARCH_ALLOWED_INDEXES: CSV allowlist of query index names.
         SPLUNK_SEARCH_ALLOWED_COMMANDS: CSV allowlist of SPL commands.
@@ -187,6 +202,7 @@ class Config:
     QUERY_RESULT_INTERPRETATION_ENABLED: bool = False
     QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS: int = 4000
     QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS: int = 3
+    QUERY_RESULT_INTERPRETATION_MAX_TOKENS: int = 768
     SPLUNK_SEARCH_ENDPOINT_PATH: str = "/services/search/jobs/oneshot"
     SPLUNK_SEARCH_ALLOWED_INDEXES: str = "main,notable,risk"
     SPLUNK_SEARCH_ALLOWED_COMMANDS: str = "search,stats,table,fields,where,head"
@@ -356,21 +372,24 @@ def load_config() -> Config:
             "INVESTIGATION_QUERY_EXECUTOR", "rest"
         ).strip()
         or "rest",
-        INVESTIGATION_MAX_QUERIES_PER_ALERT=int(
-            os.getenv("INVESTIGATION_MAX_QUERIES_PER_ALERT", "6")
+        INVESTIGATION_MAX_QUERIES_PER_ALERT=_positive_int_env(
+            "INVESTIGATION_MAX_QUERIES_PER_ALERT", 6, max_value=24
         ),
-        INVESTIGATION_MAX_CONCURRENT_QUERIES=int(
-            os.getenv("INVESTIGATION_MAX_CONCURRENT_QUERIES", "3")
+        INVESTIGATION_MAX_CONCURRENT_QUERIES=_positive_int_env(
+            "INVESTIGATION_MAX_CONCURRENT_QUERIES", 3, max_value=8
         ),
         QUERY_RESULT_INTERPRETATION_ENABLED=os.getenv(
             "QUERY_RESULT_INTERPRETATION_ENABLED", "false"
         ).lower()
         in ("true", "1", "yes"),
-        QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS=int(
-            os.getenv("QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS", "4000")
+        QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS=_positive_int_env(
+            "QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS", 4000, max_value=20000
         ),
-        QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS=int(
-            os.getenv("QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS", "3")
+        QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS=_positive_int_env(
+            "QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS", 3, max_value=10
+        ),
+        QUERY_RESULT_INTERPRETATION_MAX_TOKENS=_positive_int_env(
+            "QUERY_RESULT_INTERPRETATION_MAX_TOKENS", 768, max_value=2048
         ),
         SPLUNK_SEARCH_ENDPOINT_PATH=os.getenv(
             "SPLUNK_SEARCH_ENDPOINT_PATH", "/services/search/jobs/oneshot"
@@ -386,9 +405,11 @@ def load_config() -> Config:
             "delete,collect,outputlookup,sendemail,map,rest,script,dbxquery",
         ),
         SPLUNK_SEARCH_MAX_TIME_RANGE=os.getenv("SPLUNK_SEARCH_MAX_TIME_RANGE", "24h"),
-        SPLUNK_SEARCH_MAX_ROWS=int(os.getenv("SPLUNK_SEARCH_MAX_ROWS", "100")),
-        SPLUNK_SEARCH_TIMEOUT_SECONDS=int(
-            os.getenv("SPLUNK_SEARCH_TIMEOUT_SECONDS", "20")
+        SPLUNK_SEARCH_MAX_ROWS=_positive_int_env(
+            "SPLUNK_SEARCH_MAX_ROWS", 100, max_value=1000
+        ),
+        SPLUNK_SEARCH_TIMEOUT_SECONDS=_positive_int_env(
+            "SPLUNK_SEARCH_TIMEOUT_SECONDS", 20, max_value=300
         ),
         SPLUNK_MCP_TOOL_NAME=os.getenv("SPLUNK_MCP_TOOL_NAME", "splunk_search"),
         SERVICENOW_DRAFT_ENABLED=os.getenv("SERVICENOW_DRAFT_ENABLED", "false").lower()

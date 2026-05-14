@@ -137,7 +137,8 @@ observability without markdown bloat** note in
 
 **Settings:** `QUERY_RESULT_INTERPRETATION_ENABLED`,
 `QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS`,
-`QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS`
+`QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS`,
+`QUERY_RESULT_INTERPRETATION_MAX_TOKENS`
 
 - Leave disabled for deterministic-only reports. The markdown still includes
   `Query Results` with status, result counts, sample columns, and search refs.
@@ -148,6 +149,9 @@ observability without markdown bloat** note in
 - `confidence_delta` is model-generated prose guidance (`increase`, `decrease`,
   `unchanged`, `unknown`) and never changes `alert_reconciliation.confidence`,
   ATT&CK scores, query status, result counts, search refs, or hypothesis order.
+- Keep `QUERY_RESULT_INTERPRETATION_MAX_TOKENS` smaller than the main analysis
+  token cap; the interpretation schema is compact and should not reserve the
+  full report-generation budget.
 - If interpretation fails validation, the report keeps deterministic results and
   omits interpretation.
 
@@ -167,7 +171,7 @@ observability without markdown bloat** note in
 | Generation | `SPL_QUERY_GENERATION_ENABLED` |
 | SPL grounding KB | `SPL_QUERY_RAG_ENABLED`, `SPL_QUERY_RAG_SOURCE_DIR`, `SPL_QUERY_RAG_INDEX_DIR`, `SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE`, `SPL_QUERY_RAG_MAX_SNIPPETS`, `SPL_QUERY_RAG_CONTEXT_BUDGET_CHARS`, `SPL_QUERY_RAG_FAILURE_MODE` |
 | Execution | `INVESTIGATION_QUERY_EXECUTION_ENABLED`, `INVESTIGATION_QUERY_EXECUTOR`, `INVESTIGATION_MAX_QUERIES_PER_ALERT`, `INVESTIGATION_MAX_CONCURRENT_QUERIES` |
-| Result interpretation | `QUERY_RESULT_INTERPRETATION_ENABLED`, `QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS`, `QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS` |
+| Result interpretation | `QUERY_RESULT_INTERPRETATION_ENABLED`, `QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS`, `QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS`, `QUERY_RESULT_INTERPRETATION_MAX_TOKENS` |
 | Splunk connectivity | `SPLUNK_BASE_URL`, `SPLUNK_API_TOKEN`, `SPLUNK_CA_BUNDLE`, `SPLUNK_SEARCH_ENDPOINT_PATH` |
 | Policy | `SPLUNK_SEARCH_ALLOWED_INDEXES`, `SPLUNK_SEARCH_ALLOWED_COMMANDS`, `SPLUNK_SEARCH_DENIED_COMMANDS`, `SPLUNK_SEARCH_MAX_TIME_RANGE`, `SPLUNK_SEARCH_MAX_ROWS`, `SPLUNK_SEARCH_TIMEOUT_SECONDS` |
 | MCP | `SPLUNK_MCP_TOOL_NAME` plus injected MCP wiring in code |

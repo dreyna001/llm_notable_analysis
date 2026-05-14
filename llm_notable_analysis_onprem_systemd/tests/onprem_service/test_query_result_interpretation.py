@@ -1,6 +1,8 @@
 import unittest
+import json
 
 from llm_notable_analysis_onprem_systemd.onprem_service.query_result_interpretation import (
+    build_query_result_interpretation_context,
     build_query_result_interpretation_prompt,
     merge_query_result_interpretation,
     validate_query_result_interpretation_payload,
@@ -39,6 +41,13 @@ class TestQueryResultInterpretation(unittest.TestCase):
                         "query": "index=proxy src_ip=10.0.0.5 | stats count by dest_domain",
                         "result_count": 42,
                         "sample_columns": ["src_ip", "dest_domain", "count"],
+                        "sample_rows": [
+                            {
+                                "src_ip": "10.0.0.5",
+                                "dest_domain": "example.internal",
+                                "count": 42,
+                            }
+                        ],
                         "search_reference": "sid-beacon-1",
                     }
                 ],
@@ -57,6 +66,23 @@ class TestQueryResultInterpretation(unittest.TestCase):
         self.assertIn("confidence_delta is an interpretation-only label", prompt)
         self.assertIn("Do not modify", prompt)
         self.assertIn("QUERY_RESULT_INTERPRETATION_INPUT", prompt)
+
+    def test_context_budget_prunes_sample_rows_and_handles_malformed_counts(self) -> None:
+        analysis = self._analysis_result()
+        analysis["query_result_section"]["queries"][0]["result_count"] = "not-int"
+        analysis["alert_reconciliation"]["decision_drivers"] = ["x" * 2000]
+
+        context = build_query_result_interpretation_context(
+            "alert " + ("x" * 3000),
+            analysis,
+            context_budget_chars=900,
+            max_sample_rows=3,
+        )
+
+        rendered = json.dumps(context, ensure_ascii=True, separators=(",", ":"))
+        self.assertLessEqual(len(rendered), 900)
+        self.assertNotIn("sample_rows", context["query_result_section"]["queries"][0])
+        self.assertEqual(context["query_result_section"]["queries"][0]["result_count"], 0)
 
     def test_validator_accepts_grounded_interpretation(self) -> None:
         payload = {
@@ -119,6 +145,33 @@ class TestQueryResultInterpretation(unittest.TestCase):
         ok, err, _ = validate_query_result_interpretation_payload(bad_delta, analysis)
         self.assertFalse(ok)
         self.assertIn("confidence_delta", err or "")
+
+    def test_validator_rejects_empty_or_ungrounded_supporting_interpretation(self) -> None:
+        analysis = self._analysis_result()
+        empty_payload = {"query_result_interpretation": []}
+        ok, err, _ = validate_query_result_interpretation_payload(
+            empty_payload,
+            analysis,
+        )
+        self.assertFalse(ok)
+        self.assertIn("must not be empty", err or "")
+
+        missing_ref = {
+            "query_result_interpretation": [
+                {
+                    "hypothesis_index": 0,
+                    "assessment": "supports",
+                    "confidence_delta": "increase",
+                    "rationale": "x",
+                    "key_observations": [],
+                    "remaining_gaps": [],
+                    "source_query_refs": [],
+                }
+            ]
+        }
+        ok, err, _ = validate_query_result_interpretation_payload(missing_ref, analysis)
+        self.assertFalse(ok)
+        self.assertIn("source_query_refs", err or "")
 
     def test_merge_does_not_mutate_scores_or_confidence(self) -> None:
         analysis = self._analysis_result()

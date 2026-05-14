@@ -65,6 +65,37 @@ class TestSplunkInvestigation(unittest.TestCase):
         self.assertFalse(ok2)
         self.assertIn("denied command", reason2 or "")
 
+    def test_validate_policy_rejects_non_allowlisted_pipeline_commands(self) -> None:
+        config = _base_config()
+        for query in (
+            "search index=main | inputlookup sensitive_lookup | table *",
+            "index=main user=admin | lookup users user OUTPUT role | table user role",
+            "search index=main [ | inputlookup sensitive_lookup ] | table user",
+            "search index=main | join user [ search index=risk | table user ]",
+            "search index=main | append [ search index=risk | table user ]",
+        ):
+            with self.subTest(query=query):
+                ok, reason = validate_splunk_query_policy(
+                    query,
+                    config=config,
+                    time_range="1h",
+                    max_rows=50,
+                    timeout_seconds=10,
+                )
+                self.assertFalse(ok)
+                self.assertIn("non-allowlisted command", reason or "")
+
+    def test_validate_policy_allows_implicit_base_search_with_allowed_commands(self) -> None:
+        config = _base_config()
+        ok, reason = validate_splunk_query_policy(
+            "index=main user=admin | stats count by src | table src count",
+            config=config,
+            time_range="1h",
+            max_rows=50,
+            timeout_seconds=10,
+        )
+        self.assertTrue(ok, reason)
+
     @patch(
         "llm_notable_analysis_onprem_systemd.onprem_service.splunk_investigation.requests.post"
     )
@@ -91,6 +122,7 @@ class TestSplunkInvestigation(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["executor"], "rest")
         self.assertEqual(result["result_count"], 1)
+        self.assertEqual(result["sample_rows"], [{"src": "10.0.0.5", "user": "admin"}])
         self.assertIn("sid-123", str(result))
         _, kwargs = mock_post.call_args
         self.assertEqual(kwargs["data"]["earliest_time"], "-1h")
@@ -134,6 +166,7 @@ class TestSplunkInvestigation(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["executor"], "mcp")
         self.assertEqual(result["result_count"], 1)
+        self.assertEqual(result["sample_rows"], [{"host": "srv1", "user": "admin"}])
         self.assertEqual(client.last_payload["tool_name"], "splunk_search")
         self.assertEqual(client.last_payload["time_range"], "1h")
         self.assertEqual(client.last_payload["max_rows"], 50)

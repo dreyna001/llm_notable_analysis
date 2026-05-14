@@ -55,6 +55,7 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertFalse(config.QUERY_RESULT_INTERPRETATION_ENABLED)
         self.assertEqual(config.QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS, 4000)
         self.assertEqual(config.QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS, 3)
+        self.assertEqual(config.QUERY_RESULT_INTERPRETATION_MAX_TOKENS, 768)
 
     def test_postgres_rag_contract_loads_from_environment(self) -> None:
         """Postgres/pgvector RAG settings should be explicit env contract values."""
@@ -131,6 +132,7 @@ class TestConfigRuntimeContract(unittest.TestCase):
             "QUERY_RESULT_INTERPRETATION_ENABLED": "true",
             "QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS": "2500",
             "QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS": "2",
+            "QUERY_RESULT_INTERPRETATION_MAX_TOKENS": "512",
         }
 
         with patch.dict(os.environ, env, clear=True):
@@ -139,6 +141,25 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertTrue(config.QUERY_RESULT_INTERPRETATION_ENABLED)
         self.assertEqual(config.QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS, 2500)
         self.assertEqual(config.QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS, 2)
+        self.assertEqual(config.QUERY_RESULT_INTERPRETATION_MAX_TOKENS, 512)
+
+    def test_query_execution_and_interpretation_bounds_reject_invalid_values(self) -> None:
+        """Bounded execution settings should fail fast on invalid integers."""
+        invalid_envs = [
+            {"QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS": "0"},
+            {"QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS": "-1"},
+            {"QUERY_RESULT_INTERPRETATION_MAX_TOKENS": "0"},
+            {"INVESTIGATION_MAX_CONCURRENT_QUERIES": "0"},
+            {"INVESTIGATION_MAX_QUERIES_PER_ALERT": "0"},
+            {"SPLUNK_SEARCH_MAX_ROWS": "0"},
+            {"SPLUNK_SEARCH_TIMEOUT_SECONDS": "0"},
+        ]
+
+        for env in invalid_envs:
+            with self.subTest(env=env):
+                with patch.dict(os.environ, env, clear=True):
+                    with self.assertRaisesRegex(ValueError, "positive integer"):
+                        load_config()
 
     def test_dataclass_defaults_match_loader_defaults(self) -> None:
         """Direct Config construction should match the runtime loader defaults."""
@@ -163,6 +184,10 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(
             direct.QUERY_RESULT_INTERPRETATION_ENABLED,
             loaded.QUERY_RESULT_INTERPRETATION_ENABLED,
+        )
+        self.assertEqual(
+            direct.QUERY_RESULT_INTERPRETATION_MAX_TOKENS,
+            loaded.QUERY_RESULT_INTERPRETATION_MAX_TOKENS,
         )
 
     def test_local_llm_client_selects_postgres_rag_provider(self) -> None:

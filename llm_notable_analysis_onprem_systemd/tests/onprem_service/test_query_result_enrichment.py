@@ -22,6 +22,7 @@ class TestQueryResultEnrichment(unittest.TestCase):
                 "query": "search index=main user=admin | head 50",
                 "result_count": 4,
                 "sample_columns": ["host", "user"],
+                "sample_rows": [{"host": "srv1", "user": "admin"}],
                 "search_id": "sid-1",
             },
             {
@@ -49,6 +50,10 @@ class TestQueryResultEnrichment(unittest.TestCase):
         self.assertEqual(hypotheses[0]["query_result_reference"], "sid-1")
         self.assertEqual(hypotheses[1]["query_result_status"], "denied")
         self.assertIn("denied by policy", hypotheses[1]["query_result_summary"])
+        self.assertEqual(
+            out["query_result_section"]["queries"][0]["sample_rows"],
+            [{"host": "srv1", "user": "admin"}],
+        )
 
     def test_enrichment_preserves_evidence_vs_inference(self) -> None:
         llm_response = {

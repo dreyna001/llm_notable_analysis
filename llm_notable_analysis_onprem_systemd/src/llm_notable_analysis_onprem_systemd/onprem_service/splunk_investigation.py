@@ -27,6 +27,9 @@ _DEFAULT_MAX_QUERIES_PER_ALERT = 6
 _DEFAULT_MAX_CONCURRENT_QUERIES = 3
 _DEFAULT_SEARCH_ENDPOINT_PATH = "/services/search/jobs/oneshot"
 _DEFAULT_MCP_TOOL_NAME = "splunk_search"
+_MAX_RESULT_SAMPLE_ROWS = 5
+_MAX_SAMPLE_ROW_COLUMNS = 12
+_MAX_SAMPLE_VALUE_CHARS = 160
 _INDEX_RE = re.compile(r"\bindex\s*=\s*([A-Za-z0-9_\-*]+)", re.IGNORECASE)
 _DURATION_RE = re.compile(r"^\s*(\d+)\s*([smhd])\s*$", re.IGNORECASE)
 
@@ -68,6 +71,43 @@ def _extract_commands(query: str) -> List[str]:
         if first_token:
             commands.append(first_token)
     return commands
+
+
+def _unsupported_commands(commands: List[str], allowed_commands: List[str]) -> List[str]:
+    """Return commands outside the strict read-only allowlist."""
+    unsupported: List[str] = []
+    for pos, command in enumerate(commands):
+        # Splunk permits an implicit base search such as
+        # `index=main user=admin | stats count`; treat only that first segment
+        # as `search`, while all piped commands remain strictly allowlisted.
+        if pos == 0 and "=" in command:
+            continue
+        if command not in allowed_commands:
+            unsupported.append(command)
+    return unsupported
+
+
+def _bounded_sample_rows(rows: Any) -> List[Dict[str, str]]:
+    """Return small, stringified sample rows safe for downstream prompts."""
+    if not isinstance(rows, list):
+        return []
+    out: List[Dict[str, str]] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        clean_row: Dict[str, str] = {}
+        for key in sorted(row.keys())[:_MAX_SAMPLE_ROW_COLUMNS]:
+            clean_key = str(key).strip()[:80]
+            clean_value = str(row.get(key, "")).strip()
+            if len(clean_value) > _MAX_SAMPLE_VALUE_CHARS:
+                clean_value = clean_value[: _MAX_SAMPLE_VALUE_CHARS - 3].rstrip() + "..."
+            if clean_key:
+                clean_row[clean_key] = clean_value
+        if clean_row:
+            out.append(clean_row)
+        if len(out) >= _MAX_RESULT_SAMPLE_ROWS:
+            break
+    return out
 
 
 def validate_splunk_query_policy(
@@ -135,6 +175,9 @@ def validate_splunk_query_policy(
     )
     if allowed_commands and not any(cmd in allowed_commands for cmd in commands_present):
         return False, "query does not contain an allowed command"
+    unsupported = _unsupported_commands(commands_present, allowed_commands)
+    if allowed_commands and unsupported:
+        return False, f"query contains non-allowlisted command: {unsupported[0]}"
 
     requested_range_seconds = _duration_to_seconds(time_range)
     max_range_seconds = _duration_to_seconds(
@@ -230,6 +273,7 @@ def _normalize_rest_result(
         "query": query,
         "result_count": len(rows),
         "sample_columns": sample_columns,
+        "sample_rows": _bounded_sample_rows(rows),
         "search_id": search_ref,
     }
 
@@ -354,6 +398,7 @@ def _normalize_mcp_result(
         "query": query,
         "result_count": result_count,
         "sample_columns": sample_columns,
+        "sample_rows": _bounded_sample_rows(rows),
         ref_key: response_obj.get(ref_key),
     }
 

@@ -333,6 +333,29 @@ class TestMarkdownGenerator(unittest.TestCase):
         self.assertIn("confidence movement=increase", markdown)
         self.assertIn("Confidence movement is not a score update", markdown)
 
+    def test_query_result_interpretation_escapes_model_markdown(self) -> None:
+        llm_response = {
+            "query_result_interpretation": [
+                {
+                    "hypothesis_index": 0,
+                    "assessment": "supports",
+                    "confidence_delta": "increase",
+                    "rationale": "[click](http://evil.example) <script>alert(1)</script>",
+                    "key_observations": ["![x](http://evil.example/img.png)"],
+                    "remaining_gaps": ["`code` and *emphasis*"],
+                    "source_query_refs": ["sid-[1]"],
+                }
+            ],
+            "ttp_analysis": [],
+        }
+
+        markdown = generate_markdown_report("alert", llm_response, [])
+
+        self.assertNotIn("[click](http://evil.example)", markdown)
+        self.assertNotIn("![x](http://evil.example/img.png)", markdown)
+        self.assertIn("\\[click\\]\\(http://evil\\.example\\)", markdown)
+        self.assertIn("\\<script\\>alert\\(1\\)\\</script\\>", markdown)
+
     def test_servicenow_section_renders_when_present(self) -> None:
         llm_response = {
             "alert_reconciliation": {"verdict": "uncertain"},

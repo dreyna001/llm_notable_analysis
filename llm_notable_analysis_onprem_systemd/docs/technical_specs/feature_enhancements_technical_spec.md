@@ -98,6 +98,7 @@ INVESTIGATION_MAX_CONCURRENT_QUERIES=3
 QUERY_RESULT_INTERPRETATION_ENABLED=false
 QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS=4000
 QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS=3
+QUERY_RESULT_INTERPRETATION_MAX_TOKENS=768
 SPLUNK_SEARCH_ENDPOINT_PATH=/services/search/jobs/oneshot
 SPLUNK_SEARCH_ALLOWED_INDEXES=main,notable,risk
 SPLUNK_SEARCH_ALLOWED_COMMANDS=search,stats,table,fields,where,head
@@ -133,7 +134,7 @@ SPL_QUERY_RAG_FAILURE_MODE=suppress
 - `INVESTIGATION_MAX_QUERIES_PER_ALERT` must be a positive integer and default to `6`.
 - `INVESTIGATION_MAX_CONCURRENT_QUERIES` must be a positive integer and default to `3`.
 - `QUERY_RESULT_INTERPRETATION_ENABLED` defaults to `false` and is effective only when query execution returns a `query_result_section`.
-- `QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS` and `QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS` must be positive integers.
+- `QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS`, `QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS`, and `QUERY_RESULT_INTERPRETATION_MAX_TOKENS` must be positive integers within bounded operator limits.
 - Search timeout and max rows must be positive integers.
 - Allowed indexes and commands must parse to non-empty lists when query execution is enabled.
 - Denied commands must parse to a list.

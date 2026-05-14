@@ -6,6 +6,15 @@ This module mirrors the report structure used in `s3_testing/markdown_generator.
 from typing import Dict, Any, List
 
 
+_MARKDOWN_ESCAPE_CHARS = "\\`*_{}[]()#+-.!|<>"
+
+
+def _escape_markdown_text(value: Any) -> str:
+    """Escape untrusted model text before embedding it in markdown."""
+    text = str(value or "")
+    return "".join(f"\\{char}" if char in _MARKDOWN_ESCAPE_CHARS else char for char in text)
+
+
 def _render_hypothesis_spl_block(lines: List[str], hypothesis: Dict[str, Any]) -> None:
     """Render per-hypothesis SPL details when generation is enabled."""
     strategy = str(hypothesis.get("query_strategy", "")).strip()
@@ -124,19 +133,19 @@ def _render_query_result_interpretation_section(
             f"confidence movement={confidence_delta}\n"
         )
         if rationale:
-            lines.append(f"  - **Rationale:** {rationale}\n")
+            lines.append(f"  - **Rationale:** {_escape_markdown_text(rationale)}\n")
         if observations:
             lines.append("  - **Key observations:**\n")
             for observation in observations:
-                lines.append(f"    - {observation}\n")
+                lines.append(f"    - {_escape_markdown_text(observation)}\n")
         if gaps:
             lines.append("  - **Remaining gaps:**\n")
             for gap in gaps:
-                lines.append(f"    - {gap}\n")
+                lines.append(f"    - {_escape_markdown_text(gap)}\n")
         if refs:
             lines.append(
                 "  - **Source query refs:** "
-                f"{', '.join(str(ref) for ref in refs)}\n"
+                f"{', '.join(_escape_markdown_text(ref) for ref in refs)}\n"
             )
         lines.append("\n")
 

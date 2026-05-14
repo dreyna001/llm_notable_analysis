@@ -5,9 +5,13 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import requests
+from onprem_llm_sdk.errors import RequestTimeoutError
 
 from llm_notable_analysis_onprem_systemd.onprem_service.config import Config
 from llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client import LocalLLMClient
+from llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client_nonsdk import (
+    LocalLLMClient as NonSDKLocalLLMClient,
+)
 from llm_notable_analysis_onprem_systemd.onprem_service.sinks import update_splunk_notable
 from llm_notable_analysis_onprem_systemd.onprem_service.ttp_validator import TTPValidator
 
@@ -245,6 +249,7 @@ class TestIntegrationMocks(unittest.TestCase):
         config = Config(
             LLM_API_URL="http://127.0.0.1:4000/v1/chat/completions",
             QUERY_RESULT_INTERPRETATION_ENABLED=True,
+            QUERY_RESULT_INTERPRETATION_MAX_TOKENS=321,
         )
         client = LocalLLMClient(config=config, ttp_validator=_DummyValidator())
         analysis_result = {
@@ -276,6 +281,7 @@ class TestIntegrationMocks(unittest.TestCase):
         result = client.interpret_query_results("beacon alert", analysis_result)
 
         self.assertEqual(mock_post.call_count, 1)
+        self.assertEqual(mock_post.call_args.kwargs["json"]["max_tokens"], 321)
         self.assertIn("query_result_interpretation", result)
         self.assertEqual(result["alert_reconciliation"]["confidence"], "0.82")
         self.assertEqual(result["ttp_analysis"][0]["score"], 0.82)
@@ -324,6 +330,86 @@ class TestIntegrationMocks(unittest.TestCase):
             "query_result_interpretation_failure_reason",
             result["metadata"],
         )
+
+    def test_interpret_query_results_transport_failure_does_not_run_repair(self) -> None:
+        config = Config(
+            LLM_API_URL="http://127.0.0.1:4000/v1/chat/completions",
+            QUERY_RESULT_INTERPRETATION_ENABLED=True,
+        )
+        client = LocalLLMClient(config=config, ttp_validator=_DummyValidator())
+        client._sdk_client.complete = MagicMock(side_effect=RequestTimeoutError("timeout"))
+        analysis_result = {
+            "competing_hypotheses": [{"hypothesis": "beaconing"}],
+            "query_result_section": {
+                "summary": {"attempted": 1, "executed": 1, "denied": 0, "failed": 0, "skipped": 0},
+                "queries": [
+                    {
+                        "hypothesis_index": 0,
+                        "status": "executed",
+                        "result_count": 1,
+                        "search_reference": "sid-1",
+                    }
+                ],
+            },
+        }
+
+        result = client.interpret_query_results("alert", analysis_result)
+
+        self.assertEqual(client._sdk_client.complete.call_count, 1)
+        self.assertNotIn("query_result_interpretation", result)
+        self.assertFalse(result["metadata"]["query_result_interpretation_available"])
+        self.assertFalse(result["metadata"]["query_result_interpretation_repair_attempted"])
+        self.assertIn("transport failed", result["metadata"]["query_result_interpretation_failure_reason"])
+
+    @patch("llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client_nonsdk.requests.post")
+    def test_nonsdk_interpret_query_results_uses_third_llm_call(
+        self, mock_post: MagicMock
+    ) -> None:
+        interpretation_payload = {
+            "query_result_interpretation": [
+                {
+                    "hypothesis_index": 0,
+                    "assessment": "supports",
+                    "confidence_delta": "increase",
+                    "rationale": "Repeated proxy events support beaconing.",
+                    "key_observations": ["42 matching proxy events"],
+                    "remaining_gaps": ["Endpoint process context is unknown"],
+                    "source_query_refs": ["sid-beacon-1"],
+                }
+            ]
+        }
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "choices": [{"text": json.dumps(interpretation_payload)}]
+        }
+        mock_post.return_value = response
+
+        config = Config(
+            LLM_API_URL="http://127.0.0.1:4000/v1/chat/completions",
+            QUERY_RESULT_INTERPRETATION_ENABLED=True,
+        )
+        client = NonSDKLocalLLMClient(config=config, ttp_validator=_DummyValidator())
+        analysis_result = {
+            "competing_hypotheses": [{"hypothesis": "beaconing"}],
+            "query_result_section": {
+                "summary": {"attempted": 1, "executed": 1, "denied": 0, "failed": 0, "skipped": 0},
+                "queries": [
+                    {
+                        "hypothesis_index": 0,
+                        "status": "executed",
+                        "result_count": 42,
+                        "search_reference": "sid-beacon-1",
+                    }
+                ],
+            },
+        }
+
+        result = client.interpret_query_results("alert", analysis_result)
+
+        self.assertEqual(mock_post.call_count, 1)
+        self.assertIn("query_result_interpretation", result)
+        self.assertTrue(result["metadata"]["query_result_interpretation_available"])
 
     @patch("llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client.requests.post")
     def test_analyze_alert_runs_second_llm_call_for_spl_generation(
