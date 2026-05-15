@@ -7,10 +7,10 @@ Run commands from the repository root.
 ```bash
 PYTHONPATH=.:llm_notable_analysis_onprem_systemd/src:onprem-llm-sdk/src \
   llm_notable_analysis_onprem_systemd/.venv/bin/python -m unittest discover \
-  -s llm_notable_analysis_onprem_systemd/tests -p "test_*.py"
+  -s llm_notable_analysis_onprem_systemd/tests/onprem_service -p "test_*.py"
 ```
 
-Expected result for the on-prem service suite: `126 passed`.
+Expected result for the on-prem service suite: `134 passed`.
 Expected result for the full on-prem package suite: `164 passed`.
 
 The unit suite uses mocks for vLLM, LiteLLM, Splunk, ServiceNow, and Postgres.

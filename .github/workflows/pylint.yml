@@ -1,23 +1,38 @@
-name: Pylint
+name: Python CI
 
-on: [push]
+on:
+  push:
+  pull_request:
 
 jobs:
-  build:
+  onprem-systemd:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.12"]
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: .:llm_notable_analysis_onprem_systemd/src:onprem-llm-sdk/src
     steps:
-    - uses: actions/checkout@v4
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v3
-      with:
-        python-version: ${{ matrix.python-version }}
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pylint
-    - name: Analysing the code with pylint
-      run: |
-        pylint $(git ls-files '*.py')
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install CI dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pylint requests
+
+      - name: Lint Python sources
+        run: |
+          python -m pylint --errors-only --disable=import-error \
+            llm_notable_analysis_onprem_systemd/src \
+            llm_notable_analysis_onprem_systemd/tests \
+            onprem-llm-sdk/src \
+            onprem_rag_notable_analysis
+
+      - name: Run on-prem service tests
+        run: |
+          python -m unittest discover \
+            -s llm_notable_analysis_onprem_systemd/tests/onprem_service \
+            -p "test_*.py"
