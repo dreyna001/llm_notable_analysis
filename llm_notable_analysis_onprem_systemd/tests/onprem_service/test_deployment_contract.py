@@ -1,6 +1,9 @@
 from pathlib import Path
 import unittest
 
+# Pylint cannot infer Path.parents indexing in this test module.
+# pylint: disable=no-member
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE_ROOT = PROJECT_ROOT.parent
@@ -174,6 +177,7 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("LLM_MAX_TOKENS=4096", config_text)
         self.assertIn("RAG_FAIL_CLOSED=false", config_text)
         self.assertIn("HF_HOME=/var/notables/cache/huggingface", config_text)
+        self.assertIn("HTML_REPORT_ENABLED=false", config_text)
         self.assertIn("RAG_FUSED_RANK_LIMIT_120B=8", config_text)
         self.assertIn("RAG_RRF_K=60", config_text)
         self.assertIn("SPL_QUERY_RAG_ENABLED=false", config_text)
