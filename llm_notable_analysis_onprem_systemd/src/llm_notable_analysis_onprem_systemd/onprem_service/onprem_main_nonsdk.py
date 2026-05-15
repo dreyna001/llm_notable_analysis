@@ -25,6 +25,8 @@ from .ingest import (
     get_notable_id,
     move_to_processed,
     move_to_quarantine,
+    read_notable_text,
+    NotableReadError,
 )
 from .sinks import write_html_to_file, write_markdown_to_file, update_splunk_notable
 from .markdown_generator import generate_markdown_report
@@ -79,8 +81,13 @@ def process_notable(
     logger.info(f"Processing notable: {file_path.name}")
 
     try:
-        # Read file content
-        content = file_path.read_text(encoding="utf-8")
+        try:
+            content = read_notable_text(file_path, config.MAX_INPUT_FILE_BYTES)
+        except NotableReadError as exc:
+            logger.warning("Rejected notable (read/size): %s: %s", file_path.name, exc)
+            move_to_quarantine(file_path, config, str(exc))
+            return False
+
         if not content.strip():
             logger.warning(f"Empty file: {file_path.name}")
             move_to_quarantine(file_path, config, "Empty file")

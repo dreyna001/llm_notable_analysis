@@ -15,6 +15,45 @@ from .config import Config
 logger = logging.getLogger(__name__)
 
 
+class NotableReadError(Exception):
+    """Incoming notable could not be read (I/O failure or size limit)."""
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+        super().__init__(message)
+
+
+def read_notable_text(file_path: Path, max_bytes: int) -> str:
+    """Read a notable file as UTF-8 after verifying on-disk size.
+
+    Uses :func:`Path.stat` before :meth:`Path.read_text` so arbitrarily large
+    files are not fully loaded into memory.
+
+    Args:
+        file_path: Path to the incoming notable.
+        max_bytes: Maximum allowed file size in bytes (``MAX_INPUT_FILE_BYTES``).
+
+    Returns:
+        File contents decoded as UTF-8.
+
+    Raises:
+        NotableReadError: If the file cannot be stat'd, exceeds ``max_bytes``,
+            or cannot be read.
+    """
+    try:
+        size = file_path.stat().st_size
+    except OSError as exc:
+        raise NotableReadError(f"cannot stat notable file: {exc}") from exc
+    if size > max_bytes:
+        raise NotableReadError(
+            f"file size {size} bytes exceeds MAX_INPUT_FILE_BYTES ({max_bytes})"
+        )
+    try:
+        return file_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise NotableReadError(f"cannot read notable file: {exc}") from exc
+
+
 def discover_files(config: Config) -> List[Path]:
     """Discover unprocessed notable files in INCOMING_DIR.
 

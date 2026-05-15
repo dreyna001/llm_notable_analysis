@@ -7,6 +7,8 @@ from llm_notable_analysis_onprem_systemd.onprem_service.ingest import (
     discover_files,
     get_notable_id,
     normalize_notable,
+    read_notable_text,
+    NotableReadError,
 )
 from llm_notable_analysis_onprem_systemd.onprem_service.config import Config
 from llm_notable_analysis_onprem_systemd.onprem_service.onprem_main import _format_alert_for_llm
@@ -68,6 +70,21 @@ class TestIngestAndFormatting(unittest.TestCase):
             files = discover_files(config)
 
             self.assertEqual([f.name for f in files], ["a.json", "b.txt"])
+
+    def test_read_notable_text_reads_when_at_byte_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "n.json"
+            path.write_bytes(b"x" * 64)
+            text = read_notable_text(path, max_bytes=64)
+            self.assertEqual(len(text), 64)
+
+    def test_read_notable_text_rejects_over_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "n.json"
+            path.write_bytes(b"x" * 65)
+            with self.assertRaises(NotableReadError) as ctx:
+                read_notable_text(path, max_bytes=64)
+            self.assertIn("exceeds MAX_INPUT_FILE_BYTES", str(ctx.exception))
 
 
 if __name__ == "__main__":

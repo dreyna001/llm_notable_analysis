@@ -175,6 +175,7 @@ class TestDeploymentContract(unittest.TestCase):
         config_text = (PROJECT_ROOT / "config.env.example").read_text(encoding="utf-8")
 
         self.assertIn("LLM_MAX_TOKENS=4096", config_text)
+        self.assertIn("MAX_INPUT_FILE_BYTES=4194304", config_text)
         self.assertIn("RAG_FAIL_CLOSED=false", config_text)
         self.assertIn("HF_HOME=/var/notables/cache/huggingface", config_text)
         self.assertIn("HTML_REPORT_ENABLED=false", config_text)

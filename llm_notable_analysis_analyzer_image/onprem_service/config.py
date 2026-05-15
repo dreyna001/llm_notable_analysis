@@ -9,6 +9,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+def _positive_int_env(name: str, default: int, *, max_value: int | None = None) -> int:
+    """Read a positive integer env var with an optional upper bound."""
+    raw = os.getenv(name, str(default))
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    if max_value is not None and value > max_value:
+        raise ValueError(f"{name} must be <= {max_value}")
+    return value
+
+
 @dataclass
 class Config:
     """Service configuration container.
@@ -48,6 +62,7 @@ class Config:
         CONCURRENCY_ENABLED: Enables threaded processing mode.
         MAX_WORKERS: Thread-pool worker count when concurrency is enabled.
         MAX_QUEUE_DEPTH: Queue depth limit for backpressure.
+        MAX_INPUT_FILE_BYTES: Maximum incoming notable file size (bytes) before read.
     """
 
     # Ingest mode: file_drop (SOAR pushes via SFTP to INCOMING_DIR)
@@ -62,6 +77,9 @@ class Config:
 
     # Polling interval (seconds) for file_drop mode
     POLL_INTERVAL: int = 5
+
+    # Reject incoming notables larger than this (bytes) before read_text (DoS guard)
+    MAX_INPUT_FILE_BYTES: int = 4 * 1024 * 1024
 
     # Local LLM (OpenAI-compatible inference container)
     LLM_API_URL: str = "http://model-serving:8000/v1/chat/completions"
@@ -132,6 +150,9 @@ def load_config() -> Config:
         REPORT_DIR=Path(os.getenv("REPORT_DIR", "/watch/reports")),
         ARCHIVE_DIR=Path(os.getenv("ARCHIVE_DIR", "/watch/archive")),
         POLL_INTERVAL=int(os.getenv("POLL_INTERVAL", "5")),
+        MAX_INPUT_FILE_BYTES=_positive_int_env(
+            "MAX_INPUT_FILE_BYTES", 4 * 1024 * 1024, max_value=100 * 1024 * 1024
+        ),
         LLM_API_URL=os.getenv(
             "LLM_API_URL", "http://model-serving:8000/v1/chat/completions"
         ),
