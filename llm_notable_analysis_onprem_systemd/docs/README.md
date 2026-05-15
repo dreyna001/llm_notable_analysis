@@ -21,6 +21,7 @@ Use this page to pick **where to start** without reading the whole root [`README
 Optional deep dives:
 
 - **[Operations guide index](operations/README.md)** — Area-by-area customer tuning guide map.
+- **[Developer maintainer guide](internal/DEVELOPER_MAINTAINER_GUIDE.md)** — Code boundaries, design patterns, tool-call structured output, and how to add new capabilities.
 - **[SPL operations](operations/SPL_OPERATIONS.md)** — Indexes, Splunk execution limits, REST vs MCP, rollout; values that change every deployment.
 - **[Feature enhancements architecture](architecture/feature_enhancements_architecture.md)** — Locked runtime shape, payloads (including `servicenow_create_approval`), policies.
 - **[Feature enhancements technical spec](technical_specs/feature_enhancements_technical_spec.md)** — Contract-level detail for SPL, Splunk execution, ServiceNow.
@@ -39,6 +40,7 @@ Optional deep dives:
 | File drop and retention | [FILE_DROP_AND_RETENTION_OPERATIONS.md](operations/FILE_DROP_AND_RETENTION_OPERATIONS.md), [`config.env.example`](../config.env.example) (`INCOMING_DIR`, `RETENTION_*`, `CONCURRENCY_*`) |
 | MITRE/TTP validation | [MITRE_TTP_OPERATIONS.md](operations/MITRE_TTP_OPERATIONS.md), [`config.env.example`](../config.env.example) (`MITRE_IDS_PATH`) |
 | Offline / air-gap prep | [OFFLINE_PRESTAGE_GUIDE.md](operations/OFFLINE_PRESTAGE_GUIDE.md) |
+| Developer / maintainer guide | [DEVELOPER_MAINTAINER_GUIDE.md](internal/DEVELOPER_MAINTAINER_GUIDE.md) |
 | Testing | [TESTING.md](testing/TESTING.md) |
 | Security posture | [SECURITY_OPERATIONS.md](operations/SECURITY_OPERATIONS.md), [SECURITY_POSTURE.md](security/SECURITY_POSTURE.md) |
 | Failure / recovery duties | [RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md](operations/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md) |
@@ -48,3 +50,4 @@ Optional deep dives:
 - [`delivery_package/`](delivery_package/) — Executive and release-oriented material.
 - [`integrations/`](integrations/) — SOAR / Phantom playbook notes.
 - [`architecture/`](architecture/) — Broader deployment and enhancement architecture (including legacy S3 pipeline narrative where still relevant).
+- [`internal/`](internal/) — Developer and maintainer guidance for code structure, extension patterns, and implementation conventions.
