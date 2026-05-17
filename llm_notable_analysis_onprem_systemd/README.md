@@ -64,7 +64,7 @@ SOAR/SFTP/operator file drop
   -> optional Splunk/ServiceNow outputs
 ```
 
-Default host paths and feature flags are documented in
+Default host paths and capability profiles are documented in
 [`config.env.example`](config.env.example). The app package lives under
 [`src/llm_notable_analysis_onprem_systemd/`](src/llm_notable_analysis_onprem_systemd/)
 so installed imports and service entrypoints stay stable.
@@ -75,24 +75,25 @@ Chroot: `/var/sftp/soar`; incoming symlink:
 
 ## Optional Capabilities
 
-- **RAG grounding:** enable with `RAG_ENABLED=true`; tune with
+- **Profiles:** enable supported bundles with `CAPABILITY_PROFILES`; see
+  [`docs/operations/CAPABILITY_PROFILES.md`](docs/operations/CAPABILITY_PROFILES.md).
+- **RAG grounding:** add the `rag` profile; tune with
   [`docs/operations/RAG_OPERATIONS.md`](docs/operations/RAG_OPERATIONS.md).
-- **SPL generation:** enable with `SPL_QUERY_GENERATION_ENABLED=true`; tune
-  generation/execution controls with
+- **SPL generation and read-only execution:** add the `spl_readonly` profile;
+  tune generation/execution controls with
   [`docs/operations/SPL_OPERATIONS.md`](docs/operations/SPL_OPERATIONS.md).
-- **SPL-dedicated KB grounding:** enable with `SPL_QUERY_RAG_ENABLED=true`
-  after curated Splunk facts have been ingested into the separate SPL KB table.
-- **Read-only Splunk execution:** enable with
-  `INVESTIGATION_QUERY_EXECUTION_ENABLED=true` after allowlists and load bounds
-  are agreed with Splunk owners.
+- **SPL-dedicated KB grounding:** keep as an advanced override
+  (`SPL_QUERY_RAG_ENABLED=true`) after curated Splunk facts have been ingested
+  into the separate SPL KB table.
 - **Query-result interpretation:** enable with
   `QUERY_RESULT_INTERPRETATION_ENABLED=true` after deterministic query execution
   quality is accepted; this adds narrative interpretation without changing
   confidence scores or deterministic query facts.
-- **Splunk writeback:** enable with `SPLUNK_SINK_ENABLED=true`; validate
-  endpoint and identifier mapping first.
-- **ServiceNow:** enable draft first, then create only with approval metadata and
-  customer sign-off.
+- **HTML reports:** add the `html_reports` profile.
+- **ServiceNow draft:** add the `ticket_draft` profile.
+- **External write/actions:** add the `action_gated` profile only after Splunk
+  writeback, ServiceNow create, approval metadata, and idempotency behavior are
+  accepted.
 - **Freeform analyzer mode:** documented in
   [`docs/operations/LLM_INFERENCE_OPERATIONS.md`](docs/operations/LLM_INFERENCE_OPERATIONS.md);
   do not run it against the same incoming directory as the structured analyzer.

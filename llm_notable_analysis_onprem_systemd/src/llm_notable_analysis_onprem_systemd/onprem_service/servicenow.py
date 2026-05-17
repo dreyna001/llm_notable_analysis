@@ -9,6 +9,11 @@ from typing import Any, Dict, Optional, Tuple
 import requests
 
 from .config import Config
+from .idempotency import (
+    begin_side_effect,
+    complete_side_effect_success,
+    release_side_effect_lock,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -221,6 +226,36 @@ def create_servicenow_incident(
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
+    idempotency_key = str(
+        draft_payload.get("correlation_id")
+        or draft_payload.get("correlation_display")
+        or ""
+    ).strip()
+    try:
+        reservation = begin_side_effect(
+            config,
+            operation="servicenow_incident_create",
+            key=idempotency_key,
+        )
+    except (OSError, TimeoutError, ValueError) as exc:
+        return {
+            "status": "error",
+            "operation": "create",
+            "message": str(exc),
+            "approval": approval or {},
+        }
+
+    if not reservation.should_execute:
+        metadata = (reservation.existing_marker or {}).get("metadata", {})
+        marker_metadata = metadata if isinstance(metadata, dict) else {}
+        return {
+            "status": "skipped",
+            "operation": "create",
+            "message": "ServiceNow incident create already completed",
+            "sys_id": str(marker_metadata.get("sys_id", "")).strip(),
+            "number": str(marker_metadata.get("number", "")).strip(),
+            "approval": approval or {},
+        }
 
     try:
         response = requests.post(
@@ -237,7 +272,7 @@ def create_servicenow_incident(
         result = body.get("result", {}) if isinstance(body, dict) else {}
         if not isinstance(result, dict):
             result = {}
-        return {
+        result_payload = {
             "status": "success",
             "operation": "create",
             "sys_id": str(result.get("sys_id", "")).strip(),
@@ -245,7 +280,22 @@ def create_servicenow_incident(
             "message": "ServiceNow incident created",
             "approval": approval or {},
         }
+        idempotency_recorded = complete_side_effect_success(
+            reservation,
+            metadata={
+                "sys_id": result_payload["sys_id"],
+                "number": result_payload["number"],
+            },
+        )
+        if reservation.enabled:
+            result_payload["idempotency_recorded"] = idempotency_recorded
+            if not idempotency_recorded:
+                result_payload["idempotency_warning"] = (
+                    "side-effect marker was not written"
+                )
+        return result_payload
     except requests.RequestException as exc:
+        release_side_effect_lock(reservation)
         return {
             "status": "error",
             "operation": "create",

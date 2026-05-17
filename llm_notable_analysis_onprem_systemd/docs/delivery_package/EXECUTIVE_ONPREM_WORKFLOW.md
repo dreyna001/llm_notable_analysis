@@ -99,7 +99,7 @@ The base output contract includes alert reconciliation, competing hypotheses, ev
 
 ### 5. RAG Grounding
 
-When `RAG_ENABLED=true`, the service attempts to initialize a local RAG provider. The default production-oriented backend is PostgreSQL with PostgreSQL FTS, pgvector, BGE embeddings, and optional BGE reranking. SQLite FTS5 + FAISS remains available as a local fallback for smaller or lab deployments. The knowledge base can include SOPs, index and sourcetype references, field mapping notes, investigation playbooks, query examples, and local operating guidance.
+When the `rag` capability profile is selected, the service attempts to initialize a local RAG provider. The default production-oriented backend is PostgreSQL with PostgreSQL FTS, pgvector, BGE embeddings, and optional BGE reranking. SQLite FTS5 + FAISS remains available as a local fallback for smaller or lab deployments. The knowledge base can include SOPs, index and sourcetype references, field mapping notes, investigation playbooks, query examples, and local operating guidance.
 
 RAG context is rendered into a `SOC_OPERATIONAL_CONTEXT` block. It is advisory context only. The workflow explicitly prevents retrieved guidance from being treated as current-alert evidence unless the same fact appears in the notable itself.
 
@@ -109,7 +109,7 @@ If RAG initialization or retrieval fails, the analyzer continues without RAG rat
 
 ### 6. SPL Query Generation
 
-When `SPL_QUERY_GENERATION_ENABLED=true`, the service performs a second bounded LLM call after the base analysis. This second call is dedicated to generating SPL query fields for the six hypotheses.
+When the `spl_readonly` capability profile is selected, the service performs a second bounded LLM call after the base analysis. This second call is dedicated to generating SPL query fields for the six hypotheses.
 
 Each generated query must be tied to a hypothesis and include:
 
@@ -127,7 +127,7 @@ For per-customer tuning (SPL query KB, ingestion, failure mode, Splunk investiga
 
 ### 7. Read-Only Splunk Query Execution
 
-When `INVESTIGATION_QUERY_EXECUTION_ENABLED=true`, the service extracts generated hypothesis queries and attempts bounded read-only execution through the configured executor.
+When the `spl_readonly` capability profile is selected, the service extracts generated hypothesis queries and attempts bounded read-only execution through the configured executor.
 
 The REST executor uses the Splunk oneshot search endpoint by default:
 
@@ -177,15 +177,15 @@ The report can include:
 
 ### 9. Splunk Writeback
 
-When `SPLUNK_SINK_ENABLED=true`, the service posts the generated markdown report back to Splunk ES as a notable comment. The writeback identifier is derived from the input filename stem and sent as `finding_id`.
+When the `action_gated` capability profile is selected, the service can post the generated markdown report back to Splunk ES as a notable comment. The writeback identifier is derived from the input filename stem and sent as `finding_id`.
 
 This writeback is separate from read-only investigation query execution. Splunk writeback updates the notable comment; investigation query execution runs bounded searches and summarizes results.
 
 ### 10. ServiceNow Draft and Create
 
-When `SERVICENOW_DRAFT_ENABLED=true`, the service can build a ServiceNow incident draft payload from the analysis result. The draft includes short description, description, assignment group, category, impact, urgency, correlation ID, and work notes.
+When the `ticket_draft` or `action_gated` capability profile is selected, the service can build a ServiceNow incident draft payload from the analysis result. The draft includes short description, description, assignment group, category, impact, urgency, correlation ID, and work notes.
 
-When `SERVICENOW_CREATE_ENABLED=true`, the service can create an incident through the ServiceNow REST API. By default, create is approval-gated with `SERVICENOW_CREATE_REQUIRES_APPROVAL=true`. Approval metadata must be present in the incoming JSON payload before the create operation is allowed.
+When the `action_gated` capability profile is selected, the service can create an incident through the ServiceNow REST API. By default, create is approval-gated with `SERVICENOW_CREATE_REQUIRES_APPROVAL=true`. Approval metadata must be present in the incoming JSON payload before the create operation is allowed.
 
 If approval is missing or invalid, create fails closed and the report records the denied status.
 

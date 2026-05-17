@@ -8,6 +8,27 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+_TRUE_VALUES = {"true", "1", "yes"}
+_FALSE_VALUES = {"false", "0", "no"}
+
+_CAPABILITY_PROFILE_FLAGS: dict[str, dict[str, bool]] = {
+    "core": {},
+    "html_reports": {"HTML_REPORT_ENABLED": True},
+    "rag": {"RAG_ENABLED": True},
+    "spl_readonly": {
+        "SPL_QUERY_GENERATION_ENABLED": True,
+        "INVESTIGATION_QUERY_EXECUTION_ENABLED": True,
+    },
+    "ticket_draft": {"SERVICENOW_DRAFT_ENABLED": True},
+    "action_gated": {
+        "SPLUNK_SINK_ENABLED": True,
+        "SERVICENOW_DRAFT_ENABLED": True,
+        "SERVICENOW_CREATE_ENABLED": True,
+        "SERVICENOW_CREATE_REQUIRES_APPROVAL": True,
+        "SIDE_EFFECT_IDEMPOTENCY_ENABLED": True,
+    },
+}
+
 
 def _positive_int_env(name: str, default: int, *, max_value: int | None = None) -> int:
     """Read a positive integer env var with an optional upper bound."""
@@ -23,12 +44,74 @@ def _positive_int_env(name: str, default: int, *, max_value: int | None = None) 
     return value
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    """Read a boolean env var with explicit true/false values."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in _TRUE_VALUES:
+        return True
+    if normalized in _FALSE_VALUES:
+        return False
+    raise ValueError(f"{name} must be a boolean")
+
+
+def _bool_env_optional(name: str) -> bool | None:
+    """Read an optional boolean env var, returning None when unset."""
+    if os.getenv(name) is None:
+        return None
+    return _bool_env(name, False)
+
+
+def _parse_capability_profiles(raw: str) -> tuple[str, ...]:
+    """Parse and validate configured capability profile names."""
+    names = [part.strip().lower() for part in raw.replace(";", ",").split(",")]
+    profiles = [name for name in names if name]
+    if not profiles:
+        profiles = ["core"]
+    if "core" not in profiles:
+        profiles.insert(0, "core")
+
+    unknown = sorted(set(profiles) - set(_CAPABILITY_PROFILE_FLAGS))
+    if unknown:
+        raise ValueError(
+            "CAPABILITY_PROFILES contains unsupported profile(s): "
+            + ", ".join(unknown)
+        )
+
+    deduped: list[str] = []
+    for profile in profiles:
+        if profile not in deduped:
+            deduped.append(profile)
+    return tuple(deduped)
+
+
+def _profile_flag_defaults(profiles: tuple[str, ...]) -> dict[str, bool]:
+    """Return boolean defaults implied by the selected capability profiles."""
+    flags: dict[str, bool] = {}
+    for profile in profiles:
+        flags.update(_CAPABILITY_PROFILE_FLAGS[profile])
+    return flags
+
+
+def _profile_bool(name: str, default: bool, profile_flags: dict[str, bool]) -> bool:
+    """Resolve a boolean controlled first by profiles, then legacy env flags."""
+    if name in profile_flags:
+        return profile_flags[name]
+    env_value = _bool_env_optional(name)
+    if env_value is not None:
+        return env_value
+    return default
+
+
 @dataclass
 class Config:
     """Service configuration container.
 
     Attributes:
         INGEST_MODE: Input ingestion mode (`file_drop` by default).
+        CAPABILITY_PROFILES: Comma-separated named capability profiles.
         INCOMING_DIR: Directory watched for incoming notables.
         PROCESSED_DIR: Directory for successfully processed notables.
         QUARANTINE_DIR: Directory for failed/invalid notables.
@@ -104,6 +187,9 @@ class Config:
         SERVICENOW_API_TOKEN: Bearer token for ServiceNow API.
         SERVICENOW_ASSIGNMENT_GROUP: Assignment group used for incident drafts.
         SERVICENOW_TIMEOUT_SECONDS: Create request timeout in seconds.
+        SIDE_EFFECT_IDEMPOTENCY_ENABLED: Enables file-backed side-effect dedupe.
+        SIDE_EFFECT_IDEMPOTENCY_DIR: Directory for side-effect idempotency markers.
+        SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS: Retention window for idempotency markers.
         MITRE_IDS_PATH: Path to ATT&CK technique ID allowlist JSON.
         INPUT_RETENTION_DAYS: Retention window for processed/quarantine inputs.
         REPORT_RETENTION_DAYS: Retention window for generated reports.
@@ -117,6 +203,7 @@ class Config:
 
     # Ingest mode: file_drop (SOAR pushes via SFTP to INCOMING_DIR)
     INGEST_MODE: str = "file_drop"
+    CAPABILITY_PROFILES: str = "core"
 
     # Directories (for file_drop mode)
     INCOMING_DIR: Path = field(default_factory=lambda: Path("/var/notables/incoming"))
@@ -228,6 +315,13 @@ class Config:
     SERVICENOW_ASSIGNMENT_GROUP: str = ""
     SERVICENOW_TIMEOUT_SECONDS: int = 15
 
+    # Side-effect idempotency (external writes/actions only)
+    SIDE_EFFECT_IDEMPOTENCY_ENABLED: bool = False
+    SIDE_EFFECT_IDEMPOTENCY_DIR: Path = field(
+        default_factory=lambda: Path("/var/notables/idempotency")
+    )
+    SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS: int = 30
+
     # MITRE ATT&CK data
     MITRE_IDS_PATH: Path = field(
         default_factory=lambda: (
@@ -254,6 +348,12 @@ class Config:
     MAX_WORKERS: int = 4  # Thread pool size when enabled (A100 + Xeon Gold baseline)
     MAX_QUEUE_DEPTH: int = 32  # Backpressure limit (A100 + Xeon Gold baseline)
 
+    def __post_init__(self) -> None:
+        profiles = _parse_capability_profiles(self.CAPABILITY_PROFILES)
+        self.CAPABILITY_PROFILES = ",".join(profiles)
+        for name, value in _profile_flag_defaults(profiles).items():
+            setattr(self, name, value)
+
 
 def load_config() -> Config:
     """Load configuration from environment variables.
@@ -261,8 +361,14 @@ def load_config() -> Config:
     Returns:
         Populated Config dataclass.
     """
+    capability_profiles = _parse_capability_profiles(
+        os.getenv("CAPABILITY_PROFILES", "core")
+    )
+    profile_flags = _profile_flag_defaults(capability_profiles)
+
     return Config(
         INGEST_MODE=os.getenv("INGEST_MODE", "file_drop"),
+        CAPABILITY_PROFILES=",".join(capability_profiles),
         INCOMING_DIR=Path(os.getenv("INCOMING_DIR", "/var/notables/incoming")),
         PROCESSED_DIR=Path(os.getenv("PROCESSED_DIR", "/var/notables/processed")),
         QUARANTINE_DIR=Path(os.getenv("QUARANTINE_DIR", "/var/notables/quarantine")),
@@ -283,13 +389,13 @@ def load_config() -> Config:
         ),
         LLM_MAX_TOKENS=int(os.getenv("LLM_MAX_TOKENS", "4096")),
         LLM_TIMEOUT=int(os.getenv("LLM_TIMEOUT", "120")),
-        HTML_REPORT_ENABLED=os.getenv("HTML_REPORT_ENABLED", "false").lower()
-        in ("true", "1", "yes"),
-        RAG_ENABLED=os.getenv("RAG_ENABLED", "false").lower() in ("true", "1", "yes"),
+        HTML_REPORT_ENABLED=_profile_bool(
+            "HTML_REPORT_ENABLED", False, profile_flags
+        ),
+        RAG_ENABLED=_profile_bool("RAG_ENABLED", False, profile_flags),
         RAG_BACKEND=os.getenv("RAG_BACKEND", "postgres").strip().lower()
         or "postgres",
-        RAG_FAIL_CLOSED=os.getenv("RAG_FAIL_CLOSED", "false").lower()
-        in ("true", "1", "yes"),
+        RAG_FAIL_CLOSED=_bool_env("RAG_FAIL_CLOSED", False),
         RAG_SQLITE_PATH=Path(
             os.getenv(
                 "RAG_SQLITE_PATH",
@@ -305,8 +411,7 @@ def load_config() -> Config:
         RAG_EMBEDDING_MODEL=os.getenv(
             "RAG_EMBEDDING_MODEL", "BAAI/bge-base-en-v1.5"
         ),
-        RAG_RERANK_ENABLED=os.getenv("RAG_RERANK_ENABLED", "false").lower()
-        in ("true", "1", "yes"),
+        RAG_RERANK_ENABLED=_bool_env("RAG_RERANK_ENABLED", False),
         RAG_RERANK_MODEL=os.getenv("RAG_RERANK_MODEL", "BAAI/bge-reranker-base"),
         RAG_POSTGRES_DSN=os.getenv(
             "RAG_POSTGRES_DSN",
@@ -343,14 +448,13 @@ def load_config() -> Config:
         SPLUNK_NOTABLE_UPDATE_PATH=os.getenv(
             "SPLUNK_NOTABLE_UPDATE_PATH", "/services/notable_update"
         ),
-        SPLUNK_SINK_ENABLED=os.getenv("SPLUNK_SINK_ENABLED", "false").lower()
-        in ("true", "1", "yes"),
-        SPL_QUERY_GENERATION_ENABLED=os.getenv(
-            "SPL_QUERY_GENERATION_ENABLED", "false"
-        ).lower()
-        in ("true", "1", "yes"),
-        SPL_QUERY_RAG_ENABLED=os.getenv("SPL_QUERY_RAG_ENABLED", "false").lower()
-        in ("true", "1", "yes"),
+        SPLUNK_SINK_ENABLED=_profile_bool(
+            "SPLUNK_SINK_ENABLED", False, profile_flags
+        ),
+        SPL_QUERY_GENERATION_ENABLED=_profile_bool(
+            "SPL_QUERY_GENERATION_ENABLED", False, profile_flags
+        ),
+        SPL_QUERY_RAG_ENABLED=_bool_env("SPL_QUERY_RAG_ENABLED", False),
         SPL_QUERY_RAG_SOURCE_DIR=Path(
             os.getenv(
                 "SPL_QUERY_RAG_SOURCE_DIR",
@@ -375,10 +479,9 @@ def load_config() -> Config:
             or "suppress"
         ),
         SPLUNK_CA_BUNDLE=os.getenv("SPLUNK_CA_BUNDLE", ""),
-        INVESTIGATION_QUERY_EXECUTION_ENABLED=os.getenv(
-            "INVESTIGATION_QUERY_EXECUTION_ENABLED", "false"
-        ).lower()
-        in ("true", "1", "yes"),
+        INVESTIGATION_QUERY_EXECUTION_ENABLED=_profile_bool(
+            "INVESTIGATION_QUERY_EXECUTION_ENABLED", False, profile_flags
+        ),
         INVESTIGATION_QUERY_EXECUTOR=os.getenv(
             "INVESTIGATION_QUERY_EXECUTOR", "rest"
         ).strip()
@@ -389,10 +492,9 @@ def load_config() -> Config:
         INVESTIGATION_MAX_CONCURRENT_QUERIES=_positive_int_env(
             "INVESTIGATION_MAX_CONCURRENT_QUERIES", 3, max_value=8
         ),
-        QUERY_RESULT_INTERPRETATION_ENABLED=os.getenv(
-            "QUERY_RESULT_INTERPRETATION_ENABLED", "false"
-        ).lower()
-        in ("true", "1", "yes"),
+        QUERY_RESULT_INTERPRETATION_ENABLED=_bool_env(
+            "QUERY_RESULT_INTERPRETATION_ENABLED", False
+        ),
         QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS=_positive_int_env(
             "QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS", 4000, max_value=20000
         ),
@@ -423,14 +525,15 @@ def load_config() -> Config:
             "SPLUNK_SEARCH_TIMEOUT_SECONDS", 20, max_value=300
         ),
         SPLUNK_MCP_TOOL_NAME=os.getenv("SPLUNK_MCP_TOOL_NAME", "splunk_search"),
-        SERVICENOW_DRAFT_ENABLED=os.getenv("SERVICENOW_DRAFT_ENABLED", "false").lower()
-        in ("true", "1", "yes"),
-        SERVICENOW_CREATE_ENABLED=os.getenv("SERVICENOW_CREATE_ENABLED", "false").lower()
-        in ("true", "1", "yes"),
-        SERVICENOW_CREATE_REQUIRES_APPROVAL=os.getenv(
-            "SERVICENOW_CREATE_REQUIRES_APPROVAL", "true"
-        ).lower()
-        in ("true", "1", "yes"),
+        SERVICENOW_DRAFT_ENABLED=_profile_bool(
+            "SERVICENOW_DRAFT_ENABLED", False, profile_flags
+        ),
+        SERVICENOW_CREATE_ENABLED=_profile_bool(
+            "SERVICENOW_CREATE_ENABLED", False, profile_flags
+        ),
+        SERVICENOW_CREATE_REQUIRES_APPROVAL=_profile_bool(
+            "SERVICENOW_CREATE_REQUIRES_APPROVAL", True, profile_flags
+        ),
         SERVICENOW_BASE_URL=os.getenv(
             "SERVICENOW_BASE_URL", "https://your-instance.service-now.com"
         ),
@@ -440,6 +543,15 @@ def load_config() -> Config:
         SERVICENOW_API_TOKEN=os.getenv("SERVICENOW_API_TOKEN", ""),
         SERVICENOW_ASSIGNMENT_GROUP=os.getenv("SERVICENOW_ASSIGNMENT_GROUP", ""),
         SERVICENOW_TIMEOUT_SECONDS=int(os.getenv("SERVICENOW_TIMEOUT_SECONDS", "15")),
+        SIDE_EFFECT_IDEMPOTENCY_ENABLED=_profile_bool(
+            "SIDE_EFFECT_IDEMPOTENCY_ENABLED", False, profile_flags
+        ),
+        SIDE_EFFECT_IDEMPOTENCY_DIR=Path(
+            os.getenv("SIDE_EFFECT_IDEMPOTENCY_DIR", "/var/notables/idempotency")
+        ),
+        SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS=_positive_int_env(
+            "SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS", 30, max_value=3650
+        ),
         MITRE_IDS_PATH=Path(
             os.getenv(
                 "MITRE_IDS_PATH",

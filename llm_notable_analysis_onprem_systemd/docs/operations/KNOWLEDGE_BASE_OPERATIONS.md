@@ -13,7 +13,7 @@ behavior are covered in [`RAG_OPERATIONS.md`](RAG_OPERATIONS.md).
 There are now two supported KB content lanes:
 
 - **General SOC KB**: normal advisory context rendered as
-  `SOC_OPERATIONAL_CONTEXT` when `RAG_ENABLED=true`.
+  `SOC_OPERATIONAL_CONTEXT` when the `rag` profile is selected.
 - **SPL query KB**: Splunk-specific facts rendered as
   `SPL_QUERY_GROUNDING_CONTEXT` when `SPL_QUERY_RAG_ENABLED=true`.
 
@@ -23,7 +23,7 @@ There are now two supported KB content lanes:
 - Store authoritative source documents in an operator-controlled location, not
   only on the runtime host.
 - Rebuild manually after approved content changes.
-- Validate ingest reports before enabling `RAG_ENABLED=true`.
+- Validate ingest reports before adding the `rag` profile.
 - Do not store secrets, tokens, raw auth headers, or private keys in KB docs.
 
 ## Customer Decisions
@@ -136,7 +136,7 @@ ground generated SPL:
 4. Enable only after review:
 
    ```bash
-   SPL_QUERY_GENERATION_ENABLED=true
+   CAPABILITY_PROFILES=core,spl_readonly
    SPL_QUERY_RAG_ENABLED=true
    ```
 
@@ -193,13 +193,15 @@ runtime host if rollback auditability is required.
 
 ## Validation Checklist
 
-- `RAG_ENABLED=true` only when operators intend to use retrieved context.
+- `CAPABILITY_PROFILES` includes `rag` only when operators intend to use
+  retrieved context.
 - `RAG_BACKEND=postgres` for the Postgres/pgvector path.
 - `RAG_POSTGRES_DSN` points to the intended local database.
 - `RAG_VECTOR_DIMENSIONS=768` for `BAAI/bge-base-en-v1.5`.
 - `RAG_RERANK_ENABLED=true` only after the reranker model is staged and tested.
 - `SPL_QUERY_RAG_ENABLED=true` only after the SPL source docs have been ingested
-  into `SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE`.
+  into `SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE`; SPL generation itself should come
+  from the `spl_readonly` profile.
 - `SPL_QUERY_RAG_FAILURE_MODE=suppress` for the first rollout unless operators
   explicitly accept ungrounded fallback.
 - `ingest_report.json` shows the expected document and chunk counts.

@@ -11,8 +11,8 @@ only when create is enabled and, by default, payload-level approval is present.
 
 ## Recommended Starting Posture
 
-- Enable draft first: `SERVICENOW_DRAFT_ENABLED=true`,
-  `SERVICENOW_CREATE_ENABLED=false`.
+- Add `ticket_draft` first and validate draft payloads in reports.
+- Add `action_gated` only after the ServiceNow owner approves incident create.
 - Configure `SERVICENOW_ASSIGNMENT_GROUP` before draft mode.
 - Keep `SERVICENOW_CREATE_REQUIRES_APPROVAL=true`.
 - Use HTTPS only for `SERVICENOW_BASE_URL`.
@@ -22,11 +22,13 @@ only when create is enabled and, by default, payload-level approval is present.
 
 ### Draft only or create?
 
-**Settings:** `SERVICENOW_DRAFT_ENABLED`, `SERVICENOW_CREATE_ENABLED`
+**Profiles:** `ticket_draft`, `action_gated`
 
 - Draft mode creates no downstream side effect and is suitable for initial
-  validation.
+  validation: `CAPABILITY_PROFILES=core,ticket_draft`.
 - Create mode opens a real incident and should be treated as writeback.
+- Create mode is part of `CAPABILITY_PROFILES=core,action_gated`; that profile
+  also enables side-effect idempotency.
 - Keep create disabled until assignment group, token, approval flow, and
   incident field expectations are signed off.
 
@@ -74,16 +76,21 @@ automatic incident creation for this workflow.
 
 | Area | Primary variables |
 |------|-------------------|
-| Enablement | `SERVICENOW_DRAFT_ENABLED`, `SERVICENOW_CREATE_ENABLED`, `SERVICENOW_CREATE_REQUIRES_APPROVAL` |
+| Enablement | `CAPABILITY_PROFILES=core,ticket_draft` or `CAPABILITY_PROFILES=core,action_gated`, `SERVICENOW_CREATE_REQUIRES_APPROVAL` |
 | Endpoint/auth | `SERVICENOW_BASE_URL`, `SERVICENOW_CREATE_PATH`, `SERVICENOW_API_TOKEN`, `SERVICENOW_TIMEOUT_SECONDS` |
 | Routing | `SERVICENOW_ASSIGNMENT_GROUP` |
 | Payload approval | `servicenow_create_approval` object in incoming alert JSON |
+| Idempotency | `SIDE_EFFECT_IDEMPOTENCY_DIR`, `SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS` |
+
+When side-effect idempotency is enabled, ServiceNow create uses the draft
+`correlation_id` or `correlation_display` as the operation key. Create is
+rejected if neither stable correlation value is present.
 
 ## Validation And Rollout
 
-1. Enable draft only and confirm draft metadata renders in reports.
+1. Add `ticket_draft` and confirm draft metadata renders in reports.
 2. Confirm assignment group and field shape with the ServiceNow owner.
-3. Enable create in a lab instance with approval metadata present.
+3. Add `action_gated` in a lab instance with approval metadata present.
 4. Confirm denied behavior when approval metadata is missing.
 5. Confirm incident `number` and `sys_id` appear in report metadata on success.
 6. Promote to production only after token ownership and approval workflow are

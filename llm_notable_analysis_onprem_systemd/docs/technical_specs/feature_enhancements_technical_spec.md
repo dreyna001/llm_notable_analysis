@@ -40,9 +40,9 @@ This block must preserve the current default file-drop analysis path.
 ## 3. Baseline Assumptions
 
 - The current service remains a file-drop `systemd` analyzer.
-- `RAG_ENABLED` already injects local SOC context into the prompt.
-- `SPL_QUERY_GENERATION_ENABLED` runs a second bounded LLM call for SPL query fields only; it does not execute SPL.
-- When `RAG_ENABLED=true`, `SOC_OPERATIONAL_CONTEXT` may include runbooks/SOP/schema-style guidance used for **general** analyst reasoning; deterministic SPL grounding for environment-specific tokens uses **`SPL_QUERY_RAG_ENABLED`** plus **`SPL_QUERY_GROUNDING_CONTEXT`** into that same SPL call (separate Postgres table).
+- The `rag` capability profile injects local SOC context into the prompt.
+- The `spl_readonly` capability profile runs a second bounded LLM call for SPL query fields and bounded read-only execution.
+- When the `rag` profile is selected, `SOC_OPERATIONAL_CONTEXT` may include runbooks/SOP/schema-style guidance used for **general** analyst reasoning; deterministic SPL grounding for environment-specific tokens uses **`SPL_QUERY_RAG_ENABLED`** plus **`SPL_QUERY_GROUNDING_CONTEXT`** into that same SPL call (separate Postgres table).
 - Existing Splunk notable writeback through `SPLUNK_SINK_ENABLED` remains separate from read-only investigation.
 - All new behavior is optional and off by default.
 
@@ -193,7 +193,7 @@ Mirror the same split behavior in `local_llm_client_nonsdk.py`.
 
 - Behavior is unchanged when `SPL_QUERY_GENERATION_ENABLED=false`.
 - Main alert-analysis prompt does not include SPL query-generation instructions.
-- When `SPL_QUERY_GENERATION_ENABLED=true`, SPL query generation runs in a second bounded LLM call.
+- When the `spl_readonly` profile is selected, SPL query generation runs in a second bounded LLM call.
 - SPL output merges onto hypotheses by position and passes SPL contract validation.
 - SPL contract failure after one repair attempt suppresses SPL fields without failing base analysis output.
 - Existing SPL generation tests still pass.

@@ -26,7 +26,9 @@ macro, and datamodel grounding in the SPL-generation call, operators use
 
 ## Recommended Starting Posture
 
-- Keep `RAG_ENABLED=false` until the KB source documents are curated and owned.
+- Keep `CAPABILITY_PROFILES=core` until the KB source documents are curated and
+  owned.
+- Add the `rag` profile when operators approve retrieved advisory context.
 - Use `RAG_BACKEND=postgres` for production-like on-prem deployments.
 - Keep `RAG_FAIL_CLOSED=false` while retrieval is advisory.
 - Start with `RAG_RERANK_ENABLED=false`; enable rerank only after model staging
@@ -37,9 +39,12 @@ macro, and datamodel grounding in the SPL-generation call, operators use
 
 ### Should RAG be required or advisory?
 
-**Settings:** `RAG_ENABLED`, `RAG_FAIL_CLOSED`
+**Profile:** `rag`
 
-- Use `RAG_ENABLED=true` only when KB content is approved for analyst use.
+**Settings:** `RAG_FAIL_CLOSED`
+
+- Use `CAPABILITY_PROFILES=core,rag` only when KB content is approved for
+  analyst use.
 - Keep `RAG_FAIL_CLOSED=false` when reports are allowed to run without KB
   grounding.
 - Set `RAG_FAIL_CLOSED=true` only when operators require KB context for every
@@ -95,7 +100,7 @@ macro, and datamodel grounding in the SPL-generation call, operators use
 
 | Area | Primary variables |
 |------|-------------------|
-| Enablement | `RAG_ENABLED`, `RAG_FAIL_CLOSED`, `RAG_BACKEND` |
+| Enablement | `CAPABILITY_PROFILES=core,rag`, `RAG_FAIL_CLOSED`, `RAG_BACKEND` |
 | Postgres backend | `RAG_POSTGRES_DSN`, `RAG_POSTGRES_SCHEMA`, `RAG_POSTGRES_CHUNKS_TABLE`, `RAG_POSTGRES_FTS_CONFIG`, `RAG_POSTGRES_STATEMENT_TIMEOUT_MS` |
 | SQLite/FAISS backend | `RAG_SQLITE_PATH`, `RAG_FAISS_PATH` |
 | Models/cache | `RAG_EMBEDDING_MODEL`, `RAG_VECTOR_DIMENSIONS`, `RAG_RERANK_ENABLED`, `RAG_RERANK_MODEL`, `HF_HOME`, `SENTENCE_TRANSFORMERS_HOME` |
@@ -107,7 +112,7 @@ macro, and datamodel grounding in the SPL-generation call, operators use
 1. Curate KB source documents and rebuild using
    [`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md).
 2. Run `scripts/smoke_postgres_rag.sh` on a Docker-capable validation host.
-3. Enable `RAG_ENABLED=true` in a lab config.
+3. Add `rag` to `CAPABILITY_PROFILES` in a lab config.
 4. Process representative notables and confirm retrieved context is relevant
    and labeled advisory in the report.
 5. Tune budgets/snippets only after reviewing real output.

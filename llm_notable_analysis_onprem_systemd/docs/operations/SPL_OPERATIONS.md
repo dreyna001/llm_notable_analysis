@@ -13,12 +13,12 @@ environment.
 
 ## What This Controls
 
-1. **SPL query generation (`SPL_QUERY_GENERATION_ENABLED`)**
+1. **SPL query generation (`spl_readonly` profile)**
    The analyzer asks the LLM for `primary_spl_query` strings per hypothesis.
    Nothing is executed unless you separately enable investigation execution.
    No Splunk credential is required for generation alone.
 
-2. **Read-only investigation execution (`INVESTIGATION_QUERY_EXECUTION_ENABLED`)**
+2. **Read-only investigation execution (`spl_readonly` profile)**
    The service may run generated SPL against Splunk using REST or an injected
    MCP client. This path uses Splunk credentials, applies deterministic policy
    locally, then submits the search. Policy is not a full Splunk SPL grammar
@@ -35,10 +35,9 @@ execution on.
 
 ## Recommended Starting Posture
 
-- Start with `SPL_QUERY_GENERATION_ENABLED=true` and
-  `INVESTIGATION_QUERY_EXECUTION_ENABLED=false`.
+- Start with `CAPABILITY_PROFILES=core,spl_readonly` in lab or non-production
+  Splunk scope.
 - Review generated SPL in reports with Splunk admins before allowing execution.
-- Enable execution first in a lab or non-prod Splunk scope.
 - Keep `QUERY_RESULT_INTERPRETATION_ENABLED=false` until deterministic query
   execution quality is accepted.
 - Keep allowed indexes and commands narrow until denied/error rates are known.
@@ -48,15 +47,15 @@ execution on.
 
 ### SPL generation modes
 
-SPL strings come from the same second LLM call whenever
-`SPL_QUERY_GENERATION_ENABLED=true`. What changes per deployment is how much
+SPL strings come from the same second LLM call whenever the `spl_readonly`
+profile is selected. What changes per deployment is how much
 retrieval context is attached to that prompt.
 
 | Mode | Typical flags | Prompt context | Customer tuning |
 |------|---------------|----------------|-----------------|
-| Alert-only grounding | `SPL_QUERY_GENERATION_ENABLED=true`, `RAG_ENABLED=false`, `SPL_QUERY_RAG_ENABLED=false` | Raw alert plus hypotheses. `SOC_OPERATIONAL_CONTEXT` and `SPL_QUERY_GROUNDING_CONTEXT` are empty. | Expect SPL to lean only on observable fields from the notable. Generated queries may not assume customer indexes, sourcetypes, macros, or CIM datamodels. |
-| General SOC KB RAG | `SPL_QUERY_GENERATION_ENABLED=true`, `RAG_ENABLED=true`, `SPL_QUERY_RAG_ENABLED=false` | Raw alert, hypotheses, and `SOC_OPERATIONAL_CONTEXT` from the normal KB. | Use the normal KB for analyst process and runbooks. It does not authorize environment-specific SPL tokens for generated queries. |
-| Dedicated SPL grounding RAG | `SPL_QUERY_GENERATION_ENABLED=true`, `SPL_QUERY_RAG_ENABLED=true` | Raw alert, hypotheses, optional `SOC_OPERATIONAL_CONTEXT`, and separate `SPL_QUERY_GROUNDING_CONTEXT` from the Splunk-focused KB. | Curate real indexes, sourcetypes, macros, datamodel notes, saved searches, fields, and examples. Generated SPL may use environment-specific tokens only when they appear in the alert or this SPL grounding context. |
+| Alert-only grounding | `CAPABILITY_PROFILES=core,spl_readonly`, `SPL_QUERY_RAG_ENABLED=false` | Raw alert plus hypotheses. `SOC_OPERATIONAL_CONTEXT` and `SPL_QUERY_GROUNDING_CONTEXT` are empty. | Expect SPL to lean only on observable fields from the notable. Generated queries may not assume customer indexes, sourcetypes, macros, or CIM datamodels. |
+| General SOC KB RAG | `CAPABILITY_PROFILES=core,rag,spl_readonly`, `SPL_QUERY_RAG_ENABLED=false` | Raw alert, hypotheses, and `SOC_OPERATIONAL_CONTEXT` from the normal KB. | Use the normal KB for analyst process and runbooks. It does not authorize environment-specific SPL tokens for generated queries. |
+| Dedicated SPL grounding RAG | `CAPABILITY_PROFILES=core,spl_readonly`, `SPL_QUERY_RAG_ENABLED=true` | Raw alert, hypotheses, optional `SOC_OPERATIONAL_CONTEXT`, and separate `SPL_QUERY_GROUNDING_CONTEXT` from the Splunk-focused KB. | Curate real indexes, sourcetypes, macros, datamodel notes, saved searches, fields, and examples. Generated SPL may use environment-specific tokens only when they appear in the alert or this SPL grounding context. |
 
 Across all modes, optional investigation execution still uses the same
 deterministic `SPLUNK_SEARCH_*` policy. RAG does not bypass allowlists.
@@ -168,9 +167,9 @@ observability without markdown bloat** note in
 
 | Area | Primary variables |
 |------|-------------------|
-| Generation | `SPL_QUERY_GENERATION_ENABLED` |
+| Generation and read-only execution | `CAPABILITY_PROFILES=core,spl_readonly` |
 | SPL grounding KB | `SPL_QUERY_RAG_ENABLED`, `SPL_QUERY_RAG_SOURCE_DIR`, `SPL_QUERY_RAG_INDEX_DIR`, `SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE`, `SPL_QUERY_RAG_MAX_SNIPPETS`, `SPL_QUERY_RAG_CONTEXT_BUDGET_CHARS`, `SPL_QUERY_RAG_FAILURE_MODE` |
-| Execution | `INVESTIGATION_QUERY_EXECUTION_ENABLED`, `INVESTIGATION_QUERY_EXECUTOR`, `INVESTIGATION_MAX_QUERIES_PER_ALERT`, `INVESTIGATION_MAX_CONCURRENT_QUERIES` |
+| Execution tuning | `INVESTIGATION_QUERY_EXECUTOR`, `INVESTIGATION_MAX_QUERIES_PER_ALERT`, `INVESTIGATION_MAX_CONCURRENT_QUERIES` |
 | Result interpretation | `QUERY_RESULT_INTERPRETATION_ENABLED`, `QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS`, `QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS`, `QUERY_RESULT_INTERPRETATION_MAX_TOKENS` |
 | Splunk connectivity | `SPLUNK_BASE_URL`, `SPLUNK_API_TOKEN`, `SPLUNK_CA_BUNDLE`, `SPLUNK_SEARCH_ENDPOINT_PATH` |
 | Policy | `SPLUNK_SEARCH_ALLOWED_INDEXES`, `SPLUNK_SEARCH_ALLOWED_COMMANDS`, `SPLUNK_SEARCH_DENIED_COMMANDS`, `SPLUNK_SEARCH_MAX_TIME_RANGE`, `SPLUNK_SEARCH_MAX_ROWS`, `SPLUNK_SEARCH_TIMEOUT_SECONDS` |

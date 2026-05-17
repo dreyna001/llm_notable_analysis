@@ -174,8 +174,12 @@ class TestDeploymentContract(unittest.TestCase):
         """Example config should stay aligned with code defaults and RAG knobs."""
         config_text = (PROJECT_ROOT / "config.env.example").read_text(encoding="utf-8")
 
+        self.assertIn("CAPABILITY_PROFILES=core", config_text)
         self.assertIn("LLM_MAX_TOKENS=4096", config_text)
         self.assertIn("MAX_INPUT_FILE_BYTES=4194304", config_text)
+        self.assertIn("SIDE_EFFECT_IDEMPOTENCY_ENABLED=false", config_text)
+        self.assertIn("SIDE_EFFECT_IDEMPOTENCY_DIR=/var/notables/idempotency", config_text)
+        self.assertIn("SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS=30", config_text)
         self.assertIn("RAG_FAIL_CLOSED=false", config_text)
         self.assertIn("HF_HOME=/var/notables/cache/huggingface", config_text)
         self.assertIn("HTML_REPORT_ENABLED=false", config_text)
@@ -220,6 +224,29 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("setup_postgres_rag.sh", doc_text)
         self.assertIn("ingest_report.json", doc_text)
         self.assertIn("Rollback", doc_text)
+
+    def test_capability_profiles_doc_is_operator_entrypoint(self) -> None:
+        """Operators should be directed to profiles instead of raw enable flags."""
+        docs_index = (PROJECT_ROOT / "docs" / "README.md").read_text(encoding="utf-8")
+        ops_index = (
+            PROJECT_ROOT / "docs" / "operations" / "README.md"
+        ).read_text(encoding="utf-8")
+        profile_doc = (
+            PROJECT_ROOT / "docs" / "operations" / "CAPABILITY_PROFILES.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("CAPABILITY_PROFILES.md", docs_index)
+        self.assertIn("CAPABILITY_PROFILES.md", ops_index)
+        for profile in (
+            "core",
+            "html_reports",
+            "rag",
+            "spl_readonly",
+            "ticket_draft",
+            "action_gated",
+        ):
+            self.assertIn(f"`{profile}`", profile_doc)
+        self.assertIn("Low-level `*_ENABLED` flags remain supported", profile_doc)
 
     def test_docs_do_not_reference_removed_kb_rebuild_units(self) -> None:
         """Docs should not point operators at removed KB systemd units."""

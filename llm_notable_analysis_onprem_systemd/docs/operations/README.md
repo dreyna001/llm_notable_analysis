@@ -23,13 +23,14 @@ behavior within supported config bounds.
 
 | Area | Guide | Purpose |
 |------|-------|---------|
+| Capability profiles | [`CAPABILITY_PROFILES.md`](CAPABILITY_PROFILES.md) | Supported operator-facing feature bundles and legacy low-level flag behavior. |
 | SPL generation and execution | [`SPL_OPERATIONS.md`](SPL_OPERATIONS.md) | Customer-specific indexes, SPL query KB grounding, command controls, timeouts, REST vs MCP, and rollout. |
 | Knowledge base content | [`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md) | Add, rebuild, validate, and roll back KB source documents. |
 | RAG retrieval | [`RAG_OPERATIONS.md`](RAG_OPERATIONS.md) | RAG enablement, fail-open/fail-closed posture, backend, embeddings, rerank, context budgets. |
 | LLM inference | [`LLM_INFERENCE_OPERATIONS.md`](LLM_INFERENCE_OPERATIONS.md) | Local LiteLLM/vLLM endpoint, model id, structured output mode, tokens, timeouts. |
 | File-drop and retention | [`FILE_DROP_AND_RETENTION_OPERATIONS.md`](FILE_DROP_AND_RETENTION_OPERATIONS.md) | Incoming, processed, quarantine, reports, archive, polling, retention, concurrency. |
 | Splunk writeback | [`SPLUNK_WRITEBACK_OPERATIONS.md`](SPLUNK_WRITEBACK_OPERATIONS.md) | Optional notable comment writeback, endpoint, token, TLS, identifier mapping. |
-| ServiceNow | [`SERVICENOW_OPERATIONS.md`](SERVICENOW_OPERATIONS.md) | Incident draft/create flags, assignment group, HTTPS/token, approval payload. |
+| ServiceNow | [`SERVICENOW_OPERATIONS.md`](SERVICENOW_OPERATIONS.md) | Incident draft/create profiles, assignment group, HTTPS/token, approval payload. |
 | MITRE ATT&CK/TTP | [`MITRE_TTP_OPERATIONS.md`](MITRE_TTP_OPERATIONS.md) | TTP ID data source and validation expectations. |
 | Security | [`SECURITY_OPERATIONS.md`](SECURITY_OPERATIONS.md) | Customer decisions around exposure, secrets, TLS, systemd hardening, and audit posture. |
 | Installation | [`INSTALL.md`](INSTALL.md) | Host install, services, post-install smoke checks. |

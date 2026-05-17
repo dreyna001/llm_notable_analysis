@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import Dict, Any
 
 from .config import Config
+from .idempotency import (
+    begin_side_effect,
+    complete_side_effect_success,
+    release_side_effect_lock,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +43,7 @@ def write_markdown_to_file(notable_id: str, markdown: str, config: Config) -> Pa
             counter += 1
 
     output_path.write_text(markdown, encoding="utf-8")
-    logger.info(f"Wrote markdown report to {output_path}")
+    logger.info("Wrote markdown report to %s", output_path)
     return output_path
 
 
@@ -93,15 +98,40 @@ def update_splunk_notable(
         logger.error("SPLUNK_BASE_URL or SPLUNK_API_TOKEN not configured")
         return {"status": "error", "message": "Splunk REST credentials not configured"}
 
+    splunk_base_url = config.SPLUNK_BASE_URL.strip()
+    if not splunk_base_url.startswith("https://"):
+        logger.error("SPLUNK_BASE_URL must be HTTPS for writeback")
+        return {"status": "error", "message": "Splunk base URL must be HTTPS"}
+
     if not finding_id:
-        logger.warning(f"No finding_id provided for notable {notable_id}")
+        logger.warning("No finding_id provided for notable %s", notable_id)
         return {"status": "error", "message": "Cannot identify notable to update"}
+
+    try:
+        reservation = begin_side_effect(
+            config,
+            operation="splunk_notable_update",
+            key=finding_id,
+        )
+    except (OSError, TimeoutError, ValueError) as exc:
+        logger.error("Splunk idempotency guard failed: %s", exc)
+        return {"status": "error", "message": str(exc), "finding_id": finding_id}
+
+    if not reservation.should_execute:
+        metadata = (reservation.existing_marker or {}).get("metadata", {})
+        logger.info("Skipping duplicate Splunk notable update: %s", finding_id)
+        return {
+            "status": "skipped",
+            "message": "Splunk notable update already completed",
+            "finding_id": finding_id,
+            "idempotency": metadata if isinstance(metadata, dict) else {},
+        }
 
     # Build REST API request
     endpoint_path = config.SPLUNK_NOTABLE_UPDATE_PATH or "/services/notable_update"
     if not endpoint_path.startswith("/"):
         endpoint_path = f"/{endpoint_path}"
-    rest_url = f"{config.SPLUNK_BASE_URL.rstrip('/')}{endpoint_path}"
+    rest_url = f"{splunk_base_url.rstrip('/')}{endpoint_path}"
     headers = {
         "Authorization": f"Bearer {config.SPLUNK_API_TOKEN}",
         "Content-Type": "application/x-www-form-urlencoded",
@@ -123,16 +153,29 @@ def update_splunk_notable(
         response.raise_for_status()
 
         logger.info(
-            f"Successfully updated notable via REST API: {response.status_code}"
+            "Successfully updated notable via REST API: %s", response.status_code
         )
 
-        return {
+        result = {
             "status": "success",
             "rest_response": response.text,
             "status_code": response.status_code,
             "finding_id": finding_id,
         }
+        idempotency_recorded = complete_side_effect_success(
+            reservation,
+            metadata={
+                "notable_id": notable_id,
+                "status_code": response.status_code,
+            },
+        )
+        if reservation.enabled:
+            result["idempotency_recorded"] = idempotency_recorded
+            if not idempotency_recorded:
+                result["idempotency_warning"] = "side-effect marker was not written"
+        return result
 
-    except requests.RequestException as e:
-        logger.error(f"Error writing to Splunk REST: {e}")
-        return {"status": "error", "message": str(e)}
+    except requests.RequestException as exc:
+        release_side_effect_lock(reservation)
+        logger.error("Error writing to Splunk REST: %s", exc)
+        return {"status": "error", "message": str(exc)}

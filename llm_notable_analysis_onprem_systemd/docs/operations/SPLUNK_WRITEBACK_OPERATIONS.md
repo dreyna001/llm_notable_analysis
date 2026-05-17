@@ -6,24 +6,27 @@ separate from read-only SPL investigation execution in
 
 ## What This Controls
 
-When `SPLUNK_SINK_ENABLED=true`, the analyzer posts the generated markdown
-report back to Splunk ES as a notable comment using the configured REST
-endpoint. This is a writeback path and should be approved separately from
-read-only search execution.
+When the `action_gated` profile is selected, the analyzer can post the
+generated markdown report back to Splunk ES as a notable comment using the
+configured REST endpoint. This is a writeback path and should be approved
+separately from read-only search execution.
 
 ## Recommended Starting Posture
 
-- Keep `SPLUNK_SINK_ENABLED=false` until report quality and identifier mapping
+- Keep `CAPABILITY_PROFILES=core` until report quality and identifier mapping
   are validated.
+- Add `action_gated` only after the Splunk owner approves notable comment
+  writeback.
 - Use a lab Splunk environment or test notable first.
 - Use a dedicated token with the minimum writeback capability.
 - Keep TLS verification enabled; use `SPLUNK_CA_BUNDLE` for internal CAs.
+- Keep side-effect idempotency enabled for writeback retries.
 
 ## Customer Decisions
 
 ### Should writeback be enabled?
 
-**Setting:** `SPLUNK_SINK_ENABLED`
+**Profile:** `action_gated`
 
 - Enable only when analysts want the full markdown report attached to the
   originating notable.
@@ -59,15 +62,19 @@ SOAR/Splunk handoff before enabling production writeback.
 
 | Area | Primary variables |
 |------|-------------------|
-| Enablement | `SPLUNK_SINK_ENABLED` |
+| Enablement | `CAPABILITY_PROFILES=core,action_gated` |
 | Endpoint | `SPLUNK_BASE_URL`, `SPLUNK_NOTABLE_UPDATE_PATH` |
 | Auth/TLS | `SPLUNK_API_TOKEN`, `SPLUNK_CA_BUNDLE` |
+| Idempotency | `SIDE_EFFECT_IDEMPOTENCY_DIR`, `SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS` |
+
+When side-effect idempotency is enabled, Splunk writeback uses `finding_id` as
+the operation key.
 
 ## Validation And Rollout
 
-1. Generate reports locally with `SPLUNK_SINK_ENABLED=false`.
+1. Generate reports locally with `CAPABILITY_PROFILES=core`.
 2. Confirm filename stem to notable identifier mapping with the Splunk owner.
-3. Enable writeback in lab with a test notable.
+3. Add `action_gated` in lab with a test notable.
 4. Verify the comment appears in Splunk ES and contains the expected report.
 5. Confirm failed writeback behavior still writes local reports and preserves
    processed/quarantine semantics.

@@ -119,6 +119,10 @@ Implemented in `llm_notable_analysis_onprem_systemd/src/llm_notable_analysis_onp
 ## Recommendations (non-breaking, optional)
 
 - Ensure upstream uses atomic upload pattern (`.tmp` then rename) to avoid partial reads.
-- If duplicate writeback is operationally sensitive, introduce idempotency controls at sink layer (for example, unique operation key per input file hash + finding ID).
+- If duplicate writeback is operationally sensitive, use the `action_gated`
+  profile's side-effect idempotency controls. Splunk writeback uses `finding_id`
+  as the operation key; ServiceNow create uses the draft correlation fields.
+  Exactly-once behavior still depends on vendor-side guarantees for crash windows
+  after a successful POST and before local marker persistence.
 - If strict exactly-once semantics are required, add a durable work ledger before/after side effects.
 

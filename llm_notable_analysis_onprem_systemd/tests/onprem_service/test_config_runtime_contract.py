@@ -39,7 +39,15 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.RAG_RRF_K, 60)
         self.assertEqual(config.LLM_MODEL_NAME, "gemma-4-31B-it")
         self.assertEqual(config.LLM_TIMEOUT, 120)
+        self.assertEqual(config.CAPABILITY_PROFILES, "core")
         self.assertFalse(config.HTML_REPORT_ENABLED)
+        self.assertFalse(config.RAG_ENABLED)
+        self.assertFalse(config.SPL_QUERY_GENERATION_ENABLED)
+        self.assertFalse(config.INVESTIGATION_QUERY_EXECUTION_ENABLED)
+        self.assertFalse(config.SERVICENOW_DRAFT_ENABLED)
+        self.assertFalse(config.SERVICENOW_CREATE_ENABLED)
+        self.assertFalse(config.SIDE_EFFECT_IDEMPOTENCY_ENABLED)
+        self.assertEqual(config.SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS, 30)
         self.assertFalse(config.SPL_QUERY_RAG_ENABLED)
         self.assertEqual(
             config.SPL_QUERY_RAG_SOURCE_DIR.as_posix(),
@@ -64,6 +72,69 @@ class TestConfigRuntimeContract(unittest.TestCase):
             config = load_config()
 
         self.assertTrue(config.HTML_REPORT_ENABLED)
+
+    def test_capability_profiles_enable_named_feature_bundles(self) -> None:
+        """Profiles should make supported feature bundles explicit at startup."""
+        env = {
+            "CAPABILITY_PROFILES": (
+                "html_reports,rag,spl_readonly,ticket_draft,action_gated"
+            )
+        }
+
+        with patch.dict(os.environ, env, clear=True):
+            config = load_config()
+
+        self.assertEqual(
+            config.CAPABILITY_PROFILES,
+            "core,html_reports,rag,spl_readonly,ticket_draft,action_gated",
+        )
+        self.assertTrue(config.HTML_REPORT_ENABLED)
+        self.assertTrue(config.RAG_ENABLED)
+        self.assertTrue(config.SPL_QUERY_GENERATION_ENABLED)
+        self.assertTrue(config.INVESTIGATION_QUERY_EXECUTION_ENABLED)
+        self.assertTrue(config.SPLUNK_SINK_ENABLED)
+        self.assertTrue(config.SERVICENOW_DRAFT_ENABLED)
+        self.assertTrue(config.SERVICENOW_CREATE_ENABLED)
+        self.assertTrue(config.SERVICENOW_CREATE_REQUIRES_APPROVAL)
+        self.assertTrue(config.SIDE_EFFECT_IDEMPOTENCY_ENABLED)
+
+    def test_capability_profile_rejects_unknown_profile(self) -> None:
+        """Unsupported profile names should fail fast instead of silently drifting."""
+        with patch.dict(os.environ, {"CAPABILITY_PROFILES": "core,unknown"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "unsupported profile"):
+                load_config()
+
+    def test_profile_defaults_take_precedence_over_baseline_false_flags(self) -> None:
+        """Copied config examples should not accidentally disable selected profiles."""
+        env = {
+            "CAPABILITY_PROFILES": "html_reports",
+            "HTML_REPORT_ENABLED": "false",
+        }
+
+        with patch.dict(os.environ, env, clear=True):
+            config = load_config()
+
+        self.assertTrue(config.HTML_REPORT_ENABLED)
+
+    def test_legacy_true_flag_still_enables_capability_without_profile(self) -> None:
+        """Existing deployments can still use raw flags outside profile bundles."""
+        with patch.dict(os.environ, {"HTML_REPORT_ENABLED": "true"}, clear=True):
+            config = load_config()
+
+        self.assertTrue(config.HTML_REPORT_ENABLED)
+
+    def test_capability_profiles_accept_semicolon_separator(self) -> None:
+        """Semicolon-separated profile lists should normalize to comma output."""
+        with patch.dict(
+            os.environ,
+            {"CAPABILITY_PROFILES": "html_reports;rag"},
+            clear=True,
+        ):
+            config = load_config()
+
+        self.assertEqual(config.CAPABILITY_PROFILES, "core,html_reports,rag")
+        self.assertTrue(config.HTML_REPORT_ENABLED)
+        self.assertTrue(config.RAG_ENABLED)
 
     def test_postgres_rag_contract_loads_from_environment(self) -> None:
         """Postgres/pgvector RAG settings should be explicit env contract values."""
@@ -197,6 +268,34 @@ class TestConfigRuntimeContract(unittest.TestCase):
             direct.QUERY_RESULT_INTERPRETATION_MAX_TOKENS,
             loaded.QUERY_RESULT_INTERPRETATION_MAX_TOKENS,
         )
+        self.assertEqual(direct.CAPABILITY_PROFILES, loaded.CAPABILITY_PROFILES)
+        self.assertEqual(direct.HTML_REPORT_ENABLED, loaded.HTML_REPORT_ENABLED)
+        self.assertEqual(direct.RAG_ENABLED, loaded.RAG_ENABLED)
+        self.assertEqual(direct.SPLUNK_SINK_ENABLED, loaded.SPLUNK_SINK_ENABLED)
+        self.assertEqual(
+            direct.SIDE_EFFECT_IDEMPOTENCY_ENABLED,
+            loaded.SIDE_EFFECT_IDEMPOTENCY_ENABLED,
+        )
+
+    def test_direct_config_applies_selected_profiles(self) -> None:
+        """Direct Config construction should not bypass profile flag resolution."""
+        config = Config(
+            CAPABILITY_PROFILES="html_reports;rag;action_gated",
+            HTML_REPORT_ENABLED=False,
+            RAG_ENABLED=False,
+            SPLUNK_SINK_ENABLED=False,
+            SERVICENOW_CREATE_ENABLED=False,
+        )
+
+        self.assertEqual(
+            config.CAPABILITY_PROFILES,
+            "core,html_reports,rag,action_gated",
+        )
+        self.assertTrue(config.HTML_REPORT_ENABLED)
+        self.assertTrue(config.RAG_ENABLED)
+        self.assertTrue(config.SPLUNK_SINK_ENABLED)
+        self.assertTrue(config.SERVICENOW_CREATE_ENABLED)
+        self.assertTrue(config.SIDE_EFFECT_IDEMPOTENCY_ENABLED)
 
     def test_local_llm_client_selects_postgres_rag_provider(self) -> None:
         """LocalLLMClient should wire the Postgres provider when configured."""

@@ -219,8 +219,13 @@ def run_retention(config: Config) -> RetentionStats:
     s2c = delete_older_than_days(
         archive_reports, config.ARCHIVE_RETENTION_DAYS, now_epoch_seconds=now
     )
+    s2d = delete_older_than_days(
+        config.SIDE_EFFECT_IDEMPOTENCY_DIR,
+        config.SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS,
+        now_epoch_seconds=now,
+    )
 
-    for s in (s1a, s1b, s1c, s2a, s2b, s2c):
+    for s in (s1a, s1b, s1c, s2a, s2b, s2c, s2d):
         total_moved += s.moved
         total_deleted += s.deleted
         total_errors += s.errors

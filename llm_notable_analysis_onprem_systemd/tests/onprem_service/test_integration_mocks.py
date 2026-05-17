@@ -5,6 +5,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import requests
+
+# Tests run with PYTHONPATH pointing at the src layout and inspect SDK internals.
+# pylint: disable=import-error,no-name-in-module,protected-access
+
 from onprem_llm_sdk.errors import RequestTimeoutError
 
 from llm_notable_analysis_onprem_systemd.onprem_service.config import Config
@@ -930,6 +934,25 @@ class TestIntegrationMocks(unittest.TestCase):
         self.assertEqual(result["status"], "skipped")
 
     @patch("llm_notable_analysis_onprem_systemd.onprem_service.sinks.requests.post")
+    def test_update_splunk_notable_rejects_non_https_writeback_url(
+        self, mock_post: MagicMock
+    ) -> None:
+        result = update_splunk_notable(
+            notable_id="n1",
+            markdown="# Report",
+            finding_id="rule-123",
+            config=Config(
+                SPLUNK_SINK_ENABLED=True,
+                SPLUNK_BASE_URL="http://splunk.internal:8089",
+                SPLUNK_API_TOKEN="token",
+            ),
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("HTTPS", result["message"])
+        mock_post.assert_not_called()
+
+    @patch("llm_notable_analysis_onprem_systemd.onprem_service.sinks.requests.post")
     def test_update_splunk_notable_uses_finding_id_only(
         self, mock_post: MagicMock
     ) -> None:
@@ -957,6 +980,42 @@ class TestIntegrationMocks(unittest.TestCase):
         self.assertEqual(kwargs["data"]["finding_id"], "finding-42")
         self.assertNotIn("ruleUIDs", kwargs["data"])
         self.assertNotIn("search_name", kwargs["data"])
+
+    @patch("llm_notable_analysis_onprem_systemd.onprem_service.sinks.requests.post")
+    def test_update_splunk_notable_idempotency_skips_duplicate_success(
+        self, mock_post: MagicMock
+    ) -> None:
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        response.status_code = 200
+        response.text = "ok"
+        mock_post.return_value = response
+
+        with tempfile.TemporaryDirectory() as td:
+            config = Config(
+                SPLUNK_SINK_ENABLED=True,
+                SPLUNK_BASE_URL="https://splunk.internal:8089",
+                SPLUNK_API_TOKEN="token",
+                SIDE_EFFECT_IDEMPOTENCY_ENABLED=True,
+                SIDE_EFFECT_IDEMPOTENCY_DIR=Path(td),
+            )
+
+            first = update_splunk_notable(
+                notable_id="n1",
+                markdown="# Report",
+                finding_id="finding-42",
+                config=config,
+            )
+            second = update_splunk_notable(
+                notable_id="n1",
+                markdown="# Report",
+                finding_id="finding-42",
+                config=config,
+            )
+
+        self.assertEqual(first["status"], "success")
+        self.assertEqual(second["status"], "skipped")
+        self.assertEqual(mock_post.call_count, 1)
 
     @patch(
         "llm_notable_analysis_onprem_systemd.onprem_service.sinks.requests.post",

@@ -1,7 +1,12 @@
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import requests
+
+# Tests run with PYTHONPATH pointing at the src layout.
+# pylint: disable=import-error,no-name-in-module
 
 from llm_notable_analysis_onprem_systemd.onprem_service.config import Config
 from llm_notable_analysis_onprem_systemd.onprem_service.servicenow import (
@@ -125,6 +130,60 @@ class TestServiceNowAdapter(unittest.TestCase):
         self.assertEqual(result["number"], "INC001")
         _, kwargs = mock_post.call_args
         self.assertEqual(kwargs["timeout"], 12)
+
+    @patch("llm_notable_analysis_onprem_systemd.onprem_service.servicenow.requests.post")
+    def test_create_idempotency_skips_duplicate_success(
+        self, mock_post: MagicMock
+    ) -> None:
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {"result": {"sys_id": "abc123", "number": "INC001"}}
+        mock_post.return_value = response
+        with tempfile.TemporaryDirectory() as td:
+            config = Config(
+                SERVICENOW_CREATE_ENABLED=True,
+                SERVICENOW_CREATE_REQUIRES_APPROVAL=True,
+                SERVICENOW_BASE_URL="https://example.service-now.com",
+                SERVICENOW_API_TOKEN="token",
+                SERVICENOW_CREATE_PATH="/api/now/table/incident",
+                SIDE_EFFECT_IDEMPOTENCY_ENABLED=True,
+                SIDE_EFFECT_IDEMPOTENCY_DIR=Path(td),
+            )
+            draft = {"short_description": "x", "correlation_id": "finding-1"}
+            approval = {"approved": True, "approved_by": "analyst@example.com"}
+
+            first = create_servicenow_incident(draft, config=config, approval=approval)
+            second = create_servicenow_incident(draft, config=config, approval=approval)
+
+        self.assertEqual(first["status"], "success")
+        self.assertEqual(second["status"], "skipped")
+        self.assertEqual(second["sys_id"], "abc123")
+        self.assertEqual(second["number"], "INC001")
+        self.assertEqual(mock_post.call_count, 1)
+
+    @patch("llm_notable_analysis_onprem_systemd.onprem_service.servicenow.requests.post")
+    def test_create_idempotency_requires_stable_correlation_key(
+        self, mock_post: MagicMock
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            config = Config(
+                SERVICENOW_CREATE_ENABLED=True,
+                SERVICENOW_CREATE_REQUIRES_APPROVAL=True,
+                SERVICENOW_BASE_URL="https://example.service-now.com",
+                SERVICENOW_API_TOKEN="token",
+                SERVICENOW_CREATE_PATH="/api/now/table/incident",
+                SIDE_EFFECT_IDEMPOTENCY_ENABLED=True,
+                SIDE_EFFECT_IDEMPOTENCY_DIR=Path(td),
+            )
+            result = create_servicenow_incident(
+                {"short_description": "generic"},
+                config=config,
+                approval={"approved": True, "approved_by": "analyst@example.com"},
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("idempotency key", result["message"])
+        mock_post.assert_not_called()
 
     @patch(
         "llm_notable_analysis_onprem_systemd.onprem_service.servicenow.requests.post",

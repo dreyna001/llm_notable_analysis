@@ -364,7 +364,7 @@ Purpose:
 Controls:
 
 - disabled by default
-- requires `SERVICENOW_DRAFT_ENABLED=true`
+- requires the `ticket_draft` or `action_gated` capability profile
 - required routing fields must be configured
 - summary and body size limits must be enforced
 
@@ -390,7 +390,7 @@ Purpose:
 Controls:
 
 - disabled by default
-- requires `SERVICENOW_CREATE_ENABLED=true`
+- requires the `action_gated` capability profile
 - requires an incident draft
 - requires explicit approval metadata
 - fails closed when approval is missing
