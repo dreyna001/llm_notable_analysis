@@ -584,6 +584,48 @@ Separate **planned checks** from **allowed executions**: LLM may propose next ch
 
 **Status:** roadmap only—not in the bounded **[Scope](#scope)** or locked technical spec until catalog schema, approval matrix, and adapter contract are reviewed.
 
+### LLM observability and tracing (Langfuse-class, roadmap)
+
+**Goal:** Give operators and engineers **visibility into multi-pass LLM work** (primary structured analysis, optional SPL generation, optional query-result interpretation, repair attempts) without turning analyst markdown or Splunk comments into trace dumps.
+
+**Problem today:** Application logs capture high-level outcomes (timeouts, policy skips, RAG degradation) but not a **first-class trace** across passes: which model ran, latency per call, token usage, repair vs success, grounding availability, or correlation back to `finding_id` / input file stem across a single notable processing run.
+
+**Candidate platforms (evaluate one primary path; avoid dual shipping):**
+
+| Option | Fit | Notes |
+|--------|-----|-------|
+| **[Langfuse](https://langfuse.com/)** (self-hosted or cloud) | Strong default for LLM-native traces, generations, scores, prompt/version tags | OpenTelemetry export supported; fits on-prem air-gap when self-hosted |
+| **OpenTelemetry → existing backend** | Org already standardizes on OTEL | Instrument LiteLLM/vLLM/Bedrock clients; export to corporate collector, Grafana Tempo, Jaeger, Datadog, etc. |
+| **Helicone / Arize Phoenix** | Comparable LLM gateways or eval UI | Same architectural boundaries as Langfuse; pick based on procurement and hosting |
+
+**Distinct from existing patterns:**
+
+| Pattern | Role |
+|---------|------|
+| Structured `logging` in `onprem_service` / Lambda | Operational events, errors, policy denies—retain as source of truth for SIEM |
+| `metadata` on analysis JSON | Per-alert machine fields (`spl_query_rag_*`, sink status)—not a cross-alert trace UI |
+| Markdown / HTML reports | Analyst deliverable—must stay free of raw trace payloads unless policy requires citations |
+
+**Preferred architecture (thin instrumentation, default off):**
+
+1. **Correlation** — one trace (or root span) per notable processing attempt, keyed by `finding_id` / input stem plus a service-generated `correlation_id` already used in logs.
+2. **Spans** — child spans per LLM pass: `analyze_notable`, `spl_query_generation`, `query_result_interpretation`, optional `repair`; tag `model_id`, `structured_output_mode`, pass outcome (`success` | `repair` | `timeout` | `policy_suppressed`).
+3. **Redaction** — do **not** ship full prompts, API tokens, or unredacted notable bodies to the observability backend by default; use hashed or truncated previews and explicit operator opt-in for prompt capture in lab.
+4. **Scores / feedback (optional)** — later tie analyst disposition or evaluation harness results to the same trace id for regression analysis.
+5. **Adapter boundary** — a small `observability.py` (or OTEL wrapper) at the LLM transport edge—**not** scattered calls inside markdown or sink modules.
+
+**Instantiation:**
+
+| Concern | On‑prem | AWS |
+|---------|---------|-----|
+| Backend | self-hosted Langfuse or OTEL collector on corp network | Langfuse cloud, ADOT → X-Ray/CloudWatch, or approved SaaS |
+| Credentials | host secret for Langfuse public/secret keys or OTEL headers | Secrets Manager / SSM |
+| LiteLLM hook | optional Langfuse OTEL or callback on loopback proxy | same pattern on Bedrock path via SDK/OTEL |
+| Default | **off** until `LLM_OBSERVABILITY_ENABLED` (or capability profile) + endpoint URL are set | same |
+| Retention | operator-controlled; align with log/SIEM retention policy | account-level retention on chosen backend |
+
+**Status:** roadmap only—not in **[Scope](#scope)** until redaction rules, hosting choice, and correlation contract are reviewed. Complements **[Observability, audit posture, degraded mode](#observability-audit-posture-degraded-mode)** (application audit fields) rather than replacing it.
+
 ### Evidence layering and structured output taxonomy (aspirational alignment)
 
 Production analyzers currently use schemas such as `evidence_vs_inference`, competing hypotheses, and reconciliation objects. Target alignment for enrichment-heavy workflows emphasizes explicit lanes:
@@ -624,6 +666,8 @@ Expose detection name/id, authored logic summary, ATT&CK links, historically kno
 
 Record model id, prompt versioning, policy denies, adapter outcomes, timings, approvals—omit secrets. Explicit operational states when Bedrock/runtime, Splunk, RAG indexer, Athena, SNOW, TI, or SOAR are unavailable, capped, skipped, or policy-denied.
 
+For **LLM-native trace visibility** (multi-pass spans, token/latency dashboards, eval linkage), see **[LLM observability and tracing (Langfuse-class, roadmap)](#llm-observability-and-tracing-langfuse-class-roadmap)**.
+
 ### Cost & quota envelopes
 
 Envelope Bedrock token spend, Athena bytes scanned, Splunk concurrency, enrichment fan-out, Lambda duration/step retries—matching production guardrail defaults to policy.
@@ -658,6 +702,7 @@ Reference table for roadmap bullets above; **architecture truth** stays in prose
 | Orchestration | single service loop (+ optional playbook) | EventBridge → Lambda; optional Step Functions for fan-out retries |
 | Writeback approvals | SNOW payload approvals (implemented paths) | same semantics + IAM-scoped gated AWS actions |
 | SOC SOAR playbook runs | catalog + policy gate + thin SOAR adapter on analyzer host | catalog in SSM/S3/Dynamo + gated Lambda/Step Functions branch |
+| LLM tracing / Langfuse-class | OTEL or Langfuse at LLM transport edge; self-hosted or corp collector | Langfuse cloud, ADOT, or approved OTEL backend |
 | Replay / caching | scripted batch + disk artifacts | DynamoDB/S3 envelopes + versioning |
 
 ---
