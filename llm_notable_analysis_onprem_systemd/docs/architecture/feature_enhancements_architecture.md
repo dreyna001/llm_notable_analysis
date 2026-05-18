@@ -543,6 +543,47 @@ Retrieve **prior** similar notables, analyst disposition, tuning notes, and reme
 
 Separate **planned checks** from **allowed executions**: LLM may propose next checks; deterministic policy **allowlists** which integrations, queries, and budget classes may run—aligned with SOC workflow maturity targets (bounded tools, no open-ended autonomy).
 
+### SOC-defined SOAR playbook invocation (roadmap)
+
+**Goal:** During bounded investigation—not only at upstream ingest—invoke **Splunk SOAR playbooks authored and maintained by the SOC**, using a curated catalog rather than ad hoc playbook names invented by the model.
+
+**Distinct from existing patterns:**
+
+| Pattern | Role |
+|---------|------|
+| Phantom ingest templates (`soar_playbook/`, `s3_notable_pipeline/scripts/soar_playbook/`) | Upstream delivery: package a notable and drop to analyzer/S3 |
+| `containment_playbook` in LLM JSON | Generated analyst guidance text; no SOAR API call |
+| `LLM_STRUCTURED_OUTPUT_MODE=tool_call` | Local LLM JSON shaping for analysis/SPL fields; not SOAR execution |
+
+**Proposed surface (open to refinement):** expose registered playbooks to the investigation planner as **LLM tool/function definitions**—one tool per allowlisted playbook or a single `invoke_soar_playbook` tool with an enum of SOC-registered IDs. The model may **propose** a run with structured inputs derived from alert context; **deterministic policy** decides whether that proposal is permitted, and a **thin SOAR adapter** performs the API call.
+
+**Preferred architecture (planner + gate + adapter, not raw tool autonomy):**
+
+1. **SOC catalog** — versioned registry (config or small data file) of playbook id/name, risk class (`read_only` | `writeback` | `action`), required inputs schema, and optional alert-class routing hints. Only catalog entries may be invoked.
+2. **Proposal** — LLM tool call, deterministic router, or analyst UI selection produces a normalized `playbook_run_request` (playbook id, container/event refs, bounded parameter map).
+3. **Policy gate** — allowlists by playbook id, risk class, time window, rate budget, and tenant scope; **fail closed** on unknown playbooks or out-of-policy parameters.
+4. **Approval boundary** — `writeback` and `action` playbooks require explicit approval metadata in the payload (same semantics as ServiceNow create approval) unless a narrowly scoped auto-run profile is deliberately enabled.
+5. **Adapter** — thin HTTPS client to Splunk SOAR REST (run playbook / add work item / pass inputs); normalize outcomes into `enrichment` or `recommended_actions` with run id, status, and errors—never merge adapter output into direct alert facts.
+6. **Observability** — log playbook id, correlation id, policy decision, approval state, and terminal status; omit secrets and bulk container bodies.
+
+**Alternative designs worth evaluating before implementation:**
+
+- **Approval-first:** LLM or planner only *recommends* a playbook; analyst approves in payload or UI; adapter runs after approval (simplest operational posture).
+- **Deterministic routing only:** no LLM playbook selection—code maps alert class / enrichment signals to catalog entries; LLM summarizes outcomes only.
+- **Async handoff:** adapter enqueues a SOAR work item and returns immediately; poll or webhook for completion (better for long-running playbooks).
+
+**Instantiation:**
+
+| Concern | On‑prem | AWS |
+|---------|---------|-----|
+| Catalog storage | host config / versioned file under operator control | SSM Parameter Store, S3 config object, or DynamoDB catalog row |
+| Credentials | host secret store for SOAR API token | Secrets Manager |
+| Transport | analyzer host or sidecar egress to SOAR | Lambda/Step Functions branch with VPC egress if required |
+| Orchestration hook | optional post-analysis step in service loop | optional Step Functions branch after primary Bedrock pass |
+| Default | **off**; no playbook runs without explicit enable + catalog + policy | same |
+
+**Status:** roadmap only—not in the bounded **[Scope](#scope)** or locked technical spec until catalog schema, approval matrix, and adapter contract are reviewed.
+
 ### Evidence layering and structured output taxonomy (aspirational alignment)
 
 Production analyzers currently use schemas such as `evidence_vs_inference`, competing hypotheses, and reconciliation objects. Target alignment for enrichment-heavy workflows emphasizes explicit lanes:
@@ -616,6 +657,7 @@ Reference table for roadmap bullets above; **architecture truth** stays in prose
 | Case history | local store / corp DB abstraction | DynamoDB / Aurora / curated S3 |
 | Orchestration | single service loop (+ optional playbook) | EventBridge → Lambda; optional Step Functions for fan-out retries |
 | Writeback approvals | SNOW payload approvals (implemented paths) | same semantics + IAM-scoped gated AWS actions |
+| SOC SOAR playbook runs | catalog + policy gate + thin SOAR adapter on analyzer host | catalog in SSM/S3/Dynamo + gated Lambda/Step Functions branch |
 | Replay / caching | scripted batch + disk artifacts | DynamoDB/S3 envelopes + versioning |
 
 ---
