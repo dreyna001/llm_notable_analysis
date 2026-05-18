@@ -1,8 +1,30 @@
+# Build from repository root so sibling packages are available:
+#   docker build -f llm_notable_analysis_analyzer_image/Dockerfile.analyzer -t notable-analyzer-service .
+FROM python:3.12-slim-bookworm AS builder
+
+ENV PIP_NO_CACHE_DIR=1
+WORKDIR /build
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY onprem-llm-sdk /src/onprem-llm-sdk
+COPY onprem_rag_notable_analysis /src/onprem_rag_notable_analysis
+COPY llm_notable_analysis_onprem_systemd /src/llm_notable_analysis_onprem_systemd
+
+RUN pip install --upgrade pip \
+    && pip install --prefix=/install \
+        /src/onprem-llm-sdk \
+        /src/onprem_rag_notable_analysis \
+        /src/llm_notable_analysis_onprem_systemd
+
 FROM python:3.12-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    HF_HOME=/var/notables/cache/huggingface \
+    SENTENCE_TRANSFORMERS_HOME=/var/notables/cache/sentence-transformers
 
 WORKDIR /app
 
@@ -10,16 +32,24 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY llm_notable_analysis_analyzer_image/requirements.analyzer-docker.txt /tmp/requirements.txt
-RUN pip install --upgrade pip \
-    && pip install -r /tmp/requirements.txt
-
-COPY llm_notable_analysis_analyzer_image/onprem_service /app/onprem_service
-COPY llm_notable_analysis_analyzer_image/onprem_rag_notable_analysis /app/onprem_rag_notable_analysis
+COPY --from=builder /install /usr/local
+COPY llm_notable_analysis_analyzer_image/docker_healthcheck.py /app/docker_healthcheck.py
 
 RUN useradd --create-home --home-dir /home/analyzer --shell /usr/sbin/nologin analyzer \
-    && chown -R analyzer:analyzer /app
+    && mkdir -p \
+        /var/notables/incoming \
+        /var/notables/processed \
+        /var/notables/quarantine \
+        /var/notables/reports \
+        /var/notables/archive \
+        /var/notables/cache/huggingface \
+        /var/notables/cache/sentence-transformers \
+    && chown -R analyzer:analyzer /var/notables /app/docker_healthcheck.py
 
 USER analyzer
 
-ENTRYPOINT ["python", "-m", "onprem_service.onprem_main_nonsdk"]
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD ["python", "/app/docker_healthcheck.py"]
+
+# Matches deploy/systemd/notable-analyzer.service ExecStart.
+ENTRYPOINT ["python", "-m", "llm_notable_analysis_onprem_systemd.onprem_service.onprem_main"]

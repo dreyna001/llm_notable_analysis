@@ -1,0 +1,13 @@
+config.env
+.env
+data/notables/incoming/*
+!data/notables/incoming/.gitkeep
+data/notables/processed/*
+!data/notables/processed/.gitkeep
+data/notables/quarantine/*
+!data/notables/quarantine/.gitkeep
+data/notables/reports/*
+!data/notables/reports/.gitkeep
+data/notables/archive/*
+!data/notables/archive/.gitkeep
+data/postgres/

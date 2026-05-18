@@ -1,0 +1,33 @@
+# Optional lab stack for the analyzer container. LiteLLM/vLLM are not bundled here;
+# set LLM_API_URL in config.env to your proxy (compose service name, host gateway, etc.).
+services:
+  analyzer:
+    build:
+      context: ..
+      dockerfile: llm_notable_analysis_analyzer_image/Dockerfile.analyzer
+    image: notable-analyzer-service:local
+    user: "${ANALYZER_UID:-1000}:${ANALYZER_GID:-1000}"
+    env_file:
+      - path: config.env
+        required: false
+    environment:
+      HF_HOME: /var/notables/cache/huggingface
+      SENTENCE_TRANSFORMERS_HOME: /var/notables/cache/sentence-transformers
+      LLM_API_URL: ${LLM_API_URL:-http://host.docker.internal:4000/v1/chat/completions}
+    extra_hosts:
+      # Makes host.docker.internal work on Linux Docker Engine as well as Docker Desktop.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Host folder so you can copy test notables without docker volume commands.
+      - ./data/notables:/var/notables
+    restart: unless-stopped
+
+  # Uncomment when testing CAPABILITY_PROFILES=core,rag with RAG_POSTGRES_DSN in config.env.
+  # postgres:
+  #   image: pgvector/pgvector:pg16
+  #   environment:
+  #     POSTGRES_DB: notable_rag
+  #     POSTGRES_USER: notable_analyzer
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+  #   volumes:
+  #     - ./data/postgres:/var/lib/postgresql/data

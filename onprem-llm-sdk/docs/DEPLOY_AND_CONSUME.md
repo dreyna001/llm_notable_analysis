@@ -151,38 +151,23 @@ Current default chain:
 `onprem-llm-sdk` remains the transport client library used by analyzer code and
 other local callers. It is not a standalone deployment stack.
 
-Docker build context note for legacy/image follow-up:
+Docker analyzer image (same packages as host systemd):
 
-- To use `COPY onprem-llm-sdk ...`, `onprem-llm-sdk/` must be inside the folder Docker is building from.
-- If `onprem-llm-sdk/` is not in that folder, Docker cannot copy it into the image.
-
-Example that works:
+Build from the **repository root** so `onprem-llm-sdk/`, `onprem_rag_notable_analysis/`,
+and `llm_notable_analysis_onprem_systemd/` are in the build context:
 
 ```bash
 docker build -f llm_notable_analysis_analyzer_image/Dockerfile.analyzer -t notable-analyzer-service .
 ```
 
-Example that does not work:
+See `llm_notable_analysis_analyzer_image/README.md` for compose and `config.env.docker.example`.
 
-```bash
-docker build -f llm_notable_analysis_analyzer_image/Dockerfile.analyzer -t notable-analyzer-service .
-```
-
-### Option A: copy SDK source (simple)
+Air-gapped installs can swap the `pip install` paths for pinned wheels:
 
 ```dockerfile
-COPY onprem-llm-sdk /tmp/onprem-llm-sdk
-RUN pip install /tmp/onprem-llm-sdk
+COPY wheels /opt/artifacts/wheels
+RUN pip install --no-index --find-links /opt/artifacts/wheels onprem-llm-sdk==<version>
 ```
-
-### Option B: install pinned wheel (preferred for production/air-gap)
-
-```dockerfile
-COPY wheels /opt/artifacts/onprem_llm_sdk/wheels
-RUN pip install --no-index --find-links /opt/artifacts/onprem_llm_sdk/wheels onprem-llm-sdk==<version>
-```
-
-Note: `wheels/` must also be inside your build context.
 
 Deploy recommendation:
 

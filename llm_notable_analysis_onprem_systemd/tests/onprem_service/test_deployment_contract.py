@@ -288,14 +288,44 @@ class TestDeploymentContract(unittest.TestCase):
             ).exists()
         )
 
-    def test_legacy_docker_docs_are_not_presented_as_current_runtime(self) -> None:
-        """Legacy Docker paths should not look equivalent to the systemd runtime."""
+    def test_analyzer_docker_image_matches_systemd_runtime(self) -> None:
+        """Docker packaging should install the same packages and entrypoint as systemd."""
+        dockerfile = (
+            WORKSPACE_ROOT
+            / "llm_notable_analysis_analyzer_image"
+            / "Dockerfile.analyzer"
+        ).read_text(encoding="utf-8")
         analyzer_readme = (
             WORKSPACE_ROOT / "llm_notable_analysis_analyzer_image" / "README.md"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("not production-equivalent", analyzer_readme)
-        self.assertIn("PostgreSQL/pgvector RAG", analyzer_readme)
+        self.assertIn("onprem-llm-sdk", dockerfile)
+        self.assertIn("onprem_rag_notable_analysis", dockerfile)
+        self.assertIn("llm_notable_analysis_onprem_systemd", dockerfile)
+        self.assertIn(
+            "llm_notable_analysis_onprem_systemd.onprem_service.onprem_main",
+            dockerfile,
+        )
+        self.assertNotIn("onprem_service.onprem_main_nonsdk", dockerfile)
+        self.assertNotIn(
+            "llm_notable_analysis_analyzer_image/onprem_service", dockerfile
+        )
+        self.assertIn("AS builder", dockerfile)
+        self.assertIn("COPY --from=builder", dockerfile)
+        self.assertIn("HEALTHCHECK", dockerfile)
+        self.assertIn("docker_healthcheck.py", dockerfile)
+        compose_text = (
+            WORKSPACE_ROOT
+            / "llm_notable_analysis_analyzer_image"
+            / "docker-compose.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("./data/notables:/var/notables", compose_text)
+        self.assertIn("required: false", compose_text)
+        self.assertIn("host.docker.internal:host-gateway", compose_text)
+        self.assertIn("ANALYZER_UID", compose_text)
+        self.assertIn("llm_notable_analysis_onprem_systemd/", analyzer_readme)
+        self.assertIn("onprem_rag_notable_analysis/", analyzer_readme)
+        self.assertNotIn("not production-equivalent", analyzer_readme)
 
     def test_readme_uses_current_sftp_chroot_contract(self) -> None:
         """README SFTP guidance should match installer-created paths."""
