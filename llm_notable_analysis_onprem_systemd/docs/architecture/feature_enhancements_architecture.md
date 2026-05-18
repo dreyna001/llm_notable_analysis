@@ -687,6 +687,242 @@ Mirrors consolidated guidance shared with **`s3_notable_pipeline`** parity narra
 | Execute | Bounded read-only search; deterministic compress/enrich (**no mandatory LLM** on this rim) |
 | 3 (**optional backlog**) | Additional bounded inference pass revising prose **only from compressed query evidence plus prior structured artifact** |
 
+### Browse-only analyst portal and case archive (~90-day retention, roadmap)
+
+**Goal:** Move from “open the latest `.html` on disk” to a **browse-only analyst portal** that lists, filters, and opens prior incidents for roughly **three months**, without turning the analyzer into an interactive app or a write path for analysts.
+
+**Trigger:** At ~90 days and non-trivial volume, flat `REPORT_DIR` listing stops being enough. Operators need **indexed metadata**, **retention aligned to browse expectations**, and a **separate read-only web surface**—not just more HTML files.
+
+#### Current baseline (what exists today)
+
+| Concern | On‑prem (`llm_notable_analysis_onprem_systemd`) | AWS (`s3_notable_pipeline`) |
+|---------|--------------------------------------------------|-----------------------------|
+| Analyst artifact | `{finding_id}.md` and optional `{finding_id}.html` in `REPORT_DIR` | `{stem}.md` in S3 output prefix |
+| Structured result persistence | **None** locally—LLM JSON exists only in memory during the run | **None** in S3 by default—markdown is the durable output |
+| Browse UX | Open files from shared folder; HTML already has tabbed dashboard (`html_generator.py`) when `html_reports` profile is on | Download/list S3 objects; optional Splunk comment writeback |
+| Retention | Two-stage filesystem retention: default **7 days** hot + **14 days** archive ≈ **21 days** total before delete | Operator-defined S3 lifecycle; no first-class case index |
+| Index / search | Directory mtime only | S3 prefix listing only |
+
+This is adequate for **today / this week** and small labs. It is **not** a case archive or portal product.
+
+#### Target capability (v1 portal)
+
+| Property | Requirement |
+|----------|-------------|
+| Interaction model | **Browse-only**—list cases, filter, open detail; **no data entry**, no re-run analysis, no SOAR/ticket actions from the UI |
+| Retention target | **~90 days** (`CASE_RETENTION_DAYS=90`) as the default design point; operator-tunable |
+| Detail view | Reuse existing tabbed HTML dashboard (Verdict, Hypotheses, TTPs, IOCs, Evidence, optional Query/ServiceNow sections) |
+| System of record | Analyzer pipeline remains the **only writer**; portal is read-only |
+| Auth | Corporate SSO or reverse-proxy auth in front of portal; fail closed |
+| Default posture | **Off** until `analyst_portal` (or equivalent) capability profile + explicit config |
+
+#### Why this crosses from “UI-only” into architecture
+
+A three-month browse window requires changes **beyond** a nicer front end:
+
+1. **Case metadata store** — filename and mtime are not enough for verdict filters, date ranges, or stable pagination.
+2. **Artifact contract** — persist pointers (and optionally a redacted structured snapshot) at write time so list views do not parse markdown/HTML.
+3. **Retention decoupling** — report/case retention must be **independent** of input/processed retention; default 21-day delete would undermine a 90-day portal.
+4. **Separate read service** — the long-running analyzer loop should not serve HTTP to analysts; a small read-only portal process (or AWS equivalent) limits blast radius.
+5. **Storage sizing & lifecycle** — ~90 days of `.md` + `.html` (+ optional JSON envelope) needs documented disk/S3 envelopes and optional warm/cold tiers.
+
+Rough sizing at **90 days** (order of magnitude):
+
+| Volume | Artifacts per case | Total (~90 days) |
+|--------|-------------------|------------------|
+| 50/day | ~100–200 KB (md + html + metadata) | ~450 MB–900 MB |
+| 200/day | same | ~1.8–3.2 GB |
+| 1,000/day | same | ~9–18 GB |
+
+These remain modest on a dedicated analyzer host or S3 bucket; the architectural cost is **index + retention policy**, not raw bytes.
+
+#### Locked design principles
+
+- **Write path unchanged in spirit:** file-drop (on‑prem) or S3 trigger (AWS) → analyze → validate → render → **append case record** → existing sinks (Splunk/SNOW) when enabled.
+- **Read path isolated:** portal never calls Bedrock/vLLM, never drops files into `INCOMING_DIR`, never triggers side effects.
+- **Reuse renderers:** `html_generator.py` / `markdown_generator.py` stay deterministic; portal serves artifacts or pre-rendered HTML—it does not re-invoke the LLM.
+- **Evidence discipline:** stored JSON snapshots, if written, are the **validated structured object** already used for reports—not raw model text unless `poc_unstructured_output` fallback (then flag clearly in metadata).
+- **No dual backlog:** one case-archive contract; on‑prem and AWS differ only in **instantiation** (see table below).
+
+#### Proposed runtime shape
+
+```mermaid
+flowchart TB
+  subgraph WritePath["Write path (existing analyzer)"]
+    IN[Incoming notable] --> AN[Analyzer orchestration]
+    AN --> VAL[Validate structured result]
+    VAL --> RND[Render md / html]
+    RND --> ART[Write artifacts]
+    ART --> IDX[Upsert case metadata]
+    IDX --> MOV[Move input / retention hooks]
+  end
+
+  subgraph ReadPath["Read path (new, browse-only)"]
+    UI[Analyst browser] --> PORT[Portal API / static host]
+    PORT --> IDX
+    PORT --> ART
+  end
+```
+
+#### On‑prem instantiation (`llm_notable_analysis_onprem_systemd`)
+
+**New / extended storage layout**
+
+| Location | Purpose |
+|----------|---------|
+| `REPORT_DIR/` | Hot artifacts: `{finding_id}.md`, `{finding_id}.html` (unchanged) |
+| `CASE_ARCHIVE_DIR/` or `REPORT_DIR/archive/` | Optional warm tier after N days; portal reads both hot + warm |
+| `CASE_DB_PATH` (default e.g. `/var/notables/cases/cases.sqlite3`) | SQLite index: one row per processed case |
+| Optional `{finding_id}.analysis.json` | Redacted validated structured snapshot for re-render / audit (policy-gated) |
+
+**Case index (SQLite v1 recommended)**
+
+Minimal columns (normative detail deferred to technical spec after review):
+
+| Field | Use |
+|-------|-----|
+| `case_id` / `finding_id` | Primary key; matches filename stem |
+| `processed_at` | Sort/filter default |
+| `verdict`, `confidence` | List badges and filters |
+| `search_name`, `threat_category`, `risk_score` | Optional facets from incoming JSON |
+| `report_md_path`, `report_html_path` | Artifact pointers |
+| `analysis_json_path` | Optional |
+| `correlation_id` | Join to journald traces |
+| `capability_snapshot` | Which profiles were active (html, spl, snow, etc.) |
+
+SQLite keeps the on‑prem footprint small and matches existing `RAG_SQLITE_PATH` patterns. Postgres remains an operator choice if the same host already runs pgvector RAG—**not required for v1**.
+
+**Retention changes**
+
+| Setting | Today (example) | Portal-enabled target |
+|---------|-----------------|------------------------|
+| `REPORT_RETENTION_DAYS` | 7 | Decouple from case retention; e.g. 30 hot then move |
+| `ARCHIVE_RETENTION_DAYS` | 14 | Extend or replace with `CASE_RETENTION_DAYS=90` |
+| `INPUT_RETENTION_DAYS` | 2 | Unchanged—inputs need not live 90 days |
+| `CASE_RETENTION_DAYS` | *(new)* | 90 default when portal profile on |
+
+Retention job must **delete case index rows and artifacts together** to avoid orphan metadata.
+
+**New components (concrete, minimal)**
+
+| Component | Role |
+|-----------|------|
+| `case_store.py` | Upsert case row + optional JSON snapshot after successful report write |
+| `case_index.py` | Read-only queries: list, get-by-id, date range, verdict filter |
+| `portal_app.py` (or `deploy/systemd/notable-portal.service` + thin package) | Read-only HTTP: `GET /health`, `GET /api/cases`, `GET /api/cases/{id}`, `GET /api/cases/{id}/html` |
+| `html_generator.py` | Unchanged producer; portal serves its output |
+| `retention.py` | Extended to honor `CASE_RETENTION_DAYS` and index cleanup |
+
+**Deployment**
+
+- Separate **systemd unit** `notable-portal.service` bound to **loopback** (`127.0.0.1`) or internal VLAN; nginx/Apache with SSO terminates TLS and proxies.
+- `ReadWritePaths` for portal: `CASE_DB_PATH`, `REPORT_DIR`, warm archive path—**not** `INCOMING_DIR`.
+- New capability profile: **`analyst_portal`** (implies `html_reports`, case index, extended retention defaults).
+
+**Portal API behavior (v1)**
+
+- Paginated case list (default sort: `processed_at` desc).
+- Filters: date range, verdict, optional `search_name` prefix.
+- Detail: redirect or inline-serve pre-rendered HTML; optional markdown download.
+- **No** `POST`, `PUT`, `PATCH`, or `DELETE` on cases.
+
+**Phased delivery (on‑prem)**
+
+1. **Persist metadata + extend retention to 90 days** — portal can wait; validates storage and retention jobs.
+2. **Nightly static `index.html` or `cases.manifest.json`** — optional bridge using same `case_store` (still browse-only).
+3. **Dedicated portal service + SSO** — full app experience.
+4. **Faceted search / full-text** — v2; likely needs FTS extension or external search—out of v1 scope.
+
+#### AWS instantiation (`s3_notable_pipeline` / parity)
+
+**New / extended storage layout**
+
+| Location | Purpose |
+|----------|---------|
+| `s3://{output_bucket}/reports/{finding_id}.md` | Existing markdown artifact |
+| `s3://{output_bucket}/reports/{finding_id}.html` | **New:** shared `html_generator` parity |
+| `s3://{output_bucket}/cases/{yyyy}/{mm}/{dd}/{finding_id}.json` | Optional redacted analysis envelope + artifact keys |
+| **DynamoDB** `CaseIndex` table | **Recommended v1 index** for list/filter at 90-day scale |
+
+**Why DynamoDB on AWS (vs S3 listing alone)**
+
+- S3 `ListObjectsV2` over 90 days of prefix keys does not give cheap verdict/date filters or stable pagination.
+- DynamoDB item per case with GSI on `processed_at` (and optional `verdict`) matches browse UX with minimal ops.
+- S3 remains blob store; Dynamo holds **metadata only** (paths, facets, sizes—not full alert bodies unless policy requires).
+
+Example access pattern:
+
+| Operation | Mechanism |
+|-----------|-----------|
+| List recent cases | Query GSI `processed_at` descending, paginated |
+| Open case HTML | S3 GET via presigned URL or CloudFront OAI path |
+| Expire at 90 days | Dynamo TTL on `expires_at` + S3 lifecycle rule on `reports/` and `cases/` prefixes |
+
+**Portal on AWS (v1 options)**
+
+| Pattern | Fit |
+|---------|-----|
+| **API Gateway + Lambda (read-only)** + Cognito/SSO | Smallest always-on cost; IAM denies writes |
+| **Internal ALB + ECS** (compare `aws_notable_ecs_demo`—that demo is **interactive analyze**, not browse) | Heavier; use only if org standardizes on ECS for internal tools |
+| **CloudFront + S3 static** for HTML + **Lambda@Edge/API** for index | Good when HTML is self-contained and index API is thin |
+
+**Lambda writer changes (`s3_notable_pipeline`)**
+
+After markdown write:
+
+1. Render HTML when `HTML_REPORT_ENABLED` (parity env).
+2. Put optional `cases/...json` envelope.
+3. `PutItem` into DynamoDB `CaseIndex`.
+4. Emit structured log with `finding_id` + correlation id (unchanged observability).
+
+**Security (AWS)**
+
+- Portal Lambda/task role: **`s3:GetObject`** on report prefixes, **`dynamodb:Query`** on index—**no** `PutItem`, `DeleteItem`, Bedrock, or input-bucket access.
+- Separate IAM boundary from analyzer Lambda writer role.
+- Do not expose input bucket via portal.
+
+#### Capability profile and config (both deployments)
+
+Proposed profile **`analyst_portal`** (off by default):
+
+| Flag / setting | On‑prem | AWS |
+|----------------|---------|-----|
+| `CASE_ARCHIVE_ENABLED` | true when profile on | true when profile on |
+| `CASE_RETENTION_DAYS` | 90 | 90 |
+| `HTML_REPORT_ENABLED` | true (required for tabbed UI) | parity flag |
+| `CASE_DB_PATH` / `CASE_INDEX_TABLE` | SQLite path | DynamoDB table name |
+| `PORTAL_BIND_HOST` | `127.0.0.1` | n/a (API Gateway/ALB) |
+| `PORTAL_PAGE_SIZE` | 50 | 50 |
+
+Explicit env overrides remain supported; profile only sets defaults.
+
+#### Relationship to other roadmap items
+
+| Related item | Relationship |
+|--------------|--------------|
+| **[Case history retrieval](#case-history-retrieval)** | Advisory *similar-case* retrieval for prompts; **case archive** is durable storage of **this product’s** analysis outputs. Converge schemas later; do not block portal v1. |
+| **`html_reports` profile** | Prerequisite UI artifact; portal serves it. |
+| **Splunk / ServiceNow writeback** | Long-term SoR for some customers; portal is a **local convenience window** over analyzer outputs, not a replacement for SIEM/ticket history. |
+| **`aws_notable_ecs_demo`** | Reference for Bedrock **interactive** UI patterns—not the browse portal; do not conflate. |
+
+#### Out of scope (portal v1)
+
+- Analyst data entry, disposition capture, or feedback forms (see **[Analyst feedback loop & evaluation](#analyst-feedback-loop--evaluation)**).
+- Re-run analysis or ad hoc LLM chat from the portal.
+- SOAR playbook triggers, Splunk query execution, or ServiceNow create from the UI.
+- Full-text search across report bodies.
+- Multi-tenant RBAC beyond coarse SSO gate (v2 if required).
+
+#### Open decisions before technical spec
+
+- Store **full validated JSON** vs **list metadata + html/md only** (privacy/storage tradeoff).
+- SQLite vs Postgres for on‑prem when pgvector RAG already on Postgres (single DB vs separation).
+- Whether warm tier uses filesystem archive subdirs or separate mount.
+- AWS portal pattern: API Gateway + Lambda vs internal ALB + ECS.
+- Dynamo TTL vs nightly compaction job for index/S3 consistency on partial failures.
+
+**Status:** roadmap only—not in bounded **[Scope](#scope)** until case schema, retention matrix, and portal IAM/systemd contracts are reviewed and split into a dedicated technical spec.
+
 ---
 
 ## Deployment instantiation (On-prem vs AWS)
@@ -699,6 +935,7 @@ Reference table for roadmap bullets above; **architecture truth** stays in prose
 | Bounded investigation | Splunk MCP/REST (implemented when enabled) | Security Lake / Athena + similar policy envelope when built |
 | RAG/runbooks | `RAG_*` paths + embeddings | KB / OpenSearch / pgvector-backed retrieve |
 | Case history | local store / corp DB abstraction | DynamoDB / Aurora / curated S3 |
+| Browse-only analyst portal (~90d) | SQLite case index + `REPORT_DIR` artifacts + read-only `notable-portal` systemd unit | DynamoDB `CaseIndex` + S3 md/html + read-only API Gateway/Lambda (or internal ALB) |
 | Orchestration | single service loop (+ optional playbook) | EventBridge → Lambda; optional Step Functions for fan-out retries |
 | Writeback approvals | SNOW payload approvals (implemented paths) | same semantics + IAM-scoped gated AWS actions |
 | SOC SOAR playbook runs | catalog + policy gate + thin SOAR adapter on analyzer host | catalog in SSM/S3/Dynamo + gated Lambda/Step Functions branch |
