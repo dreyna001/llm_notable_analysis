@@ -1,0 +1,368 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Single-GPU EC2 test host for the on-prem notable analyzer (RHEL 8 or 9,
+  vLLM + LiteLLM + gemma-4-31B-it). Provisions networking, a GPU instance,
+  optional Secrets Manager for Hugging Face token, and cloud-init bootstrap
+  that clones this repo and runs scripts/install.sh.
+
+Parameters:
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: EC2 key pair for SSH access (Session Manager also works).
+
+  RhelMajorVersion:
+    Type: String
+    Default: '9'
+    AllowedValues:
+      - '8'
+      - '9'
+    Description: >-
+      RHEL major version for the test host. Uses the official AWS Marketplace
+      RHEL AMI unless AmiId is overridden.
+
+  GitCloneUrl:
+    Type: String
+    Description: >-
+      HTTPS git URL for the full llm_notable_analysis monorepo (must include
+      llm_notable_analysis_onprem_systemd/ and onprem_rag_notable_analysis/).
+    Default: https://github.com/your-org/llm_notable_analysis.git
+
+  GitBranch:
+    Type: String
+    Default: main
+    Description: Branch or tag to clone.
+
+  InstanceType:
+    Type: String
+    Default: p5.4xlarge
+    Description: >-
+      GPU instance type. gemma-4-31B-it needs roughly 80 GB+ VRAM on a single
+      GPU with the packaged vllm.service (CUDA_VISIBLE_DEVICES=0). p5.4xlarge
+      (1x H100 80 GB) is the default test size.
+
+  RootVolumeGiB:
+    Type: Number
+    Default: 500
+    MinValue: 200
+    MaxValue: 16384
+    Description: Root gp3 volume size (GB). Model weights and caches need space.
+
+  AllowedSshCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
+    Description: CIDR allowed to SSH to the instance. Tighten for lab use.
+
+  HuggingFaceToken:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: >-
+      Hugging Face token for google/gemma-4-31B-it download. Leave empty only
+      if you will stage model weights manually under /opt/models/gemma-4-31B-it.
+
+  ExistingHuggingFaceTokenSecretArn:
+    Type: String
+    Default: ''
+    Description: >-
+      Optional existing Secrets Manager ARN for the HF token. When set, it
+      overrides HuggingFaceToken.
+
+  AmiId:
+    Type: String
+    Default: ''
+    Description: >-
+      Optional explicit AMI ID. Leave empty to use the latest official RHEL
+      Marketplace AMI for RhelMajorVersion.
+
+Conditions:
+  CreateHuggingFaceSecret: !And
+    - !Equals [!Ref ExistingHuggingFaceTokenSecretArn, '']
+    - !Not [!Equals [!Ref HuggingFaceToken, '']]
+  UseCreatedSecret: !Condition CreateHuggingFaceSecret
+  UseExistingSecret: !Not [!Equals [!Ref ExistingHuggingFaceTokenSecretArn, '']]
+  HasAnyHfSecret: !Or
+    - !Condition CreateHuggingFaceSecret
+    - !Condition UseExistingSecret
+  UseProvidedAmi: !Not [!Equals [!Ref AmiId, '']]
+  IsRhel9: !Equals [!Ref RhelMajorVersion, '9']
+
+Resources:
+  NotableTestVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.42.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: notable-analyzer-test-vpc
+
+  NotableTestInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: notable-analyzer-test-igw
+
+  NotableTestVpcIgwAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref NotableTestVpc
+      InternetGatewayId: !Ref NotableTestInternetGateway
+
+  NotableTestPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NotableTestVpc
+      CidrBlock: 10.42.1.0/24
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ''
+      Tags:
+        - Key: Name
+          Value: notable-analyzer-test-public
+
+  NotableTestPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref NotableTestVpc
+      Tags:
+        - Key: Name
+          Value: notable-analyzer-test-public-rt
+
+  NotableTestPublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: NotableTestVpcIgwAttachment
+    Properties:
+      RouteTableId: !Ref NotableTestPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref NotableTestInternetGateway
+
+  NotableTestPublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref NotableTestPublicSubnet
+      RouteTableId: !Ref NotableTestPublicRouteTable
+
+  NotableTestSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Notable analyzer GPU test host
+      VpcId: !Ref NotableTestVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AllowedSshCidr
+          Description: SSH from operator CIDR
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Outbound for git, HF model download, and package installs
+      Tags:
+        - Key: Name
+          Value: notable-analyzer-test-sg
+
+  NotableTestInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - !If
+          - HasAnyHfSecret
+          - PolicyName: NotableTestSecretsRead
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - secretsmanager:GetSecretValue
+                  Resource:
+                    - !If
+                      - UseCreatedSecret
+                      - !Ref NotableTestHuggingFaceSecret
+                      - !Ref ExistingHuggingFaceTokenSecretArn
+          - !Ref AWS::NoValue
+
+  NotableTestInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref NotableTestInstanceRole
+
+  NotableTestHuggingFaceSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: CreateHuggingFaceSecret
+    Properties:
+      Description: Hugging Face token for gemma-4-31B-it download on notable test VM
+      SecretString: !Ref HuggingFaceToken
+
+  NotableTestLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${AWS::StackName}-lt'
+      LaunchTemplateData:
+        ImageId: !If
+          - UseProvidedAmi
+          - !Ref AmiId
+          - !If
+            - IsRhel9
+            - !Sub '{{resolve:ssm:/aws/service/marketplace/product/4ek98h08jp942/latest}}'
+            - !Sub '{{resolve:ssm:/aws/service/marketplace/product/6bpmfw6729cq5/latest}}'
+        InstanceType: !Ref InstanceType
+        KeyName: !Ref KeyPairName
+        IamInstanceProfile:
+          Arn: !GetAtt NotableTestInstanceProfile.Arn
+        MetadataOptions:
+          HttpTokens: required
+          HttpPutResponseHopLimit: 2
+        BlockDeviceMappings:
+          - DeviceName: /dev/sda1
+            Ebs:
+              VolumeSize: !Ref RootVolumeGiB
+              VolumeType: gp3
+              DeleteOnTermination: true
+              Encrypted: true
+        NetworkInterfaces:
+          - AssociatePublicIpAddress: true
+            DeviceIndex: 0
+            Groups:
+              - !Ref NotableTestSecurityGroup
+        UserData:
+          Fn::Base64: !Sub
+            - |
+              #cloud-config
+              write_files:
+                - path: /etc/notable-analyzer-bootstrap.env
+                  permissions: '0600'
+                  owner: root:root
+                  content: |
+                    GIT_CLONE_URL=${GitCloneUrl}
+                    GIT_BRANCH=${GitBranch}
+                    HF_TOKEN_SECRET_ARN=${HfSecretArn}
+                    RHEL_MAJOR_VERSION=${RhelMajorVersion}
+                    VLLM_HEALTH_TIMEOUT_SECONDS=900
+                    SMOKE_TEST_TIMEOUT_SECONDS=600
+                - path: /usr/local/sbin/notable-analyzer-firstboot.sh
+                  permissions: '0755'
+                  owner: root:root
+                  content: |
+                    #!/usr/bin/env bash
+                    set -euo pipefail
+                    LOG=/var/log/notable-analyzer-firstboot.log
+                    exec >>"$LOG" 2>&1
+                    if [[ -f /var/lib/notable-analyzer-bootstrap/verified ]]; then
+                      echo "bootstrap already verified; skipping"
+                      exit 0
+                    fi
+                    echo "=== firstboot $(date -Is) ==="
+                    set -a
+                    # shellcheck disable=SC1091
+                    source /etc/notable-analyzer-bootstrap.env
+                    set +a
+                    dnf -y install git
+                    if [[ ! -x /usr/local/sbin/notable-analyzer-bootstrap.sh ]]; then
+                      rm -rf /opt/llm-notable-analysis-src
+                      git clone --depth 1 --branch "$GIT_BRANCH" "$GIT_CLONE_URL" /opt/llm-notable-analysis-src
+                      install -m 0755 \
+                        /opt/llm-notable-analysis-src/llm_notable_analysis_onprem_systemd/deploy/aws/bootstrap-ec2-test.sh \
+                        /usr/local/sbin/notable-analyzer-bootstrap.sh
+                    fi
+                    exec /usr/local/sbin/notable-analyzer-bootstrap.sh
+                - path: /etc/systemd/system/notable-analyzer-bootstrap.service
+                  permissions: '0644'
+                  owner: root:root
+                  content: |
+                    [Unit]
+                    Description=Notable analyzer EC2 bootstrap (install + smoke test)
+                    After=network-online.target
+                    Wants=network-online.target
+                    ConditionPathExists=!/var/lib/notable-analyzer-bootstrap/verified
+
+                    [Service]
+                    Type=oneshot
+                    ExecStart=/usr/local/sbin/notable-analyzer-firstboot.sh
+                    RemainAfterExit=no
+
+                    [Install]
+                    WantedBy=multi-user.target
+              runcmd:
+                - systemctl daemon-reload
+                - systemctl enable --now notable-analyzer-bootstrap.service
+            - HfSecretArn: !If
+                - UseCreatedSecret
+                - !Ref NotableTestHuggingFaceSecret
+                - !If
+                  - UseExistingSecret
+                  - !Ref ExistingHuggingFaceTokenSecretArn
+                  - none
+
+  NotableTestInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref NotableTestLaunchTemplate
+        Version: !GetAtt NotableTestLaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-gpu-test'
+
+Outputs:
+  InstanceId:
+    Description: EC2 instance ID
+    Value: !Ref NotableTestInstance
+
+  PublicIp:
+    Description: Public IPv4 for SSH
+    Value: !GetAtt NotableTestInstance.PublicIp
+
+  SshCommand:
+    Description: SSH to the host as ec2-user (RHEL default user on AWS)
+    Value: !Sub 'ssh -i <key.pem> ec2-user@${NotableTestInstance.PublicIp}'
+
+  RhelVersion:
+    Description: RHEL major version deployed
+    Value: !Ref RhelMajorVersion
+
+  SessionManagerHint:
+    Description: Connect without SSH key via SSM Session Manager
+    Value: !Sub 'aws ssm start-session --target ${NotableTestInstance}'
+
+  BootstrapLogCommand:
+    Description: Tail bootstrap progress on the host
+    Value: sudo tail -f /var/log/notable-analyzer-bootstrap.log
+
+  ServiceStatusCommand:
+    Description: Check systemd chain after bootstrap completes
+    Value: sudo systemctl status vllm litellm notable-analyzer
+
+  SmokeTestCommand:
+    Description: Re-run end-to-end smoke on the host
+    Value: sudo bash /opt/llm-notable-analysis-src/llm_notable_analysis_onprem_systemd/scripts/smoke_service_chain.sh --config-env /etc/notable-analyzer/config.env
+
+  BootstrapStatusFile:
+    Description: Written when bootstrap finishes successfully
+    Value: /etc/notable-analyzer/bootstrap-status.txt
+
+  HuggingFaceSecretArn:
+    Description: Secrets Manager ARN used for model download (if created by stack)
+    Condition: CreateHuggingFaceSecret
+    Value: !Ref NotableTestHuggingFaceSecret
+
+  Notes:
+    Description: Operational notes
+    Value: >-
+      Uses official AWS Marketplace RHEL AMIs (subscription required). First
+      boot may reboot once after NVIDIA driver install. Model download and vLLM
+      load can take 30-60+ minutes. LLM endpoints stay on loopback only. Tear
+      down the stack when finished to stop GPU charges.
