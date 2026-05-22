@@ -417,7 +417,7 @@ New flags should follow the existing `config.env.example` and `Config` style:
 - `INVESTIGATION_QUERY_EXECUTION_ENABLED=false`
 - `INVESTIGATION_QUERY_EXECUTOR=rest`
 - `INVESTIGATION_MAX_QUERIES_PER_ALERT=6`
-- `INVESTIGATION_MAX_CONCURRENT_QUERIES=3`
+- `INVESTIGATION_MAX_CONCURRENT_QUERIES=6`
 - `QUERY_RESULT_INTERPRETATION_ENABLED=false`
 - `QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS=4000`
 - `QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS=3`
@@ -427,7 +427,7 @@ New flags should follow the existing `config.env.example` and `Config` style:
 - `SPLUNK_SEARCH_DENIED_COMMANDS=delete,collect,outputlookup,sendemail,map,rest,script,dbxquery`
 - `SPLUNK_SEARCH_MAX_TIME_RANGE=24h`
 - `SPLUNK_SEARCH_MAX_ROWS=100`
-- `SPLUNK_SEARCH_TIMEOUT_SECONDS=20`
+- `SPLUNK_SEARCH_TIMEOUT_SECONDS=30`
 - `SPLUNK_MCP_TOOL_NAME=splunk_search`
 - `SPL_QUERY_GENERATION_ENABLED=false` (bounded second-call SPL field generation—see section **SPL query generation & SPL grounding (canonical implementation plans)** earlier in this document)
 - `SPL_QUERY_RAG_ENABLED=false` plus `SPL_QUERY_RAG_SOURCE_DIR`, `SPL_QUERY_RAG_INDEX_DIR`, `SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE`, snippet/budget knobs, and `SPL_QUERY_RAG_FAILURE_MODE` for the optional SPL-focused KB path

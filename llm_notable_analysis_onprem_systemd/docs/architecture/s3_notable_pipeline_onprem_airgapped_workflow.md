@@ -381,14 +381,13 @@ RETENTION_RUN_INTERVAL_SECONDS=86400
 # === Concurrency (optional) ===
 # Python multithreading via ThreadPoolExecutor (not asyncio)
 CONCURRENCY_ENABLED=false
-# Gemma/vLLM baseline profile for Xeon Gold:
-MAX_WORKERS=4
-MAX_QUEUE_DEPTH=32
-# Xeon Platinum profile:
-# MAX_WORKERS=6
-# MAX_QUEUE_DEPTH=48
-# AMD EPYC 7J13 VM on KVM (30 vCPU):
-# Start with Gold profile (4/32), then tune upward only with measured headroom.
+# Gemma 4 31B-it on RTX PRO 6000 (96 GB): start sequential, load-test before raising
+MAX_WORKERS=1
+MAX_QUEUE_DEPTH=8
+# After vLLM latency is acceptable:
+# CONCURRENCY_ENABLED=true
+# MAX_WORKERS=2
+# MAX_QUEUE_DEPTH=16
 ```
 
 ### Config Loading (Python)
@@ -589,6 +588,8 @@ python -m vllm.entrypoints.openai.api_server \
   --served-model-name gemma-4-31B-it \
   --host 127.0.0.1 \
   --port 8000 \
+  --gpu-memory-utilization 0.92 \
+  --max-model-len 32768 \
   --api-key "<your-api-key>" \
   --tensor-parallel-size 1
 ```

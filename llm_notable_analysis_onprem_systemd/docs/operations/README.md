@@ -23,6 +23,7 @@ behavior within supported config bounds.
 
 | Area | Guide | Purpose |
 |------|-------|---------|
+| Deployment hardware profiles | [`deployment_profiles/README.md`](deployment_profiles/README.md) | Recommended vLLM and `config.env` starting values per CPU/GPU build. |
 | Capability profiles | [`CAPABILITY_PROFILES.md`](CAPABILITY_PROFILES.md) | Supported operator-facing feature bundles and legacy low-level flag behavior. |
 | SPL generation and execution | [`SPL_OPERATIONS.md`](SPL_OPERATIONS.md) | Customer-specific indexes, SPL query KB grounding, command controls, timeouts, REST vs MCP, and rollout. |
 | Knowledge base content | [`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md) | Add, rebuild, validate, and roll back KB source documents. |

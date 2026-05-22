@@ -226,7 +226,7 @@ class Config:
     LLM_MODEL_NAME: str = "gemma-4-31B-it"
     LLM_STRUCTURED_OUTPUT_MODE: str = "prompt_json"
     LLM_MAX_TOKENS: int = 4096
-    LLM_TIMEOUT: int = 120  # seconds
+    LLM_TIMEOUT: int = 240  # seconds
     HTML_REPORT_ENABLED: bool = False
 
     # Optional retrieval grounding (RAG)
@@ -291,7 +291,7 @@ class Config:
     INVESTIGATION_QUERY_EXECUTION_ENABLED: bool = False
     INVESTIGATION_QUERY_EXECUTOR: str = "rest"
     INVESTIGATION_MAX_QUERIES_PER_ALERT: int = 6
-    INVESTIGATION_MAX_CONCURRENT_QUERIES: int = 3
+    INVESTIGATION_MAX_CONCURRENT_QUERIES: int = 6
     QUERY_RESULT_INTERPRETATION_ENABLED: bool = False
     QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS: int = 4000
     QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS: int = 3
@@ -304,7 +304,7 @@ class Config:
     )
     SPLUNK_SEARCH_MAX_TIME_RANGE: str = "24h"
     SPLUNK_SEARCH_MAX_ROWS: int = 100
-    SPLUNK_SEARCH_TIMEOUT_SECONDS: int = 20
+    SPLUNK_SEARCH_TIMEOUT_SECONDS: int = 30
     SPLUNK_MCP_TOOL_NAME: str = "splunk_search"
     SERVICENOW_DRAFT_ENABLED: bool = False
     SERVICENOW_CREATE_ENABLED: bool = False
@@ -339,14 +339,12 @@ class Config:
     RETENTION_RUN_INTERVAL_SECONDS: int = 86400
 
     # Concurrency (optional)
-    # Gemma 4 31B-it baseline profile:
-    # - Xeon Gold: MAX_WORKERS=4, MAX_QUEUE_DEPTH=32 (default below)
-    # - Xeon Platinum: MAX_WORKERS=6, MAX_QUEUE_DEPTH=48 (override in config.env)
-    # - AMD EPYC 7J13 VM (KVM, ~30 vCPU observed): start with Gold profile (4/32),
-    #   then increase only after validating CPU headroom and queue latency.
+    # Gemma 4 31B-it on RTX PRO 6000 (96 GB) baseline:
+    # - Start sequential: CONCURRENCY_ENABLED=false, MAX_WORKERS=1, MAX_QUEUE_DEPTH=8
+    # - After load tests: try MAX_WORKERS=2 and MAX_QUEUE_DEPTH=16 with vLLM headroom
     CONCURRENCY_ENABLED: bool = False  # Sequential by default
-    MAX_WORKERS: int = 4  # Thread pool size when enabled (A100 + Xeon Gold baseline)
-    MAX_QUEUE_DEPTH: int = 32  # Backpressure limit (A100 + Xeon Gold baseline)
+    MAX_WORKERS: int = 1  # Thread pool size when enabled
+    MAX_QUEUE_DEPTH: int = 8  # Backpressure limit
 
     def __post_init__(self) -> None:
         profiles = _parse_capability_profiles(self.CAPABILITY_PROFILES)
@@ -388,7 +386,7 @@ def load_config() -> Config:
             or "prompt_json"
         ),
         LLM_MAX_TOKENS=int(os.getenv("LLM_MAX_TOKENS", "4096")),
-        LLM_TIMEOUT=int(os.getenv("LLM_TIMEOUT", "120")),
+        LLM_TIMEOUT=int(os.getenv("LLM_TIMEOUT", "240")),
         HTML_REPORT_ENABLED=_profile_bool(
             "HTML_REPORT_ENABLED", False, profile_flags
         ),
@@ -490,7 +488,7 @@ def load_config() -> Config:
             "INVESTIGATION_MAX_QUERIES_PER_ALERT", 6, max_value=24
         ),
         INVESTIGATION_MAX_CONCURRENT_QUERIES=_positive_int_env(
-            "INVESTIGATION_MAX_CONCURRENT_QUERIES", 3, max_value=8
+            "INVESTIGATION_MAX_CONCURRENT_QUERIES", 6, max_value=8
         ),
         QUERY_RESULT_INTERPRETATION_ENABLED=_bool_env(
             "QUERY_RESULT_INTERPRETATION_ENABLED", False
@@ -522,7 +520,7 @@ def load_config() -> Config:
             "SPLUNK_SEARCH_MAX_ROWS", 100, max_value=1000
         ),
         SPLUNK_SEARCH_TIMEOUT_SECONDS=_positive_int_env(
-            "SPLUNK_SEARCH_TIMEOUT_SECONDS", 20, max_value=300
+            "SPLUNK_SEARCH_TIMEOUT_SECONDS", 30, max_value=300
         ),
         SPLUNK_MCP_TOOL_NAME=os.getenv("SPLUNK_MCP_TOOL_NAME", "splunk_search"),
         SERVICENOW_DRAFT_ENABLED=_profile_bool(
@@ -566,6 +564,6 @@ def load_config() -> Config:
         ),
         CONCURRENCY_ENABLED=os.getenv("CONCURRENCY_ENABLED", "false").lower()
         in ("true", "1", "yes"),
-        MAX_WORKERS=int(os.getenv("MAX_WORKERS", "4")),
-        MAX_QUEUE_DEPTH=int(os.getenv("MAX_QUEUE_DEPTH", "32")),
+        MAX_WORKERS=int(os.getenv("MAX_WORKERS", "1")),
+        MAX_QUEUE_DEPTH=int(os.getenv("MAX_QUEUE_DEPTH", "8")),
     )

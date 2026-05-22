@@ -14,6 +14,8 @@ Use this page to pick **where to start** without reading the whole root [`README
 
 5. **[Capability profiles](operations/CAPABILITY_PROFILES.md)** and **[runtime env contract](../config.env.example)** — Operators choose supported bundles with `CAPABILITY_PROFILES`; endpoint, path, secret, and tuning values remain in `config.env`. Copy to `/etc/notable-analyzer/config.env` on the host.
 
+   For host-specific vLLM and concurrency starting values, see **[deployment hardware profiles](operations/deployment_profiles/README.md)**.
+
 6. **[Knowledge base / RAG operations](operations/KNOWLEDGE_BASE_OPERATIONS.md)** and **[RAG tuning](operations/RAG_OPERATIONS.md)** — Source document lifecycle plus retrieval configuration. Only needed when the `rag` profile is selected.
 
 7. **[Deployment readiness (executive gateway)](delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.md)** and **[readiness checklist](delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_ASSESSMENT.md)** — Ownership, approvals, Splunk/RAG prerequisites before production.

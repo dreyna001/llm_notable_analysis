@@ -43,6 +43,17 @@ class TestDeploymentContract(unittest.TestCase):
             freeform_text,
         )
 
+    def test_vllm_service_targets_notable_analysis_context_window(self) -> None:
+        """Default vLLM unit should match gemma-4-31B-it notable-analysis tuning."""
+        service_text = (
+            PROJECT_ROOT / "deploy" / "systemd" / "vllm.service"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("--gpu-memory-utilization 0.92", service_text)
+        self.assertIn("--max-model-len 32768", service_text)
+        self.assertIn("--host 127.0.0.1", service_text)
+        self.assertIn("--port 8000", service_text)
+
     def test_litellm_service_is_loopback_only(self) -> None:
         """LiteLLM should bind only to loopback in the default unit."""
         service_text = (
@@ -176,6 +187,11 @@ class TestDeploymentContract(unittest.TestCase):
 
         self.assertIn("CAPABILITY_PROFILES=core", config_text)
         self.assertIn("LLM_MAX_TOKENS=4096", config_text)
+        self.assertIn("LLM_TIMEOUT=240", config_text)
+        self.assertIn("INVESTIGATION_MAX_CONCURRENT_QUERIES=6", config_text)
+        self.assertIn("SPLUNK_SEARCH_TIMEOUT_SECONDS=30", config_text)
+        self.assertIn("MAX_WORKERS=1", config_text)
+        self.assertIn("MAX_QUEUE_DEPTH=8", config_text)
         self.assertIn("MAX_INPUT_FILE_BYTES=4194304", config_text)
         self.assertIn("SIDE_EFFECT_IDEMPOTENCY_ENABLED=false", config_text)
         self.assertIn("SIDE_EFFECT_IDEMPOTENCY_DIR=/var/notables/idempotency", config_text)

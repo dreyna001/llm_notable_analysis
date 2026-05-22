@@ -20,7 +20,8 @@ readonly VLLM_SERVICE_NAME="vllm"
 readonly VLLM_SERVED_MODEL_NAME="${VLLM_SERVED_MODEL_NAME:-gemma-4-31B-it}"
 readonly VLLM_HOST="${VLLM_HOST:-127.0.0.1}"
 readonly VLLM_PORT="${VLLM_PORT:-8000}"
-readonly VLLM_GPU_MEMORY_UTILIZATION="${VLLM_GPU_MEMORY_UTILIZATION:-0.9}"
+readonly VLLM_GPU_MEMORY_UTILIZATION="${VLLM_GPU_MEMORY_UTILIZATION:-0.92}"
+readonly VLLM_MAX_MODEL_LEN="${VLLM_MAX_MODEL_LEN:-32768}"
 
 # Controls
 readonly AUTO_START_VLLM="${AUTO_START_VLLM:-true}"
@@ -110,7 +111,7 @@ patch_vllm_unit() {
     [[ -f "$unit_file" ]] || err "vLLM unit file not found: $unit_file"
 
     local vllm_python="$VLLM_VENV_DIR/bin/python"
-    local esc_install esc_python esc_model esc_served esc_host esc_port esc_gpu
+    local esc_install esc_python esc_model esc_served esc_host esc_port esc_gpu esc_max_len
     esc_install="$(escape_sed_replacement "$VLLM_INSTALL_DIR")"
     esc_python="$(escape_sed_replacement "$vllm_python")"
     esc_model="$(escape_sed_replacement "$VLLM_MODEL_PATH")"
@@ -118,6 +119,7 @@ patch_vllm_unit() {
     esc_host="$(escape_sed_replacement "$VLLM_HOST")"
     esc_port="$(escape_sed_replacement "$VLLM_PORT")"
     esc_gpu="$(escape_sed_replacement "$VLLM_GPU_MEMORY_UTILIZATION")"
+    esc_max_len="$(escape_sed_replacement "$VLLM_MAX_MODEL_LEN")"
 
     sed -i -E "s|^User=.*$|User=${VLLM_USER}|" "$unit_file"
     sed -i -E "s|^Group=.*$|Group=${VLLM_GROUP}|" "$unit_file"
@@ -128,6 +130,7 @@ patch_vllm_unit() {
     sed -i -E "s|^([[:space:]]*--host[[:space:]]+).*$|\\1${esc_host} \\\\|" "$unit_file"
     sed -i -E "s|^([[:space:]]*--port[[:space:]]+).*$|\\1${esc_port} \\\\|" "$unit_file"
     sed -i -E "s|^([[:space:]]*--gpu-memory-utilization[[:space:]]+).*$|\\1${esc_gpu} \\\\|" "$unit_file"
+    sed -i -E "s|^([[:space:]]*--max-model-len[[:space:]]+).*$|\\1${esc_max_len} \\\\|" "$unit_file"
 }
 
 handle_vllm_overrides() {
@@ -254,5 +257,5 @@ echo "Optional flags:"
 echo "  sudo VLLM_SKIP_INSTALL=true bash install_vllm.sh"
 echo "  sudo VLLM_PIP_SPEC='/mnt/media/wheels/vllm-0.14.1-*.whl' bash install_vllm.sh"
 echo "  sudo VLLM_INSTALL_DIR=/opt/vllm312 VLLM_VENV_DIR=/opt/vllm312/venv bash install_vllm.sh"
-echo "  sudo VLLM_MODEL_PATH=/opt/models/gemma-4-31B-it VLLM_GPU_MEMORY_UTILIZATION=0.9 bash install_vllm.sh"
+echo "  sudo VLLM_MODEL_PATH=/opt/models/gemma-4-31B-it VLLM_GPU_MEMORY_UTILIZATION=0.92 VLLM_MAX_MODEL_LEN=32768 bash install_vllm.sh"
 

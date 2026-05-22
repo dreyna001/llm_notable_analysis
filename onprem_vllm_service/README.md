@@ -39,7 +39,8 @@ curl -sS http://127.0.0.1:8000/v1/chat/completions \
 - Endpoint: `127.0.0.1:8000`
 - Model path: `/opt/models/gemma-4-31B-it`
 - Served model name: `gemma-4-31B-it`
-- GPU memory target: `0.9`
+- GPU memory target: `0.92`
+- Max model length: `32768` (notable-analysis default; raise only if longer context is required)
 - Service name: `vllm`
 
 ## Common install variants

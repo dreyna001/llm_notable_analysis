@@ -18,7 +18,8 @@ parsing behavior.
   different model id.
 - Use `LLM_STRUCTURED_OUTPUT_MODE=prompt_json` first.
 - Increase `LLM_TIMEOUT` only after measuring model startup and inference
-  latency.
+  latency. Default is `240` to cover spl_readonly plus query interpretation.
+  Core-only deployments may use `120`.
 - Keep LiteLLM/vLLM bound to loopback unless a documented authenticated edge
   listener is approved.
 

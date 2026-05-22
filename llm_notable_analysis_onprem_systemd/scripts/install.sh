@@ -853,7 +853,7 @@ echo "      sudo -u $VLLM_USER $VLLM_VENV_DIR/bin/python -m vllm.entrypoints.ope
 echo "        --model $VLLM_MODEL_PATH \\"
 echo "        --served-model-name $VLLM_SERVED_MODEL_NAME \\"
 echo "        --host 127.0.0.1 --port 8000 \\"
-echo "        --gpu-memory-utilization 0.9 --max-model-len 131072 --dtype auto \\"
+echo "        --gpu-memory-utilization 0.92 --max-model-len 32768 --dtype auto \\"
 echo "        --distributed-executor-backend mp"
 echo "  - If the error mentions trust_remote_code, consider enabling it explicitly (security tradeoff):"
 echo "      sudo vi /etc/systemd/system/vllm.service  # add --trust-remote-code"

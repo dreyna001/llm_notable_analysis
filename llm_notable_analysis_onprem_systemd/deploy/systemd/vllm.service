@@ -13,7 +13,11 @@ WorkingDirectory=/opt/vllm
 
 # vLLM server command
 # Adjust --model path to local model directory
-# Adjust --gpu-memory-utilization as needed (0.9 = 90% of GPU memory)
+# Adjust --gpu-memory-utilization as needed (0.92 = 92% of GPU memory).
+# --max-model-len 32768 fits notable analysis prompts; raise only if longer
+# context is required and VRAM allows it.
+# Optional after load-testing CONCURRENCY_ENABLED + MAX_WORKERS=2:
+#   --max-num-seqs 4
 #
 # SECURITY NOTE: --trust-remote-code is DISABLED by default for hardening.
 # This flag allows executing arbitrary Python code bundled with model artifacts.
@@ -26,8 +30,8 @@ ExecStart=/opt/vllm/venv/bin/python -m vllm.entrypoints.openai.api_server \
     --served-model-name gemma-4-31B-it \
     --host 127.0.0.1 \
     --port 8000 \
-    --gpu-memory-utilization 0.9 \
-    --max-model-len 131072 \
+    --gpu-memory-utilization 0.92 \
+    --max-model-len 32768 \
     --dtype auto \
     --distributed-executor-backend mp
 
