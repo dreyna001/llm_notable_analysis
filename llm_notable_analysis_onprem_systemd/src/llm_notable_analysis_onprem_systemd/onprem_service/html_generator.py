@@ -450,7 +450,7 @@ def _render_query_results(response: Dict[str, Any]) -> str:
             '<span class="hyp-chevron">v</span>'
             '</div>'
             '<div class="hyp-card-body">'
-            '<div class="hyp-section-title piv">SPL</div>'
+            '<div class="hyp-section-title piv">Query</div>'
             f'<div class="pivot-block">{_html(query or "No query text recorded.")}</div>'
             '<div class="hyp-section-title sup">Result summary</div>'
             '<div class="ev-grid">'

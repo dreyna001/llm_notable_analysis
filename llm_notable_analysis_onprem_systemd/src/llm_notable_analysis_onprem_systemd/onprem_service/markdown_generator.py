@@ -3,6 +3,7 @@
 This module mirrors the report structure used in `s3_testing/markdown_generator.py`.
 """
 
+import json
 from typing import Dict, Any, List
 
 
@@ -32,6 +33,29 @@ def _render_hypothesis_spl_block(lines: List[str], hypothesis: Dict[str, Any]) -
         if not primary_query.endswith("\n"):
             lines.append("\n")
         lines.append("```\n")
+    if why_this_query:
+        lines.append(f"  - **Why this query:** {why_this_query}\n")
+    if supports_if:
+        lines.append(f"  - **Supports hypothesis if:** {supports_if}\n")
+    if weakens_if:
+        lines.append(f"  - **Weakens hypothesis if:** {weakens_if}\n")
+
+
+def _render_hypothesis_elastic_block(lines: List[str], hypothesis: Dict[str, Any]) -> None:
+    """Render per-hypothesis Elasticsearch details when generation is enabled."""
+    strategy = str(hypothesis.get("query_strategy", "")).strip()
+    primary_query = hypothesis.get("primary_elastic_query", {})
+    why_this_query = str(hypothesis.get("why_this_query", "")).strip()
+    supports_if = str(hypothesis.get("supports_if", "")).strip()
+    weakens_if = str(hypothesis.get("weakens_if", "")).strip()
+
+    if strategy:
+        lines.append(f"  - **Query strategy:** {strategy}\n")
+    if isinstance(primary_query, dict) and primary_query:
+        lines.append("  - **Primary Elasticsearch query:**\n")
+        lines.append("```json\n")
+        lines.append(json.dumps(primary_query, indent=2, ensure_ascii=True, sort_keys=True))
+        lines.append("\n```\n")
     if why_this_query:
         lines.append(f"  - **Why this query:** {why_this_query}\n")
     if supports_if:
@@ -83,7 +107,7 @@ def _render_query_results_section(lines: List[str], query_result_section: Dict[s
         if strategy:
             lines.append(f"  - **Strategy:** {strategy}\n")
         if query:
-            lines.append(f"  - **SPL:** `{query}`\n")
+            lines.append(f"  - **Query:** `{query}`\n")
         if status == "executed":
             lines.append(f"  - **Result count:** {result_count}\n")
             if columns:
@@ -214,6 +238,13 @@ def generate_markdown_report(
     spl_unavailable_reason = str(
         metadata.get("spl_query_generation_unavailable_reason", "")
     ).strip()
+    elastic_enabled = bool(metadata.get("elastic_query_generation_enabled", False))
+    elastic_unavailable = bool(
+        metadata.get("elastic_query_generation_unavailable", False)
+    )
+    elastic_unavailable_reason = str(
+        metadata.get("elastic_query_generation_unavailable_reason", "")
+    ).strip()
 
     if llm_response.get("poc_unstructured_output"):
         reason = str(llm_response.get("poc_fallback_reason", "unknown"))
@@ -269,6 +300,16 @@ def generate_markdown_report(
                 )
             )
             lines.append(f"**Note:** {note}\n\n")
+        if elastic_enabled and elastic_unavailable:
+            note = (
+                "Elasticsearch query generation was enabled but unavailable for this alert."
+                if not elastic_unavailable_reason
+                else (
+                    "Elasticsearch query generation was enabled but unavailable for this alert: "
+                    f"{elastic_unavailable_reason}"
+                )
+            )
+            lines.append(f"**Note:** {note}\n\n")
         for i, hyp in enumerate(ch, 1):
             hyp_type = hyp.get("hypothesis_type", "unknown").capitalize()
             lines.append(
@@ -301,6 +342,8 @@ def generate_markdown_report(
                 )
             if spl_enabled and not spl_unavailable and isinstance(hyp, dict):
                 _render_hypothesis_spl_block(lines, hyp)
+            if elastic_enabled and not elastic_unavailable and isinstance(hyp, dict):
+                _render_hypothesis_elastic_block(lines, hyp)
             lines.append("\n")
 
     if isinstance(llm_response.get("query_result_section"), dict):

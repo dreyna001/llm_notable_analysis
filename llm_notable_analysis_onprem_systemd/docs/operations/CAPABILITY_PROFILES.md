@@ -17,6 +17,7 @@ takes precedence; remove the profile to turn that capability off.
 | `html_reports` | Static HTML reports next to markdown reports. | Local report artifact only. |
 | `rag` | General SOC RAG context in the main analysis prompt. | Read-only retrieval/advisory context. |
 | `spl_readonly` | SPL query generation and bounded read-only Splunk investigation execution. | Read-only external queries. |
+| `elastic_readonly` | Elasticsearch Query DSL generation and bounded read-only `_search` execution. | Read-only external queries. |
 | `ticket_draft` | ServiceNow incident draft payloads in reports. | Local draft only; no ServiceNow POST. |
 | `action_gated` | Splunk notable writeback, ServiceNow draft/create, required ServiceNow approval, and side-effect idempotency. | External write/action path. |
 
@@ -27,6 +28,7 @@ Profiles may be separated with commas or semicolons.
 CAPABILITY_PROFILES=core
 CAPABILITY_PROFILES=core,html_reports,rag
 CAPABILITY_PROFILES=core,rag,spl_readonly
+CAPABILITY_PROFILES=core,rag,elastic_readonly
 CAPABILITY_PROFILES=core,ticket_draft
 CAPABILITY_PROFILES=core,action_gated
 ```
@@ -80,6 +82,32 @@ Primary follow-up values:
 - `SPLUNK_SEARCH_MAX_ROWS`
 - `SPLUNK_SEARCH_TIMEOUT_SECONDS`
 - optional `SPL_QUERY_RAG_*` values for dedicated SPL grounding
+
+`spl_readonly` and `elastic_readonly` are mutually exclusive for v1. Choose one
+active read-only investigation backend per deployment.
+
+### `elastic_readonly`
+
+Use when Elasticsearch owners approve generated Query DSL and bounded read-only
+`_search` execution. This profile does not enable writeback or action-taking.
+
+Primary follow-up values:
+
+- `INVESTIGATION_QUERY_BACKEND=elasticsearch`
+- `ELASTICSEARCH_BASE_URL`
+- `ELASTICSEARCH_API_KEY`
+- `ELASTICSEARCH_INDEX_ALLOWLIST`
+- `ELASTICSEARCH_ALLOW_WILDCARD_INDEXES`
+- `ELASTICSEARCH_TIMESTAMP_FIELD`
+- `ELASTICSEARCH_ALLOWED_FIELDS`
+- `ELASTICSEARCH_MAX_TIME_RANGE`
+- `ELASTICSEARCH_MAX_ROWS`
+- `ELASTICSEARCH_TIMEOUT_SECONDS`
+- `ELASTICSEARCH_CA_BUNDLE`
+- optional `ELASTICSEARCH_GROUNDING_*` values for dedicated Elastic grounding
+
+`spl_readonly` and `elastic_readonly` are mutually exclusive for v1. Choose one
+active read-only investigation backend per deployment.
 
 ### `ticket_draft`
 
@@ -138,6 +166,7 @@ Examples:
 
 - enabling `HTML_REPORT_ENABLED` without selecting `html_reports` in a local lab
 - enabling `SPL_QUERY_RAG_ENABLED` after the dedicated SPL KB is curated
+- enabling `ELASTICSEARCH_GROUNDING_ENABLED` after the dedicated Elastic KB is curated
 
 Unknown profile names fail startup validation. Invalid boolean overrides also
 fail startup validation.
@@ -146,6 +175,7 @@ fail startup validation.
 
 - [`RAG_OPERATIONS.md`](RAG_OPERATIONS.md)
 - [`SPL_OPERATIONS.md`](SPL_OPERATIONS.md)
+- [`ELASTICSEARCH_OPERATIONS.md`](ELASTICSEARCH_OPERATIONS.md)
 - [`SPLUNK_WRITEBACK_OPERATIONS.md`](SPLUNK_WRITEBACK_OPERATIONS.md)
 - [`SERVICENOW_OPERATIONS.md`](SERVICENOW_OPERATIONS.md)
 - [`FILE_DROP_AND_RETENTION_OPERATIONS.md`](FILE_DROP_AND_RETENTION_OPERATIONS.md)

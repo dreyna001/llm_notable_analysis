@@ -105,6 +105,55 @@ class TestOnpremMainInvestigation(unittest.TestCase):
             self.assertIn("attempted=1, executed=1", report_text)
             self.assertIn("Query result summary", report_text)
 
+    def test_process_notable_runs_elasticsearch_investigation_when_selected(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            incoming = Path(td) / "incoming"
+            processed = Path(td) / "processed"
+            quarantine = Path(td) / "quarantine"
+            reports = Path(td) / "reports"
+            for d in (incoming, processed, quarantine, reports):
+                d.mkdir(parents=True, exist_ok=True)
+
+            notable_file = incoming / "notable_elastic.json"
+            notable_file.write_text(json.dumps({"summary": "alert"}), encoding="utf-8")
+
+            config = Config(
+                INCOMING_DIR=incoming,
+                PROCESSED_DIR=processed,
+                QUARANTINE_DIR=quarantine,
+                REPORT_DIR=reports,
+                INVESTIGATION_QUERY_EXECUTION_ENABLED=True,
+                INVESTIGATION_QUERY_BACKEND="elasticsearch",
+            )
+            llm_client = MagicMock()
+            llm_client.analyze_alert.return_value = self._make_base_llm_response()
+            logger = logging.getLogger("test_onprem_main_elasticsearch_investigation")
+            query_results = [
+                {
+                    "hypothesis_index": 0,
+                    "query_strategy": "resolve_unknown",
+                    "query": '{"index_pattern":"logs-auth"}',
+                    "status": "success",
+                    "executor": "elasticsearch",
+                    "result_count": 1,
+                    "sample_columns": ["user.name"],
+                    "raw_result_ref": "elasticsearch:logs-auth",
+                }
+            ]
+
+            with patch(
+                "llm_notable_analysis_onprem_systemd.onprem_service.onprem_main.execute_hypothesis_elasticsearch_queries",
+                return_value=query_results,
+            ) as mock_execute:
+                ok = process_notable(notable_file, config, llm_client, logger)
+
+            self.assertTrue(ok)
+            mock_execute.assert_called_once()
+            self.assertTrue((processed / "notable_elastic.json").exists())
+            report_text = (reports / "notable_elastic.md").read_text(encoding="utf-8")
+            self.assertIn("### Query Results", report_text)
+            self.assertIn("attempted=1, executed=1", report_text)
+
     def test_process_notable_runs_query_result_interpretation_when_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             incoming = Path(td) / "incoming"

@@ -38,6 +38,7 @@ from .servicenow import (
     extract_servicenow_create_approval,
 )
 from .splunk_investigation import execute_hypothesis_queries
+from .elasticsearch_investigation import execute_hypothesis_elasticsearch_queries
 from .retention import run_retention
 
 
@@ -129,7 +130,19 @@ def process_notable(
 
         if bool(getattr(config, "INVESTIGATION_QUERY_EXECUTION_ENABLED", False)):
             try:
-                query_results = execute_hypothesis_queries(llm_response, config=config)
+                query_backend = str(
+                    getattr(config, "INVESTIGATION_QUERY_BACKEND", "splunk")
+                ).strip().lower()
+                if query_backend == "elasticsearch":
+                    query_results = execute_hypothesis_elasticsearch_queries(
+                        llm_response,
+                        config=config,
+                    )
+                else:
+                    query_results = execute_hypothesis_queries(
+                        llm_response,
+                        config=config,
+                    )
                 if query_results:
                     llm_response = enrich_analysis_with_query_results(
                         llm_response,

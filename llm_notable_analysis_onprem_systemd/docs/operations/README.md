@@ -26,6 +26,7 @@ behavior within supported config bounds.
 | Deployment hardware profiles | [`deployment_profiles/README.md`](deployment_profiles/README.md) | Recommended vLLM and `config.env` starting values per CPU/GPU build. |
 | Capability profiles | [`CAPABILITY_PROFILES.md`](CAPABILITY_PROFILES.md) | Supported operator-facing feature bundles and legacy low-level flag behavior. |
 | SPL generation and execution | [`SPL_OPERATIONS.md`](SPL_OPERATIONS.md) | Customer-specific indexes, SPL query KB grounding, command controls, timeouts, REST vs MCP, and rollout. |
+| Elasticsearch generation and execution | [`ELASTICSEARCH_OPERATIONS.md`](ELASTICSEARCH_OPERATIONS.md) | Customer-specific index patterns, field mappings, Elastic query grounding, Query DSL controls, timeouts, and rollout. |
 | Knowledge base content | [`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md) | Add, rebuild, validate, and roll back KB source documents. |
 | RAG retrieval | [`RAG_OPERATIONS.md`](RAG_OPERATIONS.md) | RAG enablement, fail-open/fail-closed posture, backend, embeddings, rerank, context budgets. |
 | LLM inference | [`LLM_INFERENCE_OPERATIONS.md`](LLM_INFERENCE_OPERATIONS.md) | Local LiteLLM/vLLM endpoint, model id, structured output mode, tokens, timeouts. |

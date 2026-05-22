@@ -43,6 +43,17 @@ from .spl_query_grounding import (
     init_spl_query_rag_provider,
     spl_query_rag_failure_mode,
 )
+from .elastic_query_generation import (
+    build_elastic_query_generation_prompt,
+    merge_elastic_query_fields_by_position,
+    normalize_competing_hypotheses as normalize_elastic_competing_hypotheses,
+    validate_elastic_query_contract,
+)
+from .elasticsearch_query_grounding import (
+    build_elasticsearch_grounding_context,
+    elasticsearch_grounding_failure_mode,
+    init_elasticsearch_grounding_provider,
+)
 from .query_result_interpretation import (
     build_query_result_interpretation_prompt,
     build_query_result_interpretation_repair_prompt,
@@ -142,6 +153,7 @@ _COMMON_RESULT_WRAPPER_KEYS = (
 _STRUCTURED_OUTPUT_MODES = {"prompt_json", "tool_call"}
 _TOOL_ANALYZE_NOTABLE_NAME = "analyze_notable"
 _TOOL_GENERATE_SPL_NAME = "generate_spl_queries"
+_TOOL_GENERATE_ELASTIC_NAME = "generate_elastic_queries"
 _TOOL_INTERPRET_QUERY_RESULTS_NAME = "interpret_query_results"
 
 
@@ -237,6 +249,56 @@ def _spl_tool_spec() -> Dict[str, Any]:
                             "required": [
                                 "query_strategy",
                                 "primary_spl_query",
+                                "why_this_query",
+                                "supports_if",
+                                "weakens_if",
+                            ],
+                            "additionalProperties": True,
+                        },
+                    }
+                },
+                "required": ["competing_hypotheses"],
+                "additionalProperties": True,
+            },
+        },
+    }
+
+
+def _elastic_tool_spec() -> Dict[str, Any]:
+    """Build tool schema for Elastic-only second-call contract."""
+    return {
+        "type": "function",
+        "function": {
+            "name": _TOOL_GENERATE_ELASTIC_NAME,
+            "description": "Return Elasticsearch Query DSL fields for each competing hypothesis.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "competing_hypotheses": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "query_strategy": {
+                                    "type": "string",
+                                    "enum": ["resolve_unknown", "check_contradiction"],
+                                },
+                                "primary_elastic_query": {
+                                    "type": "object",
+                                    "properties": {
+                                        "index_pattern": {"type": "string"},
+                                        "body": {"type": "object"},
+                                    },
+                                    "required": ["index_pattern", "body"],
+                                    "additionalProperties": True,
+                                },
+                                "why_this_query": {"type": "string"},
+                                "supports_if": {"type": "string"},
+                                "weakens_if": {"type": "string"},
+                            },
+                            "required": [
+                                "query_strategy",
+                                "primary_elastic_query",
                                 "why_this_query",
                                 "supports_if",
                                 "weakens_if",
@@ -523,6 +585,35 @@ def _validate_spl_query_contract(
     )
 
 
+def _validate_elastic_query_contract(
+    result: Dict[str, Any],
+    *,
+    alert_text: str = "",
+    elasticsearch_grounding_context: str = "",
+    config: Optional[Config] = None,
+    require_elastic_grounding: bool = False,
+) -> Tuple[bool, Optional[str]]:
+    """Validate strict Elastic query contract for per-hypothesis generation."""
+    return validate_elastic_query_contract(
+        result,
+        alert_text=alert_text,
+        elasticsearch_grounding_context=elasticsearch_grounding_context,
+        allowed_fields=str(getattr(config, "ELASTICSEARCH_ALLOWED_FIELDS", ""))
+        if config
+        else "",
+        allow_wildcard_indexes=bool(
+            getattr(config, "ELASTICSEARCH_ALLOW_WILDCARD_INDEXES", False)
+        )
+        if config
+        else False,
+        max_rows=int(getattr(config, "ELASTICSEARCH_MAX_ROWS", 100)) if config else 100,
+        timestamp_field=str(getattr(config, "ELASTICSEARCH_TIMESTAMP_FIELD", "@timestamp"))
+        if config
+        else "@timestamp",
+        require_elastic_grounding=require_elastic_grounding,
+    )
+
+
 def _normalize_competing_hypotheses(
     value: Any, *, spl_query_enabled: bool
 ) -> List[Dict[str, Any]]:
@@ -710,7 +801,10 @@ def _extract_ttp_ids_from_text(text: str) -> List[str]:
 
 
 def _normalize_and_fill_defaults(
-    parsed: Dict[str, Any], *, spl_query_enabled: bool = False
+    parsed: Dict[str, Any],
+    *,
+    spl_query_enabled: bool = False,
+    elastic_query_enabled: bool = False,
 ) -> Dict[str, Any]:
     """Make the parsed object robust to minor schema drift from local models."""
     if not isinstance(parsed, dict):
@@ -748,9 +842,22 @@ def _normalize_and_fill_defaults(
             if str(x)
         ],
     }
-    out["competing_hypotheses"] = _normalize_competing_hypotheses(
+    raw_hypotheses = out.get("competing_hypotheses", [])
+    if spl_query_enabled or not elastic_query_enabled:
+        normalized_hypotheses = _normalize_competing_hypotheses(
+            raw_hypotheses,
+            spl_query_enabled=spl_query_enabled,
+        )
+    elif isinstance(raw_hypotheses, list):
+        normalized_hypotheses = [
+            dict(item) for item in raw_hypotheses if isinstance(item, dict)
+        ]
+    else:
+        normalized_hypotheses = []
+    out["competing_hypotheses"] = normalized_hypotheses
+    out["competing_hypotheses"] = normalize_elastic_competing_hypotheses(
         out.get("competing_hypotheses", []),
-        spl_query_enabled=spl_query_enabled,
+        elastic_query_enabled=elastic_query_enabled,
     )
     out["evidence_vs_inference"] = _coerce_evidence_vs_inference(
         out.get("evidence_vs_inference", {})
@@ -1053,6 +1160,9 @@ class LocalLLMClient:
         )
         self._rag_provider = self._init_rag_provider()
         self._spl_query_rag_provider = self._init_spl_query_rag_provider()
+        self._elasticsearch_grounding_provider = (
+            self._init_elasticsearch_grounding_provider()
+        )
 
     def _init_rag_provider(self):
         """Initialize optional RAG context provider (best-effort).
@@ -1147,6 +1257,10 @@ class LocalLLMClient:
         """Initialize optional SPL-dedicated RAG provider."""
         return init_spl_query_rag_provider(self.config)
 
+    def _init_elasticsearch_grounding_provider(self):
+        """Initialize optional Elasticsearch-dedicated grounding provider."""
+        return init_elasticsearch_grounding_provider(self.config)
+
     def _build_soc_operational_context(self, alert_text: str) -> str:
         """Build SOC operational context block from retrieval layer.
 
@@ -1189,6 +1303,27 @@ class LocalLLMClient:
         if provider is None:
             raise RuntimeError("SPL query RAG is enabled but provider is unavailable.")
         return build_spl_query_grounding_context(
+            provider=provider,
+            config=self.config,
+            alert_text=alert_text,
+            hypotheses=hypotheses,
+        )
+
+    def _build_elasticsearch_grounding_context(
+        self,
+        *,
+        alert_text: str,
+        hypotheses: List[Dict[str, Any]],
+    ) -> str:
+        """Build Elastic-dedicated grounding context for Query DSL generation."""
+        if not bool(getattr(self.config, "ELASTICSEARCH_GROUNDING_ENABLED", False)):
+            return ""
+        provider = getattr(self, "_elasticsearch_grounding_provider", None)
+        if provider is None:
+            raise RuntimeError(
+                "Elasticsearch grounding is enabled but provider is unavailable."
+            )
+        return build_elasticsearch_grounding_context(
             provider=provider,
             config=self.config,
             alert_text=alert_text,
@@ -1580,13 +1715,23 @@ SECURITY ALERT INPUT:
             )
             return result.text, result.latency_seconds
 
-        spl_query_generation_enabled = bool(
+        investigation_backend = str(
+            getattr(self.config, "INVESTIGATION_QUERY_BACKEND", "splunk")
+        ).strip().lower()
+        spl_query_generation_enabled = investigation_backend == "splunk" and bool(
             getattr(self.config, "SPL_QUERY_GENERATION_ENABLED", False)
+        )
+        elastic_query_generation_enabled = investigation_backend == "elasticsearch" and bool(
+            getattr(self.config, "ELASTIC_QUERY_GENERATION_ENABLED", False)
         )
         spl_query_rag_enabled = bool(
             getattr(self.config, "SPL_QUERY_RAG_ENABLED", False)
         )
         spl_query_rag_mode = spl_query_rag_failure_mode(self.config)
+        elasticsearch_grounding_enabled = bool(
+            getattr(self.config, "ELASTICSEARCH_GROUNDING_ENABLED", False)
+        )
+        elasticsearch_grounding_mode = elasticsearch_grounding_failure_mode(self.config)
 
         def _annotate_metadata(
             result_obj: Dict[str, Any],
@@ -1604,6 +1749,14 @@ SECURITY ALERT INPUT:
             spl_query_rag_included: bool = False,
             spl_query_rag_context_chars: int = 0,
             spl_query_rag_unavailable_reason: Optional[str] = None,
+            elastic_unavailable_reason: Optional[str] = None,
+            elastic_generation_attempted: bool = False,
+            elastic_generation_inference_time_seconds: float = 0.0,
+            elastic_generation_prompt_length: int = 0,
+            elastic_generation_repair_attempted: bool = False,
+            elasticsearch_grounding_included: bool = False,
+            elasticsearch_grounding_context_chars: int = 0,
+            elasticsearch_grounding_unavailable_reason: Optional[str] = None,
         ) -> Dict[str, Any]:
             metadata: Dict[str, Any] = {
                 "model": self.config.LLM_MODEL_NAME,
@@ -1614,6 +1767,7 @@ SECURITY ALERT INPUT:
                 "soc_context_included": bool(soc_context),
                 "soc_context_chars": len(soc_context),
                 "structured_output_mode": structured_mode,
+                "investigation_query_backend": investigation_backend,
                 "spl_query_generation_enabled": spl_query_generation_enabled,
                 "spl_query_generation_unavailable": bool(spl_unavailable_reason),
                 "spl_query_generation_attempted": spl_generation_attempted,
@@ -1624,6 +1778,16 @@ SECURITY ALERT INPUT:
                 "spl_query_rag_included": spl_query_rag_included,
                 "spl_query_rag_context_chars": spl_query_rag_context_chars,
                 "spl_query_rag_failure_mode": spl_query_rag_mode,
+                "elastic_query_generation_enabled": elastic_query_generation_enabled,
+                "elastic_query_generation_unavailable": bool(elastic_unavailable_reason),
+                "elastic_query_generation_attempted": elastic_generation_attempted,
+                "elastic_query_generation_inference_time_seconds": elastic_generation_inference_time_seconds,
+                "elastic_query_generation_prompt_length": elastic_generation_prompt_length,
+                "elastic_query_generation_repair_attempted": elastic_generation_repair_attempted,
+                "elasticsearch_grounding_enabled": elasticsearch_grounding_enabled,
+                "elasticsearch_grounding_included": elasticsearch_grounding_included,
+                "elasticsearch_grounding_context_chars": elasticsearch_grounding_context_chars,
+                "elasticsearch_grounding_failure_mode": elasticsearch_grounding_mode,
             }
             if repair_reason:
                 metadata["repair_reason"] = repair_reason
@@ -1634,6 +1798,14 @@ SECURITY ALERT INPUT:
             if spl_query_rag_unavailable_reason:
                 metadata["spl_query_rag_unavailable_reason"] = (
                     str(spl_query_rag_unavailable_reason)[:600]
+                )
+            if elastic_unavailable_reason:
+                metadata["elastic_query_generation_unavailable_reason"] = (
+                    str(elastic_unavailable_reason)[:600]
+                )
+            if elasticsearch_grounding_unavailable_reason:
+                metadata["elasticsearch_grounding_unavailable_reason"] = (
+                    str(elasticsearch_grounding_unavailable_reason)[:600]
                 )
             result_obj["metadata"] = metadata
             return result_obj
@@ -1647,6 +1819,17 @@ SECURITY ALERT INPUT:
             )
             suppressed["spl_query_generation_unavailable"] = True
             suppressed["spl_query_generation_unavailable_reason"] = str(reason)[:600]
+            return suppressed
+
+        def _suppress_elastic_queries_for_alert(
+            result_obj: Dict[str, Any], *, reason: str
+        ) -> Dict[str, Any]:
+            suppressed = _normalize_and_fill_defaults(
+                result_obj,
+                elastic_query_enabled=False,
+            )
+            suppressed["elastic_query_generation_unavailable"] = True
+            suppressed["elastic_query_generation_unavailable_reason"] = str(reason)[:600]
             return suppressed
 
         def _validate_base_and_postprocess(
@@ -1715,6 +1898,19 @@ SECURITY ALERT INPUT:
                 alert_text=alert_text,
                 spl_query_grounding_context=spl_query_grounding_context,
                 require_spl_grounding=bool(spl_query_grounding_context.strip()),
+            )
+
+        def _check_elastic_query_contract(
+            result_obj: Dict[str, Any], *, elasticsearch_grounding_context: str
+        ) -> Tuple[bool, Optional[str]]:
+            if not elastic_query_generation_enabled:
+                return True, None
+            return _validate_elastic_query_contract(
+                result_obj,
+                alert_text=alert_text,
+                elasticsearch_grounding_context=elasticsearch_grounding_context,
+                config=self.config,
+                require_elastic_grounding=bool(elasticsearch_grounding_context.strip()),
             )
 
         def _generate_spl_queries_for_alert(
@@ -1873,6 +2069,174 @@ SECURITY ALERT INPUT:
                     spl_grounding_unavailable_reason,
                 )
 
+        def _generate_elastic_queries_for_alert(
+            result_obj: Dict[str, Any], *, alert_time_value: Optional[str]
+        ) -> Tuple[bool, Optional[str], Dict[str, Any], float, int, bool, str, Optional[str]]:
+            """Run bounded second LLM call for Elastic Query DSL fields only."""
+            elastic_grounding_context = ""
+            elastic_grounding_unavailable_reason: Optional[str] = None
+            if elasticsearch_grounding_enabled:
+                try:
+                    elastic_grounding_context = (
+                        self._build_elasticsearch_grounding_context(
+                            alert_text=alert_text,
+                            hypotheses=result_obj.get("competing_hypotheses", []),
+                        )
+                    )
+                    if not elastic_grounding_context.strip():
+                        raise RuntimeError("Elasticsearch grounding returned no context.")
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    elastic_grounding_unavailable_reason = str(exc)
+                    if elasticsearch_grounding_mode == "suppress":
+                        return (
+                            False,
+                            f"Elasticsearch grounding unavailable: {exc}",
+                            result_obj,
+                            0.0,
+                            0,
+                            False,
+                            "",
+                            elastic_grounding_unavailable_reason,
+                        )
+                    logger.warning(
+                        "Elasticsearch grounding unavailable; falling back to ungrounded Elastic generation: %s",
+                        exc,
+                    )
+
+            elastic_prompt = build_elastic_query_generation_prompt(
+                alert_text=alert_text,
+                hypotheses=result_obj.get("competing_hypotheses", []),
+                soc_operational_context=soc_context,
+                elasticsearch_grounding_context=elastic_grounding_context,
+                alert_time=alert_time_value,
+            )
+            if _model_name_suggests_qwen(self.config.LLM_MODEL_NAME):
+                elastic_prompt = (
+                    "Output policy: Respond with a single JSON object only, no markdown fences, "
+                    "no text before or after the object. /no_think\n\n"
+                    + elastic_prompt
+                )
+
+            def _merge_and_validate_elastic(
+                parsed_obj: Dict[str, Any]
+            ) -> Tuple[bool, Optional[str], Dict[str, Any]]:
+                merged_obj = dict(result_obj)
+                merged_obj["competing_hypotheses"] = (
+                    merge_elastic_query_fields_by_position(
+                        base_hypotheses=result_obj.get("competing_hypotheses", []),
+                        generated_payload=parsed_obj,
+                        elasticsearch_grounding_context=elastic_grounding_context,
+                    )
+                )
+                elastic_ok, elastic_err = _check_elastic_query_contract(
+                    merged_obj,
+                    elasticsearch_grounding_context=elastic_grounding_context,
+                )
+                return elastic_ok, elastic_err, merged_obj
+
+            elapsed_total = 0.0
+            try:
+                elastic_text, elastic_elapsed = _call_llm(
+                    elastic_prompt,
+                    tool_spec=_elastic_tool_spec(),
+                    tool_name=_TOOL_GENERATE_ELASTIC_NAME,
+                )
+                elapsed_total += elastic_elapsed
+                elastic_parsed = self._parse_llm_response(elastic_text)
+                elastic_ok, elastic_err, elastic_merged = _merge_and_validate_elastic(
+                    elastic_parsed
+                )
+                if elastic_ok:
+                    return (
+                        True,
+                        None,
+                        elastic_merged,
+                        elapsed_total,
+                        len(elastic_prompt),
+                        False,
+                        elastic_grounding_context,
+                        elastic_grounding_unavailable_reason,
+                    )
+                first_error = (
+                    f"Elastic query contract validation: {elastic_err or 'unknown'}"
+                )
+            except (
+                RequestTimeoutError,
+                TransportError,
+                RateLimitError,
+                ServerError,
+                ClientRequestError,
+                json.JSONDecodeError,
+                ValueError,
+                SyntaxError,
+                ResponseFormatError,
+            ) as exc:
+                first_error = f"Elastic query generation failed: {exc}"
+                elastic_text = ""
+
+            prior = (elastic_text or "")[:4000]
+            repair_prompt = REPAIR_PROMPT_TEMPLATE_RAW_JSON.format(
+                error=first_error,
+                prior_output=prior,
+            )
+            try:
+                elastic_text2, elastic_elapsed2 = _call_llm(
+                    repair_prompt,
+                    tool_spec=_elastic_tool_spec(),
+                    tool_name=_TOOL_GENERATE_ELASTIC_NAME,
+                )
+                elapsed_total += elastic_elapsed2
+                elastic_parsed2 = self._parse_llm_response(elastic_text2)
+                elastic_ok2, elastic_err2, elastic_merged2 = (
+                    _merge_and_validate_elastic(elastic_parsed2)
+                )
+                if elastic_ok2:
+                    return (
+                        True,
+                        None,
+                        elastic_merged2,
+                        elapsed_total,
+                        len(elastic_prompt),
+                        True,
+                        elastic_grounding_context,
+                        elastic_grounding_unavailable_reason,
+                    )
+                reason = (
+                    f"{first_error}; repair Elastic validation: {elastic_err2 or 'unknown'}"
+                )
+                return (
+                    False,
+                    reason,
+                    result_obj,
+                    elapsed_total,
+                    len(elastic_prompt),
+                    True,
+                    elastic_grounding_context,
+                    elastic_grounding_unavailable_reason,
+                )
+            except (
+                RequestTimeoutError,
+                TransportError,
+                RateLimitError,
+                ServerError,
+                ClientRequestError,
+                json.JSONDecodeError,
+                ValueError,
+                SyntaxError,
+                ResponseFormatError,
+            ) as exc:
+                reason = f"{first_error}; repair Elastic generation failed: {exc}"
+                return (
+                    False,
+                    reason,
+                    result_obj,
+                    elapsed_total,
+                    len(elastic_prompt),
+                    True,
+                    elastic_grounding_context,
+                    elastic_grounding_unavailable_reason,
+                )
+
         def _finalize_with_optional_spl(
             base_obj: Dict[str, Any],
             *,
@@ -1883,8 +2247,8 @@ SECURITY ALERT INPUT:
             repair_reason: Optional[str],
             raw_response: str,
         ) -> Dict[str, Any]:
-            """Attach SPL queries if enabled, otherwise return base analysis output."""
-            if not spl_query_generation_enabled:
+            """Attach backend queries if enabled, otherwise return base analysis output."""
+            if not spl_query_generation_enabled and not elastic_query_generation_enabled:
                 base_obj = _annotate_metadata(
                     base_obj,
                     inference_time_seconds=base_elapsed,
@@ -1895,6 +2259,71 @@ SECURITY ALERT INPUT:
                 )
                 base_obj["raw_response"] = raw_response
                 return base_obj
+
+            if elastic_query_generation_enabled:
+                (
+                    elastic_ok,
+                    elastic_reason,
+                    elastic_obj,
+                    elastic_elapsed,
+                    elastic_prompt_len,
+                    elastic_repair,
+                    elastic_grounding_context,
+                    elastic_grounding_reason,
+                ) = _generate_elastic_queries_for_alert(
+                    base_obj, alert_time_value=alert_time
+                )
+                if elastic_ok:
+                    elastic_obj = _annotate_metadata(
+                        elastic_obj,
+                        inference_time_seconds=base_elapsed + elastic_elapsed,
+                        prompt_length=base_prompt_length,
+                        attempt_num=attempt_num,
+                        repair_attempted=repair_attempted,
+                        repair_reason=repair_reason,
+                        elastic_generation_attempted=True,
+                        elastic_generation_inference_time_seconds=elastic_elapsed,
+                        elastic_generation_prompt_length=elastic_prompt_len,
+                        elastic_generation_repair_attempted=elastic_repair,
+                        elasticsearch_grounding_included=bool(
+                            elastic_grounding_context.strip()
+                        ),
+                        elasticsearch_grounding_context_chars=len(
+                            elastic_grounding_context
+                        ),
+                        elasticsearch_grounding_unavailable_reason=elastic_grounding_reason,
+                    )
+                    elastic_obj["raw_response"] = raw_response
+                    return elastic_obj
+
+                logger.warning(
+                    "Elastic query generation unavailable after repair; suppressing Elastic output for this alert: %s",
+                    elastic_reason,
+                )
+                suppressed_obj = _suppress_elastic_queries_for_alert(
+                    base_obj,
+                    reason=elastic_reason or "unknown Elastic query generation error",
+                )
+                suppressed_obj = _annotate_metadata(
+                    suppressed_obj,
+                    inference_time_seconds=base_elapsed + elastic_elapsed,
+                    prompt_length=base_prompt_length,
+                    attempt_num=attempt_num,
+                    repair_attempted=repair_attempted,
+                    repair_reason=repair_reason,
+                    elastic_unavailable_reason=elastic_reason,
+                    elastic_generation_attempted=True,
+                    elastic_generation_inference_time_seconds=elastic_elapsed,
+                    elastic_generation_prompt_length=elastic_prompt_len,
+                    elastic_generation_repair_attempted=elastic_repair,
+                    elasticsearch_grounding_included=bool(
+                        elastic_grounding_context.strip()
+                    ),
+                    elasticsearch_grounding_context_chars=len(elastic_grounding_context),
+                    elasticsearch_grounding_unavailable_reason=elastic_grounding_reason,
+                )
+                suppressed_obj["raw_response"] = raw_response
+                return suppressed_obj
 
             (
                 spl_ok,

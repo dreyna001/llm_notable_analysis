@@ -47,7 +47,9 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertFalse(config.HTML_REPORT_ENABLED)
         self.assertFalse(config.RAG_ENABLED)
         self.assertFalse(config.SPL_QUERY_GENERATION_ENABLED)
+        self.assertFalse(config.ELASTIC_QUERY_GENERATION_ENABLED)
         self.assertFalse(config.INVESTIGATION_QUERY_EXECUTION_ENABLED)
+        self.assertEqual(config.INVESTIGATION_QUERY_BACKEND, "splunk")
         self.assertFalse(config.SERVICENOW_DRAFT_ENABLED)
         self.assertFalse(config.SERVICENOW_CREATE_ENABLED)
         self.assertFalse(config.SIDE_EFFECT_IDEMPOTENCY_ENABLED)
@@ -69,6 +71,18 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS, 4000)
         self.assertEqual(config.QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS, 3)
         self.assertEqual(config.QUERY_RESULT_INTERPRETATION_MAX_TOKENS, 768)
+        self.assertEqual(config.ELASTICSEARCH_TIMESTAMP_FIELD, "@timestamp")
+        self.assertFalse(config.ELASTICSEARCH_GROUNDING_ENABLED)
+        self.assertEqual(
+            config.ELASTICSEARCH_GROUNDING_SOURCE_DIR.as_posix(),
+            "/opt/llm-notable-analysis/knowledge_base/elasticsearch_source_docs",
+        )
+        self.assertEqual(
+            config.ELASTICSEARCH_GROUNDING_POSTGRES_CHUNKS_TABLE,
+            "elasticsearch_query_chunks",
+        )
+        self.assertEqual(config.ELASTICSEARCH_MAX_ROWS, 100)
+        self.assertEqual(config.ELASTICSEARCH_TIMEOUT_SECONDS, 30)
 
     def test_html_report_flag_loads_from_environment(self) -> None:
         """HTML dashboard report generation should be opt-in by config."""
@@ -101,6 +115,28 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertTrue(config.SERVICENOW_CREATE_ENABLED)
         self.assertTrue(config.SERVICENOW_CREATE_REQUIRES_APPROVAL)
         self.assertTrue(config.SIDE_EFFECT_IDEMPOTENCY_ENABLED)
+        self.assertEqual(config.INVESTIGATION_QUERY_BACKEND, "splunk")
+
+    def test_elastic_readonly_profile_enables_elastic_backend(self) -> None:
+        """Elastic profile should mirror spl_readonly without enabling Splunk queries."""
+        with patch.dict(os.environ, {"CAPABILITY_PROFILES": "elastic_readonly"}, clear=True):
+            config = load_config()
+
+        self.assertEqual(config.CAPABILITY_PROFILES, "core,elastic_readonly")
+        self.assertTrue(config.ELASTIC_QUERY_GENERATION_ENABLED)
+        self.assertTrue(config.INVESTIGATION_QUERY_EXECUTION_ENABLED)
+        self.assertEqual(config.INVESTIGATION_QUERY_BACKEND, "elasticsearch")
+        self.assertFalse(config.SPL_QUERY_GENERATION_ENABLED)
+
+    def test_readonly_profiles_are_mutually_exclusive(self) -> None:
+        """A deployment should choose one read-only investigation backend for v1."""
+        with patch.dict(
+            os.environ,
+            {"CAPABILITY_PROFILES": "spl_readonly,elastic_readonly"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(ValueError, "spl_readonly and elastic_readonly"):
+                load_config()
 
     def test_capability_profile_rejects_unknown_profile(self) -> None:
         """Unsupported profile names should fail fast instead of silently drifting."""
@@ -209,6 +245,63 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.SPL_QUERY_RAG_CONTEXT_BUDGET_CHARS, 900)
         self.assertEqual(config.SPL_QUERY_RAG_FAILURE_MODE, "fallback_to_ungrounded")
 
+    def test_elasticsearch_contract_loads_from_environment(self) -> None:
+        """Elasticsearch read-only query path should expose explicit tuning values."""
+        env = {
+            "INVESTIGATION_QUERY_BACKEND": "elasticsearch",
+            "ELASTIC_QUERY_GENERATION_ENABLED": "true",
+            "ELASTICSEARCH_BASE_URL": "https://elastic.internal:9200",
+            "ELASTICSEARCH_API_KEY": "test-key",
+            "ELASTICSEARCH_INDEX_ALLOWLIST": "logs-auth,security-*",
+            "ELASTICSEARCH_ALLOW_WILDCARD_INDEXES": "true",
+            "ELASTICSEARCH_TIMESTAMP_FIELD": "event.ingested",
+            "ELASTICSEARCH_ALLOWED_FIELDS": "event.ingested,user.name,host.name",
+            "ELASTICSEARCH_GROUNDING_ENABLED": "true",
+            "ELASTICSEARCH_GROUNDING_SOURCE_DIR": "/kb/elastic/source",
+            "ELASTICSEARCH_GROUNDING_POSTGRES_CHUNKS_TABLE": "customer_elastic_chunks",
+            "ELASTICSEARCH_GROUNDING_MAX_SNIPPETS": "3",
+            "ELASTICSEARCH_GROUNDING_CONTEXT_BUDGET_CHARS": "900",
+            "ELASTICSEARCH_GROUNDING_FAILURE_MODE": "fallback_to_ungrounded",
+            "ELASTICSEARCH_MAX_TIME_RANGE": "12h",
+            "ELASTICSEARCH_MAX_ROWS": "50",
+            "ELASTICSEARCH_TIMEOUT_SECONDS": "12",
+            "ELASTICSEARCH_CA_BUNDLE": "/etc/pki/elastic-ca.pem",
+        }
+
+        with patch.dict(os.environ, env, clear=True):
+            config = load_config()
+
+        self.assertEqual(config.INVESTIGATION_QUERY_BACKEND, "elasticsearch")
+        self.assertTrue(config.ELASTIC_QUERY_GENERATION_ENABLED)
+        self.assertEqual(config.ELASTICSEARCH_BASE_URL, "https://elastic.internal:9200")
+        self.assertEqual(config.ELASTICSEARCH_API_KEY, "test-key")
+        self.assertEqual(config.ELASTICSEARCH_INDEX_ALLOWLIST, "logs-auth,security-*")
+        self.assertTrue(config.ELASTICSEARCH_ALLOW_WILDCARD_INDEXES)
+        self.assertEqual(config.ELASTICSEARCH_TIMESTAMP_FIELD, "event.ingested")
+        self.assertEqual(
+            config.ELASTICSEARCH_ALLOWED_FIELDS,
+            "event.ingested,user.name,host.name",
+        )
+        self.assertTrue(config.ELASTICSEARCH_GROUNDING_ENABLED)
+        self.assertEqual(
+            config.ELASTICSEARCH_GROUNDING_SOURCE_DIR.as_posix(),
+            "/kb/elastic/source",
+        )
+        self.assertEqual(
+            config.ELASTICSEARCH_GROUNDING_POSTGRES_CHUNKS_TABLE,
+            "customer_elastic_chunks",
+        )
+        self.assertEqual(config.ELASTICSEARCH_GROUNDING_MAX_SNIPPETS, 3)
+        self.assertEqual(config.ELASTICSEARCH_GROUNDING_CONTEXT_BUDGET_CHARS, 900)
+        self.assertEqual(
+            config.ELASTICSEARCH_GROUNDING_FAILURE_MODE,
+            "fallback_to_ungrounded",
+        )
+        self.assertEqual(config.ELASTICSEARCH_MAX_TIME_RANGE, "12h")
+        self.assertEqual(config.ELASTICSEARCH_MAX_ROWS, 50)
+        self.assertEqual(config.ELASTICSEARCH_TIMEOUT_SECONDS, 12)
+        self.assertEqual(config.ELASTICSEARCH_CA_BUNDLE, "/etc/pki/elastic-ca.pem")
+
     def test_query_result_interpretation_contract_loads_from_environment(self) -> None:
         """Query-result interpretation should be independently flag-gated."""
         env = {
@@ -236,6 +329,10 @@ class TestConfigRuntimeContract(unittest.TestCase):
             {"INVESTIGATION_MAX_QUERIES_PER_ALERT": "0"},
             {"SPLUNK_SEARCH_MAX_ROWS": "0"},
             {"SPLUNK_SEARCH_TIMEOUT_SECONDS": "0"},
+            {"ELASTICSEARCH_MAX_ROWS": "0"},
+            {"ELASTICSEARCH_TIMEOUT_SECONDS": "0"},
+            {"ELASTICSEARCH_GROUNDING_MAX_SNIPPETS": "0"},
+            {"ELASTICSEARCH_GROUNDING_CONTEXT_BUDGET_CHARS": "0"},
         ]
 
         for env in invalid_envs:

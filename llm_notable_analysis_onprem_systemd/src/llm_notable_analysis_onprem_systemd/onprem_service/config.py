@@ -7,16 +7,21 @@ All paths default to RHEL-standard locations.
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 _TRUE_VALUES = {"true", "1", "yes"}
 _FALSE_VALUES = {"false", "0", "no"}
 
-_CAPABILITY_PROFILE_FLAGS: dict[str, dict[str, bool]] = {
+_CAPABILITY_PROFILE_FLAGS: dict[str, dict[str, Any]] = {
     "core": {},
     "html_reports": {"HTML_REPORT_ENABLED": True},
     "rag": {"RAG_ENABLED": True},
     "spl_readonly": {
         "SPL_QUERY_GENERATION_ENABLED": True,
+        "INVESTIGATION_QUERY_EXECUTION_ENABLED": True,
+    },
+    "elastic_readonly": {
+        "ELASTIC_QUERY_GENERATION_ENABLED": True,
         "INVESTIGATION_QUERY_EXECUTION_ENABLED": True,
     },
     "ticket_draft": {"SERVICENOW_DRAFT_ENABLED": True},
@@ -79,6 +84,10 @@ def _parse_capability_profiles(raw: str) -> tuple[str, ...]:
             "CAPABILITY_PROFILES contains unsupported profile(s): "
             + ", ".join(unknown)
         )
+    if "spl_readonly" in profiles and "elastic_readonly" in profiles:
+        raise ValueError(
+            "CAPABILITY_PROFILES cannot include both spl_readonly and elastic_readonly"
+        )
 
     deduped: list[str] = []
     for profile in profiles:
@@ -87,15 +96,19 @@ def _parse_capability_profiles(raw: str) -> tuple[str, ...]:
     return tuple(deduped)
 
 
-def _profile_flag_defaults(profiles: tuple[str, ...]) -> dict[str, bool]:
+def _profile_flag_defaults(profiles: tuple[str, ...]) -> dict[str, Any]:
     """Return boolean defaults implied by the selected capability profiles."""
-    flags: dict[str, bool] = {}
+    flags: dict[str, Any] = {}
     for profile in profiles:
         flags.update(_CAPABILITY_PROFILE_FLAGS[profile])
+    if "elastic_readonly" in profiles:
+        flags["INVESTIGATION_QUERY_BACKEND"] = "elasticsearch"
+    elif "spl_readonly" in profiles:
+        flags["INVESTIGATION_QUERY_BACKEND"] = "splunk"
     return flags
 
 
-def _profile_bool(name: str, default: bool, profile_flags: dict[str, bool]) -> bool:
+def _profile_bool(name: str, default: bool, profile_flags: dict[str, Any]) -> bool:
     """Resolve a boolean controlled first by profiles, then legacy env flags."""
     if name in profile_flags:
         return profile_flags[name]
@@ -103,6 +116,13 @@ def _profile_bool(name: str, default: bool, profile_flags: dict[str, bool]) -> b
     if env_value is not None:
         return env_value
     return default
+
+
+def _profile_str(name: str, default: str, profile_flags: dict[str, Any]) -> str:
+    """Resolve a string controlled first by profiles, then env/default."""
+    if name in profile_flags:
+        return str(profile_flags[name])
+    return os.getenv(name, default).strip() or default
 
 
 @dataclass
@@ -289,6 +309,7 @@ class Config:
         ""  # Path to PEM CA bundle for Splunk TLS; empty = system trust store
     )
     INVESTIGATION_QUERY_EXECUTION_ENABLED: bool = False
+    INVESTIGATION_QUERY_BACKEND: str = "splunk"
     INVESTIGATION_QUERY_EXECUTOR: str = "rest"
     INVESTIGATION_MAX_QUERIES_PER_ALERT: int = 6
     INVESTIGATION_MAX_CONCURRENT_QUERIES: int = 6
@@ -306,6 +327,27 @@ class Config:
     SPLUNK_SEARCH_MAX_ROWS: int = 100
     SPLUNK_SEARCH_TIMEOUT_SECONDS: int = 30
     SPLUNK_MCP_TOOL_NAME: str = "splunk_search"
+    ELASTIC_QUERY_GENERATION_ENABLED: bool = False
+    ELASTICSEARCH_BASE_URL: str = ""
+    ELASTICSEARCH_API_KEY: str = ""
+    ELASTICSEARCH_INDEX_ALLOWLIST: str = ""
+    ELASTICSEARCH_ALLOW_WILDCARD_INDEXES: bool = False
+    ELASTICSEARCH_TIMESTAMP_FIELD: str = "@timestamp"
+    ELASTICSEARCH_ALLOWED_FIELDS: str = ""
+    ELASTICSEARCH_GROUNDING_ENABLED: bool = False
+    ELASTICSEARCH_GROUNDING_SOURCE_DIR: Path = field(
+        default_factory=lambda: Path(
+            "/opt/llm-notable-analysis/knowledge_base/elasticsearch_source_docs"
+        )
+    )
+    ELASTICSEARCH_GROUNDING_POSTGRES_CHUNKS_TABLE: str = "elasticsearch_query_chunks"
+    ELASTICSEARCH_GROUNDING_MAX_SNIPPETS: int = 4
+    ELASTICSEARCH_GROUNDING_CONTEXT_BUDGET_CHARS: int = 1600
+    ELASTICSEARCH_GROUNDING_FAILURE_MODE: str = "suppress"
+    ELASTICSEARCH_MAX_TIME_RANGE: str = "24h"
+    ELASTICSEARCH_MAX_ROWS: int = 100
+    ELASTICSEARCH_TIMEOUT_SECONDS: int = 30
+    ELASTICSEARCH_CA_BUNDLE: str = ""
     SERVICENOW_DRAFT_ENABLED: bool = False
     SERVICENOW_CREATE_ENABLED: bool = False
     SERVICENOW_CREATE_REQUIRES_APPROVAL: bool = True
@@ -351,6 +393,21 @@ class Config:
         self.CAPABILITY_PROFILES = ",".join(profiles)
         for name, value in _profile_flag_defaults(profiles).items():
             setattr(self, name, value)
+        self.INVESTIGATION_QUERY_BACKEND = (
+            str(self.INVESTIGATION_QUERY_BACKEND or "splunk").strip().lower()
+        )
+        if self.INVESTIGATION_QUERY_BACKEND not in {"splunk", "elasticsearch"}:
+            raise ValueError(
+                "INVESTIGATION_QUERY_BACKEND must be splunk or elasticsearch"
+            )
+        if self.INVESTIGATION_QUERY_BACKEND == "elasticsearch":
+            self.ELASTIC_QUERY_GENERATION_ENABLED = True
+        if (
+            self.ELASTIC_QUERY_GENERATION_ENABLED
+            and self.SPL_QUERY_GENERATION_ENABLED
+            and self.INVESTIGATION_QUERY_BACKEND == "elasticsearch"
+        ):
+            self.SPL_QUERY_GENERATION_ENABLED = False
 
 
 def load_config() -> Config:
@@ -480,6 +537,9 @@ def load_config() -> Config:
         INVESTIGATION_QUERY_EXECUTION_ENABLED=_profile_bool(
             "INVESTIGATION_QUERY_EXECUTION_ENABLED", False, profile_flags
         ),
+        INVESTIGATION_QUERY_BACKEND=_profile_str(
+            "INVESTIGATION_QUERY_BACKEND", "splunk", profile_flags
+        ).lower(),
         INVESTIGATION_QUERY_EXECUTOR=os.getenv(
             "INVESTIGATION_QUERY_EXECUTOR", "rest"
         ).strip()
@@ -523,6 +583,51 @@ def load_config() -> Config:
             "SPLUNK_SEARCH_TIMEOUT_SECONDS", 30, max_value=300
         ),
         SPLUNK_MCP_TOOL_NAME=os.getenv("SPLUNK_MCP_TOOL_NAME", "splunk_search"),
+        ELASTIC_QUERY_GENERATION_ENABLED=_profile_bool(
+            "ELASTIC_QUERY_GENERATION_ENABLED", False, profile_flags
+        ),
+        ELASTICSEARCH_BASE_URL=os.getenv("ELASTICSEARCH_BASE_URL", ""),
+        ELASTICSEARCH_API_KEY=os.getenv("ELASTICSEARCH_API_KEY", ""),
+        ELASTICSEARCH_INDEX_ALLOWLIST=os.getenv("ELASTICSEARCH_INDEX_ALLOWLIST", ""),
+        ELASTICSEARCH_ALLOW_WILDCARD_INDEXES=_bool_env(
+            "ELASTICSEARCH_ALLOW_WILDCARD_INDEXES", False
+        ),
+        ELASTICSEARCH_TIMESTAMP_FIELD=os.getenv(
+            "ELASTICSEARCH_TIMESTAMP_FIELD", "@timestamp"
+        ).strip()
+        or "@timestamp",
+        ELASTICSEARCH_ALLOWED_FIELDS=os.getenv("ELASTICSEARCH_ALLOWED_FIELDS", ""),
+        ELASTICSEARCH_GROUNDING_ENABLED=_bool_env(
+            "ELASTICSEARCH_GROUNDING_ENABLED", False
+        ),
+        ELASTICSEARCH_GROUNDING_SOURCE_DIR=Path(
+            os.getenv(
+                "ELASTICSEARCH_GROUNDING_SOURCE_DIR",
+                "/opt/llm-notable-analysis/knowledge_base/elasticsearch_source_docs",
+            )
+        ),
+        ELASTICSEARCH_GROUNDING_POSTGRES_CHUNKS_TABLE=os.getenv(
+            "ELASTICSEARCH_GROUNDING_POSTGRES_CHUNKS_TABLE",
+            "elasticsearch_query_chunks",
+        ),
+        ELASTICSEARCH_GROUNDING_MAX_SNIPPETS=_positive_int_env(
+            "ELASTICSEARCH_GROUNDING_MAX_SNIPPETS", 4, max_value=20
+        ),
+        ELASTICSEARCH_GROUNDING_CONTEXT_BUDGET_CHARS=_positive_int_env(
+            "ELASTICSEARCH_GROUNDING_CONTEXT_BUDGET_CHARS", 1600, max_value=10000
+        ),
+        ELASTICSEARCH_GROUNDING_FAILURE_MODE=(
+            os.getenv("ELASTICSEARCH_GROUNDING_FAILURE_MODE", "suppress").strip().lower()
+            or "suppress"
+        ),
+        ELASTICSEARCH_MAX_TIME_RANGE=os.getenv("ELASTICSEARCH_MAX_TIME_RANGE", "24h"),
+        ELASTICSEARCH_MAX_ROWS=_positive_int_env(
+            "ELASTICSEARCH_MAX_ROWS", 100, max_value=1000
+        ),
+        ELASTICSEARCH_TIMEOUT_SECONDS=_positive_int_env(
+            "ELASTICSEARCH_TIMEOUT_SECONDS", 30, max_value=300
+        ),
+        ELASTICSEARCH_CA_BUNDLE=os.getenv("ELASTICSEARCH_CA_BUNDLE", ""),
         SERVICENOW_DRAFT_ENABLED=_profile_bool(
             "SERVICENOW_DRAFT_ENABLED", False, profile_flags
         ),
