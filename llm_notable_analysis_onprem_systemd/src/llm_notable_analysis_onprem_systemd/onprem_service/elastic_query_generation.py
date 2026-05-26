@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
+from fnmatch import fnmatch
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 ELASTIC_QUERY_STRATEGIES = {"resolve_unknown", "check_contradiction"}
@@ -25,12 +27,25 @@ _GROUNDING_LINE_RE = re.compile(
     r"^\[\d+\]\s+\[(?P<source>.*?)\s+::\s+(?P<section>.*?)\]\s+(?P<excerpt>.*)$"
 )
 _DENIED_DSL_KEYS = {
+    "aggs",
+    "aggregations",
+    "collapse",
+    "delete",
+    "highlight",
+    "knn",
+    "more_like_this",
+    "pipeline",
+    "query_string",
+    "regexp",
+    "rescore",
+    "runtime_mappings",
     "script",
     "script_fields",
-    "runtime_mappings",
+    "script_score",
+    "simple_query_string",
+    "suggest",
     "update",
-    "delete",
-    "pipeline",
+    "wildcard",
 }
 _FIELD_QUERY_KEYS = {
     "term",
@@ -38,14 +53,15 @@ _FIELD_QUERY_KEYS = {
     "match",
     "match_phrase",
     "range",
-    "wildcard",
     "prefix",
-    "regexp",
 }
+_DURATION_RE = re.compile(r"^\s*(\d+)\s*([smhd])\s*$", re.IGNORECASE)
+_NOW_MATH_RE = re.compile(r"^now(?:-(\d+)([smhd]))?$", re.IGNORECASE)
+_INDEX_FORBIDDEN_CHARS = {",", "/", "\\", "?", "#"}
 
 ELASTIC_QUERY_GENERATION_RULES = """
 ELASTICSEARCH QUERY GENERATION (Enabled):
-- For each of the EXACTLY 6 hypotheses, include exactly one primary Elasticsearch Query DSL request.
+- For each input hypothesis, include exactly one primary Elasticsearch Query DSL request.
 - Each hypothesis must include:
   - query_strategy: "resolve_unknown" or "check_contradiction"
   - primary_elastic_query: an object with index_pattern and body
@@ -58,6 +74,9 @@ ELASTICSEARCH QUERY GENERATION (Enabled):
 - Do not output pseudo-queries or prose.
 - Do not invent environment-specific index patterns or field names unless explicitly present in SECURITY ALERT INPUT or ELASTICSEARCH_GROUNDING_CONTEXT.
 - Keep each search read-only, bounded, and decision-oriented.
+- Use only bounded _search Query DSL. Do not use aggregations, query_string,
+  simple_query_string, regex, wildcard clauses, scripts, highlighting, or runtime mappings.
+- Every query must include a lower and upper bound range filter on the configured timestamp field.
 """.strip()
 
 ELASTIC_QUERY_CONTEXT_RULES = """
@@ -95,7 +114,7 @@ Return ONLY a single JSON object with this shape:
 }
 
 Requirements:
-- Output exactly 6 items in competing_hypotheses.
+- Output the same number of items as INPUT_COMPETING_HYPOTHESES.
 - Keep the same order as INPUT_COMPETING_HYPOTHESES.
 - Include only the query fields above per hypothesis item.
 - Do not include markdown fences or extra prose.
@@ -242,6 +261,79 @@ def _csv_to_set(value: str) -> Set[str]:
     return {part.strip().casefold() for part in (value or "").split(",") if part.strip()}
 
 
+def _csv_to_list(value: str) -> List[str]:
+    return [part.strip().casefold() for part in (value or "").split(",") if part.strip()]
+
+
+def duration_to_seconds(value: str) -> Optional[int]:
+    """Parse a compact duration such as `24h` into seconds."""
+    match = _DURATION_RE.match(str(value or ""))
+    if not match:
+        return None
+    amount = int(match.group(1))
+    unit = match.group(2).lower()
+    factor = {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
+    return amount * factor
+
+
+def _now_math_lookback_seconds(value: Any) -> Optional[int]:
+    match = _NOW_MATH_RE.match(str(value or "").strip())
+    if not match:
+        return None
+    amount = match.group(1)
+    unit = match.group(2)
+    if amount is None or unit is None:
+        return 0
+    return duration_to_seconds(f"{amount}{unit}")
+
+
+def _parse_datetime(value: Any) -> Optional[datetime]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _validate_index_pattern(
+    index_pattern: str,
+    *,
+    allowed_index_patterns: str,
+    allow_wildcard_indexes: bool,
+    require_elastic_grounding: bool,
+    alert_text: str,
+    elasticsearch_grounding_context: str,
+) -> Tuple[bool, Optional[str]]:
+    clean = str(index_pattern or "").strip()
+    if not clean:
+        return False, "primary_elastic_query.index_pattern is required"
+    if _PLACEHOLDER_RE.search(clean):
+        return False, "primary_elastic_query.index_pattern contains placeholder text"
+    if any(char in clean for char in _INDEX_FORBIDDEN_CHARS):
+        return False, "primary_elastic_query.index_pattern contains a denied delimiter"
+    if "*" in clean and not allow_wildcard_indexes:
+        return False, "wildcard index patterns are disabled"
+
+    allowed_patterns = _csv_to_list(allowed_index_patterns)
+    if allowed_patterns and not any(
+        fnmatch(clean.casefold(), pattern) for pattern in allowed_patterns
+    ):
+        return False, "primary_elastic_query.index_pattern is not allowlisted"
+
+    if require_elastic_grounding and not _token_allowed(
+        clean,
+        alert_text=alert_text,
+        grounding_context=elasticsearch_grounding_context,
+    ):
+        return False, f"ungrounded index pattern: {clean}"
+    return True, None
+
+
 def _walk(obj: Any) -> List[Any]:
     out = [obj]
     if isinstance(obj, dict):
@@ -323,6 +415,69 @@ def _has_time_filter(body: Dict[str, Any], timestamp_field: str) -> bool:
     return False
 
 
+def _iter_timestamp_ranges(body: Dict[str, Any], timestamp_field: str) -> List[Dict[str, Any]]:
+    ranges: List[Dict[str, Any]] = []
+    for item in _walk(body):
+        if not isinstance(item, dict):
+            continue
+        range_obj = item.get("range")
+        if isinstance(range_obj, dict) and timestamp_field in range_obj:
+            time_bounds = range_obj.get(timestamp_field)
+            if isinstance(time_bounds, dict):
+                ranges.append(time_bounds)
+    return ranges
+
+
+def _validate_timestamp_range(
+    body: Dict[str, Any],
+    *,
+    timestamp_field: str,
+    max_time_range: str,
+) -> Tuple[bool, Optional[str]]:
+    ranges = _iter_timestamp_ranges(body, timestamp_field)
+    if not ranges:
+        return False, f"primary_elastic_query.body must include range on {timestamp_field}"
+
+    max_seconds = duration_to_seconds(max_time_range)
+    if max_seconds is None:
+        return False, "ELASTICSEARCH_MAX_TIME_RANGE has invalid format"
+
+    for time_bounds in ranges:
+        lower = (
+            time_bounds.get("gte")
+            if "gte" in time_bounds
+            else time_bounds.get("gt", time_bounds.get("from"))
+        )
+        upper = (
+            time_bounds.get("lte")
+            if "lte" in time_bounds
+            else time_bounds.get("lt", time_bounds.get("to"))
+        )
+        if lower is None or upper is None:
+            return False, "timestamp range must include lower and upper bounds"
+
+        lower_lookback = _now_math_lookback_seconds(lower)
+        upper_lookback = _now_math_lookback_seconds(upper)
+        if lower_lookback is not None and upper_lookback is not None:
+            if lower_lookback < upper_lookback:
+                return False, "timestamp lower bound must be before upper bound"
+            if lower_lookback - upper_lookback > max_seconds:
+                return False, "timestamp range exceeds configured max"
+            continue
+
+        lower_dt = _parse_datetime(lower)
+        upper_dt = _parse_datetime(upper)
+        if lower_dt and upper_dt:
+            if upper_dt < lower_dt:
+                return False, "timestamp lower bound must be before upper bound"
+            if (upper_dt - lower_dt).total_seconds() > max_seconds:
+                return False, "timestamp range exceeds configured max"
+            continue
+
+        return False, "timestamp range uses unsupported date format"
+    return True, None
+
+
 def build_elastic_query_grounding_refs(
     primary_elastic_query: Dict[str, Any],
     elasticsearch_grounding_context: str,
@@ -365,26 +520,26 @@ def _validate_one_primary_query(
     alert_text: str,
     elasticsearch_grounding_context: str,
     allowed_fields: str,
+    allowed_index_patterns: str,
     allow_wildcard_indexes: bool,
     max_rows: int,
+    max_time_range: str,
     timestamp_field: str,
     require_elastic_grounding: bool,
 ) -> Tuple[bool, Optional[str]]:
     primary = _clean_primary_query(query_obj)
     index_pattern = str(primary.get("index_pattern", "")).strip()
     body = primary.get("body", {})
-    if not index_pattern:
-        return False, "primary_elastic_query.index_pattern is required"
-    if _PLACEHOLDER_RE.search(index_pattern):
-        return False, "primary_elastic_query.index_pattern contains placeholder text"
-    if "*" in index_pattern and not allow_wildcard_indexes:
-        return False, "wildcard index patterns are disabled"
-    if require_elastic_grounding and not _token_allowed(
+    index_ok, index_err = _validate_index_pattern(
         index_pattern,
+        allowed_index_patterns=allowed_index_patterns,
+        allow_wildcard_indexes=allow_wildcard_indexes,
+        require_elastic_grounding=require_elastic_grounding,
         alert_text=alert_text,
-        grounding_context=elasticsearch_grounding_context,
-    ):
-        return False, f"ungrounded index pattern: {index_pattern}"
+        elasticsearch_grounding_context=elasticsearch_grounding_context,
+    )
+    if not index_ok:
+        return False, index_err
     if not isinstance(body, dict) or not body:
         return False, "primary_elastic_query.body must be a non-empty object"
     body_text = json.dumps(body, ensure_ascii=True, sort_keys=True)
@@ -398,16 +553,22 @@ def _validate_one_primary_query(
         return False, "primary_elastic_query.body.size exceeds configured max"
     if "query" not in body or not isinstance(body["query"], dict):
         return False, "primary_elastic_query.body.query must be an object"
-    if timestamp_field and not _has_time_filter(body, timestamp_field):
-        return False, f"primary_elastic_query.body must include range on {timestamp_field}"
+    if timestamp_field:
+        time_ok, time_err = _validate_timestamp_range(
+            body,
+            timestamp_field=timestamp_field,
+            max_time_range=max_time_range,
+        )
+        if not time_ok:
+            return False, time_err
 
     allowed = _csv_to_set(allowed_fields)
+    if not allowed and not require_elastic_grounding:
+        return False, "ELASTICSEARCH_ALLOWED_FIELDS must contain at least one field"
     for field in sorted(_extract_fields(body)):
         if field == timestamp_field:
             continue
         if allowed and field.casefold() in allowed:
-            continue
-        if not allowed and not require_elastic_grounding:
             continue
         if _token_allowed(
             field,
@@ -425,17 +586,25 @@ def validate_elastic_query_contract(
     alert_text: str = "",
     elasticsearch_grounding_context: str = "",
     allowed_fields: str = "",
+    allowed_index_patterns: str = "",
     allow_wildcard_indexes: bool = False,
     max_rows: int = 100,
+    max_time_range: str = "24h",
     timestamp_field: str = "@timestamp",
     require_elastic_grounding: bool = False,
+    expected_hypothesis_count: int | None = 6,
 ) -> Tuple[bool, Optional[str]]:
     """Validate strict Elastic query contract for per-hypothesis generation."""
     hypotheses = result.get("competing_hypotheses", [])
     if not isinstance(hypotheses, list):
         return False, "competing_hypotheses must be a list"
-    if len(hypotheses) != 6:
-        return False, f"competing_hypotheses must contain exactly 6 items, got {len(hypotheses)}"
+    if expected_hypothesis_count is not None and expected_hypothesis_count <= 0:
+        return False, "competing_hypotheses must contain at least one item"
+    if expected_hypothesis_count is not None and len(hypotheses) != expected_hypothesis_count:
+        return (
+            False,
+            f"competing_hypotheses must contain exactly {expected_hypothesis_count} items, got {len(hypotheses)}",
+        )
 
     for i, item in enumerate(hypotheses):
         if not isinstance(item, dict):
@@ -451,8 +620,10 @@ def validate_elastic_query_contract(
             alert_text=alert_text,
             elasticsearch_grounding_context=elasticsearch_grounding_context,
             allowed_fields=allowed_fields,
+            allowed_index_patterns=allowed_index_patterns,
             allow_wildcard_indexes=allow_wildcard_indexes,
             max_rows=max_rows,
+            max_time_range=max_time_range,
             timestamp_field=timestamp_field,
             require_elastic_grounding=require_elastic_grounding,
         )

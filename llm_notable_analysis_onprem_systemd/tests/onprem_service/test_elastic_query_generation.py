@@ -1,6 +1,9 @@
 import unittest
 from typing import Any, Dict, List
 
+# Tests run with PYTHONPATH pointing at the src layout.
+# pylint: disable=import-error,no-name-in-module
+
 from llm_notable_analysis_onprem_systemd.onprem_service.elastic_query_generation import (
     build_elastic_query_generation_prompt,
     build_elastic_query_grounding_refs,
@@ -102,6 +105,7 @@ class TestElasticQueryGeneration(unittest.TestCase):
         ok, err = validate_elastic_query_contract(
             payload,
             allowed_fields="@timestamp,user.name",
+            allowed_index_patterns="logs-auth",
             max_rows=100,
         )
         self.assertTrue(ok, msg=err)
@@ -126,6 +130,19 @@ class TestElasticQueryGeneration(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("denied DSL key", err or "")
 
+    def test_validate_elastic_query_contract_rejects_freeform_query_parser(
+        self,
+    ) -> None:
+        payload = {"competing_hypotheses": _valid_hypotheses()}
+        payload["competing_hypotheses"][0]["primary_elastic_query"]["body"]["query"][
+            "bool"
+        ]["filter"].append({"query_string": {"query": "sensitive_field:*"}})
+
+        ok, err = validate_elastic_query_contract(payload)
+
+        self.assertFalse(ok)
+        self.assertIn("query_string", err or "")
+
     def test_validate_elastic_query_contract_rejects_wildcard_when_disabled(self) -> None:
         payload = {"competing_hypotheses": _valid_hypotheses()}
         payload["competing_hypotheses"][0]["primary_elastic_query"] = _primary_query(
@@ -134,6 +151,20 @@ class TestElasticQueryGeneration(unittest.TestCase):
         ok, err = validate_elastic_query_contract(payload)
         self.assertFalse(ok)
         self.assertIn("wildcard", err or "")
+
+    def test_validate_elastic_query_contract_rejects_multi_index_expression(self) -> None:
+        payload = {"competing_hypotheses": _valid_hypotheses()}
+        payload["competing_hypotheses"][0]["primary_elastic_query"] = _primary_query(
+            "logs-auth,secret-index"
+        )
+
+        ok, err = validate_elastic_query_contract(
+            payload,
+            allowed_index_patterns="logs-auth,secret-index",
+        )
+
+        self.assertFalse(ok)
+        self.assertIn("delimiter", err or "")
 
     def test_validate_elastic_query_contract_rejects_missing_time_filter(self) -> None:
         payload = {"competing_hypotheses": _valid_hypotheses()}
@@ -145,6 +176,45 @@ class TestElasticQueryGeneration(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("@timestamp", err or "")
 
+    def test_validate_elastic_query_contract_rejects_excessive_time_range(self) -> None:
+        payload = {"competing_hypotheses": _valid_hypotheses()}
+        payload["competing_hypotheses"][0]["primary_elastic_query"]["body"]["query"][
+            "bool"
+        ]["filter"][0] = {
+            "range": {"@timestamp": {"gte": "now-30d", "lte": "now"}}
+        }
+
+        ok, err = validate_elastic_query_contract(
+            payload,
+            max_time_range="24h",
+        )
+
+        self.assertFalse(ok)
+        self.assertIn("timestamp range exceeds", err or "")
+
+    def test_validate_elastic_query_contract_rejects_lower_only_time_range(self) -> None:
+        payload = {"competing_hypotheses": _valid_hypotheses()}
+        payload["competing_hypotheses"][0]["primary_elastic_query"]["body"]["query"][
+            "bool"
+        ]["filter"][0] = {"range": {"@timestamp": {"gte": "now-1h"}}}
+
+        ok, err = validate_elastic_query_contract(payload)
+
+        self.assertFalse(ok)
+        self.assertIn("lower and upper", err or "")
+
+    def test_validate_elastic_query_contract_accepts_expected_base_count(self) -> None:
+        payload = {"competing_hypotheses": _valid_hypotheses()[:3]}
+
+        ok, err = validate_elastic_query_contract(
+            payload,
+            allowed_fields="@timestamp,user.name",
+            allowed_index_patterns="logs-auth",
+            expected_hypothesis_count=3,
+        )
+
+        self.assertTrue(ok, msg=err)
+
     def test_validate_elastic_query_contract_rejects_non_allowlisted_field(self) -> None:
         payload = {"competing_hypotheses": _valid_hypotheses()}
         ok, err = validate_elastic_query_contract(
@@ -153,6 +223,16 @@ class TestElasticQueryGeneration(unittest.TestCase):
         )
         self.assertFalse(ok)
         self.assertIn("user.name", err or "")
+
+    def test_validate_elastic_query_contract_rejects_empty_allowed_fields_without_grounding(
+        self,
+    ) -> None:
+        payload = {"competing_hypotheses": _valid_hypotheses()}
+
+        ok, err = validate_elastic_query_contract(payload)
+
+        self.assertFalse(ok)
+        self.assertIn("ELASTICSEARCH_ALLOWED_FIELDS", err or "")
 
     def test_build_elastic_query_grounding_refs_returns_source_sections(self) -> None:
         refs = build_elastic_query_grounding_refs(

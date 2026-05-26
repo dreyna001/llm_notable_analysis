@@ -124,6 +124,10 @@ class TestOnpremMainInvestigation(unittest.TestCase):
                 REPORT_DIR=reports,
                 INVESTIGATION_QUERY_EXECUTION_ENABLED=True,
                 INVESTIGATION_QUERY_BACKEND="elasticsearch",
+                ELASTICSEARCH_BASE_URL="https://elastic.internal:9200",
+                ELASTICSEARCH_API_KEY="test-key",
+                ELASTICSEARCH_INDEX_ALLOWLIST="logs-auth",
+                ELASTICSEARCH_ALLOWED_FIELDS="@timestamp,user.name",
             )
             llm_client = MagicMock()
             llm_client.analyze_alert.return_value = self._make_base_llm_response()

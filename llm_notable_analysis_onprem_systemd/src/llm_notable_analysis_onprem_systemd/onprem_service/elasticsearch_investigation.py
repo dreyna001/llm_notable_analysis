@@ -7,16 +7,19 @@ deterministic policy rules and executes eligible requests through `_search`.
 from __future__ import annotations
 
 import concurrent.futures
+from copy import deepcopy
 import fnmatch
 import json
 import logging
 import re
+import threading
 from typing import Any, Dict, List, Mapping, Optional, Tuple
+from urllib.parse import quote
 
 import requests
 
 from .config import Config
-from .elastic_query_generation import validate_elastic_query_contract
+from .elastic_query_generation import duration_to_seconds, validate_elastic_query_contract
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +32,12 @@ _MAX_RESULT_SAMPLE_ROWS = 5
 _MAX_SAMPLE_ROW_COLUMNS = 12
 _MAX_SAMPLE_VALUE_CHARS = 160
 _DURATION_RE = re.compile(r"^\s*(\d+)\s*([smhd])\s*$", re.IGNORECASE)
+_INDEX_FORBIDDEN_CHARS = {",", "/", "\\", "?", "#"}
+_GLOBAL_QUERY_SEMAPHORE_LOCK = threading.Lock()
+_GLOBAL_QUERY_SEMAPHORE_STATE: Dict[str, Any] = {
+    "limit": None,
+    "semaphore": None,
+}
 
 
 def _csv_to_list(value: str) -> List[str]:
@@ -36,23 +45,18 @@ def _csv_to_list(value: str) -> List[str]:
 
 
 def _duration_to_seconds(value: str) -> Optional[int]:
-    match = _DURATION_RE.match(str(value or ""))
-    if not match:
-        return None
-    amount = int(match.group(1))
-    unit = match.group(2).lower()
-    factor = {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
-    return amount * factor
+    return duration_to_seconds(value)
 
 
 def _query_to_compact_text(primary_query: Mapping[str, Any]) -> str:
     return json.dumps(primary_query, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
 
 
-def _bounded_sample_rows(rows: Any) -> List[Dict[str, str]]:
+def _bounded_sample_rows(rows: Any, *, allowed_fields: List[str]) -> List[Dict[str, str]]:
     """Return small, stringified sample rows safe for downstream prompts."""
     if not isinstance(rows, list):
         return []
+    allowed = {field.casefold() for field in allowed_fields}
     out: List[Dict[str, str]] = []
     for row in rows:
         if not isinstance(row, Mapping):
@@ -63,6 +67,8 @@ def _bounded_sample_rows(rows: Any) -> List[Dict[str, str]]:
         clean_row: Dict[str, str] = {}
         for key in sorted(source.keys())[:_MAX_SAMPLE_ROW_COLUMNS]:
             clean_key = str(key).strip()[:80]
+            if allowed and clean_key.casefold() not in allowed:
+                continue
             clean_value = str(source.get(key, "")).strip()
             if len(clean_value) > _MAX_SAMPLE_VALUE_CHARS:
                 clean_value = clean_value[: _MAX_SAMPLE_VALUE_CHARS - 3].rstrip() + "..."
@@ -79,9 +85,52 @@ def _index_allowed(index_pattern: str, *, allowed_patterns: List[str], allow_wil
     clean = index_pattern.strip().lower()
     if not clean:
         return False
+    if any(char in clean for char in _INDEX_FORBIDDEN_CHARS):
+        return False
     if "*" in clean and not allow_wildcards:
         return False
     return any(fnmatch.fnmatch(clean, allowed) for allowed in allowed_patterns)
+
+
+def _allowed_fields(config: Config) -> List[str]:
+    return _csv_to_list(str(getattr(config, "ELASTICSEARCH_ALLOWED_FIELDS", "")))
+
+
+def _global_query_semaphore(limit: int) -> threading.BoundedSemaphore:
+    """Return the process-wide Elastic query concurrency guard."""
+    safe_limit = max(1, int(limit))
+    with _GLOBAL_QUERY_SEMAPHORE_LOCK:
+        if (
+            _GLOBAL_QUERY_SEMAPHORE_STATE["semaphore"] is None
+            or _GLOBAL_QUERY_SEMAPHORE_STATE["limit"] != safe_limit
+        ):
+            _GLOBAL_QUERY_SEMAPHORE_STATE["semaphore"] = threading.BoundedSemaphore(
+                safe_limit
+            )
+            _GLOBAL_QUERY_SEMAPHORE_STATE["limit"] = safe_limit
+        return _GLOBAL_QUERY_SEMAPHORE_STATE["semaphore"]
+
+
+def _normalized_request_body(
+    primary_query: Mapping[str, Any],
+    *,
+    config: Config,
+    max_rows: int,
+    timeout_seconds: int,
+) -> Dict[str, Any]:
+    """Return a bounded request body; never trust model projection or row caps."""
+    body = primary_query.get("body", {})
+    normalized = deepcopy(body) if isinstance(body, Mapping) else {}
+    size = normalized.get("size", max_rows)
+    if not isinstance(size, int) or size <= 0 or size > max_rows:
+        size = max_rows
+    normalized["size"] = size
+    fields = sorted(_allowed_fields(config))
+    if fields:
+        normalized["_source"] = fields
+    normalized["timeout"] = f"{timeout_seconds}s"
+    normalized["terminate_after"] = max_rows
+    return normalized
 
 
 def validate_elasticsearch_query_policy(
@@ -109,6 +158,8 @@ def validate_elasticsearch_query_policy(
         allow_wildcards=allow_wildcards,
     ):
         return False, "query index_pattern is not in allowed index policy"
+    if not _allowed_fields(config):
+        return False, "ELASTICSEARCH_ALLOWED_FIELDS must contain at least one field"
 
     requested_range_seconds = _duration_to_seconds(time_range)
     max_range_seconds = _duration_to_seconds(
@@ -135,8 +186,12 @@ def validate_elasticsearch_query_policy(
         alert_text="",
         elasticsearch_grounding_context="",
         allowed_fields=str(getattr(config, "ELASTICSEARCH_ALLOWED_FIELDS", "")),
+        allowed_index_patterns=str(getattr(config, "ELASTICSEARCH_INDEX_ALLOWLIST", "")),
         allow_wildcard_indexes=allow_wildcards,
         max_rows=max_rows,
+        max_time_range=str(
+            getattr(config, "ELASTICSEARCH_MAX_TIME_RANGE", _DEFAULT_MAX_TIME_RANGE)
+        ),
         timestamp_field=str(getattr(config, "ELASTICSEARCH_TIMESTAMP_FIELD", "@timestamp")),
         require_elastic_grounding=False,
     )
@@ -194,6 +249,8 @@ def extract_hypothesis_elastic_queries(
 def _normalize_search_result(
     primary_query: Mapping[str, Any],
     response_json: Mapping[str, Any],
+    *,
+    allowed_fields: List[str],
 ) -> Dict[str, Any]:
     hits_obj = response_json.get("hits")
     hits: List[Any] = []
@@ -204,13 +261,16 @@ def _normalize_search_result(
             hits = raw_hits
         total = hits_obj.get("total")
         if isinstance(total, Mapping):
-            result_count = int(total.get("value", len(hits)) or 0)
+            try:
+                result_count = int(total.get("value", len(hits)) or 0)
+            except (TypeError, ValueError):
+                result_count = len(hits)
         elif isinstance(total, int):
             result_count = total
         else:
             result_count = len(hits)
 
-    sample_rows = _bounded_sample_rows(hits)
+    sample_rows = _bounded_sample_rows(hits, allowed_fields=allowed_fields)
     sample_columns: List[str] = []
     if sample_rows:
         sample_columns = sorted(str(k) for k in sample_rows[0].keys())
@@ -261,8 +321,14 @@ def execute_elasticsearch_query(
         }
 
     index_pattern = str(primary_query.get("index_pattern", "")).strip()
-    body = primary_query.get("body", {})
-    search_url = f"{config.ELASTICSEARCH_BASE_URL.rstrip('/')}/{index_pattern}/_search"
+    body = _normalized_request_body(
+        primary_query,
+        config=config,
+        max_rows=max_rows,
+        timeout_seconds=timeout_seconds,
+    )
+    encoded_index = quote(index_pattern, safe="*.-_")
+    search_url = f"{config.ELASTICSEARCH_BASE_URL.rstrip('/')}/{encoded_index}/_search"
     headers = {
         "Authorization": f"ApiKey {config.ELASTICSEARCH_API_KEY}",
         "Content-Type": "application/json",
@@ -294,8 +360,23 @@ def execute_elasticsearch_query(
                 "query": query_text,
                 "message": "Elasticsearch response must be an object",
             }
-        return _normalize_search_result(primary_query, response_json)
+        result = _normalize_search_result(
+            primary_query,
+            response_json,
+            allowed_fields=_allowed_fields(config),
+        )
+        logger.info(
+            "Elasticsearch query executed: index_pattern=%s result_count=%s",
+            index_pattern,
+            result.get("result_count", 0),
+        )
+        return result
     except requests.RequestException as exc:
+        logger.warning(
+            "Elasticsearch query transport failed: index_pattern=%s error_type=%s",
+            index_pattern,
+            type(exc).__name__,
+        )
         return {
             "status": "error",
             "executor": "elasticsearch",
@@ -320,6 +401,7 @@ def execute_hypothesis_elasticsearch_queries(
             _DEFAULT_MAX_QUERIES_PER_ALERT,
         )
     )
+    max_queries = max(1, max_queries)
     max_concurrent = int(
         getattr(
             config,
@@ -327,6 +409,7 @@ def execute_hypothesis_elasticsearch_queries(
             _DEFAULT_MAX_CONCURRENT_QUERIES,
         )
     )
+    max_concurrent = max(1, max_concurrent)
     time_range = str(
         getattr(config, "ELASTICSEARCH_MAX_TIME_RANGE", _DEFAULT_MAX_TIME_RANGE)
     )
@@ -340,17 +423,32 @@ def execute_hypothesis_elasticsearch_queries(
         return []
 
     max_workers = min(max_concurrent, len(candidates))
+    query_semaphore = _global_query_semaphore(max_concurrent)
     indexed_results: List[Tuple[int, Dict[str, Any]]] = []
 
     def _run_one(pos: int, item: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
         primary_query = item.get("primary_query", {})
-        result = execute_elasticsearch_query(
-            primary_query,
-            config=config,
-            time_range=time_range,
-            max_rows=max_rows,
-            timeout_seconds=timeout_seconds,
-        )
+        try:
+            with query_semaphore:
+                result = execute_elasticsearch_query(
+                    primary_query,
+                    config=config,
+                    time_range=time_range,
+                    max_rows=max_rows,
+                    timeout_seconds=timeout_seconds,
+                )
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.warning(
+                "Elasticsearch query failed unexpectedly: hypothesis_index=%s error_type=%s",
+                item.get("hypothesis_index"),
+                type(exc).__name__,
+            )
+            result = {
+                "status": "error",
+                "executor": "elasticsearch",
+                "query": item.get("query", ""),
+                "message": f"Unexpected Elasticsearch query error: {type(exc).__name__}",
+            }
         result["hypothesis_index"] = item.get("hypothesis_index")
         result["query_strategy"] = item.get("query_strategy", "")
         result["supports_if"] = item.get("supports_if", "")

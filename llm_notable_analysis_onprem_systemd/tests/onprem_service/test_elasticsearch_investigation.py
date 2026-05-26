@@ -126,6 +126,54 @@ class TestElasticsearchInvestigation(unittest.TestCase):
         self.assertEqual(kwargs["timeout"], 10)
         self.assertEqual(kwargs["headers"]["Authorization"], "ApiKey api-key")
         self.assertEqual(kwargs["json"]["size"], 25)
+        self.assertEqual(
+            kwargs["json"]["_source"],
+            ["@timestamp", "event.action", "host.name", "user.name"],
+        )
+        self.assertEqual(kwargs["json"]["terminate_after"], 50)
+
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.elasticsearch_investigation.requests.post"
+    )
+    def test_execute_elasticsearch_query_injects_missing_size_and_filters_source(
+        self, mock_post: MagicMock
+    ) -> None:
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "hits": {
+                "total": {"value": 1},
+                "hits": [
+                    {
+                        "_source": {
+                            "user.name": "admin",
+                            "secret": "must not be forwarded",
+                        }
+                    }
+                ],
+            }
+        }
+        mock_post.return_value = response
+        config = _base_config()
+        primary = _primary_query()
+        del primary["body"]["size"]
+
+        result = execute_elasticsearch_query(
+            primary,
+            config=config,
+            time_range="1h",
+            max_rows=50,
+            timeout_seconds=10,
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["sample_rows"], [{"user.name": "admin"}])
+        _, kwargs = mock_post.call_args
+        self.assertEqual(kwargs["json"]["size"], 50)
+        self.assertEqual(
+            kwargs["json"]["_source"],
+            ["@timestamp", "event.action", "host.name", "user.name"],
+        )
 
     @patch(
         "llm_notable_analysis_onprem_systemd.onprem_service.elasticsearch_investigation.requests.post"
@@ -144,6 +192,38 @@ class TestElasticsearchInvestigation(unittest.TestCase):
 
         self.assertEqual(result["status"], "denied")
         self.assertEqual(mock_post.call_count, 0)
+
+    def test_validate_policy_rejects_overwide_body_time_range(self) -> None:
+        config = _base_config()
+        primary = _primary_query()
+        primary["body"]["query"]["bool"]["filter"][0] = {
+            "range": {"@timestamp": {"gte": "now-30d", "lte": "now"}}
+        }
+
+        ok, reason = validate_elasticsearch_query_policy(
+            primary,
+            config=config,
+            time_range="1h",
+            max_rows=50,
+            timeout_seconds=10,
+        )
+
+        self.assertFalse(ok)
+        self.assertIn("timestamp range exceeds", reason or "")
+
+    def test_validate_policy_rejects_multi_index_expansion(self) -> None:
+        config = _base_config()
+
+        ok, reason = validate_elasticsearch_query_policy(
+            _primary_query("logs-auth,security-*"),
+            config=config,
+            time_range="1h",
+            max_rows=50,
+            timeout_seconds=10,
+        )
+
+        self.assertFalse(ok)
+        self.assertIn("allowed index policy", reason or "")
 
     @patch(
         "llm_notable_analysis_onprem_systemd.onprem_service.elasticsearch_investigation.requests.post"
@@ -169,6 +249,56 @@ class TestElasticsearchInvestigation(unittest.TestCase):
 
         self.assertEqual(len(results), 2)
         self.assertEqual(mock_post.call_count, 2)
+
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.elasticsearch_investigation.execute_elasticsearch_query"
+    )
+    def test_execute_hypothesis_elasticsearch_queries_preserves_partial_failures(
+        self, mock_execute: MagicMock
+    ) -> None:
+        config = _base_config()
+        config.INVESTIGATION_MAX_CONCURRENT_QUERIES = 1
+        analysis_result = {
+            "competing_hypotheses": [
+                {"primary_elastic_query": _primary_query(), "query_strategy": "resolve_unknown"},
+                {"primary_elastic_query": _primary_query(), "query_strategy": "resolve_unknown"},
+            ]
+        }
+        mock_execute.side_effect = [
+            {"status": "success", "executor": "elasticsearch", "query": "one"},
+            RuntimeError("boom"),
+        ]
+
+        results = execute_hypothesis_elasticsearch_queries(analysis_result, config=config)
+
+        self.assertEqual(results[0]["status"], "success")
+        self.assertEqual(results[1]["status"], "error")
+        self.assertIn("Unexpected Elasticsearch query error", results[1]["message"])
+
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.elasticsearch_investigation.requests.post"
+    )
+    def test_execute_hypothesis_elasticsearch_queries_clamps_direct_config_concurrency(
+        self, mock_post: MagicMock
+    ) -> None:
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+        mock_post.return_value = response
+        config = _base_config()
+        config.INVESTIGATION_MAX_QUERIES_PER_ALERT = 0
+        config.INVESTIGATION_MAX_CONCURRENT_QUERIES = 0
+        analysis_result = {
+            "competing_hypotheses": [
+                {"primary_elastic_query": _primary_query(), "query_strategy": "resolve_unknown"},
+                {"primary_elastic_query": _primary_query(), "query_strategy": "resolve_unknown"},
+            ]
+        }
+
+        results = execute_hypothesis_elasticsearch_queries(analysis_result, config=config)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["status"], "success")
 
     @patch(
         "llm_notable_analysis_onprem_systemd.onprem_service.elasticsearch_investigation.requests.post"

@@ -601,16 +601,29 @@ def _validate_elastic_query_contract(
         allowed_fields=str(getattr(config, "ELASTICSEARCH_ALLOWED_FIELDS", ""))
         if config
         else "",
+        allowed_index_patterns=str(
+            getattr(config, "ELASTICSEARCH_INDEX_ALLOWLIST", "")
+        )
+        if config
+        else "",
         allow_wildcard_indexes=bool(
             getattr(config, "ELASTICSEARCH_ALLOW_WILDCARD_INDEXES", False)
         )
         if config
         else False,
         max_rows=int(getattr(config, "ELASTICSEARCH_MAX_ROWS", 100)) if config else 100,
+        max_time_range=str(getattr(config, "ELASTICSEARCH_MAX_TIME_RANGE", "24h"))
+        if config
+        else "24h",
         timestamp_field=str(getattr(config, "ELASTICSEARCH_TIMESTAMP_FIELD", "@timestamp"))
         if config
         else "@timestamp",
         require_elastic_grounding=require_elastic_grounding,
+        expected_hypothesis_count=len(
+            result.get("competing_hypotheses", [])
+            if isinstance(result.get("competing_hypotheses"), list)
+            else []
+        ),
     )
 
 

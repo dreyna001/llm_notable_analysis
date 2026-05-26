@@ -119,7 +119,14 @@ class TestConfigRuntimeContract(unittest.TestCase):
 
     def test_elastic_readonly_profile_enables_elastic_backend(self) -> None:
         """Elastic profile should mirror spl_readonly without enabling Splunk queries."""
-        with patch.dict(os.environ, {"CAPABILITY_PROFILES": "elastic_readonly"}, clear=True):
+        env = {
+            "CAPABILITY_PROFILES": "elastic_readonly",
+            "ELASTICSEARCH_BASE_URL": "https://elastic.internal:9200",
+            "ELASTICSEARCH_API_KEY": "test-key",
+            "ELASTICSEARCH_INDEX_ALLOWLIST": "logs-auth",
+            "ELASTICSEARCH_ALLOWED_FIELDS": "@timestamp,user.name",
+        }
+        with patch.dict(os.environ, env, clear=True):
             config = load_config()
 
         self.assertEqual(config.CAPABILITY_PROFILES, "core,elastic_readonly")
@@ -127,6 +134,60 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertTrue(config.INVESTIGATION_QUERY_EXECUTION_ENABLED)
         self.assertEqual(config.INVESTIGATION_QUERY_BACKEND, "elasticsearch")
         self.assertFalse(config.SPL_QUERY_GENERATION_ENABLED)
+
+    def test_elastic_backend_selection_does_not_force_generation(self) -> None:
+        """Backend selection alone should not silently enable query generation."""
+        with patch.dict(
+            os.environ,
+            {"INVESTIGATION_QUERY_BACKEND": "elasticsearch"},
+            clear=True,
+        ):
+            config = load_config()
+
+        self.assertEqual(config.INVESTIGATION_QUERY_BACKEND, "elasticsearch")
+        self.assertFalse(config.ELASTIC_QUERY_GENERATION_ENABLED)
+        self.assertFalse(config.INVESTIGATION_QUERY_EXECUTION_ENABLED)
+
+    def test_elastic_execution_fails_fast_without_required_runtime_contract(self) -> None:
+        """Enabled Elastic execution should not discover missing secrets at query time."""
+        with patch.dict(
+            os.environ,
+            {
+                "INVESTIGATION_QUERY_BACKEND": "elasticsearch",
+                "INVESTIGATION_QUERY_EXECUTION_ENABLED": "true",
+            },
+            clear=True,
+        ):
+            with self.assertRaisesRegex(ValueError, "ELASTICSEARCH_INDEX_ALLOWLIST"):
+                load_config()
+
+    def test_elastic_execution_requires_https_endpoint(self) -> None:
+        """Elastic API keys should not be sent to plaintext endpoints."""
+        env = {
+            "INVESTIGATION_QUERY_BACKEND": "elasticsearch",
+            "INVESTIGATION_QUERY_EXECUTION_ENABLED": "true",
+            "ELASTICSEARCH_BASE_URL": "http://elastic.internal:9200",
+            "ELASTICSEARCH_API_KEY": "test-key",
+            "ELASTICSEARCH_INDEX_ALLOWLIST": "logs-auth",
+            "ELASTICSEARCH_ALLOWED_FIELDS": "@timestamp,user.name",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaisesRegex(ValueError, "HTTPS"):
+                load_config()
+
+    def test_elastic_execution_requires_allowed_fields_even_with_grounding(self) -> None:
+        """Execution needs projection fields even when generation is grounded."""
+        env = {
+            "INVESTIGATION_QUERY_BACKEND": "elasticsearch",
+            "INVESTIGATION_QUERY_EXECUTION_ENABLED": "true",
+            "ELASTICSEARCH_BASE_URL": "https://elastic.internal:9200",
+            "ELASTICSEARCH_API_KEY": "test-key",
+            "ELASTICSEARCH_INDEX_ALLOWLIST": "logs-auth",
+            "ELASTICSEARCH_GROUNDING_ENABLED": "true",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaisesRegex(ValueError, "ELASTICSEARCH_ALLOWED_FIELDS"):
+                load_config()
 
     def test_readonly_profiles_are_mutually_exclusive(self) -> None:
         """A deployment should choose one read-only investigation backend for v1."""

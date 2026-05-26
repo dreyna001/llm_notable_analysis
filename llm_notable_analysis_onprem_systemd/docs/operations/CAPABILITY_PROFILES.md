@@ -109,6 +109,11 @@ Primary follow-up values:
 `spl_readonly` and `elastic_readonly` are mutually exclusive for v1. Choose one
 active read-only investigation backend per deployment.
 
+When `elastic_readonly` enables execution, `ELASTICSEARCH_BASE_URL` must be an
+HTTPS URL, `ELASTICSEARCH_API_KEY` must be set, and
+`ELASTICSEARCH_INDEX_ALLOWLIST` plus `ELASTICSEARCH_ALLOWED_FIELDS` must be
+configured before startup succeeds.
+
 ### `ticket_draft`
 
 Use when operators want ServiceNow incident drafts rendered into reports without

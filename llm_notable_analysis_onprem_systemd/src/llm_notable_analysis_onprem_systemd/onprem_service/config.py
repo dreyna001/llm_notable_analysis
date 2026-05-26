@@ -8,6 +8,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 _TRUE_VALUES = {"true", "1", "yes"}
 _FALSE_VALUES = {"false", "0", "no"}
@@ -123,6 +124,49 @@ def _profile_str(name: str, default: str, profile_flags: dict[str, Any]) -> str:
     if name in profile_flags:
         return str(profile_flags[name])
     return os.getenv(name, default).strip() or default
+
+
+def _csv_has_values(value: str) -> bool:
+    """Return whether a CSV config value contains at least one item."""
+    return any(part.strip() for part in str(value or "").split(","))
+
+
+def _validate_elasticsearch_runtime_contract(config: "Config") -> None:
+    """Fail fast on unsafe or incomplete Elasticsearch read-only configuration."""
+    if config.INVESTIGATION_QUERY_BACKEND != "elasticsearch":
+        return
+
+    elastic_generation_enabled = bool(config.ELASTIC_QUERY_GENERATION_ENABLED)
+    elastic_execution_enabled = bool(config.INVESTIGATION_QUERY_EXECUTION_ENABLED)
+    if not elastic_generation_enabled and not elastic_execution_enabled:
+        return
+
+    if not _csv_has_values(config.ELASTICSEARCH_INDEX_ALLOWLIST):
+        raise ValueError(
+            "ELASTICSEARCH_INDEX_ALLOWLIST is required when Elasticsearch query generation or execution is enabled"
+        )
+    has_allowed_fields = _csv_has_values(config.ELASTICSEARCH_ALLOWED_FIELDS)
+    if not has_allowed_fields:
+        if elastic_execution_enabled:
+            raise ValueError(
+                "ELASTICSEARCH_ALLOWED_FIELDS is required when Elasticsearch query execution is enabled"
+            )
+        if not bool(config.ELASTICSEARCH_GROUNDING_ENABLED):
+            raise ValueError(
+                "ELASTICSEARCH_ALLOWED_FIELDS is required unless ELASTICSEARCH_GROUNDING_ENABLED=true"
+            )
+
+    if not elastic_execution_enabled:
+        return
+
+    base_url = str(config.ELASTICSEARCH_BASE_URL or "").strip()
+    parsed = urlparse(base_url)
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+        raise ValueError("ELASTICSEARCH_BASE_URL must be an HTTPS URL without userinfo")
+    if not str(config.ELASTICSEARCH_API_KEY or "").strip():
+        raise ValueError(
+            "ELASTICSEARCH_API_KEY is required when Elasticsearch query execution is enabled"
+        )
 
 
 @dataclass
@@ -400,14 +444,13 @@ class Config:
             raise ValueError(
                 "INVESTIGATION_QUERY_BACKEND must be splunk or elasticsearch"
             )
-        if self.INVESTIGATION_QUERY_BACKEND == "elasticsearch":
-            self.ELASTIC_QUERY_GENERATION_ENABLED = True
         if (
             self.ELASTIC_QUERY_GENERATION_ENABLED
             and self.SPL_QUERY_GENERATION_ENABLED
             and self.INVESTIGATION_QUERY_BACKEND == "elasticsearch"
         ):
             self.SPL_QUERY_GENERATION_ENABLED = False
+        _validate_elasticsearch_runtime_contract(self)
 
 
 def load_config() -> Config:
