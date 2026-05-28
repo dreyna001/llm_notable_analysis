@@ -200,6 +200,56 @@ patch_vllm_systemd_unit() {
         || err "Failed to patch --served-model-name in $unit_file"
 }
 
+detect_cuda_home_best_effort() {
+    # vLLM/FlashInfer can JIT-build CUDA kernels at runtime. Prefer an explicit
+    # CUDA_HOME, then common NVIDIA toolkit install paths.
+    if [[ -n "${CUDA_HOME:-}" && -x "$CUDA_HOME/bin/nvcc" ]]; then
+        printf '%s\n' "$CUDA_HOME"
+        return 0
+    fi
+
+    if [[ -x /usr/local/cuda/bin/nvcc ]]; then
+        printf '%s\n' "/usr/local/cuda"
+        return 0
+    fi
+
+    local nvcc_path
+    for nvcc_path in /usr/local/cuda-*/bin/nvcc; do
+        [[ -x "$nvcc_path" ]] || continue
+        dirname "$(dirname "$nvcc_path")"
+        return 0
+    done
+
+    if command -v nvcc &>/dev/null; then
+        nvcc_path="$(command -v nvcc)"
+        dirname "$(dirname "$nvcc_path")"
+        return 0
+    fi
+
+    printf '%s\n' "/usr/local/cuda"
+}
+
+patch_vllm_cuda_environment() {
+    local unit_file="$1"
+    local cuda_home
+    cuda_home="$(detect_cuda_home_best_effort)"
+
+    local escaped_cuda_home escaped_path
+    escaped_cuda_home="$(printf '%s' "$cuda_home" | sed 's/[&|]/\\&/g')"
+    escaped_path="$(printf '%s' "$cuda_home/bin:$VLLM_VENV_DIR/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" | sed 's/[&|]/\\&/g')"
+
+    sed -i -E "s|^Environment=\"CUDA_HOME=.*\"$|Environment=\"CUDA_HOME=${escaped_cuda_home}\"|" "$unit_file" \
+        || err "Failed to patch CUDA_HOME in $unit_file"
+    sed -i -E "s|^Environment=\"PATH=.*\"$|Environment=\"PATH=${escaped_path}\"|" "$unit_file" \
+        || err "Failed to patch CUDA PATH in $unit_file"
+
+    if [[ -x "$cuda_home/bin/nvcc" ]]; then
+        info "Configured vLLM CUDA_HOME=$cuda_home"
+    else
+        warn "CUDA toolkit nvcc not found; vLLM may fail if runtime JIT compilation is required. Expected: $cuda_home/bin/nvcc"
+    fi
+}
+
 handle_vllm_systemd_overrides() {
     # Existing drop-ins can silently override newly installed unit settings.
     # By default we warn; optionally clear them for deterministic installs.
@@ -733,6 +783,7 @@ if [[ "${INSTALL_SYSTEMD_UNITS:-true}" == "true" ]]; then
         strip_crlf_in_file_best_effort "/etc/systemd/system/$unit"
         if [[ "$unit" == "vllm.service" ]]; then
             patch_vllm_systemd_unit "/etc/systemd/system/$unit"
+            patch_vllm_cuda_environment "/etc/systemd/system/$unit"
         fi
         info "Installed: $unit"
     done

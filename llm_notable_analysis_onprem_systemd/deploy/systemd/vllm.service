@@ -46,6 +46,11 @@ RestartSec=30
 
 # Environment for CUDA
 Environment="CUDA_VISIBLE_DEVICES=0"
+# FlashInfer/vLLM can JIT-build CUDA kernels during startup. Keep nvcc visible
+# for hosts where the toolkit is installed under /usr/local/cuda or patched by
+# scripts/install.sh to a versioned path such as /usr/local/cuda-13.3.
+Environment="CUDA_HOME=/usr/local/cuda"
+Environment="PATH=/usr/local/cuda/bin:/opt/vllm/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 # Keep torch distributed rendezvous local on single-node deployments.
 Environment="VLLM_HOST_IP=127.0.0.1"
 Environment="MASTER_ADDR=127.0.0.1"

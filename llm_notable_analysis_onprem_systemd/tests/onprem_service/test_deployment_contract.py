@@ -53,6 +53,8 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("--max-model-len 32768", service_text)
         self.assertIn("--host 127.0.0.1", service_text)
         self.assertIn("--port 8000", service_text)
+        self.assertIn('Environment="CUDA_HOME=/usr/local/cuda"', service_text)
+        self.assertIn("/usr/local/cuda/bin:/opt/vllm/venv/bin", service_text)
 
     def test_litellm_service_is_loopback_only(self) -> None:
         """LiteLLM should bind only to loopback in the default unit."""
@@ -89,6 +91,8 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("$DATA_DIR/cache/sentence-transformers", install_text)
         self.assertIn("future/__pycache__", install_text)
         self.assertIn("*.egg-info", install_text)
+        self.assertIn("detect_cuda_home_best_effort", install_text)
+        self.assertIn("patch_vllm_cuda_environment", install_text)
 
         pyproject_text = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         self.assertIn('"onprem-rag-notable-analysis==0.1.0"', pyproject_text)

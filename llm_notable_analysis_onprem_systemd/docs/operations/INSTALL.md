@@ -245,6 +245,19 @@ This vLLM generation uses Transformers v5 and supports the default
 `VLLM_PIP_SPEC`, keep it aligned with a Transformers version that recognizes
 the configured model architecture.
 
+Gemma 4 startup can require runtime CUDA kernel compilation through
+FlashInfer/vLLM sampling paths. The host must have the CUDA toolkit available,
+not only the NVIDIA driver. `scripts/install.sh` patches the installed
+`vllm.service` with `CUDA_HOME` and `PATH` by checking, in order:
+
+- explicit `CUDA_HOME` when it contains `bin/nvcc`
+- `/usr/local/cuda/bin/nvcc`
+- versioned toolkit paths such as `/usr/local/cuda-13.3/bin/nvcc`
+- `nvcc` already on `PATH`
+
+If no `nvcc` is found, install the CUDA toolkit for the host driver/runtime
+before starting vLLM.
+
 If you need a different path (for example, Python 3.12 side-by-side), set:
 
 - `VLLM_INSTALL_DIR` (default: `/opt/vllm`)

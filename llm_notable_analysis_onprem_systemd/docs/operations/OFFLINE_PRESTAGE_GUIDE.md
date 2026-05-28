@@ -120,6 +120,9 @@ Commonly needed in practice:
 For full vLLM mode, also stage:
 
 - NVIDIA driver + CUDA runtime/toolkit compatible with your GPU
+- CUDA toolkit `nvcc`; vLLM/FlashInfer may JIT-build kernels during startup.
+  The installer auto-detects `CUDA_HOME` from `/usr/local/cuda`,
+  `/usr/local/cuda-*`, or `nvcc` on `PATH` and patches `vllm.service`.
 
 For PostgreSQL RAG mode, also stage:
 
