@@ -64,6 +64,53 @@ parsing behavior.
 - Increase timeout only when the model needs it under normal load.
 - Revisit timeout when enabling RAG, SPL generation, or concurrent processing.
 
+### What local inference telemetry is available?
+
+vLLM exposes a local Prometheus-format metrics endpoint on the loopback vLLM
+listener:
+
+```bash
+curl -sS http://127.0.0.1:8000/metrics
+```
+
+This endpoint is useful for checking model-server behavior such as request
+latency, token throughput, cache behavior, and queueing. The packaged
+deployment does not scrape, persist, or export these metrics by default;
+operators should wire an approved Prometheus/OpenTelemetry path if they need
+long-term metrics retention.
+
+### Which vLLM endpoints are operator-facing?
+
+The analyzer should call LiteLLM, not vLLM directly. Keep application traffic on:
+
+```bash
+http://127.0.0.1:4000/v1/chat/completions
+```
+
+Operators may use these loopback vLLM endpoints for validation and debugging:
+
+```bash
+# Readiness
+curl -sS http://127.0.0.1:8000/health
+
+# Prometheus-format model-server metrics
+curl -sS http://127.0.0.1:8000/metrics
+
+# Direct vLLM model advertisement
+curl -sS http://127.0.0.1:8000/v1/models
+
+# Prompt sizing/debugging
+curl -sS http://127.0.0.1:8000/tokenize \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gemma-4-31B-it","prompt":"test prompt"}'
+```
+
+The vLLM OpenAI-compatible server may also expose direct completion endpoints
+such as `/v1/chat/completions` and `/v1/completions`, plus model-dependent
+surfaces such as `/v1/embeddings`. Those are not the supported analyzer
+integration path in this deployment; use them only for isolated operator tests
+unless the LiteLLM routing contract is intentionally changed.
+
 ### Should freeform mode be used?
 
 The default analyzer is the structured report path. A separate freeform service
@@ -86,17 +133,22 @@ not a per-file toggle.
 | Model | `LLM_MODEL_NAME` |
 | Output contract | `LLM_STRUCTURED_OUTPUT_MODE` |
 | Bounds | `LLM_MAX_TOKENS`, `LLM_TIMEOUT` |
+| vLLM operator checks | `/health`, `/metrics`, `/v1/models`, `/tokenize` on `127.0.0.1:8000` |
 | Alternate report mode | `notable-analyzer-freeform.service` systemd unit |
 
 ## Validation And Rollout
 
 1. Confirm the endpoint responds locally:
    `curl -sS http://127.0.0.1:4000/v1/models`.
-2. Run the service-chain smoke test after services are started:
+2. Confirm vLLM is healthy:
+   `curl -sS http://127.0.0.1:8000/health`.
+3. Optionally confirm local vLLM metrics are exposed:
+   `curl -sS http://127.0.0.1:8000/metrics`.
+4. Run the service-chain smoke test after services are started:
    `sudo bash scripts/smoke_service_chain.sh --config-env /etc/notable-analyzer/config.env`.
-3. Process representative JSON and text notables.
-4. Review parse/repair metadata, report completeness, and latency.
-5. Change one inference setting at a time between validation runs.
+5. Process representative JSON and text notables.
+6. Review parse/repair metadata, report completeness, and latency.
+7. Change one inference setting at a time between validation runs.
 
 ## Related Docs
 
