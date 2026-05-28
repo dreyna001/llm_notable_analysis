@@ -1,0 +1,54 @@
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Arial", "primaryTextColor": "#111827", "lineColor": "#334155", "clusterBkg": "#F8FAFC", "clusterBorder": "#CBD5E1"}}}%%
+flowchart LR
+  subgraph App["Small application caller"]
+    DROP["File drop<br/>/var/notables/incoming"]
+    ANA["notable-analyzer.service<br/>builds prompt + validates output"]
+    REPORT["Reports / archive<br/>/var/notables"]
+    DROP --> ANA --> REPORT
+  end
+
+  subgraph Host["Single RHEL on-prem LLM host"]
+    subgraph Control["systemd control plane"]
+      SYS["systemd<br/>enable, start, restart, health"]
+      ENV["config.env + secrets<br/>loopback URLs, API keys, model id"]
+      LOGS["journald / service logs<br/>vLLM, LiteLLM, analyzer"]
+    end
+
+    subgraph Gateway["Caller-facing LLM gateway"]
+      LITE["litellm.service<br/>OpenAI-compatible API<br/>127.0.0.1:4000"]
+      POLICY["Model alias + routing<br/>timeouts, auth boundary,<br/>stable caller contract"]
+    end
+
+    subgraph Runtime["GPU inference runtime"]
+      VLLM["vllm.service<br/>OpenAI-compatible backend<br/>127.0.0.1:8000"]
+      MODEL["Local model artifacts<br/>gemma-4-31B-it example<br/>offline staged weights"]
+      GPU["NVIDIA driver + CUDA<br/>single GPU / VRAM pool<br/>continuous batching"]
+    end
+  end
+
+  ANA -->|"POST /v1/chat/completions"| LITE
+  LITE --> POLICY --> VLLM
+  VLLM --> MODEL
+  VLLM --> GPU
+  SYS --> ANA
+  SYS --> LITE
+  SYS --> VLLM
+  ENV -. runtime contract .-> ANA
+  ENV -. runtime contract .-> LITE
+  ENV -. runtime contract .-> VLLM
+  ANA -. logs .-> LOGS
+  LITE -. logs .-> LOGS
+  VLLM -. logs .-> LOGS
+  VLLM -->|"model response"| LITE -->|"structured response"| ANA
+
+  classDef app fill:#EEF2FF,stroke:#818CF8,stroke-width:1px,color:#111827;
+  classDef control fill:#ECFDF5,stroke:#10B981,stroke-width:1px,color:#064E3B;
+  classDef gateway fill:#EFF6FF,stroke:#2563EB,stroke-width:2px,color:#1E3A8A;
+  classDef runtime fill:#FFF7ED,stroke:#F97316,stroke-width:2px,color:#7C2D12;
+  classDef ops fill:#F1F5F9,stroke:#64748B,stroke-width:1px,color:#334155;
+
+  class DROP,ANA,REPORT app;
+  class SYS,ENV control;
+  class LITE,POLICY gateway;
+  class VLLM,MODEL,GPU runtime;
+  class LOGS ops;

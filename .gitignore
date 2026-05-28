@@ -24,3 +24,10 @@ llm_notable_analysis_onprem_systemd/wsl-notable-data/
 
 # Cursor IDE (local only; do not commit)
 .cursor/
+
+# Node / npm (local diagram tooling only; never commit installs)
+node_modules/
+package-lock.json
+npm-debug.log*
+.yarn/
+.pnp.*

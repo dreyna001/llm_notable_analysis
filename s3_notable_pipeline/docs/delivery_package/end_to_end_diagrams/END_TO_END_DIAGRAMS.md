@@ -2,6 +2,8 @@
 
 Pre-rendered SVG exports of each figure (same folder): `END_TO_END_DIAGRAMS.fig01-full-story.svg` through `END_TO_END_DIAGRAMS.fig04-deployment-sequence.svg`.
 
+**PowerPoint PNGs (fig01):** Source `END_TO_END_DIAGRAMS.fig01-full-story.mmd`. Exports: `END_TO_END_DIAGRAMS.fig01-full-story.ppt-slide01-upstream.png` (A-C), `END_TO_END_DIAGRAMS.fig01-full-story.ppt-slide02-aws-pipeline.png` (D-E), and optional `END_TO_END_DIAGRAMS.fig01-full-story.ppt-full.png`. The upstream slide is also split into 16:9 slide crops: `END_TO_END_DIAGRAMS.fig01-full-story.ppt-slide01-upstream-part01-authoring-live.png`, `END_TO_END_DIAGRAMS.fig01-full-story.ppt-slide01-upstream-part02-live-handoff.png`, and `END_TO_END_DIAGRAMS.fig01-full-story.ppt-slide01-upstream-part03-handoff-pipeline-entry.png`. Regenerate the base exports from `s3_notable_pipeline`: `npm install`, `pip install pillow`, then `node scripts/tools/export_svg_to_ppt_pngs.mjs docs/delivery_package/end_to_end_diagrams/END_TO_END_DIAGRAMS.fig01-full-story.mmd` (uses `mmdc`/Chromium so labels render; do not rasterize the SVG with resvg alone).
+
 These Mermaid diagrams summarize how work flows from **how customers build and fire notables** through **customer-side deployment** to **analyst-ready reports**.
 
 **Assumptions (planning, not a guarantee):**

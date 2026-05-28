@@ -6,7 +6,7 @@ Use this page to pick **where to start** without reading the whole root [`README
 
 1. **[Executive on-prem build writeup](delivery_package/EXECUTIVE_ONPREM_BUILD_WRITEUP.md)** — Short stakeholder summary of what the build provides, including AI infrastructure, the analyzer application, assumptions, hardware expectations, and constraints.
 
-2. **[End-to-end behavior](delivery_package/EXECUTIVE_ONPREM_WORKFLOW.md)** — File-drop flow, optional RAG (advisory context), SPL generation, read-only Splunk execution, Splunk writeback, ServiceNow draft/create and approval gates. Read this for what the service does.
+2. **[End-to-end behavior](delivery_package/EXECUTIVE_ONPREM_WORKFLOW.md)** and **[end-to-end diagrams](delivery_package/end_to_end_diagrams/END_TO_END_DIAGRAMS.md)** — File-drop flow, optional RAG (advisory context), SPL generation, read-only Splunk execution, Splunk writeback, ServiceNow draft/create and approval gates. Read these for what the service does.
 
 3. **[Operations guide index](operations/README.md)** — Customer-facing tuning guides organized by area: SPL, KB, RAG, LLM inference, file-drop/retention, Splunk writeback, ServiceNow, MITRE, security, install, prestage, and recovery.
 
