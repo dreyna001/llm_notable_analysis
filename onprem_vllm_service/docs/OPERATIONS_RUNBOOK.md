@@ -57,7 +57,7 @@ sudo VLLM_GPU_MEMORY_UTILIZATION=0.8 bash install_vllm.sh
 
 ```bash
 # Upgrade/pin version
-sudo VLLM_PIP_SPEC="vllm==0.14.1" bash install_vllm.sh
+sudo VLLM_PIP_SPEC="vllm==0.21.0" bash install_vllm.sh
 
 # Roll back to known-good version
 sudo VLLM_PIP_SPEC="vllm==<known-good-version>" bash install_vllm.sh

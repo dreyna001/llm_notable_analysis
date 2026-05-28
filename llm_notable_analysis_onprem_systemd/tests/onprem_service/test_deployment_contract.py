@@ -103,7 +103,8 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("curl -fsS --max-time 5", install_text)
         self.assertIn("mktemp \"$incoming_dir/.", install_text)
         self.assertIn("litellm[proxy]==", install_text)
-        self.assertIn("huggingface_hub==", install_text)
+        self.assertIn("vllm==0.21.0", install_text)
+        self.assertIn("huggingface_hub==1.16.4", install_text)
         self.assertNotIn('source "$config_file"', install_text)
 
     def test_postgres_rag_helper_uses_config_env_and_ingest_module(self) -> None:
@@ -136,6 +137,8 @@ class TestDeploymentContract(unittest.TestCase):
             "pgvector==0.4.2",
             "faiss-cpu==1.13.2",
             "sentence-transformers==5.4.1",
+            "transformers==5.9.0",
+            "huggingface-hub==1.16.4",
             "numpy==2.4.4",
             "python-docx==1.2.0",
             "docx2txt==0.9",
@@ -163,6 +166,8 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn('requires-python = ">=3.12"', rag_pyproject_text)
         self.assertIn("psycopg[binary]==3.3.4", rag_pyproject_text)
         self.assertIn("sentence-transformers==5.4.1", rag_pyproject_text)
+        self.assertIn("transformers==5.9.0", rag_pyproject_text)
+        self.assertIn("huggingface-hub==1.16.4", rag_pyproject_text)
         self.assertIn("[project.optional-dependencies]", pyproject_text)
         self.assertIn("litellm[proxy]==1.83.14", pyproject_text)
 

@@ -569,7 +569,7 @@ sudo systemctl status notable-analyzer
 # Install vLLM in a separate virtual environment
 python3.12 -m venv /opt/vllm/venv
 source /opt/vllm/venv/bin/activate
-pip install vllm==0.14.1
+pip install vllm==0.21.0
 ```
 
 #### Stage gemma-4-31B-it model weights

@@ -26,11 +26,11 @@ readonly RAG_PACKAGE_INSTALL_DIR="$INSTALL_DIR/onprem_rag_notable_analysis"
 # - Default pins to a known-good version.
 # - Override for air-gapped installs to point at an internal wheelhouse or local artifact.
 #   Examples:
-#     sudo VLLM_PIP_SPEC="vllm==0.14.1" bash scripts/install.sh
-#     sudo VLLM_PIP_SPEC="/mnt/media/wheels/vllm-0.14.1-*.whl" bash scripts/install.sh
-readonly VLLM_PIP_SPEC="${VLLM_PIP_SPEC:-vllm==0.14.1}"
+#     sudo VLLM_PIP_SPEC="vllm==0.21.0" bash scripts/install.sh
+#     sudo VLLM_PIP_SPEC="/mnt/media/wheels/vllm-0.21.0-*.whl" bash scripts/install.sh
+readonly VLLM_PIP_SPEC="${VLLM_PIP_SPEC:-vllm==0.21.0}"
 readonly LITELLM_PIP_SPEC="${LITELLM_PIP_SPEC:-litellm[proxy]==1.83.14}"
-readonly HUGGINGFACE_HUB_PIP_SPEC="${HUGGINGFACE_HUB_PIP_SPEC:-huggingface_hub==1.14.0}"
+readonly HUGGINGFACE_HUB_PIP_SPEC="${HUGGINGFACE_HUB_PIP_SPEC:-huggingface_hub==1.16.4}"
 
 # Python interpreter selection (pinning / reproducibility)
 #

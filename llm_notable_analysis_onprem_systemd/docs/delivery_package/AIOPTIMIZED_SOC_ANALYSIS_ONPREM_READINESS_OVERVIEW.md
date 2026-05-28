@@ -23,7 +23,7 @@ If those five buckets are not already understood, this is not yet a low-friction
 - target host, host owner, and GPU owner are identified
 - connected-host versus air-gapped delivery is chosen
 - host baseline is ready: `systemd`, Python 3.12, admin access, recommended CPU/RAM, and enough storage
-- approved GPU profile, healthy NVIDIA driver state, and CUDA/runtime compatibility for this pinned `vllm==0.14.1` shape are in place
+- approved GPU profile, healthy NVIDIA driver state, and CUDA/runtime compatibility for this pinned `vllm==0.21.0` shape are in place
 - the control-plane choice is settled: `LiteLLM` or direct `vLLM`
 - the `gemma-4-31B-it` model tree is staged, or there is an approved process to stage it
 - if Splunk or RAG is in scope, the team already knows the source of secrets, KB artifacts, and key integration decisions
@@ -48,7 +48,7 @@ If those five buckets are not already understood, this is not yet a low-friction
 
 ## Most Common Blockers
 - `gemma-4-31B-it` artifacts are not yet staged
-- GPU driver/runtime or CUDA compatibility is not yet validated for `vllm==0.14.1`
+- GPU driver/runtime or CUDA compatibility is not yet validated for `vllm==0.21.0`
 - runtime values are not aligned between `vLLM`, `LiteLLM`, and the analyzer
 - there is no settled owner for the `LiteLLM` master key or Splunk writeback token
 - the KB / RAG decision is still unresolved

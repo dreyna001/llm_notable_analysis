@@ -41,12 +41,13 @@ Required pins from this package:
 - `pgvector==0.4.2`
 - `faiss-cpu==1.13.2`
 - `sentence-transformers==5.4.1`
+- `transformers==5.9.0`
+- `huggingface-hub==1.16.4`
 - `numpy==2.4.4`
 - `python-docx==1.2.0`
 - `docx2txt==0.9`
 - `litellm[proxy]==1.83.14` (default installer pin; installed into `/opt/litellm/venv`)
-- `huggingface_hub==1.14.0` (default installer pin for optional model download helper)
-- `vllm==0.14.1` (default installer pin; includes transitive dependencies)
+- `vllm==0.21.0` (default installer pin; includes transitive dependencies)
 
 Example:
 
@@ -58,12 +59,13 @@ python3 -m pip download -d wheelhouse \
   pgvector==0.4.2 \
   faiss-cpu==1.13.2 \
   sentence-transformers==5.4.1 \
+  transformers==5.9.0 \
+  huggingface-hub==1.16.4 \
   numpy==2.4.4 \
   python-docx==1.2.0 \
   docx2txt==0.9 \
   'litellm[proxy]==1.83.14' \
-  huggingface_hub==1.14.0 \
-  vllm==0.14.1
+  vllm==0.21.0
 ```
 
 For `onprem-llm-sdk`, either:
@@ -134,7 +136,7 @@ Install from local wheelhouse/model artifacts:
 cd /path/to/llm_notable_analysis_onprem_systemd
 sudo PIP_NO_INDEX=1 \
      PIP_FIND_LINKS=/mnt/media/wheelhouse \
-     VLLM_PIP_SPEC="/mnt/media/wheelhouse/vllm-0.14.1-*.whl" \
+     VLLM_PIP_SPEC="/mnt/media/wheelhouse/vllm-0.21.0-*.whl" \
      VLLM_SKIP_INSTALL=false \
      MODEL_DOWNLOAD=false \
      bash scripts/install.sh

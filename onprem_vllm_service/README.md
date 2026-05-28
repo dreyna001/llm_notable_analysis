@@ -47,7 +47,7 @@ curl -sS http://127.0.0.1:8000/v1/chat/completions \
 
 ```bash
 # Air-gapped wheel
-sudo VLLM_PIP_SPEC="/mnt/media/wheels/vllm-0.14.1-*.whl" bash install_vllm.sh
+sudo VLLM_PIP_SPEC="/mnt/media/wheels/vllm-0.21.0-*.whl" bash install_vllm.sh
 
 # Custom model path + served model name
 sudo VLLM_MODEL_PATH=/opt/models/<model-dir> \

@@ -17,7 +17,7 @@ This readiness view assumes the host-native GPU deployment shape represented in 
 An org is genuinely ready for this deployment when all of this is already true:
 
 - it has a target Linux host chosen for the service, with ownership for the host and GPU
-- it has an NVIDIA RTX PRO 6000 (96 GB) or greater, with driver and runtime compatibility for this project's pinned `vllm==0.14.1` deployment shape
+- it has an NVIDIA RTX PRO 6000 (96 GB) or greater, with driver and runtime compatibility for this project's pinned `vllm==0.21.0` deployment shape
 - it knows whether the deployment is connected or air-gapped, and it already knows how artifacts from the internet get onto the host
 - it has approved `gemma-4-31B-it` model artifacts staged or an approved process to stage them
 - it has decided that either `LiteLLM` is the control plane for callers or callers will point directly to `vLLM`
@@ -47,7 +47,7 @@ This is the biggest hidden blocker.
 They need:
 
 - NVIDIA driver installed and healthy on the host, with `nvidia-smi` working cleanly
-- a CUDA stack compatible with the staged `vllm==0.14.1` wheel, the target Linux and Python 3.12 environment, and the approved GPU profile
+- a CUDA stack compatible with the staged `vllm==0.21.0` wheel, the target Linux and Python 3.12 environment, and the approved GPU profile
 - confirmation that the target GPU profile is approved for the configured model, defaulting to `gemma-4-31B-it`
 - `vLLM` installed in the expected runtime path and able to start
 - a clear served model name, with analyzer and proxy config aligned to it
@@ -158,7 +158,7 @@ This section does not add new requirements. It reorganizes the same readiness po
 - the target Linux host is chosen and the org knows who owns the host and GPU
 - the deployment model is decided: connected host or air-gapped / transfer-bundle workflow
 - the host has the expected platform baseline: `systemd`, Python 3.12, root/admin access, recommended CPU/RAM, and enough storage for the repo, runtime files, and the configured model tree
-- the approved GPU profile is chosen, with NVIDIA driver health and CUDA/runtime compatibility for this pinned `vllm==0.14.1` deployment shape
+- the approved GPU profile is chosen, with NVIDIA driver health and CUDA/runtime compatibility for this pinned `vllm==0.21.0` deployment shape
 - the org has already decided whether callers will use `LiteLLM` or go directly to `vLLM`
 - the full `gemma-4-31B-it` model tree is staged, or there is an approved and understood process to stage it
 - if Splunk writeback is in scope, the team already has the correct endpoint and a Splunk REST API token with the needed rights

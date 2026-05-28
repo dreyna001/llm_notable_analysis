@@ -234,7 +234,16 @@ The included `vllm.service` expects vLLM to be installed in:
 
 - `/opt/vllm/venv` (Python venv)
 
-If you ran `scripts/install.sh` without overrides, it will create this venv and install vLLM automatically.
+If you ran `scripts/install.sh` without overrides, it will create this venv and
+install the pinned Gemma 4-compatible runtime automatically:
+
+- `VLLM_PIP_SPEC=vllm==0.21.0`
+- Python 3.12 via `VLLM_PYTHON_BIN=python3.12` unless overridden
+
+This vLLM generation uses Transformers v5 and supports the default
+`google/gemma-4-31B-it` checkpoint (`model_type=gemma4`). If you override
+`VLLM_PIP_SPEC`, keep it aligned with a Transformers version that recognizes
+the configured model architecture.
 
 If you need a different path (for example, Python 3.12 side-by-side), set:
 

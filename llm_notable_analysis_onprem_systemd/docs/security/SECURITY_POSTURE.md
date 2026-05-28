@@ -165,15 +165,15 @@ Retention intervals are configurable in `/etc/notable-analyzer/config.env` (defa
 By default, `scripts/install.sh` installs runtime helper packages from
 **pinned** specs:
 
-- `VLLM_PIP_SPEC` (default: `vllm==0.14.1`)
+- `VLLM_PIP_SPEC` (default: `vllm==0.21.0`)
 - `LITELLM_PIP_SPEC` (default: `litellm[proxy]==1.83.14`)
-- `HUGGINGFACE_HUB_PIP_SPEC` (default: `huggingface_hub==1.14.0`, used only when `MODEL_DOWNLOAD=true`)
+- `HUGGINGFACE_HUB_PIP_SPEC` (default: `huggingface_hub==1.16.4`, used only when `MODEL_DOWNLOAD=true`)
 
 Override examples (air‑gapped):
 
-- `VLLM_PIP_SPEC="vllm==0.14.1"` (internal mirror)
+- `VLLM_PIP_SPEC="vllm==0.21.0"` (internal mirror)
 - `LITELLM_PIP_SPEC="litellm[proxy]==1.83.14"` (internal mirror)
-- `VLLM_PIP_SPEC="/mnt/media/wheels/vllm-0.14.1-*.whl"` (offline media)
+- `VLLM_PIP_SPEC="/mnt/media/wheels/vllm-0.21.0-*.whl"` (offline media)
 
 ### Evidence-based dependency manifest (recommended)
 

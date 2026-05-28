@@ -78,7 +78,7 @@ The package includes operational material intended to make the build reviewable 
 - `128 GB` of server-grade ECC RAM is the documented baseline; `256 GB` is preferred when the customer wants more headroom for RAG, concurrency, or larger models.
 - `500 GB` NVMe storage is the documented minimum; `1 TB` NVMe is the practical baseline when model artifacts, virtual environments, reports, logs, and alternate models are included.
 - The GPU baseline assumes an NVIDIA RTX PRO 6000 with `96 GB` VRAM or greater for the default `gemma-4-31B-it` deployment shape.
-- NVIDIA driver and CUDA/runtime compatibility must be validated against the pinned `vllm==0.14.1` runtime shape.
+- NVIDIA driver and CUDA/runtime compatibility must be validated against the pinned `vllm==0.21.0` runtime shape.
 
 ### Model And Inference Contract
 
