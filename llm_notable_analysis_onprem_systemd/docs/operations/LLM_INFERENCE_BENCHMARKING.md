@@ -156,33 +156,50 @@ runtime:
 /opt/vllm/venv/bin/vllm bench serve --help
 ```
 
-LiteLLM production path:
-
-```bash
-/opt/vllm/venv/bin/vllm bench serve \
-  --backend openai-chat \
-  --base-url http://127.0.0.1:4000 \
-  --model gemma-4-31B-it \
-  --dataset-name random \
-  --random-input-len 2048 \
-  --random-output-len 512 \
-  --num-prompts 100 \
-  --max-concurrency 4
-```
-
 Direct vLLM baseline:
 
 ```bash
 /opt/vllm/venv/bin/vllm bench serve \
   --backend openai-chat \
   --base-url http://127.0.0.1:8000 \
+  --endpoint /v1/chat/completions \
   --model gemma-4-31B-it \
+  --tokenizer /opt/models/gemma-4-31B-it \
   --dataset-name random \
   --random-input-len 2048 \
   --random-output-len 512 \
   --num-prompts 100 \
   --max-concurrency 4
 ```
+
+LiteLLM production path:
+
+```bash
+/opt/vllm/venv/bin/vllm bench serve \
+  --backend openai-chat \
+  --base-url http://127.0.0.1:4000 \
+  --endpoint /v1/chat/completions \
+  --model gemma-4-31B-it \
+  --tokenizer /opt/models/gemma-4-31B-it \
+  --dataset-name random \
+  --random-input-len 2048 \
+  --random-output-len 512 \
+  --num-prompts 100 \
+  --max-concurrency 4
+```
+
+Important:
+
+- `--model` must match the **served model id** advertised by the endpoint
+  (`gemma-4-31B-it` in this deployment).
+- `--tokenizer` must point to the **local model directory on disk**
+  (`/opt/models/gemma-4-31B-it`), not the served name. vLLM bench uses the
+  tokenizer locally to build random prompts with exact token lengths; it does
+  not infer tokenizer location from the HTTP API.
+- `--endpoint /v1/chat/completions` is required for `--backend openai-chat`;
+  otherwise vLLM bench may default to `/v1/completions`.
+- If your weights live elsewhere, use the same path as `vllm.service`
+  `--model=...`.
 
 vLLM bench adds capabilities the repo script does not provide:
 
@@ -263,5 +280,6 @@ python3 -m unittest discover \
 
 - [`LLM_INFERENCE_OPERATIONS.md`](LLM_INFERENCE_OPERATIONS.md)
 - [`deployment_profiles/a6000-96gb-ultra9-285k.md`](deployment_profiles/a6000-96gb-ultra9-285k.md)
+- [`deployment_profiles/a6000-96gb-ultra9-285k-vllm-benchmark-2026-05-28.md`](deployment_profiles/a6000-96gb-ultra9-285k-vllm-benchmark-2026-05-28.md)
 - [`FILE_DROP_AND_RETENTION_OPERATIONS.md`](FILE_DROP_AND_RETENTION_OPERATIONS.md)
 - [`INSTALL.md`](INSTALL.md)

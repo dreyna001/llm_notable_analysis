@@ -24,8 +24,14 @@ actual host before increasing `MAX_WORKERS`, `--max-num-seqs`, or Splunk concurr
 
 | Profile ID | Hardware | Status |
 |------------|----------|--------|
-| [`a6000-96gb-ultra9-285k.md`](a6000-96gb-ultra9-285k.md) | 1x NVIDIA RTX PRO 6000 (96 GB) + Intel Core Ultra 9 Processor 285K | Active baseline |
+| [`a6000-96gb-ultra9-285k.md`](a6000-96gb-ultra9-285k.md) | 1x NVIDIA RTX PRO 6000 (96 GB) + Intel Core Ultra 9 285K (24 cores / 24 threads) | Active baseline |
 | [`h100x2-intel-tbd.md`](h100x2-intel-tbd.md) | 2x NVIDIA H100 (80 GB) + Intel CPU (model TBD) | Draft / load-test required |
+
+## Measured Benchmark Reports
+
+| Report | Scope | Use |
+|--------|-------|-----|
+| [`a6000-96gb-ultra9-285k-vllm-benchmark-2026-05-28.md`](a6000-96gb-ultra9-285k-vllm-benchmark-2026-05-28.md) | Direct vLLM baseline for `gemma-4-31B-it`, 2048 input tokens, 512 output tokens, concurrency 4 | Customer hardware sizing and baseline throughput comparison |
 
 ## Related Docs
 
