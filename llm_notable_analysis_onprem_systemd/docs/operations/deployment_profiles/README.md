@@ -15,6 +15,7 @@ how a particular host should run the same features.
 3. Copy the recommended analyzer values into `/etc/notable-analyzer/config.env`.
 4. Keep capability profiles aligned with product scope (`CAPABILITY_PROFILES=...`).
 5. Run the validation steps in the profile before raising concurrency.
+6. For serving load tests, use [`../LLM_INFERENCE_BENCHMARKING.md`](../LLM_INFERENCE_BENCHMARKING.md).
 
 Treat values as **recommended starting points**, not guarantees. Load-test on the
 actual host before increasing `MAX_WORKERS`, `--max-num-seqs`, or Splunk concurrency.
@@ -30,6 +31,7 @@ actual host before increasing `MAX_WORKERS`, `--max-num-seqs`, or Splunk concurr
 
 - [`../CAPABILITY_PROFILES.md`](../CAPABILITY_PROFILES.md) — feature bundles
 - [`../LLM_INFERENCE_OPERATIONS.md`](../LLM_INFERENCE_OPERATIONS.md) — LLM client contract
+- [`../LLM_INFERENCE_BENCHMARKING.md`](../LLM_INFERENCE_BENCHMARKING.md) — serving load tests
 - [`../FILE_DROP_AND_RETENTION_OPERATIONS.md`](../FILE_DROP_AND_RETENTION_OPERATIONS.md) — concurrency and ingest
 - [`../../../config.env.example`](../../../config.env.example) — generic template (not host-specific)
 - [`../../../deploy/systemd/vllm.service`](../../../deploy/systemd/vllm.service) — packaged single-GPU unit

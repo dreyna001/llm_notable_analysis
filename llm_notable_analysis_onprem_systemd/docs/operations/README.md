@@ -30,6 +30,7 @@ behavior within supported config bounds.
 | Knowledge base content | [`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md) | Add, rebuild, validate, and roll back KB source documents. |
 | RAG retrieval | [`RAG_OPERATIONS.md`](RAG_OPERATIONS.md) | RAG enablement, fail-open/fail-closed posture, backend, embeddings, rerank, context budgets. |
 | LLM inference | [`LLM_INFERENCE_OPERATIONS.md`](LLM_INFERENCE_OPERATIONS.md) | Local LiteLLM/vLLM endpoint, model id, structured output mode, tokens, timeouts. |
+| LLM inference benchmarking | [`LLM_INFERENCE_BENCHMARKING.md`](LLM_INFERENCE_BENCHMARKING.md) | Load-test the serving stack with the repo benchmark script or vLLM bench; live monitoring and rollout gates. |
 | File-drop and retention | [`FILE_DROP_AND_RETENTION_OPERATIONS.md`](FILE_DROP_AND_RETENTION_OPERATIONS.md) | Incoming, processed, quarantine, reports, archive, polling, retention, concurrency. |
 | Splunk writeback | [`SPLUNK_WRITEBACK_OPERATIONS.md`](SPLUNK_WRITEBACK_OPERATIONS.md) | Optional notable comment writeback, endpoint, token, TLS, identifier mapping. |
 | ServiceNow | [`SERVICENOW_OPERATIONS.md`](SERVICENOW_OPERATIONS.md) | Incident draft/create profiles, assignment group, HTTPS/token, approval payload. |

@@ -146,12 +146,16 @@ not a per-file toggle.
    `curl -sS http://127.0.0.1:8000/metrics`.
 4. Run the service-chain smoke test after services are started:
    `sudo bash scripts/smoke_service_chain.sh --config-env /etc/notable-analyzer/config.env`.
-5. Process representative JSON and text notables.
-6. Review parse/repair metadata, report completeness, and latency.
-7. Change one inference setting at a time between validation runs.
+5. Before raising analyzer concurrency or vLLM batch limits, run an inference
+   serving benchmark:
+   [`LLM_INFERENCE_BENCHMARKING.md`](LLM_INFERENCE_BENCHMARKING.md).
+6. Process representative JSON and text notables.
+7. Review parse/repair metadata, report completeness, and latency.
+8. Change one inference setting at a time between validation runs.
 
 ## Related Docs
 
+- [`LLM_INFERENCE_BENCHMARKING.md`](LLM_INFERENCE_BENCHMARKING.md)
 - [`INSTALL.md`](INSTALL.md)
 - [`OFFLINE_PRESTAGE_GUIDE.md`](OFFLINE_PRESTAGE_GUIDE.md)
 - [`RAG_OPERATIONS.md`](RAG_OPERATIONS.md)

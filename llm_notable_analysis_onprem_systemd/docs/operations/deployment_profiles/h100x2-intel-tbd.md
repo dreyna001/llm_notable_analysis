@@ -148,9 +148,11 @@ Higher than the single A6000 build, but do not publish a fixed SLA until measure
 3. Verify models endpoint: `curl -sS http://127.0.0.1:8000/v1/models`
 4. Verify LiteLLM route: `curl -sS http://127.0.0.1:4000/v1/models`
 5. Run `scripts/smoke_service_chain.sh`
-6. Process representative notables at `MAX_WORKERS=1`
-7. Record p50/p95 latency and GPU utilization
-8. Only then test `MAX_WORKERS=2` and optional `--max-num-seqs 8`
+6. Run an inference serving benchmark:
+   [`../LLM_INFERENCE_BENCHMARKING.md`](../LLM_INFERENCE_BENCHMARKING.md)
+7. Process representative notables at `MAX_WORKERS=1`
+8. Record p50/p95 latency and GPU utilization
+9. Only then test `MAX_WORKERS=2` and optional `--max-num-seqs 8`
 
 ## Open Items (Update This Profile Later)
 
