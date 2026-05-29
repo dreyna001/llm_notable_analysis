@@ -123,7 +123,11 @@ simple internal static hosting.
 
 ### Tier 2: Browse-only recent archive
 
-This is the 90-day portal discussed in the architecture roadmap.
+This is the 90-day portal discussed in the architecture roadmap. The default
+retention target is **90 days** for case/report artifacts and metadata, with
+shorter raw-input retention. Operators can tune this, but the product should
+present 90 days as the standard recent-investigation window rather than as a
+compliance archive.
 
 ```text
 analysis artifacts -> case metadata index -> read-only portal
@@ -145,13 +149,95 @@ separate `notable-portal.service`. AWS likely means S3 artifacts plus a DynamoDB
 This tier solves "show me what happened today, this week, and the last three
 months" without making the UI operationally dangerous.
 
-### Tier 3: Rich archive and search
+An optional **Tier 2+ Case Q&A / Notable Archive Assistant** surface can sit
+inside this portal when it remains read-only and retrieval-bound. This is the
+preferred customer-facing UI direction after the browse portal because it lets
+analysts ask where something appears and why it matters without building a
+heavy archive search product first:
 
-This is above browse-only.
+- Ask questions about notables retained in the 90-day archive.
+- Retrieve bounded source cases, report sections, and optional validated JSON
+  snippets before generation.
+- Retrieve approved customer context, such as SOC SOPs, escalation doctrine,
+  Splunk index/field/macro references, detection notes, and threat-hunting
+  playbooks, to help interpret the retained notables.
+- Answer only from retrieved sources and cite the case IDs, report links, and
+  evidence sections used. Customer SOPs and index docs are advisory context;
+  current-alert facts must still come from cited notables and report evidence.
+- Support analyst workflows such as working through one specific alert, asking
+  threat-hunting questions across recent notables, looking for recurring
+  patterns, and generating weekly alert summaries with links back to sources.
+- Treat one natural-language request as a bounded read-only workflow. For
+  example, "tell me what the last notable was about and how should we solve it
+  per our SOPs" should retrieve the latest retained case/report evidence,
+  retrieve relevant customer KB guidance, then synthesize a cited answer that
+  separates case facts from SOP recommendations.
+- Return `unknown` or no-match when retrieval is weak.
+- Never execute SPL, call external systems, re-run analysis, create tickets,
+  trigger SOAR, update cases, or answer from broad model memory.
+- Treat conversation history as ephemeral by default. Persist chat transcripts
+  only when a customer explicitly enables an audit or feedback workflow, and
+  then store retention, ownership, and redaction rules as part of that contract.
+- Use stable source deep links into report sections and evidence snippets
+  wherever possible, not just links to whole reports.
 
-New requirements appear when analysts need full-text search, faceted filtering,
-longer retention, RBAC by team or case type, legal hold, or exportable audit
-bundles.
+The assistant is not a separate chatbot memory store or unrelated backend. It
+should reuse the configured customer knowledge base used by the `rag`,
+`spl_readonly`, and related capability profiles, such as Postgres/pgvector,
+SQLite/FAISS, Bedrock Knowledge Bases, or the deployment-approved equivalent.
+The assistant layer combines two retrieval families:
+
+```text
+question
+-> retrieve retained case/report evidence from the 90-day case archive
+-> retrieve advisory customer context from the existing RAG/SPL knowledge base
+-> synthesize a bounded answer with source citations
+```
+
+Case/archive retrieval powers both the normal portal UI and the assistant's
+source lookup. Advisory/context retrieval powers environment-specific guidance.
+The Notable Archive Assistant is the orchestrated question-answer interface over
+both, with bounded LLM synthesis after retrieval.
+
+Recommended retention presets:
+
+| Preset | Case/report retention | Use |
+|---|---:|---|
+| Minimal | 30 days | Strict data minimization or sensitive deployments. |
+| Standard | 90 days | Default recent-investigation portal and Case Q&A window. |
+| Extended | 180 days | Explicit operator/legal sign-off; reassess Tier 3 archive expectations. |
+
+### Tier 3: Enterprise archive hardening
+
+This should be treated as **enterprise archive hardening**, not the normal next
+UI tier. Tier 2+ already covers most analyst-facing discovery through the
+Notable Archive Assistant. Tier 3 becomes necessary when scale, governance, or
+audit duties outgrow a 90-day assistant over a bounded case index.
+
+The differentiator is not just "more days." It is that the product starts
+behaving like a controlled archive for this analysis stack:
+
+- **Deterministic audit search:** auditors or incident reviewers need repeatable
+  search/export results, not only conversational answers.
+- **Large-scale retrieval:** the assistant needs Postgres/OpenSearch-class
+  retrieval because SQLite/DynamoDB metadata plus bounded snippets no longer
+  gives fast, explainable source selection.
+- **Full report-body search:** users need arbitrary term/entity/IOC/command
+  search across report sections, evidence snippets, hypotheses, query results,
+  and summaries, including ranking, highlighting, and stable pagination.
+- **Broader facets:** customers need filters such as ATT&CK technique, IOC type,
+  source system, customer/team, data sensitivity, verdict, confidence band,
+  search name, and date range.
+- **RBAC:** different teams, customers, source systems, or data classes need
+  different visibility instead of one coarse SSO gate.
+- **Legal hold:** selected cases must survive normal lifecycle deletion, with
+  records of who applied the hold and why.
+- **Export:** legal, compliance, incident review, or a downstream system of
+  record needs bundled reports, source citations, metadata, timestamps, and
+  audit context.
+- **Archive governance:** deletion behavior, privacy boundaries, ownership, and
+  system-of-record responsibilities must be explicit when the portal becomes
+  more than a recent convenience window.
 
 Likely architecture:
 
@@ -160,7 +246,9 @@ Likely architecture:
 - AWS: DynamoDB or Aurora for metadata, S3 for artifacts, OpenSearch for
   full-text search when justified, lifecycle policies for warm/cold storage.
 
-This tier is no longer just "UI"; it is a governed search and archive service.
+This tier is no longer just "UI"; it is a governed archive/search service that
+hardens or extends Tier 2+ when a customer explicitly needs that operating
+model.
 
 ### Tier 4: Analyst workbench
 
@@ -264,10 +352,12 @@ storage and orchestration:
 | IAM | Hard split between writer role, read-only portal role, and action-capable roles. |
 | CloudWatch/ADOT/Langfuse | Operational logs, LLM traces, token/latency metrics, and eval linkage. |
 
-AWS should avoid making the portal Lambda or UI role capable of invoking
-Bedrock, writing input objects, modifying the case index, or performing
-ticket/SOAR actions unless a later approval-shell design explicitly grants those
-permissions through separate endpoints and roles.
+AWS should avoid making the baseline portal Lambda or UI role capable of
+invoking Bedrock, writing input objects, modifying the case index, or performing
+ticket/SOAR actions. If Case Q&A is enabled, model invocation should sit behind
+a separate bounded read/synthesis endpoint that can only retrieve archive
+sources and generate cited answers. Approval-shell permissions require separate
+endpoints and roles.
 
 ## How Existing Profiles Map Forward
 
@@ -280,6 +370,7 @@ permissions through separate endpoints and roles.
 | `ticket_draft` | Local ServiceNow incident draft in reports | Workbench output and analyst review surface. |
 | `action_gated` | Splunk writeback, ServiceNow create, idempotency, approval requirement | Approval/action tier, not browse-only UI. |
 | `analyst_portal` (roadmap) | 90-day case index plus read-only UI | Tier 2 browse archive. |
+| Case Q&A / Notable Archive Assistant (roadmap) | Read-only, citation-bound questions over the 90-day case archive | Preferred Tier 2+ portal direction, not an action surface. |
 | LLM observability (roadmap) | Trace model calls, latency, repair, token use, prompt versions | Cross-cutting engineering and governance layer. |
 | SOAR playbook invocation (roadmap) | SOC catalog, policy gate, approval, thin adapter | Tier 5 approval shell. |
 | Analyst feedback/evaluation (roadmap) | Dispositions, corrections, replay corpus | Tier 4 workbench and quality loop. |
@@ -304,7 +395,9 @@ model.
 
 ## Non-Goals
 
-- Do not build an open-ended analyst chatbot as the core operating model.
+- Do not build an open-ended analyst chatbot as the core operating model. A
+  read-only Case Q&A assistant is acceptable only when it is scoped to retained
+  case sources, cites evidence, and cannot execute tools or mutate state.
 - Do not let the LLM enforce policy, authorize actions, or decide approvals.
 - Do not make the portal the source of truth for Splunk or ServiceNow state.
 - Do not trigger SOAR playbooks from freeform model output.
@@ -318,8 +411,9 @@ model.
 If the team wants to improve beyond the browse-only portal, the next document
 should be a dedicated technical spec for one of these bounded blocks:
 
-1. **Portal v1 technical spec**: case schema, retention contract, on-prem
-   `notable-portal.service`, AWS `CaseIndex`, and read-only API.
+1. **Portal v1 technical spec**: case schema, 90-day default retention contract,
+   optional Case Q&A retrieval contract, on-prem `notable-portal.service`, AWS
+   `CaseIndex`, and read-only API.
 2. **Feedback/evaluation spec**: analyst disposition schema, replay harness, and
    trace linkage.
 3. **Approval shell spec**: UI approval records, policy gates, ServiceNow/SOAR
