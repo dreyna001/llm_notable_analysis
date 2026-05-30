@@ -81,8 +81,6 @@ credentials.
 The following sections must be completed in the same diff that implements the
 feature:
 
-- ServiceNow draft/create contract.
-- DynamoDB idempotency contract.
 - Elasticsearch generation, grounding, and execution contract.
 
 ## Bedrock Knowledge Base Retrieval Contract
@@ -185,3 +183,37 @@ Rules:
   interpretation is dropped and deterministic query results remain.
 - Interpretation may produce prose assessment, observations, gaps, and
   `confidence_delta` labels only. It must not rewrite deterministic facts.
+
+## ServiceNow Draft/Create Contract
+
+ServiceNow support is implemented in `servicenow.py` and wired into
+`lambda_handler.py`.
+
+Rules:
+
+- Draft generation is default-off and has no network side effect.
+- Drafts require `SERVICENOW_ASSIGNMENT_GROUP` and produce an
+  `incident_payload` under `servicenow_section.draft`.
+- Incident create is default-off and uses `SERVICENOW_API_TOKEN_SECRET_ARN` for
+  the bearer token.
+- When `SERVICENOW_CREATE_REQUIRES_APPROVAL=true`, create requires payload-level
+  `servicenow_create_approval.approved=true` and non-empty `approved_by`.
+- Create results are written under `servicenow_section.create`.
+- ServiceNow URLs must use HTTPS.
+
+## DynamoDB Idempotency Contract
+
+External side-effect idempotency is implemented in `idempotency.py`.
+
+Rules:
+
+- Idempotency is only for external side effects, not the S3 analysis run itself.
+- `action_gated` enables idempotency by default.
+- The DynamoDB table uses `id` as a string hash key and `expires_at` as a TTL
+  attribute.
+- Reservation keys are deterministic and operation-scoped:
+  `splunk_notable_update` uses `finding_id`; `servicenow_incident_create` uses
+  the ServiceNow correlation id.
+- Conditional `PutItem` prevents duplicate side effects. Existing rows return a
+  skipped result with prior metadata where available.
+- Failed side effects release their in-progress reservation.

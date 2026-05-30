@@ -137,6 +137,28 @@ class NotableRestSinkTests(unittest.TestCase):
         self.assertEqual(result["s3_result"]["status"], "error")
         self.assertEqual(result["rest_result"]["status"], "success")
 
+    def test_notable_rest_sink_treats_duplicate_writeback_as_success(self) -> None:
+        """Idempotent duplicate writeback should not fail the combined sink."""
+        with (
+            patch.object(
+                self.lambda_handler,
+                "write_to_s3_sink",
+                return_value={"status": "success", "bucket": "out"},
+            ),
+            patch.object(
+                self.lambda_handler,
+                "write_to_splunk_rest",
+                return_value={"status": "skipped", "finding_id": "example"},
+            ),
+        ):
+            result = self.lambda_handler.write_to_notable_rest_sink(
+                "incoming/example.json",
+                self.analysis_result,
+            )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["rest_result"]["status"], "skipped")
+
     def test_get_splunk_api_token_from_plain_secret_string(self) -> None:
         """Token resolver should support plain-text Secrets Manager values."""
         with (
@@ -175,6 +197,24 @@ class NotableRestSinkTests(unittest.TestCase):
             token = self.lambda_handler.get_splunk_api_token()
 
         self.assertEqual(token, "json-secret-token")
+
+    def test_get_servicenow_api_token_from_json_secret(self) -> None:
+        """ServiceNow token resolver should read token from Secrets Manager JSON."""
+        with (
+            patch.dict(
+                "os.environ",
+                {"SERVICENOW_API_TOKEN_SECRET_ARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:snow"},
+                clear=True,
+            ),
+            patch.object(
+                self.lambda_handler.secretsmanager_client,
+                "get_secret_value",
+                return_value={"SecretString": '{"token":"snow-token"}'},
+            ),
+        ):
+            token = self.lambda_handler.get_servicenow_api_token()
+
+        self.assertEqual(token, "snow-token")
 
 
 class CompressedInputTests(unittest.TestCase):

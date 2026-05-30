@@ -139,6 +139,8 @@ aws secretsmanager create-secret \
 - `docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_AWS_READINESS_ASSESSMENT.md` - readiness assessment (technical checklist)
 - `docs/operations/DEPLOYMENT_IMAGE_STEPS.md` - Lambda image build and ECR deployment notes
 - `docs/operations/SPL_OPERATIONS.md` - SPL generation, grounding, and read-only Splunk investigation operations
+- `docs/operations/SPLUNK_WRITEBACK_OPERATIONS.md` - Splunk notable writeback and DynamoDB idempotency operations
+- `docs/operations/SERVICENOW_OPERATIONS.md` - ServiceNow incident draft/create operations
 - `docs/integrations/SOAR_PLAYBOOK_PHANTOM.md` - SOAR upload pattern
 - `docs/security/ATTACK_LLM_ANALYSIS.md` - ATT&CK grounding and validation approach
 

@@ -73,6 +73,23 @@ def _render_query_interpretation(llm_response: dict[str, Any]) -> str:
 """
 
 
+def _render_servicenow(llm_response: dict[str, Any]) -> str:
+    section = llm_response.get("servicenow_section")
+    if not isinstance(section, dict):
+        return ""
+    draft = section.get("draft") if isinstance(section.get("draft"), dict) else {}
+    create = section.get("create") if isinstance(section.get("create"), dict) else {}
+    return f"""  <section class="card">
+    <h2>ServiceNow</h2>
+    <p><span class="label">Draft:</span> {escape(_text(draft.get('status')))}</p>
+    <p>{escape(_text(draft.get('message'), ''))}</p>
+    <p><span class="label">Create:</span> {escape(_text(create.get('status'), 'not_requested'))}</p>
+    <p>{escape(_text(create.get('message'), ''))}</p>
+    <p><span class="label">Number:</span> {escape(_text(create.get('number'), ''))}</p>
+  </section>
+"""
+
+
 def generate_html_report(
     alert_text: str,
     llm_response: dict[str, Any],
@@ -103,6 +120,7 @@ def generate_html_report(
         ttp_rows = '<tr><td colspan="3">No TTPs scored</td></tr>'
     query_results = _render_query_results(llm_response)
     query_interpretation = _render_query_interpretation(llm_response)
+    servicenow = _render_servicenow(llm_response)
 
     return f"""<!doctype html>
 <html lang="en">
@@ -139,7 +157,7 @@ def generate_html_report(
       <tbody>{ttp_rows}</tbody>
     </table>
   </section>
-{query_results}{query_interpretation}
+{query_results}{query_interpretation}{servicenow}
   <section class="card">
     <h2>Markdown Report</h2>
     <pre>{escape(markdown)}</pre>

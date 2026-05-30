@@ -23,7 +23,17 @@ from .aws_clients import secretsmanager_client as make_secretsmanager_client
 from .bedrock_kb_retrieval import retrieve_soc_context
 from .config import Config, load_config
 from .html_generator import generate_html_report
+from .idempotency import (
+    begin_side_effect,
+    complete_side_effect_success,
+    release_side_effect_lock,
+)
 from .query_result_enrichment import enrich_analysis_with_query_results
+from .servicenow import (
+    build_servicenow_incident_draft,
+    create_servicenow_incident,
+    extract_servicenow_create_approval,
+)
 from .spl_query_grounding import retrieve_spl_query_grounding
 from .splunk_investigation import HttpSplunkMcpClient, execute_hypothesis_queries
 from .ttp_analyzer import BedrockAnalyzer
@@ -345,7 +355,7 @@ def write_to_notable_rest_sink(
     rest_result = write_to_splunk_rest(analysis_result, source_key, config)
     combined_status = (
         "success"
-        if s3_result.get("status") == "success" and rest_result.get("status") == "success"
+        if s3_result.get("status") == "success" and rest_result.get("status") in {"success", "skipped"}
         else "error"
     )
 
@@ -440,6 +450,39 @@ def get_splunk_mcp_token(config: Config | None = None) -> str:
         return ""
 
 
+def get_servicenow_api_token(config: Config | None = None) -> str:
+    """Resolve ServiceNow API token from Secrets Manager."""
+
+    config = config or load_config()
+    secret_arn = (config.SERVICENOW_API_TOKEN_SECRET_ARN or '').strip()
+    if not secret_arn or secret_arn == "*":
+        return ""
+
+    try:
+        secret_response = secretsmanager_client.get_secret_value(SecretId=secret_arn)
+        secret_string = secret_response.get('SecretString') or ''
+        if not secret_string:
+            logger.error("ServiceNow API token secret has no SecretString content")
+            return ""
+
+        try:
+            parsed = json.loads(secret_string)
+        except json.JSONDecodeError:
+            return secret_string
+
+        if isinstance(parsed, dict):
+            token_value = parsed.get("token")
+            if isinstance(token_value, str) and token_value.strip():
+                return token_value
+            logger.error("ServiceNow API token secret JSON missing required field 'token'")
+            return ""
+        logger.error("ServiceNow API token secret JSON must be an object or plain string")
+        return ""
+    except Exception as e:
+        logger.error("Error resolving ServiceNow API token from Secrets Manager: %s", str(e))
+        return ""
+
+
 def write_to_splunk_rest(
     analysis_result: Dict[str, Any],
     source_key: str,
@@ -472,6 +515,18 @@ def write_to_splunk_rest(
         if not finding_id:
             logger.warning(f"Could not derive finding_id from source key: {source_key!r}")
             return {"status": "error", "message": "Cannot derive finding_id from source key"}
+
+        reservation = begin_side_effect(
+            config,
+            operation="splunk_notable_update",
+            key=finding_id,
+        )
+        if not reservation.should_execute:
+            return {
+                "status": "skipped",
+                "message": "Splunk notable update already completed",
+                "finding_id": finding_id,
+            }
         
         # Use the full markdown report as the comment
         comment = analysis_result["markdown"]
@@ -496,15 +551,24 @@ def write_to_splunk_rest(
         response.raise_for_status()
         
         logger.info(f"Successfully updated notable via REST API: {response.status_code}")
+        idempotency_recorded = complete_side_effect_success(
+            reservation,
+            metadata={"status_code": response.status_code, "finding_id": finding_id},
+        )
         
-        return {
+        result = {
             "status": "success",
             "rest_response": response.text,
             "status_code": response.status_code,
             "finding_id": finding_id
         }
+        if reservation.enabled:
+            result["idempotency_recorded"] = idempotency_recorded
+        return result
         
     except Exception as e:
+        if "reservation" in locals():
+            release_side_effect_lock(reservation)
         logger.error(f"Error writing to Splunk REST: {str(e)}")
         return {"status": "error", "message": str(e)}
 
@@ -655,6 +719,30 @@ def handler(event, context):
                     metadata["investigation_query_backend"] = config.INVESTIGATION_QUERY_BACKEND
                     metadata["investigation_query_executor"] = config.INVESTIGATION_QUERY_EXECUTOR
                     metadata["investigation_query_result_count"] = len(query_results)
+
+            if isinstance(llm_response, dict) and (
+                config.SERVICENOW_DRAFT_ENABLED or config.SERVICENOW_CREATE_ENABLED
+            ):
+                finding_id = extract_finding_id_from_s3_key(key)
+                draft_result = build_servicenow_incident_draft(
+                    llm_response,
+                    config=config,
+                    notable_id=source_key_stem(key),
+                    finding_id=finding_id,
+                )
+                servicenow_section = {"draft": draft_result}
+                if (
+                    config.SERVICENOW_CREATE_ENABLED
+                    and draft_result.get("status") == "success"
+                    and isinstance(draft_result.get("incident_payload"), dict)
+                ):
+                    servicenow_section["create"] = create_servicenow_incident(
+                        draft_result["incident_payload"],
+                        config=config,
+                        api_token=get_servicenow_api_token(config),
+                        approval=extract_servicenow_create_approval(alert_payload),
+                    )
+                llm_response["servicenow_section"] = servicenow_section
             
             # Generate markdown report
             logger.info("Generating markdown report")

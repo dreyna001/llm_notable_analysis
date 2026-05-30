@@ -1,0 +1,185 @@
+"""DynamoDB-backed idempotency helpers for external side effects."""
+# pylint: disable=broad-exception-caught
+
+from __future__ import annotations
+
+import hashlib
+import json
+import time
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any
+
+from .aws_clients import dynamodb_client
+from .config import Config
+
+_GENERIC_KEYS = {"unknown", "none", "null", "n/a", "na"}
+
+
+@dataclass(frozen=True)
+class SideEffectReservation:
+    """Reservation state for one side-effect attempt."""
+
+    enabled: bool
+    should_execute: bool
+    operation: str
+    key: str
+    table_name: str = ""
+    item_id: str = ""
+    existing_marker: dict[str, Any] | None = None
+    client: Any | None = None
+
+
+def _normalize_key(key: str) -> str:
+    normalized = str(key or "").strip()
+    if not normalized or normalized.lower() in _GENERIC_KEYS:
+        raise ValueError("side-effect idempotency key must be specific")
+    return normalized
+
+
+def _item_id(operation: str, key: str) -> str:
+    digest = hashlib.sha256(f"{operation}:{key}".encode("utf-8")).hexdigest()
+    return f"{operation}#{digest}"
+
+
+def _expiry_epoch(retention_days: int) -> int:
+    return int(time.time()) + max(1, int(retention_days)) * 86400
+
+
+def _metadata_to_attr(metadata: dict[str, Any]) -> dict[str, Any]:
+    return {"S": json.dumps(metadata or {}, sort_keys=True, default=str)}
+
+
+def _metadata_from_item(item: dict[str, Any]) -> dict[str, Any]:
+    raw = item.get("metadata", {}).get("S", "{}")
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _error_code(exc: Exception) -> str:
+    response = getattr(exc, "response", {})
+    if isinstance(response, dict):
+        return str(response.get("Error", {}).get("Code", ""))
+    return ""
+
+
+def begin_side_effect(
+    config: Config,
+    *,
+    operation: str,
+    key: str,
+    client: Any | None = None,
+) -> SideEffectReservation:
+    """Reserve a side-effect key before executing an external write/action."""
+
+    if not bool(getattr(config, "SIDE_EFFECT_IDEMPOTENCY_ENABLED", False)):
+        return SideEffectReservation(
+            enabled=False,
+            should_execute=True,
+            operation=operation,
+            key=str(key or "").strip(),
+        )
+
+    table_name = str(getattr(config, "SIDE_EFFECT_IDEMPOTENCY_TABLE", "")).strip()
+    if not table_name:
+        raise ValueError("SIDE_EFFECT_IDEMPOTENCY_TABLE is required when idempotency is enabled")
+
+    normalized_key = _normalize_key(key)
+    item_id = _item_id(operation, normalized_key)
+    ddb = client or dynamodb_client()
+    now = datetime.now(timezone.utc).isoformat()
+    ttl = _expiry_epoch(int(getattr(config, "SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS", 30)))
+
+    try:
+        ddb.put_item(
+            TableName=table_name,
+            Item={
+                "id": {"S": item_id},
+                "operation": {"S": operation},
+                "side_effect_key": {"S": normalized_key},
+                "status": {"S": "in_progress"},
+                "started_at": {"S": now},
+                "expires_at": {"N": str(ttl)},
+            },
+            ConditionExpression="attribute_not_exists(id)",
+        )
+    except Exception as exc:
+        if _error_code(exc) != "ConditionalCheckFailedException":
+            raise
+        existing = ddb.get_item(TableName=table_name, Key={"id": {"S": item_id}}).get("Item", {})
+        marker = {
+            "operation": existing.get("operation", {}).get("S", operation),
+            "key": existing.get("side_effect_key", {}).get("S", normalized_key),
+            "status": existing.get("status", {}).get("S", "unknown"),
+            "metadata": _metadata_from_item(existing),
+        }
+        return SideEffectReservation(
+            enabled=True,
+            should_execute=False,
+            operation=operation,
+            key=normalized_key,
+            table_name=table_name,
+            item_id=item_id,
+            existing_marker=marker,
+            client=ddb,
+        )
+
+    return SideEffectReservation(
+        enabled=True,
+        should_execute=True,
+        operation=operation,
+        key=normalized_key,
+        table_name=table_name,
+        item_id=item_id,
+        client=ddb,
+    )
+
+
+def complete_side_effect_success(
+    reservation: SideEffectReservation,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> bool:
+    """Record success for an acquired side-effect reservation."""
+
+    if not reservation.enabled:
+        return True
+    if not reservation.should_execute:
+        return False
+    if not reservation.client:
+        return False
+    try:
+        reservation.client.update_item(
+            TableName=reservation.table_name,
+            Key={"id": {"S": reservation.item_id}},
+            UpdateExpression="SET #status = :status, completed_at = :completed_at, metadata = :metadata",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={
+                ":status": {"S": "completed"},
+                ":completed_at": {"S": datetime.now(timezone.utc).isoformat()},
+                ":metadata": _metadata_to_attr(metadata or {}),
+            },
+        )
+        return True
+    except Exception:
+        return False
+
+
+def release_side_effect_lock(reservation: SideEffectReservation) -> None:
+    """Release an in-progress reservation after a failed side effect."""
+
+    if not reservation.enabled or not reservation.should_execute or not reservation.client:
+        return
+    try:
+        reservation.client.delete_item(
+            TableName=reservation.table_name,
+            Key={"id": {"S": reservation.item_id}},
+            ConditionExpression="#status = :status",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={":status": {"S": "in_progress"}},
+        )
+    except Exception:
+        return

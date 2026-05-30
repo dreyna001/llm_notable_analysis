@@ -112,6 +112,35 @@ Parameters:
     ConstraintDescription: Must be * or a valid Secrets Manager secret ARN.
     Description: Optional bearer token secret ARN for Splunk MCP-over-HTTPS.
 
+  ServiceNowBaseUrl:
+    Type: String
+    Description: ServiceNow instance base URL for approved incident create.
+    Default: https://your-instance.service-now.com
+
+  ServiceNowApiTokenSecretArn:
+    Type: String
+    Default: '*'
+    AllowedPattern: '^\*$|^arn:(aws|aws-us-gov|aws-cn):secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+$'
+    ConstraintDescription: Must be * or a valid Secrets Manager secret ARN.
+    Description: Optional ServiceNow API bearer token secret ARN.
+
+  ServiceNowAssignmentGroup:
+    Type: String
+    Description: ServiceNow assignment group used for incident drafts.
+    Default: ''
+
+  SideEffectIdempotencyTableName:
+    Type: String
+    Description: DynamoDB table for external side-effect idempotency markers.
+    Default: notable-side-effect-idempotency
+
+  SideEffectIdempotencyRetentionDays:
+    Type: Number
+    Description: Best-effort DynamoDB TTL retention for side-effect idempotency rows.
+    Default: 30
+    MinValue: 1
+    MaxValue: 3650
+
   SplunkBaseUrl:
     Type: String
     Default: ''
@@ -215,6 +244,7 @@ Conditions:
   HasRagKnowledgeBase: !Not [!Equals [!Ref RagBedrockKbId, '']]
   HasSplQueryKnowledgeBase: !Not [!Equals [!Ref SplQueryRagBedrockKbId, '']]
   HasSplunkMcpSecret: !Not [!Equals [!Ref SplunkMcpAuthSecretArn, '*']]
+  HasServiceNowSecret: !Not [!Equals [!Ref ServiceNowApiTokenSecretArn, '*']]
 
 Resources:
   InputBucket:
@@ -248,6 +278,21 @@ Resources:
             Status: Enabled
             Prefix: reports/
             ExpirationInDays: !Ref OutputRetentionDays
+
+  SideEffectIdempotencyTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref SideEffectIdempotencyTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
   
   LambdaExecutionRole:
     Type: AWS::IAM::Role
@@ -321,6 +366,25 @@ Resources:
                   Resource:
                     - !Ref SplunkMcpAuthSecretArn
                 - !Ref AWS::NoValue
+              - !If
+                - HasServiceNowSecret
+                - Effect: Allow
+                  Action:
+                    - secretsmanager:GetSecretValue
+                  Resource:
+                    - !Ref ServiceNowApiTokenSecretArn
+                - !Ref AWS::NoValue
+        - PolicyName: SideEffectIdempotencyPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource: !GetAtt SideEffectIdempotencyTable.Arn
         - PolicyName: CloudWatchLogsPolicy
           PolicyDocument:
             Version: '2012-10-17'
@@ -369,6 +433,11 @@ Resources:
           SPLUNK_SEARCH_TIMEOUT_SECONDS: !Ref SplunkSearchTimeoutSeconds
           SPLUNK_MCP_ENDPOINT: !Ref SplunkMcpEndpoint
           SPLUNK_MCP_AUTH_SECRET_ARN: !Ref SplunkMcpAuthSecretArn
+          SERVICENOW_BASE_URL: !Ref ServiceNowBaseUrl
+          SERVICENOW_API_TOKEN_SECRET_ARN: !Ref ServiceNowApiTokenSecretArn
+          SERVICENOW_ASSIGNMENT_GROUP: !Ref ServiceNowAssignmentGroup
+          SIDE_EFFECT_IDEMPOTENCY_TABLE: !Ref SideEffectIdempotencyTableName
+          SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS: !Ref SideEffectIdempotencyRetentionDays
           INPUT_BUCKET_NAME: !Ref InputBucketName
           OUTPUT_BUCKET_NAME: !Ref OutputBucketName
           OUTPUT_PREFIX: reports

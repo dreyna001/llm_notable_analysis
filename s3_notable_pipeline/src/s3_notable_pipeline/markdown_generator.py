@@ -102,6 +102,33 @@ def _render_query_result_interpretation_section(llm_response: Dict[str, Any]) ->
     return lines
 
 
+def _render_servicenow_section(llm_response: Dict[str, Any]) -> list[str]:
+    section = llm_response.get("servicenow_section")
+    if not isinstance(section, dict):
+        return []
+    lines = ["### ServiceNow\n\n"]
+    draft = section.get("draft", {})
+    if isinstance(draft, dict):
+        lines.append(f"**Draft:** {draft.get('status', 'unknown')}\n")
+        if draft.get("message"):
+            lines.append(f"- {draft.get('message')}\n")
+        payload = draft.get("incident_payload")
+        if isinstance(payload, dict):
+            lines.append(f"- **Short description:** {payload.get('short_description', '')}\n")
+            lines.append(f"- **Assignment group:** {payload.get('assignment_group', '')}\n")
+    create = section.get("create", {})
+    if isinstance(create, dict):
+        lines.append(f"\n**Create:** {create.get('status', 'unknown')}\n")
+        if create.get("number"):
+            lines.append(f"- **Number:** {create.get('number')}\n")
+        if create.get("sys_id"):
+            lines.append(f"- **sys_id:** {create.get('sys_id')}\n")
+        if create.get("message"):
+            lines.append(f"- {create.get('message')}\n")
+    lines.append("\n")
+    return lines
+
+
 def generate_markdown_report(
     alert_text: str,
     llm_response: Dict[str, Any],
@@ -181,6 +208,7 @@ def generate_markdown_report(
 
     lines.extend(_render_query_results_section(llm_response))
     lines.extend(_render_query_result_interpretation_section(llm_response))
+    lines.extend(_render_servicenow_section(llm_response))
 
     if "evidence_vs_inference" in llm_response:
         evi = llm_response["evidence_vs_inference"]
