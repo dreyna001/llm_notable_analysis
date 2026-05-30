@@ -134,6 +134,10 @@ aws secretsmanager create-secret \
 - `data/test-notable.txt` - sample notable used by the test helper
 - `config.env.example` - AWS runtime contract reference for Lambda environment variables
 - `docs/operations/README.md` - AWS operations guide index
+- `docs/operations/CAPABILITY_PROFILES.md` - supported AWS feature bundles and profile-first configuration
+- `docs/operations/FILE_DROP_AND_RETENTION_OPERATIONS.md` - S3 intake prefixes, gzip handling, lifecycle, and size limits
+- `docs/operations/MITRE_TTP_OPERATIONS.md` - bundled TTP ID data, refresh workflow, and validation
+- `docs/operations/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md` - failure behavior, retry semantics, and recovery duties
 - `docs/technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md` - AWS/on-prem parity implementation contract
 - `docs/planning/AWS_ONPREM_PARITY_PLAN.md` - reviewed parity plan and diff sequence
 - `docs/delivery_package/EXECUTIVE_AWS_WORKFLOW.md` - executive end-to-end workflow overview
