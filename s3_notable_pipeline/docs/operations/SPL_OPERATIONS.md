@@ -41,6 +41,7 @@ For parity deployments, start with:
 - `SPLUNK_SEARCH_ALLOWED_INDEXES`
 - `SPLUNK_SEARCH_ALLOWED_COMMANDS`
 - `SPLUNK_SEARCH_DENIED_COMMANDS`
+- `SPLUNK_SEARCH_ALLOWED_FIELDS`
 - `SPLUNK_SEARCH_MAX_TIME_RANGE`
 - `SPLUNK_SEARCH_MAX_ROWS`
 - `SPLUNK_SEARCH_TIMEOUT_SECONDS`
@@ -58,8 +59,11 @@ environment variables are the runtime representation of those parameters.
 3. Enable `core,spl_readonly` in a non-production stack with narrow indexes and
    row limits.
 4. Verify generated SPL appears in JSON and markdown reports.
-5. Confirm denied queries do not make a network call.
+5. Confirm denied queries, including subsearch or macro syntax, do not make a
+   network call.
 6. Confirm REST or MCP results are normalized under `investigation_query_results`.
+7. Confirm returned sample rows omit `_raw` and retain only approved fields when
+   `SPLUNK_SEARCH_ALLOWED_FIELDS` is set.
 
 Unit test commands:
 

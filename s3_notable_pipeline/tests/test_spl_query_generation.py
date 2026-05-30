@@ -36,7 +36,6 @@ def _generated_query(index: str = "main") -> dict[str, object]:
     return {
         "competing_hypotheses": [
             {
-                "hypothesis_type": "benign" if i < 3 else "adversary",
                 "query_strategy": "resolve_unknown",
                 "primary_spl_query": f"index={index} user=alice | stats count",
                 "why_this_query": "Counts related events.",
@@ -72,6 +71,15 @@ class SplQueryGenerationTests(unittest.TestCase):
 
         self.assertFalse(ok)
         self.assertIn("ungrounded index", str(error))
+
+    def test_contract_accepts_schema_without_hypothesis_type(self) -> None:
+        ok, error = validate_spl_query_contract(
+            _generated_query("main"),
+            alert_text="user=alice",
+            allowed_indexes="main",
+        )
+
+        self.assertTrue(ok, error)
 
     def test_merge_adds_queries_and_grounding_refs_by_position(self) -> None:
         merged = merge_spl_query_fields_by_position(

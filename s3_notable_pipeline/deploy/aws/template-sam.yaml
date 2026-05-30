@@ -26,6 +26,14 @@ Parameters:
     Description: Comma-separated capability profiles for the Lambda runtime.
     Default: core
 
+  AllowPrivateOutboundEndpoints:
+    Type: String
+    Description: Explicitly allow outbound HTTPS integrations to private or local IP ranges.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
   HtmlReportEnabled:
     Type: String
     Description: Enables optional HTML companion reports.
@@ -87,6 +95,26 @@ Parameters:
     Description: Comma-separated Splunk indexes allowed for read-only investigation queries.
     Default: main,notable,risk
 
+  SplunkSearchAllowedCommands:
+    Type: String
+    Description: Comma-separated SPL commands allowed for read-only investigation queries.
+    Default: search,stats,table,fields,where,head
+
+  SplunkSearchDeniedCommands:
+    Type: String
+    Description: Comma-separated SPL commands explicitly denied for read-only investigation queries.
+    Default: delete,collect,outputlookup,sendemail,map,rest,script,dbxquery,inputlookup
+
+  SplunkSearchAllowedFields:
+    Type: String
+    Description: Optional comma-separated Splunk result fields retained in samples. _raw is always dropped.
+    Default: ''
+
+  SplunkSearchMaxTimeRange:
+    Type: String
+    Description: Maximum lookback window for one read-only Splunk investigation query.
+    Default: 24h
+
   SplunkSearchMaxRows:
     Type: Number
     Description: Maximum rows returned by one read-only Splunk investigation query.
@@ -100,6 +128,20 @@ Parameters:
     Default: 30
     MinValue: 1
     MaxValue: 300
+
+  InvestigationMaxQueriesPerAlert:
+    Type: Number
+    Description: Maximum read-only investigation queries per notable.
+    Default: 6
+    MinValue: 1
+    MaxValue: 24
+
+  InvestigationMaxConcurrentQueries:
+    Type: Number
+    Description: Maximum concurrent read-only investigation queries per notable.
+    Default: 6
+    MinValue: 1
+    MaxValue: 8
 
   SplunkMcpEndpoint:
     Type: String
@@ -125,10 +167,24 @@ Parameters:
     ConstraintDescription: Must be * or a valid Secrets Manager secret ARN.
     Description: Optional ServiceNow API bearer token secret ARN.
 
+  ServiceNowApprovalHmacSecretArn:
+    Type: String
+    Default: '*'
+    AllowedPattern: '^\*$|^arn:(aws|aws-us-gov|aws-cn):secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+$'
+    ConstraintDescription: Must be * or a valid Secrets Manager secret ARN.
+    Description: HMAC key secret ARN used to validate ServiceNow create approvals.
+
   ServiceNowAssignmentGroup:
     Type: String
     Description: ServiceNow assignment group used for incident drafts.
     Default: ''
+
+  ServiceNowTimeoutSeconds:
+    Type: Number
+    Description: Timeout in seconds for ServiceNow create calls.
+    Default: 15
+    MinValue: 1
+    MaxValue: 300
 
   SideEffectIdempotencyTableName:
     Type: String
@@ -141,6 +197,13 @@ Parameters:
     Default: 30
     MinValue: 1
     MaxValue: 3650
+
+  SideEffectIdempotencyLockSeconds:
+    Type: Number
+    Description: Stale-lock timeout for in-progress side-effect idempotency reservations.
+    Default: 900
+    MinValue: 1
+    MaxValue: 86400
 
   ElasticsearchBaseUrl:
     Type: String
@@ -159,10 +222,42 @@ Parameters:
     Description: Comma-separated Elasticsearch index patterns allowed for read-only investigation.
     Default: ''
 
+  ElasticsearchAllowWildcardIndexes:
+    Type: String
+    Description: Allow wildcard index patterns in Elasticsearch read-only investigation.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  ElasticsearchTimestampField:
+    Type: String
+    Description: Timestamp field required in generated Elasticsearch range filters.
+    Default: '@timestamp'
+
   ElasticsearchAllowedFields:
     Type: String
     Description: Comma-separated fields allowed in generated Elasticsearch queries and returned samples.
     Default: ''
+
+  ElasticsearchMaxTimeRange:
+    Type: String
+    Description: Maximum time range for generated Elasticsearch queries.
+    Default: 24h
+
+  ElasticsearchMaxRows:
+    Type: Number
+    Description: Maximum Elasticsearch rows returned by one read-only investigation query.
+    Default: 100
+    MinValue: 1
+    MaxValue: 1000
+
+  ElasticsearchTimeoutSeconds:
+    Type: Number
+    Description: Timeout in seconds for one Elasticsearch _search call.
+    Default: 30
+    MinValue: 1
+    MaxValue: 300
 
   ElasticsearchGroundingBedrockKbId:
     Type: String
@@ -197,6 +292,14 @@ Parameters:
     Type: String
     Default: /services/notable_update
     Description: Optional Splunk notable update path used by notable_rest mode.
+
+  SplunkRequirePayloadFindingId:
+    Type: String
+    Description: Require a payload finding_id/notable_id/sid that matches the S3 object key for Splunk writeback.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
   
   InputRetentionDays:
     Type: Number
@@ -239,6 +342,13 @@ Parameters:
     MinValue: 512
     MaxValue: 10240
 
+  LambdaReservedConcurrentExecutions:
+    Type: Number
+    Description: Reserved concurrency cap to limit downstream Bedrock/SIEM/Elastic fan-out.
+    Default: 5
+    MinValue: 1
+    MaxValue: 100
+
   AwsAccountId:
     Type: String
     AllowedPattern: '^[0-9]{12}$'
@@ -275,6 +385,7 @@ Conditions:
   HasSplQueryKnowledgeBase: !Not [!Equals [!Ref SplQueryRagBedrockKbId, '']]
   HasSplunkMcpSecret: !Not [!Equals [!Ref SplunkMcpAuthSecretArn, '*']]
   HasServiceNowSecret: !Not [!Equals [!Ref ServiceNowApiTokenSecretArn, '*']]
+  HasServiceNowApprovalSecret: !Not [!Equals [!Ref ServiceNowApprovalHmacSecretArn, '*']]
   HasElasticsearchSecret: !Not [!Equals [!Ref ElasticsearchApiKeySecretArn, '*']]
   HasElasticsearchKnowledgeBase: !Not [!Equals [!Ref ElasticsearchGroundingBedrockKbId, '']]
  
@@ -284,6 +395,15 @@ Resources:
     DependsOn: LambdaInvokePermission
     Properties:
       BucketName: !Ref InputBucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
       NotificationConfiguration:
         LambdaConfigurations:
           - Event: s3:ObjectCreated:*
@@ -304,6 +424,15 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Ref OutputBucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
       LifecycleConfiguration:
         Rules:
           - Id: DeleteOutputReportsAfterRetention
@@ -333,11 +462,13 @@ Resources:
       PackageType: Image
       Timeout: !Ref LambdaTimeoutSeconds
       MemorySize: !Ref LambdaMemorySize
+      ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       EphemeralStorage:
         Size: !Ref LambdaEphemeralStorageMb
       Environment:
         Variables:
           CAPABILITY_PROFILES: !Ref CapabilityProfiles
+          ALLOW_PRIVATE_OUTBOUND_ENDPOINTS: !Ref AllowPrivateOutboundEndpoints
           HTML_REPORT_ENABLED: !Ref HtmlReportEnabled
           RAG_ENABLED: !Ref RagEnabled
           RAG_BEDROCK_KB_ID: !Ref RagBedrockKbId
@@ -350,23 +481,38 @@ Resources:
           SPLUNK_API_TOKEN_SECRET_ARN: !Ref SplunkApiTokenSecretArn
           SPLUNK_API_TOKEN_SECRET_FIELD: !Ref SplunkApiTokenSecretField
           SPLUNK_NOTABLE_UPDATE_PATH: !Ref SplunkNotableUpdatePath
+          SPLUNK_REQUIRE_PAYLOAD_FINDING_ID: !Ref SplunkRequirePayloadFindingId
           SPL_QUERY_RAG_ENABLED: !If [HasSplQueryKnowledgeBase, 'true', 'false']
           SPL_QUERY_RAG_BEDROCK_KB_ID: !Ref SplQueryRagBedrockKbId
           INVESTIGATION_QUERY_EXECUTOR: !Ref InvestigationQueryExecutor
+          INVESTIGATION_MAX_QUERIES_PER_ALERT: !Ref InvestigationMaxQueriesPerAlert
+          INVESTIGATION_MAX_CONCURRENT_QUERIES: !Ref InvestigationMaxConcurrentQueries
           SPLUNK_SEARCH_ALLOWED_INDEXES: !Ref SplunkSearchAllowedIndexes
+          SPLUNK_SEARCH_ALLOWED_COMMANDS: !Ref SplunkSearchAllowedCommands
+          SPLUNK_SEARCH_DENIED_COMMANDS: !Ref SplunkSearchDeniedCommands
+          SPLUNK_SEARCH_ALLOWED_FIELDS: !Ref SplunkSearchAllowedFields
+          SPLUNK_SEARCH_MAX_TIME_RANGE: !Ref SplunkSearchMaxTimeRange
           SPLUNK_SEARCH_MAX_ROWS: !Ref SplunkSearchMaxRows
           SPLUNK_SEARCH_TIMEOUT_SECONDS: !Ref SplunkSearchTimeoutSeconds
           SPLUNK_MCP_ENDPOINT: !Ref SplunkMcpEndpoint
           SPLUNK_MCP_AUTH_SECRET_ARN: !Ref SplunkMcpAuthSecretArn
           SERVICENOW_BASE_URL: !Ref ServiceNowBaseUrl
           SERVICENOW_API_TOKEN_SECRET_ARN: !Ref ServiceNowApiTokenSecretArn
+          SERVICENOW_APPROVAL_HMAC_SECRET_ARN: !Ref ServiceNowApprovalHmacSecretArn
           SERVICENOW_ASSIGNMENT_GROUP: !Ref ServiceNowAssignmentGroup
+          SERVICENOW_TIMEOUT_SECONDS: !Ref ServiceNowTimeoutSeconds
           SIDE_EFFECT_IDEMPOTENCY_TABLE: !Ref SideEffectIdempotencyTableName
           SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS: !Ref SideEffectIdempotencyRetentionDays
+          SIDE_EFFECT_IDEMPOTENCY_LOCK_SECONDS: !Ref SideEffectIdempotencyLockSeconds
           ELASTICSEARCH_BASE_URL: !Ref ElasticsearchBaseUrl
           ELASTICSEARCH_API_KEY_SECRET_ARN: !Ref ElasticsearchApiKeySecretArn
           ELASTICSEARCH_INDEX_ALLOWLIST: !Ref ElasticsearchIndexAllowlist
+          ELASTICSEARCH_ALLOW_WILDCARD_INDEXES: !Ref ElasticsearchAllowWildcardIndexes
+          ELASTICSEARCH_TIMESTAMP_FIELD: !Ref ElasticsearchTimestampField
           ELASTICSEARCH_ALLOWED_FIELDS: !Ref ElasticsearchAllowedFields
+          ELASTICSEARCH_MAX_TIME_RANGE: !Ref ElasticsearchMaxTimeRange
+          ELASTICSEARCH_MAX_ROWS: !Ref ElasticsearchMaxRows
+          ELASTICSEARCH_TIMEOUT_SECONDS: !Ref ElasticsearchTimeoutSeconds
           ELASTICSEARCH_GROUNDING_ENABLED: !If [HasElasticsearchKnowledgeBase, 'true', 'false']
           ELASTICSEARCH_GROUNDING_BEDROCK_KB_ID: !Ref ElasticsearchGroundingBedrockKbId
           INPUT_BUCKET_NAME: !Ref InputBucketName
@@ -376,7 +522,7 @@ Resources:
       Policies:
         - S3ReadPolicy:
             BucketName: !Ref InputBucketName
-        - S3CrudPolicy:
+        - S3WritePolicy:
             BucketName: !Ref OutputBucketName
         - Statement:
             - Effect: Allow
@@ -428,6 +574,15 @@ Resources:
                   - secretsmanager:GetSecretValue
                 Resource:
                   - !Ref ServiceNowApiTokenSecretArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasServiceNowApprovalSecret
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref ServiceNowApprovalHmacSecretArn
           - !Ref AWS::NoValue
         - !If
           - HasElasticsearchKnowledgeBase

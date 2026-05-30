@@ -36,7 +36,7 @@ SPL QUERY GENERATION (Enabled):
 - Focus each query on a decision-changing unknown or strongest contradiction.
 - Do not use placeholders such as <INDEX>, <SOURCETYPE>, or similar tokens.
 - Do not output pseudo-queries such as "search ...".
-- Do not invent environment-specific tokens unless they appear in SECURITY ALERT INPUT or SPL_QUERY_GROUNDING_CONTEXT.
+- Do not invent environment-specific tokens unless they appear in SECURITY ALERT INPUT, SPL_QUERY_GROUNDING_CONTEXT, or the configured allowlist.
 """.strip()
 
 SPL_QUERY_CONTEXT_RULES = """
@@ -44,7 +44,7 @@ SPL QUERY CONTEXT RULES:
 - Treat SOC_OPERATIONAL_CONTEXT as advisory context only.
 - Treat SPL_QUERY_GROUNDING_CONTEXT as advisory Splunk-environment context only.
 - Never treat either context block as direct alert evidence.
-- Do not use indexes, sourcetypes, macros, or CIM data models unless they appear in SECURITY ALERT INPUT or SPL_QUERY_GROUNDING_CONTEXT.
+- Do not use indexes, sourcetypes, macros, or CIM data models unless they appear in SECURITY ALERT INPUT, SPL_QUERY_GROUNDING_CONTEXT, or the configured allowlist.
 - Keep each query bounded and decision-oriented.
 """.strip()
 
@@ -198,35 +198,27 @@ def build_spl_query_grounding_refs(
 
 def _environment_token_is_allowed(
     *,
+    token_kind: str,
     token: str,
     alert_text: str,
     spl_query_grounding_context: str,
+    allowed_indexes: str = "",
 ) -> bool:
-    return _token_present(token, alert_text) or _token_present(token, spl_query_grounding_context)
+    if _token_present(token, alert_text) or _token_present(token, spl_query_grounding_context):
+        return True
+    if token_kind == "index":
+        allowed = {part.strip().casefold() for part in allowed_indexes.split(",") if part.strip()}
+        return token.casefold() in allowed
+    return False
 
 
 def _validate_strict_hypothesis_balance(hypotheses: list[Any]) -> tuple[bool, str | None]:
     if len(hypotheses) != 6:
         return False, f"competing_hypotheses must contain exactly 6 items, got {len(hypotheses)}"
 
-    benign = 0
-    adversary = 0
     for i, item in enumerate(hypotheses):
         if not isinstance(item, dict):
             return False, f"competing_hypotheses[{i}] must be an object"
-        htype = str(item.get("hypothesis_type", "")).strip().lower()
-        if htype == "benign":
-            benign += 1
-        elif htype == "adversary":
-            adversary += 1
-        else:
-            return False, f"competing_hypotheses[{i}].hypothesis_type must be benign or adversary"
-
-    if benign != 3 or adversary != 3:
-        return False, (
-            "competing_hypotheses must include exactly 3 benign and 3 adversary; "
-            f"got benign={benign}, adversary={adversary}"
-        )
     return True, None
 
 
@@ -236,6 +228,7 @@ def validate_spl_query_contract(
     alert_text: str = "",
     spl_query_grounding_context: str = "",
     require_spl_grounding: bool = False,
+    allowed_indexes: str = "",
 ) -> tuple[bool, str | None]:
     """Validate strict SPL query contract for per-hypothesis query generation."""
 
@@ -260,10 +253,12 @@ def validate_spl_query_contract(
         if "..." in primary_query:
             return False, f"competing_hypotheses[{i}].primary_spl_query contains pseudo-query ellipsis"
         for token_kind, token_value in _query_environment_tokens(primary_query):
-            if require_spl_grounding and _environment_token_is_allowed(
+            if _environment_token_is_allowed(
+                token_kind=token_kind,
                 token=token_value,
                 alert_text=alert_text,
                 spl_query_grounding_context=spl_query_grounding_context,
+                allowed_indexes=allowed_indexes,
             ):
                 continue
             if require_spl_grounding:

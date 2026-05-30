@@ -47,6 +47,8 @@ Diff 1 must preserve current default behavior:
 - markdown and JSON outputs are written under `reports/`
 - `SPLUNK_SINK_MODE=notable_rest` still writes S3 output first, then posts to
   Splunk REST
+- If the S3 sink write fails, Splunk REST writeback is skipped and the Lambda
+  invocation fails so the event can be retried.
 
 ## Capability Profiles
 
@@ -145,6 +147,9 @@ Rules:
 - Queries must include explicit `index=...`, use only allowlisted indexes and
   commands, avoid denied commands, and stay within configured row, timeout, and
   time-range bounds.
+- Subsearch and macro syntax is denied by default for generated read-only SPL.
+- Result samples drop `_raw` and retain only `SPLUNK_SEARCH_ALLOWED_FIELDS` when
+  configured before reports or LLM interpretation see the rows.
 - `INVESTIGATION_QUERY_EXECUTOR=rest` calls Splunk REST oneshot search using the
   existing Splunk token resolver.
 - `INVESTIGATION_QUERY_EXECUTOR=mcp` calls a configured HTTPS MCP bridge
@@ -222,8 +227,10 @@ Rules:
   `incident_payload` under `servicenow_section.draft`.
 - Incident create is default-off and uses `SERVICENOW_API_TOKEN_SECRET_ARN` for
   the bearer token.
-- When `SERVICENOW_CREATE_REQUIRES_APPROVAL=true`, create requires payload-level
-  `servicenow_create_approval.approved=true` and non-empty `approved_by`.
+- When `SERVICENOW_CREATE_REQUIRES_APPROVAL=true`, create requires
+  `servicenow_create_approval.approved` to be the JSON boolean `true`,
+  non-empty `approved_by`, and a valid HMAC signature from
+  `SERVICENOW_APPROVAL_HMAC_SECRET_ARN`.
 - Create results are written under `servicenow_section.create`.
 - ServiceNow URLs must use HTTPS.
 
@@ -240,6 +247,8 @@ Rules:
 - Reservation keys are deterministic and operation-scoped:
   `splunk_notable_update` uses `finding_id`; `servicenow_incident_create` uses
   the ServiceNow correlation id.
-- Conditional `PutItem` prevents duplicate side effects. Existing rows return a
-  skipped result with prior metadata where available.
+- Conditional `PutItem` prevents duplicate side effects. Completed rows return a
+  skipped result with prior metadata where available. Stale in-progress rows can
+  be reclaimed after `SIDE_EFFECT_IDEMPOTENCY_LOCK_SECONDS`; fresh in-progress
+  rows are reported as locked rather than completed.
 - Failed side effects release their in-progress reservation.

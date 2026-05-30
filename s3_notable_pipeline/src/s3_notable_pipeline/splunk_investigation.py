@@ -5,11 +5,11 @@ from __future__ import annotations
 import concurrent.futures
 import re
 from typing import Any, Mapping, Protocol
-from urllib.parse import urlparse
 
 import requests
 
 from .config import Config
+from .runtime_security import validate_https_url
 
 _DEFAULT_ALLOWED_INDEXES = "main,notable,risk"
 _DEFAULT_ALLOWED_COMMANDS = "search,stats,table,fields,where,head"
@@ -37,11 +37,19 @@ class SplunkMcpClient(Protocol):
 class HttpSplunkMcpClient:
     """MCP-over-HTTPS bridge client with a narrow search payload contract."""
 
-    def __init__(self, *, endpoint: str, bearer_token: str = "", timeout_seconds: int = 35):
-        parsed = urlparse(endpoint or "")
-        if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
-            raise ValueError("SPLUNK_MCP_ENDPOINT must be an HTTPS URL without userinfo")
-        self.endpoint = endpoint
+    def __init__(
+        self,
+        *,
+        endpoint: str,
+        bearer_token: str = "",
+        timeout_seconds: int = 35,
+        allow_private: bool = False,
+    ):
+        self.endpoint = validate_https_url(
+            endpoint,
+            setting_name="SPLUNK_MCP_ENDPOINT",
+            allow_private=allow_private,
+        )
         self.bearer_token = bearer_token
         self.timeout_seconds = timeout_seconds
 
@@ -103,9 +111,14 @@ def _unsupported_commands(commands: list[str], allowed_commands: list[str]) -> l
     return unsupported
 
 
-def _bounded_sample_rows(rows: Any) -> list[dict[str, str]]:
+def _allowed_fields(config: Config) -> set[str]:
+    return {part.strip().casefold() for part in str(getattr(config, "SPLUNK_SEARCH_ALLOWED_FIELDS", "")).split(",") if part.strip()}
+
+
+def _bounded_sample_rows(rows: Any, *, allowed_fields: set[str] | None = None) -> list[dict[str, str]]:
     if not isinstance(rows, list):
         return []
+    allowed = allowed_fields or set()
     out: list[dict[str, str]] = []
     for row in rows:
         if not isinstance(row, Mapping):
@@ -113,6 +126,10 @@ def _bounded_sample_rows(rows: Any) -> list[dict[str, str]]:
         clean_row: dict[str, str] = {}
         for key in sorted(row.keys())[:_MAX_SAMPLE_ROW_COLUMNS]:
             clean_key = str(key).strip()[:80]
+            if clean_key == "_raw":
+                continue
+            if allowed and clean_key.casefold() not in allowed:
+                continue
             clean_value = str(row.get(key, "")).strip()
             if len(clean_value) > _MAX_SAMPLE_VALUE_CHARS:
                 clean_value = clean_value[: _MAX_SAMPLE_VALUE_CHARS - 3].rstrip() + "..."
@@ -138,6 +155,8 @@ def validate_splunk_query_policy(
     query_clean = str(query or "").strip()
     if not query_clean:
         return False, "query is empty"
+    if "[" in query_clean or "]" in query_clean or "`" in query_clean:
+        return False, "query contains subsearch or macro syntax that is denied by policy"
 
     allowed_indexes = _csv_to_list(
         str(getattr(config, "SPLUNK_SEARCH_ALLOWED_INDEXES", _DEFAULT_ALLOWED_INDEXES))
@@ -219,16 +238,16 @@ def extract_hypothesis_queries(
     return out
 
 
-def _normalize_rest_result(query: str, response_json: Mapping[str, Any]) -> dict[str, Any]:
+def _normalize_rest_result(query: str, response_json: Mapping[str, Any], *, config: Config) -> dict[str, Any]:
     rows = response_json.get("results")
     if isinstance(rows, dict):
         rows = [rows]
     if not isinstance(rows, list):
         rows = []
 
-    sample_columns: list[str] = []
-    if rows and isinstance(rows[0], dict):
-        sample_columns = sorted(str(k) for k in rows[0].keys())
+    allowed = _allowed_fields(config)
+    sample_rows = _bounded_sample_rows(rows, allowed_fields=allowed)
+    sample_columns = sorted(str(k) for k in sample_rows[0].keys()) if sample_rows else []
 
     search_ref = response_json.get("sid") or response_json.get("search_id") or response_json.get("job_id")
     return {
@@ -237,7 +256,7 @@ def _normalize_rest_result(query: str, response_json: Mapping[str, Any]) -> dict
         "query": query,
         "result_count": len(rows),
         "sample_columns": sample_columns,
-        "sample_rows": _bounded_sample_rows(rows),
+        "sample_rows": sample_rows,
         "search_id": search_ref,
     }
 
@@ -274,7 +293,12 @@ def execute_splunk_rest_query(
     endpoint_path = str(getattr(config, "SPLUNK_SEARCH_ENDPOINT_PATH", _DEFAULT_SEARCH_ENDPOINT_PATH))
     if not endpoint_path.startswith("/"):
         endpoint_path = f"/{endpoint_path}"
-    rest_url = f"{config.SPLUNK_BASE_URL.rstrip('/')}{endpoint_path}"
+    base_url = validate_https_url(
+        config.SPLUNK_BASE_URL,
+        setting_name="SPLUNK_BASE_URL",
+        allow_private=bool(getattr(config, "ALLOW_PRIVATE_OUTBOUND_ENDPOINTS", False)),
+    )
+    rest_url = f"{base_url.rstrip('/')}{endpoint_path}"
     headers = {
         "Authorization": f"Bearer {api_token}",
         "Content-Type": "application/x-www-form-urlencoded",
@@ -305,12 +329,12 @@ def execute_splunk_rest_query(
                 "query": query,
                 "message": "Splunk REST response must be an object",
             }
-        return _normalize_rest_result(query, response_json)
+        return _normalize_rest_result(query, response_json, config=config)
     except (requests.RequestException, ValueError) as exc:
         return {"status": "error", "executor": "rest", "query": query, "message": str(exc)}
 
 
-def _normalize_mcp_result(query: str, response_obj: Mapping[str, Any]) -> dict[str, Any]:
+def _normalize_mcp_result(query: str, response_obj: Mapping[str, Any], *, config: Config) -> dict[str, Any]:
     ref_key: str | None = None
     for key in ("raw_result_ref", "search_id", "job_id", "sid"):
         if response_obj.get(key):
@@ -327,9 +351,9 @@ def _normalize_mcp_result(query: str, response_obj: Mapping[str, Any]) -> dict[s
     rows = response_obj.get("rows")
     if not isinstance(rows, list):
         rows = []
-    sample_columns: list[str] = []
-    if rows and isinstance(rows[0], dict):
-        sample_columns = sorted(str(k) for k in rows[0].keys())
+    allowed = _allowed_fields(config)
+    sample_rows = _bounded_sample_rows(rows, allowed_fields=allowed)
+    sample_columns = sorted(str(k) for k in sample_rows[0].keys()) if sample_rows else []
     result_count = response_obj.get("result_count")
     if not isinstance(result_count, int):
         result_count = len(rows)
@@ -340,7 +364,7 @@ def _normalize_mcp_result(query: str, response_obj: Mapping[str, Any]) -> dict[s
         "query": query,
         "result_count": result_count,
         "sample_columns": sample_columns,
-        "sample_rows": _bounded_sample_rows(rows),
+        "sample_rows": sample_rows,
         ref_key: response_obj.get(ref_key),
     }
 
@@ -393,7 +417,7 @@ def execute_splunk_mcp_query(
             "query": query,
             "message": "MCP response must be an object",
         }
-    return _normalize_mcp_result(query, response_obj)
+    return _normalize_mcp_result(query, response_obj, config=config)
 
 
 def execute_hypothesis_queries(

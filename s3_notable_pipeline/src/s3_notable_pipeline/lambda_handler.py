@@ -15,6 +15,7 @@ import traceback
 import zlib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+import re
 from urllib.parse import unquote_plus
 from typing import Dict, Any
 
@@ -36,6 +37,7 @@ from .servicenow import (
     create_servicenow_incident,
     extract_servicenow_create_approval,
 )
+from .runtime_security import resolve_secret_string, validate_https_url
 from .spl_query_grounding import retrieve_spl_query_grounding
 from .splunk_investigation import HttpSplunkMcpClient, execute_hypothesis_queries
 from .ttp_analyzer import BedrockAnalyzer
@@ -53,6 +55,7 @@ secretsmanager_client = make_secretsmanager_client()
 PLACEHOLDER_FILENAMES = frozenset({'.keep', '.gitkeep', '_success', '.placeholder'})
 DEFAULT_MAX_DECOMPRESSED_INPUT_BYTES = 1_048_576
 GZIP_CONTENT_ENCODINGS = frozenset({'gzip', 'x-gzip'})
+FINDING_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
 
 @dataclass(frozen=True)
@@ -162,6 +165,38 @@ def source_key_stem(source_key: str) -> str:
     return Path(strip_gzip_suffix(filename)).stem
 
 
+def validate_finding_id(value: str) -> str:
+    """Validate external notable/finding identifiers before writeback."""
+
+    finding_id = str(value or "").strip()
+    if not FINDING_ID_RE.fullmatch(finding_id):
+        raise ValueError("finding_id must be 1-128 chars using letters, digits, dot, underscore, colon, or dash")
+    return finding_id
+
+
+def resolve_finding_id_for_writeback(
+    analysis_result: Dict[str, Any],
+    source_key: str,
+    config: Config,
+) -> str:
+    """Resolve a writeback finding id with optional payload/key consistency checks."""
+
+    source_finding_id = validate_finding_id(extract_finding_id_from_s3_key(source_key))
+    alert_payload = analysis_result.get("alert_payload")
+    payload_finding_id = ""
+    if isinstance(alert_payload, dict):
+        for field in ("finding_id", "notable_id", "sid"):
+            candidate = alert_payload.get(field)
+            if candidate:
+                payload_finding_id = validate_finding_id(str(candidate))
+                break
+    if payload_finding_id and payload_finding_id != source_finding_id:
+        raise ValueError("payload finding_id does not match S3 object key stem")
+    if getattr(config, "SPLUNK_REQUIRE_PAYLOAD_FINDING_ID", False) and not payload_finding_id:
+        raise ValueError("payload finding_id is required for Splunk writeback")
+    return payload_finding_id or source_finding_id
+
+
 def is_gzip_input(source_key: str, content_encoding: str | None = None) -> bool:
     """Return whether an S3 object should be treated as gzip-compressed input."""
     decoded_key = unquote_plus(source_key or "")
@@ -222,11 +257,16 @@ def decode_s3_notable_object(
     """
     was_compressed = is_gzip_input(source_key, content_encoding)
     content_bytes = raw_bytes
+    max_bytes = get_max_decompressed_input_bytes(config)
+    if not was_compressed and len(content_bytes) > max_bytes:
+        raise ValueError(
+            f"S3 object {source_key!r} exceeds MAX_DECOMPRESSED_INPUT_BYTES ({max_bytes})"
+        )
     if was_compressed:
         try:
             content_bytes = decompress_gzip_bounded(
                 raw_bytes,
-                get_max_decompressed_input_bytes(config),
+                max_bytes,
             )
         except (gzip.BadGzipFile, EOFError, zlib.error) as exc:
             raise ValueError(f"Invalid gzip content for S3 object {source_key!r}") from exc
@@ -354,6 +394,12 @@ def write_to_notable_rest_sink(
         analysis_result,
         config,
     )
+    if s3_result.get("status") != "success":
+        return {
+            "status": "error",
+            "s3_result": s3_result,
+            "rest_result": {"status": "skipped", "message": "Skipped Splunk writeback because S3 sink failed"},
+        }
     rest_result = write_to_splunk_rest(analysis_result, source_key, config)
     combined_status = (
         "success"
@@ -386,30 +432,12 @@ def get_splunk_api_token(config: Config | None = None) -> str:
         return ""
 
     try:
-        secret_response = secretsmanager_client.get_secret_value(SecretId=secret_arn)
-        secret_string = secret_response.get('SecretString') or ''
-        if not secret_string:
-            logger.error("Splunk API token secret has no SecretString content")
-            return ""
-
-        try:
-            parsed = json.loads(secret_string)
-        except json.JSONDecodeError:
-            # Allow plain-text secret values.
-            return secret_string
-
-        if isinstance(parsed, dict):
-            token_value = parsed.get(secret_field)
-            if isinstance(token_value, str) and token_value.strip():
-                return token_value
-            logger.error(
-                "Splunk API token secret JSON missing required field '%s'",
-                secret_field,
-            )
-            return ""
-
-        logger.error("Splunk API token secret JSON must be an object or plain string")
-        return ""
+        return resolve_secret_string(
+            secret_arn=secret_arn,
+            setting_name="Splunk API token",
+            secret_field=secret_field,
+            client=secretsmanager_client,
+        )
     except Exception as e:
         logger.error("Error resolving Splunk API token from Secrets Manager: %s", str(e))
         return ""
@@ -425,28 +453,12 @@ def get_splunk_mcp_token(config: Config | None = None) -> str:
         return ""
 
     try:
-        secret_response = secretsmanager_client.get_secret_value(SecretId=secret_arn)
-        secret_string = secret_response.get('SecretString') or ''
-        if not secret_string:
-            logger.error("Splunk MCP auth secret has no SecretString content")
-            return ""
-
-        try:
-            parsed = json.loads(secret_string)
-        except json.JSONDecodeError:
-            return secret_string
-
-        if isinstance(parsed, dict):
-            token_value = parsed.get(secret_field)
-            if isinstance(token_value, str) and token_value.strip():
-                return token_value
-            logger.error(
-                "Splunk MCP auth secret JSON missing required field '%s'",
-                secret_field,
-            )
-            return ""
-        logger.error("Splunk MCP auth secret JSON must be an object or plain string")
-        return ""
+        return resolve_secret_string(
+            secret_arn=secret_arn,
+            setting_name="Splunk MCP token",
+            secret_field=secret_field,
+            client=secretsmanager_client,
+        )
     except Exception as e:
         logger.error("Error resolving Splunk MCP token from Secrets Manager: %s", str(e))
         return ""
@@ -461,27 +473,32 @@ def get_servicenow_api_token(config: Config | None = None) -> str:
         return ""
 
     try:
-        secret_response = secretsmanager_client.get_secret_value(SecretId=secret_arn)
-        secret_string = secret_response.get('SecretString') or ''
-        if not secret_string:
-            logger.error("ServiceNow API token secret has no SecretString content")
-            return ""
-
-        try:
-            parsed = json.loads(secret_string)
-        except json.JSONDecodeError:
-            return secret_string
-
-        if isinstance(parsed, dict):
-            token_value = parsed.get("token")
-            if isinstance(token_value, str) and token_value.strip():
-                return token_value
-            logger.error("ServiceNow API token secret JSON missing required field 'token'")
-            return ""
-        logger.error("ServiceNow API token secret JSON must be an object or plain string")
-        return ""
+        return resolve_secret_string(
+            secret_arn=secret_arn,
+            setting_name="ServiceNow API token",
+            secret_field="token",
+            client=secretsmanager_client,
+        )
     except Exception as e:
         logger.error("Error resolving ServiceNow API token from Secrets Manager: %s", str(e))
+        return ""
+
+
+def get_servicenow_approval_hmac_key(config: Config | None = None) -> str:
+    """Resolve ServiceNow approval HMAC key from Secrets Manager."""
+
+    config = config or load_config()
+    secret_arn = (config.SERVICENOW_APPROVAL_HMAC_SECRET_ARN or '').strip()
+    try:
+        return resolve_secret_string(
+            secret_arn=secret_arn,
+            setting_name="ServiceNow approval HMAC key",
+            secret_field="hmac_key",
+            fallback_fields=("secret", "token"),
+            client=secretsmanager_client,
+        )
+    except Exception as e:
+        logger.error("Error resolving ServiceNow approval HMAC key from Secrets Manager: %s", str(e))
         return ""
 
 
@@ -494,23 +511,13 @@ def get_elasticsearch_api_key(config: Config | None = None) -> str:
         return ""
 
     try:
-        secret_response = secretsmanager_client.get_secret_value(SecretId=secret_arn)
-        secret_string = secret_response.get('SecretString') or ''
-        if not secret_string:
-            logger.error("Elasticsearch API key secret has no SecretString content")
-            return ""
-        try:
-            parsed = json.loads(secret_string)
-        except json.JSONDecodeError:
-            return secret_string
-        if isinstance(parsed, dict):
-            token_value = parsed.get("api_key") or parsed.get("token")
-            if isinstance(token_value, str) and token_value.strip():
-                return token_value
-            logger.error("Elasticsearch API key secret JSON missing api_key/token field")
-            return ""
-        logger.error("Elasticsearch API key secret JSON must be an object or plain string")
-        return ""
+        return resolve_secret_string(
+            secret_arn=secret_arn,
+            setting_name="Elasticsearch API key",
+            secret_field="api_key",
+            fallback_fields=("token",),
+            client=secretsmanager_client,
+        )
     except Exception as e:
         logger.error("Error resolving Elasticsearch API key from Secrets Manager: %s", str(e))
         return ""
@@ -544,10 +551,11 @@ def write_to_splunk_rest(
             )
             return {"status": "error", "message": "Splunk REST credentials not configured"}
 
-        finding_id = extract_finding_id_from_s3_key(source_key)
-        if not finding_id:
-            logger.warning(f"Could not derive finding_id from source key: {source_key!r}")
-            return {"status": "error", "message": "Cannot derive finding_id from source key"}
+        try:
+            finding_id = resolve_finding_id_for_writeback(analysis_result, source_key, config)
+        except ValueError as exc:
+            logger.warning("Could not resolve safe finding_id for source key %r: %s", source_key, exc)
+            return {"status": "error", "message": str(exc)}
 
         reservation = begin_side_effect(
             config,
@@ -555,10 +563,12 @@ def write_to_splunk_rest(
             key=finding_id,
         )
         if not reservation.should_execute:
+            marker_status = (reservation.existing_marker or {}).get("status", "unknown")
             return {
                 "status": "skipped",
-                "message": "Splunk notable update already completed",
+                "message": f"Splunk notable update already reserved with status={marker_status}",
                 "finding_id": finding_id,
+                "idempotency_status": marker_status,
             }
         
         # Use the full markdown report as the comment
@@ -568,6 +578,11 @@ def write_to_splunk_rest(
         endpoint_path = config.SPLUNK_NOTABLE_UPDATE_PATH
         if not endpoint_path.startswith('/'):
             endpoint_path = f"/{endpoint_path}"
+        splunk_base_url = validate_https_url(
+            splunk_base_url,
+            setting_name="SPLUNK_BASE_URL",
+            allow_private=config.ALLOW_PRIVATE_OUTBOUND_ENDPOINTS,
+        )
         rest_url = f"{splunk_base_url.rstrip('/')}{endpoint_path}"
         headers = {
             "Authorization": f"Bearer {splunk_api_token}",
@@ -643,10 +658,20 @@ def handler(event, context):
             
             # Read object from S3
             response = s3_client.get_object(Bucket=bucket, Key=key)
+            content_encoding = response.get('ContentEncoding')
+            max_input_bytes = get_max_decompressed_input_bytes(config)
+            if (
+                isinstance(size, int)
+                and size > max_input_bytes
+                and not is_gzip_input(key, content_encoding)
+            ):
+                raise ValueError(
+                    f"S3 object {key!r} exceeds MAX_DECOMPRESSED_INPUT_BYTES ({max_input_bytes})"
+                )
             decoded_notable = decode_s3_notable_object(
                 key,
                 response['Body'].read(),
-                response.get('ContentEncoding'),
+                content_encoding,
                 config,
             )
             content = decoded_notable.content
@@ -732,6 +757,7 @@ def handler(event, context):
                         endpoint=config.SPLUNK_MCP_ENDPOINT,
                         bearer_token=get_splunk_mcp_token(config),
                         timeout_seconds=config.SPLUNK_MCP_HTTP_TIMEOUT_SECONDS,
+                        allow_private=config.ALLOW_PRIVATE_OUTBOUND_ENDPOINTS,
                     )
                 query_results = execute_hypothesis_queries(
                     llm_response,
@@ -822,6 +848,7 @@ def handler(event, context):
                         config=config,
                         api_token=get_servicenow_api_token(config),
                         approval=extract_servicenow_create_approval(alert_payload),
+                        approval_hmac_key=get_servicenow_approval_hmac_key(config),
                     )
                 llm_response["servicenow_section"] = servicenow_section
             
@@ -840,6 +867,7 @@ def handler(event, context):
                 "html": html,
                 "llm_response": llm_response,
                 "scored_ttps": scored_ttps,
+                "alert_payload": alert_payload,
                 "meta": {
                     "model_id": model_id,
                     "execution_time_seconds": round(end_time - start_time, 2),
@@ -861,14 +889,17 @@ def handler(event, context):
                 logger.error(f"Unknown sink mode: {sink_mode}")
                 sink_result = {"sink": sink_mode, "status": "error", "message": "Unknown sink mode"}
             
+            record_status = "success" if sink_result.get("status") == "success" else "error"
             results.append({
                 "key": key,
-                "status": "success",
+                "status": record_status,
                 "ttp_count": len(scored_ttps),
                 "sink_result": sink_result
             })
-            
-            logger.info(f"Successfully processed {key}")
+            if record_status != "success":
+                logger.error("Sink failed for %s: %s", key, sink_result)
+            else:
+                logger.info(f"Successfully processed {key}")
             
         except Exception as e:
             logger.error(f"Error processing record: {str(e)}")
@@ -879,6 +910,10 @@ def handler(event, context):
                 "error": str(e)
             })
     
+    failed_count = sum(1 for item in results if item.get("status") == "error")
+    if failed_count:
+        raise RuntimeError(f"Failed to process {failed_count} S3 record(s)")
+
     return {
         'statusCode': 200,
         'body': json.dumps({

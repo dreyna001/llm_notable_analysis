@@ -1568,6 +1568,7 @@ SECURITY ALERT INPUT:
                 alert_text=alert_text,
                 spl_query_grounding_context=spl_query_grounding_context,
                 require_spl_grounding=require_grounding,
+                allowed_indexes=str(getattr(config, "SPLUNK_SEARCH_ALLOWED_INDEXES", "")),
             )
             if not ok:
                 metadata.update(

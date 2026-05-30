@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -13,6 +16,7 @@ from .idempotency import (
     complete_side_effect_success,
     release_side_effect_lock,
 )
+from .runtime_security import validate_https_url
 
 _SHORT_DESCRIPTION_MAX_CHARS = 160
 _DESCRIPTION_MAX_CHARS = 4000
@@ -147,25 +151,61 @@ def extract_servicenow_create_approval(alert_payload: Any) -> dict[str, Any]:
     if not isinstance(approval, dict):
         return {}
     return {
-        "approved": bool(approval.get("approved", False)),
+        "approved": approval.get("approved"),
         "approved_by": str(approval.get("approved_by", "")).strip(),
         "approval_ref": str(approval.get("approval_ref", "")).strip(),
         "approved_at": str(approval.get("approved_at", "")).strip(),
+        "signature": str(approval.get("signature", "")).strip(),
     }
+
+
+def _approval_signature_payload(
+    approval: dict[str, Any],
+    *,
+    correlation_id: str,
+) -> str:
+    """Build the canonical approval payload signed by a trusted approval service."""
+
+    return json.dumps(
+        {
+            "approved": approval.get("approved"),
+            "approved_by": str(approval.get("approved_by", "")).strip(),
+            "approval_ref": str(approval.get("approval_ref", "")).strip(),
+            "approved_at": str(approval.get("approved_at", "")).strip(),
+            "correlation_id": correlation_id,
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 def _validate_create_approval(
     approval: dict[str, Any],
     *,
     require_approval: bool,
+    correlation_id: str,
+    approval_hmac_key: str,
 ) -> tuple[bool, str]:
     if not require_approval:
         return True, ""
-    if not isinstance(approval, dict) or not approval.get("approved", False):
+    if not isinstance(approval, dict) or approval.get("approved") is not True:
         return False, "ServiceNow create denied: explicit approval is required"
     approved_by = str(approval.get("approved_by", "")).strip()
     if not approved_by:
         return False, "ServiceNow create denied: approved_by is required"
+    if not approval_hmac_key:
+        return False, "ServiceNow create denied: trusted approval signature key is required"
+    signature = str(approval.get("signature", "")).strip()
+    if not signature:
+        return False, "ServiceNow create denied: approval signature is required"
+    expected = hmac.new(
+        approval_hmac_key.encode("utf-8"),
+        _approval_signature_payload(approval, correlation_id=correlation_id).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        return False, "ServiceNow create denied: approval signature is invalid"
     return True, ""
 
 
@@ -175,6 +215,7 @@ def create_servicenow_incident(
     config: Config,
     api_token: str,
     approval: dict[str, Any] | None = None,
+    approval_hmac_key: str = "",
     idempotency_client: Any | None = None,
 ) -> dict[str, Any]:
     """Create a ServiceNow incident from an approved draft payload."""
@@ -186,22 +227,33 @@ def create_servicenow_incident(
             "message": "ServiceNow create is disabled",
         }
 
+    base_url = str(getattr(config, "SERVICENOW_BASE_URL", "")).strip()
+    path = str(getattr(config, "SERVICENOW_CREATE_PATH", "")).strip()
+    timeout_seconds = int(getattr(config, "SERVICENOW_TIMEOUT_SECONDS", 15))
+    idempotency_key = str(
+        draft_payload.get("correlation_id") or draft_payload.get("correlation_display") or ""
+    ).strip()
+
     allowed, reason = _validate_create_approval(
         approval or {},
         require_approval=bool(getattr(config, "SERVICENOW_CREATE_REQUIRES_APPROVAL", True)),
+        correlation_id=idempotency_key,
+        approval_hmac_key=approval_hmac_key,
     )
     if not allowed:
         return {"status": "denied", "operation": "create", "message": reason, "approval": approval or {}}
 
-    base_url = str(getattr(config, "SERVICENOW_BASE_URL", "")).strip()
-    path = str(getattr(config, "SERVICENOW_CREATE_PATH", "")).strip()
-    timeout_seconds = int(getattr(config, "SERVICENOW_TIMEOUT_SECONDS", 15))
-
-    if not base_url.startswith("https://"):
+    try:
+        base_url = validate_https_url(
+            base_url,
+            setting_name="SERVICENOW_BASE_URL",
+            allow_private=bool(getattr(config, "ALLOW_PRIVATE_OUTBOUND_ENDPOINTS", False)),
+        )
+    except ValueError as exc:
         return {
             "status": "error",
             "operation": "create",
-            "message": "ServiceNow base URL must be HTTPS",
+            "message": str(exc),
             "approval": approval or {},
         }
     if not path or not path.startswith("/"):
@@ -219,9 +271,6 @@ def create_servicenow_incident(
             "approval": approval or {},
         }
 
-    idempotency_key = str(
-        draft_payload.get("correlation_id") or draft_payload.get("correlation_display") or ""
-    ).strip()
     try:
         reservation = begin_side_effect(
             config,
@@ -235,12 +284,14 @@ def create_servicenow_incident(
     if not reservation.should_execute:
         metadata = (reservation.existing_marker or {}).get("metadata", {})
         marker_metadata = metadata if isinstance(metadata, dict) else {}
+        marker_status = (reservation.existing_marker or {}).get("status", "unknown")
         return {
             "status": "skipped",
             "operation": "create",
-            "message": "ServiceNow incident create already completed",
+            "message": f"ServiceNow incident create already reserved with status={marker_status}",
             "sys_id": str(marker_metadata.get("sys_id", "")).strip(),
             "number": str(marker_metadata.get("number", "")).strip(),
+            "idempotency_status": marker_status,
             "approval": approval or {},
         }
 

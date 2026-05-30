@@ -33,7 +33,14 @@ class ConfigTests(unittest.TestCase):
 
     def test_action_gated_profile_enables_writeback_and_idempotency(self) -> None:
         """`action_gated` should mirror the on-prem external-action posture."""
-        with patch.dict("os.environ", {"CAPABILITY_PROFILES": "core,action_gated"}, clear=True):
+        with patch.dict(
+            "os.environ",
+            {
+                "CAPABILITY_PROFILES": "core,action_gated",
+                "SERVICENOW_APPROVAL_HMAC_SECRET_ARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:snow-approval",
+            },
+            clear=True,
+        ):
             config = load_config()
 
         self.assertTrue(config.SPLUNK_SINK_ENABLED)
@@ -110,7 +117,22 @@ class ConfigTests(unittest.TestCase):
                 },
                 clear=True,
             ),
-            self.assertRaisesRegex(ValueError, "must be HTTPS"),
+            self.assertRaisesRegex(ValueError, "must be an HTTPS URL"),
+        ):
+            load_config()
+
+    def test_outbound_private_ip_requires_explicit_allowance(self) -> None:
+        """Outbound integration URLs should not silently target private IPs."""
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "SPLUNK_SINK_MODE": "notable_rest",
+                    "SPLUNK_BASE_URL": "https://127.0.0.1:8089",
+                },
+                clear=True,
+            ),
+            self.assertRaisesRegex(ValueError, "private or local IP"),
         ):
             load_config()
 

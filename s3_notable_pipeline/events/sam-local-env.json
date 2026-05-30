@@ -1,0 +1,17 @@
+{
+  "NotableAnalyzerFunction": {
+    "AWS_ENDPOINT_URL": "http://host.docker.internal:4566",
+    "AWS_ACCESS_KEY_ID": "test",
+    "AWS_SECRET_ACCESS_KEY": "test",
+    "AWS_REGION": "us-east-1",
+    "AWS_DEFAULT_REGION": "us-east-1",
+    "AWS_EC2_METADATA_DISABLED": "true",
+    "CAPABILITY_PROFILES": "core",
+    "BEDROCK_MODEL_ID": "local-placeholder",
+    "SPLUNK_SINK_MODE": "s3",
+    "INPUT_BUCKET_NAME": "notable-local-input",
+    "OUTPUT_BUCKET_NAME": "notable-local-output",
+    "OUTPUT_PREFIX": "reports",
+    "MAX_DECOMPRESSED_INPUT_BYTES": "1048576"
+  }
+}

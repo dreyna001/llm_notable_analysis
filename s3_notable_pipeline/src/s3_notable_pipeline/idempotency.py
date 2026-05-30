@@ -59,6 +59,37 @@ def _metadata_from_item(item: dict[str, Any]) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _parse_epoch(value: str) -> float | None:
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def _marker_from_item(
+    item: dict[str, Any],
+    *,
+    operation: str,
+    key: str,
+) -> dict[str, Any]:
+    return {
+        "operation": item.get("operation", {}).get("S", operation),
+        "key": item.get("side_effect_key", {}).get("S", key),
+        "status": item.get("status", {}).get("S", "unknown"),
+        "started_at": item.get("started_at", {}).get("S", ""),
+        "metadata": _metadata_from_item(item),
+    }
+
+
+def _is_stale_in_progress(marker: dict[str, Any], *, lock_seconds: int) -> bool:
+    if marker.get("status") != "in_progress":
+        return False
+    started_epoch = _parse_epoch(str(marker.get("started_at", "")))
+    if started_epoch is None:
+        return False
+    return time.time() - started_epoch > max(1, lock_seconds)
+
+
 def _error_code(exc: Exception) -> str:
     response = getattr(exc, "response", {})
     if isinstance(response, dict):
@@ -93,39 +124,60 @@ def begin_side_effect(
     now = datetime.now(timezone.utc).isoformat()
     ttl = _expiry_epoch(int(getattr(config, "SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS", 30)))
 
-    try:
-        ddb.put_item(
-            TableName=table_name,
-            Item={
-                "id": {"S": item_id},
-                "operation": {"S": operation},
-                "side_effect_key": {"S": normalized_key},
-                "status": {"S": "in_progress"},
-                "started_at": {"S": now},
-                "expires_at": {"N": str(ttl)},
-            },
-            ConditionExpression="attribute_not_exists(id)",
-        )
-    except Exception as exc:
-        if _error_code(exc) != "ConditionalCheckFailedException":
-            raise
-        existing = ddb.get_item(TableName=table_name, Key={"id": {"S": item_id}}).get("Item", {})
-        marker = {
-            "operation": existing.get("operation", {}).get("S", operation),
-            "key": existing.get("side_effect_key", {}).get("S", normalized_key),
-            "status": existing.get("status", {}).get("S", "unknown"),
-            "metadata": _metadata_from_item(existing),
-        }
-        return SideEffectReservation(
-            enabled=True,
-            should_execute=False,
-            operation=operation,
-            key=normalized_key,
-            table_name=table_name,
-            item_id=item_id,
-            existing_marker=marker,
-            client=ddb,
-        )
+    for attempt in range(2):
+        try:
+            ddb.put_item(
+                TableName=table_name,
+                Item={
+                    "id": {"S": item_id},
+                    "operation": {"S": operation},
+                    "side_effect_key": {"S": normalized_key},
+                    "status": {"S": "in_progress"},
+                    "started_at": {"S": now},
+                    "expires_at": {"N": str(ttl)},
+                },
+                ConditionExpression="attribute_not_exists(id)",
+            )
+            break
+        except Exception as exc:
+            if _error_code(exc) != "ConditionalCheckFailedException":
+                raise
+            existing = ddb.get_item(TableName=table_name, Key={"id": {"S": item_id}}).get("Item", {})
+            marker = _marker_from_item(existing, operation=operation, key=normalized_key)
+            lock_seconds = int(getattr(config, "SIDE_EFFECT_IDEMPOTENCY_LOCK_SECONDS", 900))
+            if attempt == 0 and _is_stale_in_progress(marker, lock_seconds=lock_seconds):
+                try:
+                    ddb.delete_item(
+                        TableName=table_name,
+                        Key={"id": {"S": item_id}},
+                        ConditionExpression="#status = :status",
+                        ExpressionAttributeNames={"#status": "status"},
+                        ExpressionAttributeValues={":status": {"S": "in_progress"}},
+                    )
+                except Exception as delete_exc:
+                    if _error_code(delete_exc) != "ConditionalCheckFailedException":
+                        raise
+                    return SideEffectReservation(
+                        enabled=True,
+                        should_execute=False,
+                        operation=operation,
+                        key=normalized_key,
+                        table_name=table_name,
+                        item_id=item_id,
+                        existing_marker=marker,
+                        client=ddb,
+                    )
+                continue
+            return SideEffectReservation(
+                enabled=True,
+                should_execute=False,
+                operation=operation,
+                key=normalized_key,
+                table_name=table_name,
+                item_id=item_id,
+                existing_marker=marker,
+                client=ddb,
+            )
 
     return SideEffectReservation(
         enabled=True,

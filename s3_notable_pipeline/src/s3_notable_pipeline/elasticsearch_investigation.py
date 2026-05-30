@@ -13,6 +13,7 @@ import requests
 
 from .config import Config
 from .elastic_query_generation import duration_to_seconds, validate_elastic_query_contract
+from .runtime_security import validate_https_url
 
 _DEFAULT_MAX_TIME_RANGE = "24h"
 _DEFAULT_MAX_ROWS = 100
@@ -273,7 +274,12 @@ def execute_elasticsearch_query(
         timeout_seconds=timeout_seconds,
     )
     encoded_index = quote(index_pattern, safe="*.-_")
-    search_url = f"{config.ELASTICSEARCH_BASE_URL.rstrip('/')}/{encoded_index}/_search"
+    base_url = validate_https_url(
+        config.ELASTICSEARCH_BASE_URL,
+        setting_name="ELASTICSEARCH_BASE_URL",
+        allow_private=bool(getattr(config, "ALLOW_PRIVATE_OUTBOUND_ENDPOINTS", False)),
+    )
+    search_url = f"{base_url.rstrip('/')}/{encoded_index}/_search"
     headers = {"Authorization": f"ApiKey {api_key}", "Content-Type": "application/json"}
     try:
         response = requests.post(

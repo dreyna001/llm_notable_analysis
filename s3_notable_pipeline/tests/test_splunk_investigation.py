@@ -89,6 +89,43 @@ class SplunkInvestigationTests(unittest.TestCase):
         self.assertEqual(result["result_count"], 1)
         self.assertEqual(result["search_id"], "sid-1")
 
+    def test_policy_denies_subsearch_and_macro_syntax(self) -> None:
+        for query in (
+            "index=main [ search index=notable | head 1 ] | stats count",
+            "index=main `risky_macro` | stats count",
+        ):
+            allowed, reason = validate_splunk_query_policy(
+                query,
+                config=_config(),
+                time_range="24h",
+                max_rows=100,
+                timeout_seconds=30,
+            )
+
+            self.assertFalse(allowed)
+            self.assertIn("subsearch or macro", str(reason))
+
+    def test_rest_executor_filters_sample_fields_and_drops_raw(self) -> None:
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "sid": "sid-1",
+            "results": [{"user": "alice", "host": "server1", "_raw": "secret raw"}],
+        }
+
+        with patch("s3_notable_pipeline.splunk_investigation.requests.post", return_value=response):
+            result = execute_splunk_rest_query(
+                "index=main user=alice | table user host _raw",
+                config=_config(SPLUNK_SEARCH_ALLOWED_FIELDS="user,host"),
+                api_token="token",
+                time_range="24h",
+                max_rows=100,
+                timeout_seconds=30,
+            )
+
+        self.assertEqual(result["sample_rows"], [{"host": "server1", "user": "alice"}])
+        self.assertEqual(result["sample_columns"], ["host", "user"])
+
     def test_mcp_executor_uses_same_normalized_shape(self) -> None:
         mcp_client = SimpleNamespace(
             run_search=lambda _payload: {
@@ -109,7 +146,7 @@ class SplunkInvestigationTests(unittest.TestCase):
         self.assertEqual(results[0]["hypothesis_index"], 0)
 
     def test_mcp_endpoint_must_be_https_without_userinfo(self) -> None:
-        with self.assertRaisesRegex(ValueError, "HTTPS URL without userinfo"):
+        with self.assertRaisesRegex(ValueError, "must not include userinfo"):
             HttpSplunkMcpClient(endpoint="https://user:pass@splunk.example.test/mcp")
 
 

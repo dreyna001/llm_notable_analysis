@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import sys
 import unittest
+import hmac
+import hashlib
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -15,6 +17,7 @@ if str(SRC_DIR) not in sys.path:
 
 from s3_notable_pipeline.config import Config
 from s3_notable_pipeline.servicenow import (
+    _approval_signature_payload,
     build_servicenow_incident_draft,
     create_servicenow_incident,
     extract_servicenow_create_approval,
@@ -31,6 +34,21 @@ def _analysis() -> dict[str, object]:
             "recommended_actions": ["Review VPN logs"],
         }
     }
+
+
+def _signed_approval(correlation_id: str = "finding-1") -> dict[str, object]:
+    approval = {
+        "approved": True,
+        "approved_by": "analyst@example.test",
+        "approval_ref": "CHANGE-1",
+        "approved_at": "2026-05-29T00:00:00Z",
+    }
+    approval["signature"] = hmac.new(
+        b"approval-secret",
+        _approval_signature_payload(approval, correlation_id=correlation_id).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return approval
 
 
 class ServiceNowTests(unittest.TestCase):
@@ -55,7 +73,10 @@ class ServiceNowTests(unittest.TestCase):
     def test_create_requires_approval_by_default(self) -> None:
         result = create_servicenow_incident(
             {"correlation_id": "finding-1"},
-            config=Config(SERVICENOW_CREATE_ENABLED=True),
+            config=Config(
+                SERVICENOW_CREATE_ENABLED=True,
+                SERVICENOW_APPROVAL_HMAC_SECRET_ARN="arn:aws:secretsmanager:us-east-1:123456789012:secret:snow-approval",
+            ),
             api_token="token",
             approval={},
         )
@@ -74,10 +95,12 @@ class ServiceNowTests(unittest.TestCase):
                 config=Config(
                     SERVICENOW_CREATE_ENABLED=True,
                     SERVICENOW_BASE_URL="https://snow.example.test",
+                    SERVICENOW_APPROVAL_HMAC_SECRET_ARN="arn:aws:secretsmanager:us-east-1:123456789012:secret:snow-approval",
                     SIDE_EFFECT_IDEMPOTENCY_ENABLED=False,
                 ),
                 api_token="token",
-                approval={"approved": True, "approved_by": "analyst@example.test"},
+                approval=_signed_approval(),
+                approval_hmac_key="approval-secret",
             )
 
         self.assertEqual(result["status"], "success")
@@ -98,6 +121,20 @@ class ServiceNowTests(unittest.TestCase):
         self.assertTrue(approval["approved"])
         self.assertEqual(approval["approved_by"], "analyst@example.test")
         self.assertEqual(approval["approval_ref"], "CHANGE-1")
+
+    def test_string_false_approval_is_denied(self) -> None:
+        result = create_servicenow_incident(
+            {"correlation_id": "finding-1"},
+            config=Config(
+                SERVICENOW_CREATE_ENABLED=True,
+                SERVICENOW_APPROVAL_HMAC_SECRET_ARN="arn:aws:secretsmanager:us-east-1:123456789012:secret:snow-approval",
+            ),
+            api_token="token",
+            approval={"approved": "false", "approved_by": "analyst@example.test"},
+            approval_hmac_key="approval-secret",
+        )
+
+        self.assertEqual(result["status"], "denied")
 
 
 if __name__ == "__main__":

@@ -27,7 +27,6 @@ deployment image guide:
 
 | Area | Guide | Purpose |
 |------|-------|---------|
-| Capability profiles | `CAPABILITY_PROFILES.md` | Supported AWS feature bundles and legacy low-level flag behavior. |
 | LLM inference | `LLM_INFERENCE_OPERATIONS.md` | Bedrock model id, Lambda timeout, model-call budgets, and rollout. |
 | Knowledge base content | `KNOWLEDGE_BASE_OPERATIONS.md` | Bedrock Knowledge Base ownership, source content, and lifecycle. |
 | RAG retrieval | `RAG_OPERATIONS.md` | General SOC RAG enablement, failure mode, snippets, and context budgets. |
@@ -35,10 +34,7 @@ deployment image guide:
 | Elasticsearch generation and execution | `ELASTICSEARCH_OPERATIONS.md` | Query DSL generation, Elastic grounding, `_search` execution policy. |
 | Splunk writeback | `SPLUNK_WRITEBACK_OPERATIONS.md` | Optional notable comment writeback and idempotency. |
 | ServiceNow | `SERVICENOW_OPERATIONS.md` | Incident draft/create, Secrets Manager token, and approval payload. |
-| S3 intake and retention | `FILE_DROP_AND_RETENTION_OPERATIONS.md` | S3 prefixes, gzip handling, lifecycle rules, and report outputs. |
-| Security | `SECURITY_OPERATIONS.md` | IAM, Secrets Manager, TLS, network posture, and audit expectations. |
-| MITRE ATT&CK/TTP | `MITRE_TTP_OPERATIONS.md` | TTP ID data source and validation expectations. |
-| Recovery | `RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md` | Failure behavior, ownership, and recovery duties. |
+| Security | `SECURITY_OPERATIONS.md` | IAM, secrets, TLS, endpoint validation, and action gates. |
 | Testing | `../testing/TESTING.md` | Unit, smoke, and optional integration validation commands. |
 
 ## Current Diff 1 Status

@@ -126,7 +126,7 @@ class NotableRestSinkTests(unittest.TestCase):
                 self.lambda_handler,
                 "write_to_splunk_rest",
                 return_value={"status": "success", "finding_id": "example"},
-            ),
+            ) as mock_rest,
         ):
             result = self.lambda_handler.write_to_notable_rest_sink(
                 "incoming/example.json",
@@ -135,7 +135,8 @@ class NotableRestSinkTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "error")
         self.assertEqual(result["s3_result"]["status"], "error")
-        self.assertEqual(result["rest_result"]["status"], "success")
+        self.assertEqual(result["rest_result"]["status"], "skipped")
+        mock_rest.assert_not_called()
 
     def test_notable_rest_sink_treats_duplicate_writeback_as_success(self) -> None:
         """Idempotent duplicate writeback should not fail the combined sink."""
@@ -234,6 +235,24 @@ class NotableRestSinkTests(unittest.TestCase):
 
         self.assertEqual(token, "elastic-token")
 
+    def test_writeback_finding_id_requires_payload_key_match_when_present(self) -> None:
+        """Writeback should not let the object key target a different payload finding."""
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            self.lambda_handler.resolve_finding_id_for_writeback(
+                {"alert_payload": {"finding_id": "payload-1"}},
+                "incoming/key-1.json",
+                self.lambda_handler.Config(),
+            )
+
+    def test_writeback_can_require_payload_finding_id(self) -> None:
+        """Deployments can require trusted payload finding ids for writeback."""
+        with self.assertRaisesRegex(ValueError, "payload finding_id is required"):
+            self.lambda_handler.resolve_finding_id_for_writeback(
+                {"alert_payload": {}},
+                "incoming/key-1.json",
+                self.lambda_handler.Config(SPLUNK_REQUIRE_PAYLOAD_FINDING_ID=True),
+            )
+
 
 class CompressedInputTests(unittest.TestCase):
     """Tests for gzip-aware S3 input decoding."""
@@ -292,6 +311,15 @@ class CompressedInputTests(unittest.TestCase):
             self.lambda_handler.decode_s3_notable_object(
                 "incoming/example.txt.gz",
                 gzip.compress(b"this is too long"),
+            )
+
+    def test_oversized_uncompressed_input_is_rejected(self) -> None:
+        """Uncompressed objects should be bounded before prompt construction."""
+        with self.assertRaisesRegex(ValueError, "exceeds MAX_DECOMPRESSED_INPUT_BYTES"):
+            self.lambda_handler.decode_s3_notable_object(
+                "incoming/example.txt",
+                b"0123456789ABCDEF",
+                config=self.lambda_handler.Config(MAX_DECOMPRESSED_INPUT_BYTES=10),
             )
 
     def test_report_key_strips_data_and_gzip_extensions(self) -> None:

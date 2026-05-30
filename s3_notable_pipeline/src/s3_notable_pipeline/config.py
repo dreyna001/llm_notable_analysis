@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+from .runtime_security import validate_https_url
+
 _TRUE_VALUES = {"true", "1", "yes"}
 _FALSE_VALUES = {"false", "0", "no"}
 
@@ -124,6 +126,7 @@ class Config:
     OUTPUT_BUCKET_NAME: str = ""
     OUTPUT_PREFIX: str = "reports"
     MAX_DECOMPRESSED_INPUT_BYTES: int = 1_048_576
+    ALLOW_PRIVATE_OUTBOUND_ENDPOINTS: bool = False
 
     HTML_REPORT_ENABLED: bool = False
     RAG_ENABLED: bool = False
@@ -137,6 +140,7 @@ class Config:
     SPLUNK_API_TOKEN_SECRET_FIELD: str = "token"
     SPLUNK_NOTABLE_UPDATE_PATH: str = "/services/notable_update"
     SPLUNK_SINK_ENABLED: bool = False
+    SPLUNK_REQUIRE_PAYLOAD_FINDING_ID: bool = False
 
     SPL_QUERY_GENERATION_ENABLED: bool = False
     SPL_QUERY_RAG_ENABLED: bool = False
@@ -158,8 +162,9 @@ class Config:
     SPLUNK_SEARCH_ENDPOINT_PATH: str = "/services/search/jobs/oneshot"
     SPLUNK_SEARCH_ALLOWED_INDEXES: str = "main,notable,risk"
     SPLUNK_SEARCH_ALLOWED_COMMANDS: str = "search,stats,table,fields,where,head"
+    SPLUNK_SEARCH_ALLOWED_FIELDS: str = ""
     SPLUNK_SEARCH_DENIED_COMMANDS: str = (
-        "delete,collect,outputlookup,sendemail,map,rest,script,dbxquery"
+        "delete,collect,outputlookup,sendemail,map,rest,script,dbxquery,inputlookup"
     )
     SPLUNK_SEARCH_MAX_TIME_RANGE: str = "24h"
     SPLUNK_SEARCH_MAX_ROWS: int = 100
@@ -192,12 +197,14 @@ class Config:
     SERVICENOW_BASE_URL: str = "https://your-instance.service-now.com"
     SERVICENOW_CREATE_PATH: str = "/api/now/table/incident"
     SERVICENOW_API_TOKEN_SECRET_ARN: str = ""
+    SERVICENOW_APPROVAL_HMAC_SECRET_ARN: str = ""
     SERVICENOW_ASSIGNMENT_GROUP: str = ""
     SERVICENOW_TIMEOUT_SECONDS: int = 15
 
     SIDE_EFFECT_IDEMPOTENCY_ENABLED: bool = False
     SIDE_EFFECT_IDEMPOTENCY_TABLE: str = ""
     SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS: int = 30
+    SIDE_EFFECT_IDEMPOTENCY_LOCK_SECONDS: int = 900
 
     def __post_init__(self) -> None:
         profiles = _parse_capability_profiles(self.CAPABILITY_PROFILES)
@@ -220,14 +227,33 @@ class Config:
         ).strip().lower()
         if self.INVESTIGATION_QUERY_EXECUTOR not in {"rest", "mcp"}:
             raise ValueError("INVESTIGATION_QUERY_EXECUTOR must be rest or mcp")
+        if self.SPLUNK_SINK_MODE == "notable_rest" or (
+            self.INVESTIGATION_QUERY_BACKEND == "splunk"
+            and self.INVESTIGATION_QUERY_EXECUTION_ENABLED
+        ):
+            if self.SPLUNK_BASE_URL:
+                self.SPLUNK_BASE_URL = validate_https_url(
+                    self.SPLUNK_BASE_URL,
+                    setting_name="SPLUNK_BASE_URL",
+                    allow_private=self.ALLOW_PRIVATE_OUTBOUND_ENDPOINTS,
+                )
+            elif self.SPLUNK_SINK_MODE == "notable_rest":
+                raise ValueError("SPLUNK_BASE_URL is required when notable_rest sink is enabled")
+        if self.SPLUNK_MCP_ENDPOINT:
+            self.SPLUNK_MCP_ENDPOINT = validate_https_url(
+                self.SPLUNK_MCP_ENDPOINT,
+                setting_name="SPLUNK_MCP_ENDPOINT",
+                allow_private=self.ALLOW_PRIVATE_OUTBOUND_ENDPOINTS,
+            )
         if (
             self.INVESTIGATION_QUERY_BACKEND == "elasticsearch"
             and self.INVESTIGATION_QUERY_EXECUTION_ENABLED
         ):
-            if not self.ELASTICSEARCH_BASE_URL.startswith("https://"):
-                raise ValueError(
-                    "ELASTICSEARCH_BASE_URL must be HTTPS when Elasticsearch execution is enabled"
-                )
+            self.ELASTICSEARCH_BASE_URL = validate_https_url(
+                self.ELASTICSEARCH_BASE_URL,
+                setting_name="ELASTICSEARCH_BASE_URL",
+                allow_private=self.ALLOW_PRIVATE_OUTBOUND_ENDPOINTS,
+            )
             if not self.ELASTICSEARCH_INDEX_ALLOWLIST.strip():
                 raise ValueError(
                     "ELASTICSEARCH_INDEX_ALLOWLIST is required when Elasticsearch execution is enabled"
@@ -235,6 +261,16 @@ class Config:
             if not self.ELASTICSEARCH_ALLOWED_FIELDS.strip():
                 raise ValueError(
                     "ELASTICSEARCH_ALLOWED_FIELDS is required when Elasticsearch execution is enabled"
+                )
+        if self.SERVICENOW_CREATE_ENABLED:
+            self.SERVICENOW_BASE_URL = validate_https_url(
+                self.SERVICENOW_BASE_URL,
+                setting_name="SERVICENOW_BASE_URL",
+                allow_private=self.ALLOW_PRIVATE_OUTBOUND_ENDPOINTS,
+            )
+            if self.SERVICENOW_CREATE_REQUIRES_APPROVAL and not self.SERVICENOW_APPROVAL_HMAC_SECRET_ARN:
+                raise ValueError(
+                    "SERVICENOW_APPROVAL_HMAC_SECRET_ARN is required when ServiceNow create requires approval"
                 )
 
 
@@ -257,6 +293,7 @@ def load_config() -> Config:
         MAX_DECOMPRESSED_INPUT_BYTES=_positive_int_env(
             "MAX_DECOMPRESSED_INPUT_BYTES", 1_048_576
         ),
+        ALLOW_PRIVATE_OUTBOUND_ENDPOINTS=_bool_env("ALLOW_PRIVATE_OUTBOUND_ENDPOINTS", False),
         HTML_REPORT_ENABLED=_profile_bool("HTML_REPORT_ENABLED", False, profile_flags),
         RAG_ENABLED=_profile_bool("RAG_ENABLED", False, profile_flags),
         RAG_BEDROCK_KB_ID=os.getenv("RAG_BEDROCK_KB_ID", ""),
@@ -278,6 +315,7 @@ def load_config() -> Config:
         SPLUNK_SINK_ENABLED=_profile_bool(
             "SPLUNK_SINK_ENABLED", False, profile_flags
         ),
+        SPLUNK_REQUIRE_PAYLOAD_FINDING_ID=_bool_env("SPLUNK_REQUIRE_PAYLOAD_FINDING_ID", False),
         SPL_QUERY_GENERATION_ENABLED=_profile_bool(
             "SPL_QUERY_GENERATION_ENABLED", False, profile_flags
         ),
@@ -327,9 +365,10 @@ def load_config() -> Config:
         SPLUNK_SEARCH_ALLOWED_COMMANDS=os.getenv(
             "SPLUNK_SEARCH_ALLOWED_COMMANDS", "search,stats,table,fields,where,head"
         ),
+        SPLUNK_SEARCH_ALLOWED_FIELDS=os.getenv("SPLUNK_SEARCH_ALLOWED_FIELDS", ""),
         SPLUNK_SEARCH_DENIED_COMMANDS=os.getenv(
             "SPLUNK_SEARCH_DENIED_COMMANDS",
-            "delete,collect,outputlookup,sendemail,map,rest,script,dbxquery",
+            "delete,collect,outputlookup,sendemail,map,rest,script,dbxquery,inputlookup",
         ),
         SPLUNK_SEARCH_MAX_TIME_RANGE=os.getenv("SPLUNK_SEARCH_MAX_TIME_RANGE", "24h"),
         SPLUNK_SEARCH_MAX_ROWS=_positive_int_env(
@@ -404,6 +443,9 @@ def load_config() -> Config:
         SERVICENOW_API_TOKEN_SECRET_ARN=os.getenv(
             "SERVICENOW_API_TOKEN_SECRET_ARN", ""
         ),
+        SERVICENOW_APPROVAL_HMAC_SECRET_ARN=os.getenv(
+            "SERVICENOW_APPROVAL_HMAC_SECRET_ARN", ""
+        ),
         SERVICENOW_ASSIGNMENT_GROUP=os.getenv("SERVICENOW_ASSIGNMENT_GROUP", ""),
         SERVICENOW_TIMEOUT_SECONDS=_positive_int_env(
             "SERVICENOW_TIMEOUT_SECONDS", 15, max_value=300
@@ -414,5 +456,8 @@ def load_config() -> Config:
         SIDE_EFFECT_IDEMPOTENCY_TABLE=os.getenv("SIDE_EFFECT_IDEMPOTENCY_TABLE", ""),
         SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS=_positive_int_env(
             "SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS", 30, max_value=3650
+        ),
+        SIDE_EFFECT_IDEMPOTENCY_LOCK_SECONDS=_positive_int_env(
+            "SIDE_EFFECT_IDEMPOTENCY_LOCK_SECONDS", 900, max_value=86400
         ),
     )
