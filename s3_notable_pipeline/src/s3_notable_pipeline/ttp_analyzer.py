@@ -1480,6 +1480,131 @@ SECURITY ALERT INPUT:
             self.last_llm_response = {"error": f"LLM API error: {e}", "ttp_analysis": []}
             return []
 
+    def generate_spl_queries(
+        self,
+        *,
+        alert_text: str,
+        analysis_result: Dict[str, Any],
+        config: Any,
+        soc_operational_context: str = "",
+        spl_query_grounding_context: str = "",
+        alert_time: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Generate SPL fields as a bounded second Bedrock call."""
+
+        from .spl_query_generation import (
+            build_spl_query_generation_prompt,
+            merge_spl_query_fields_by_position,
+            normalize_competing_hypotheses,
+            validate_spl_query_contract,
+        )
+
+        out = dict(analysis_result) if isinstance(analysis_result, dict) else {}
+        metadata = out.setdefault("metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+            out["metadata"] = metadata
+
+        hypotheses = out.get("competing_hypotheses", [])
+        if not bool(getattr(config, "SPL_QUERY_GENERATION_ENABLED", False)):
+            out["competing_hypotheses"] = normalize_competing_hypotheses(
+                hypotheses,
+                spl_query_enabled=False,
+            )
+            metadata["spl_query_generation_enabled"] = False
+            return out
+
+        if not isinstance(hypotheses, list) or not hypotheses:
+            metadata.update(
+                {
+                    "spl_query_generation_enabled": True,
+                    "spl_query_generation_status": "skipped",
+                    "spl_query_generation_message": "No competing hypotheses available",
+                }
+            )
+            return out
+
+        require_grounding = bool(getattr(config, "SPL_QUERY_RAG_ENABLED", False))
+        failure_mode = str(
+            getattr(config, "SPL_QUERY_RAG_FAILURE_MODE", "suppress") or "suppress"
+        ).strip().lower()
+        if require_grounding and not spl_query_grounding_context.strip():
+            metadata.update(
+                {
+                    "spl_query_generation_enabled": True,
+                    "spl_query_generation_status": "skipped",
+                    "spl_query_generation_message": "SPL query grounding unavailable",
+                }
+            )
+            if failure_mode != "fallback_to_ungrounded":
+                return out
+            require_grounding = False
+
+        prompt = build_spl_query_generation_prompt(
+            alert_text=alert_text,
+            hypotheses=hypotheses,
+            soc_operational_context=soc_operational_context,
+            spl_query_grounding_context=spl_query_grounding_context,
+            alert_time=alert_time,
+        )
+        start_time = time.time()
+        try:
+            response = self._converse(prompt, use_tool=False)
+            parsed, error_msg, raw_content = self._parse_bedrock_response(
+                response,
+                allow_text_fallback=True,
+            )
+            if not isinstance(parsed, dict):
+                metadata.update(
+                    {
+                        "spl_query_generation_enabled": True,
+                        "spl_query_generation_status": "failed",
+                        "spl_query_generation_message": error_msg or "SPL query response was not an object",
+                    }
+                )
+                return out
+            ok, validation_error = validate_spl_query_contract(
+                parsed,
+                alert_text=alert_text,
+                spl_query_grounding_context=spl_query_grounding_context,
+                require_spl_grounding=require_grounding,
+            )
+            if not ok:
+                metadata.update(
+                    {
+                        "spl_query_generation_enabled": True,
+                        "spl_query_generation_status": "failed",
+                        "spl_query_generation_message": validation_error,
+                    }
+                )
+                return out
+            out["competing_hypotheses"] = merge_spl_query_fields_by_position(
+                base_hypotheses=hypotheses,
+                generated_payload=parsed,
+                spl_query_grounding_context=spl_query_grounding_context,
+            )
+            metadata.update(
+                {
+                    "spl_query_generation_enabled": True,
+                    "spl_query_generation_status": "success",
+                    "spl_query_generation_inference_time_seconds": round(time.time() - start_time, 3),
+                    "spl_query_generation_prompt_length": len(prompt),
+                }
+            )
+            if raw_content:
+                metadata["spl_query_generation_raw_response_length"] = len(raw_content)
+            return out
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.warning("SPL query generation failed: %s", exc)
+            metadata.update(
+                {
+                    "spl_query_generation_enabled": True,
+                    "spl_query_generation_status": "failed",
+                    "spl_query_generation_message": str(exc),
+                }
+            )
+            return out
+
 
 def extract_score(ttp: Dict[str, Any]) -> float:
     """Extract score from TTP dict.

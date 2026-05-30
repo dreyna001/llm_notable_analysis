@@ -92,6 +92,8 @@ This script:
 - In `notable_rest` mode, `finding_id` is derived from the filename stem:
   - `incoming/abc-123.json` -> `finding_id=abc-123`
   - `incoming/abc-123.json.gz` -> `finding_id=abc-123`
+- Optional `spl_readonly` parity adds generated SPL and bounded read-only
+  Splunk investigation results to the JSON report. It is disabled by default.
 
 ## 5) Sink Modes
 
@@ -136,6 +138,7 @@ aws secretsmanager create-secret \
 - `docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_AWS_READINESS_OVERVIEW.md` - deployment readiness gateway (executive)
 - `docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_AWS_READINESS_ASSESSMENT.md` - readiness assessment (technical checklist)
 - `docs/operations/DEPLOYMENT_IMAGE_STEPS.md` - Lambda image build and ECR deployment notes
+- `docs/operations/SPL_OPERATIONS.md` - SPL generation, grounding, and read-only Splunk investigation operations
 - `docs/integrations/SOAR_PLAYBOOK_PHANTOM.md` - SOAR upload pattern
 - `docs/security/ATTACK_LLM_ANALYSIS.md` - ATT&CK grounding and validation approach
 

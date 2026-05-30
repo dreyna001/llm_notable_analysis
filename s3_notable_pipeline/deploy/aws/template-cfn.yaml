@@ -68,6 +68,50 @@ Parameters:
       - suppress
       - fail_closed
 
+  SplQueryRagBedrockKbId:
+    Type: String
+    Description: Bedrock Knowledge Base ID for SPL query grounding.
+    Default: ''
+
+  InvestigationQueryExecutor:
+    Type: String
+    Description: Read-only Splunk investigation executor.
+    Default: rest
+    AllowedValues:
+      - rest
+      - mcp
+
+  SplunkSearchAllowedIndexes:
+    Type: String
+    Description: Comma-separated Splunk indexes allowed for read-only investigation queries.
+    Default: main,notable,risk
+
+  SplunkSearchMaxRows:
+    Type: Number
+    Description: Maximum rows returned by one read-only Splunk investigation query.
+    Default: 100
+    MinValue: 1
+    MaxValue: 1000
+
+  SplunkSearchTimeoutSeconds:
+    Type: Number
+    Description: Timeout in seconds for one read-only Splunk investigation query.
+    Default: 30
+    MinValue: 1
+    MaxValue: 300
+
+  SplunkMcpEndpoint:
+    Type: String
+    Description: Optional HTTPS MCP bridge endpoint for read-only Splunk investigation.
+    Default: ''
+
+  SplunkMcpAuthSecretArn:
+    Type: String
+    Default: '*'
+    AllowedPattern: '^\*$|^arn:(aws|aws-us-gov|aws-cn):secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+$'
+    ConstraintDescription: Must be * or a valid Secrets Manager secret ARN.
+    Description: Optional bearer token secret ARN for Splunk MCP-over-HTTPS.
+
   SplunkBaseUrl:
     Type: String
     Default: ''
@@ -169,6 +213,8 @@ Rules:
 Conditions:
   IsNotableRest: !Equals [!Ref SplunkSinkMode, notable_rest]
   HasRagKnowledgeBase: !Not [!Equals [!Ref RagBedrockKbId, '']]
+  HasSplQueryKnowledgeBase: !Not [!Equals [!Ref SplQueryRagBedrockKbId, '']]
+  HasSplunkMcpSecret: !Not [!Equals [!Ref SplunkMcpAuthSecretArn, '*']]
 
 Resources:
   InputBucket:
@@ -259,6 +305,22 @@ Resources:
                   Resource:
                     - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${RagBedrockKbId}'
                 - !Ref AWS::NoValue
+              - !If
+                - HasSplQueryKnowledgeBase
+                - Effect: Allow
+                  Action:
+                    - bedrock:Retrieve
+                  Resource:
+                    - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${SplQueryRagBedrockKbId}'
+                - !Ref AWS::NoValue
+              - !If
+                - HasSplunkMcpSecret
+                - Effect: Allow
+                  Action:
+                    - secretsmanager:GetSecretValue
+                  Resource:
+                    - !Ref SplunkMcpAuthSecretArn
+                - !Ref AWS::NoValue
         - PolicyName: CloudWatchLogsPolicy
           PolicyDocument:
             Version: '2012-10-17'
@@ -299,6 +361,14 @@ Resources:
           SPLUNK_API_TOKEN_SECRET_ARN: !Ref SplunkApiTokenSecretArn
           SPLUNK_API_TOKEN_SECRET_FIELD: !Ref SplunkApiTokenSecretField
           SPLUNK_NOTABLE_UPDATE_PATH: !Ref SplunkNotableUpdatePath
+          SPL_QUERY_RAG_ENABLED: !If [HasSplQueryKnowledgeBase, 'true', 'false']
+          SPL_QUERY_RAG_BEDROCK_KB_ID: !Ref SplQueryRagBedrockKbId
+          INVESTIGATION_QUERY_EXECUTOR: !Ref InvestigationQueryExecutor
+          SPLUNK_SEARCH_ALLOWED_INDEXES: !Ref SplunkSearchAllowedIndexes
+          SPLUNK_SEARCH_MAX_ROWS: !Ref SplunkSearchMaxRows
+          SPLUNK_SEARCH_TIMEOUT_SECONDS: !Ref SplunkSearchTimeoutSeconds
+          SPLUNK_MCP_ENDPOINT: !Ref SplunkMcpEndpoint
+          SPLUNK_MCP_AUTH_SECRET_ARN: !Ref SplunkMcpAuthSecretArn
           INPUT_BUCKET_NAME: !Ref InputBucketName
           OUTPUT_BUCKET_NAME: !Ref OutputBucketName
           OUTPUT_PREFIX: reports

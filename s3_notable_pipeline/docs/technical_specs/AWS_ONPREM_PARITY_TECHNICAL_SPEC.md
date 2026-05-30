@@ -81,8 +81,6 @@ credentials.
 The following sections must be completed in the same diff that implements the
 feature:
 
-- SPL generation and grounding contract.
-- Splunk REST/MCP execution contract.
 - Query-result enrichment and interpretation contract.
 - ServiceNow draft/create contract.
 - DynamoDB idempotency contract.
@@ -120,3 +118,47 @@ Rules:
 - Markdown and JSON output keys are unchanged.
 - HTML rendering is deterministic and does not call the model.
 - Alert text and model-controlled text are HTML-escaped before rendering.
+
+## SPL Generation And Grounding Contract
+
+SPL query generation is implemented in `spl_query_generation.py`,
+`spl_query_grounding.py`, and `BedrockAnalyzer.generate_spl_queries()`.
+
+Rules:
+
+- SPL generation is default-off and enabled by `spl_readonly` or
+  `SPL_QUERY_GENERATION_ENABLED=true`.
+- The SPL call is a second bounded Bedrock call. It may only add
+  `query_strategy`, `primary_spl_query`, `why_this_query`, `supports_if`, and
+  `weakens_if` to the six existing competing hypotheses.
+- SPL-specific grounding uses `SPL_QUERY_RAG_BEDROCK_KB_ID`. The runtime reads
+  the Lambda environment variable, while operators should set the value through
+  SAM/CloudFormation parameters.
+- Retrieved SPL grounding is advisory Splunk-environment context, not current
+  alert evidence.
+- Generated queries must not contain placeholder tokens, pseudo-query ellipses,
+  or ungrounded indexes, sourcetypes, macros, or data model names when SPL query
+  grounding is required.
+- Generation failures fail soft by leaving the base analysis unchanged and
+  recording `spl_query_generation_status` metadata.
+
+## Splunk REST/MCP Execution Contract
+
+Read-only Splunk investigation is implemented in `splunk_investigation.py`.
+
+Rules:
+
+- Execution is default-off and runs only when
+  `INVESTIGATION_QUERY_EXECUTION_ENABLED=true` with
+  `INVESTIGATION_QUERY_BACKEND=splunk`.
+- Every generated query is policy-validated before any external call.
+- Queries must include explicit `index=...`, use only allowlisted indexes and
+  commands, avoid denied commands, and stay within configured row, timeout, and
+  time-range bounds.
+- `INVESTIGATION_QUERY_EXECUTOR=rest` calls Splunk REST oneshot search using the
+  existing Splunk token resolver.
+- `INVESTIGATION_QUERY_EXECUTOR=mcp` calls a configured HTTPS MCP bridge
+  endpoint. This has no Cursor MCP dependency.
+- REST and MCP execution return the same normalized result shape and are stored
+  under `investigation_query_results` until deterministic enrichment is added in
+  Diff 4.

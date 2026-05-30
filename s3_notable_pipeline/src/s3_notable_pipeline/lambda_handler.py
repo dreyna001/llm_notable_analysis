@@ -23,6 +23,8 @@ from .aws_clients import secretsmanager_client as make_secretsmanager_client
 from .bedrock_kb_retrieval import retrieve_soc_context
 from .config import Config, load_config
 from .html_generator import generate_html_report
+from .spl_query_grounding import retrieve_spl_query_grounding
+from .splunk_investigation import HttpSplunkMcpClient, execute_hypothesis_queries
 from .ttp_analyzer import BedrockAnalyzer
 from .markdown_generator import generate_markdown_report
 
@@ -400,6 +402,43 @@ def get_splunk_api_token(config: Config | None = None) -> str:
         return ""
 
 
+def get_splunk_mcp_token(config: Config | None = None) -> str:
+    """Resolve optional Splunk MCP bearer token from Secrets Manager."""
+
+    config = config or load_config()
+    secret_arn = (config.SPLUNK_MCP_AUTH_SECRET_ARN or '').strip()
+    secret_field = (config.SPLUNK_MCP_AUTH_SECRET_FIELD or 'token').strip() or 'token'
+    if not secret_arn or secret_arn == "*":
+        return ""
+
+    try:
+        secret_response = secretsmanager_client.get_secret_value(SecretId=secret_arn)
+        secret_string = secret_response.get('SecretString') or ''
+        if not secret_string:
+            logger.error("Splunk MCP auth secret has no SecretString content")
+            return ""
+
+        try:
+            parsed = json.loads(secret_string)
+        except json.JSONDecodeError:
+            return secret_string
+
+        if isinstance(parsed, dict):
+            token_value = parsed.get(secret_field)
+            if isinstance(token_value, str) and token_value.strip():
+                return token_value
+            logger.error(
+                "Splunk MCP auth secret JSON missing required field '%s'",
+                secret_field,
+            )
+            return ""
+        logger.error("Splunk MCP auth secret JSON must be an object or plain string")
+        return ""
+    except Exception as e:
+        logger.error("Error resolving Splunk MCP token from Secrets Manager: %s", str(e))
+        return ""
+
+
 def write_to_splunk_rest(
     analysis_result: Dict[str, Any],
     source_key: str,
@@ -559,6 +598,55 @@ def handler(event, context):
                     metadata["rag_snippet_count"] = rag_result.snippet_count
                     if rag_result.message:
                         metadata["rag_message"] = rag_result.message
+
+            if (
+                isinstance(llm_response, dict)
+                and config.INVESTIGATION_QUERY_BACKEND == "splunk"
+                and config.SPL_QUERY_GENERATION_ENABLED
+            ):
+                spl_grounding = retrieve_spl_query_grounding(
+                    alert_text=alert_text,
+                    hypotheses=llm_response.get("competing_hypotheses", []),
+                    config=config,
+                )
+                llm_response = analyzer.generate_spl_queries(
+                    alert_text=alert_text,
+                    analysis_result=llm_response,
+                    config=config,
+                    soc_operational_context=rag_result.context,
+                    spl_query_grounding_context=spl_grounding.context,
+                )
+                metadata = llm_response.setdefault("metadata", {})
+                if isinstance(metadata, dict):
+                    metadata["spl_query_rag_status"] = spl_grounding.status
+                    metadata["spl_query_rag_snippet_count"] = spl_grounding.snippet_count
+                    if spl_grounding.message:
+                        metadata["spl_query_rag_message"] = spl_grounding.message
+
+            if (
+                isinstance(llm_response, dict)
+                and config.INVESTIGATION_QUERY_BACKEND == "splunk"
+                and config.INVESTIGATION_QUERY_EXECUTION_ENABLED
+            ):
+                mcp_client = None
+                if config.INVESTIGATION_QUERY_EXECUTOR == "mcp" and config.SPLUNK_MCP_ENDPOINT:
+                    mcp_client = HttpSplunkMcpClient(
+                        endpoint=config.SPLUNK_MCP_ENDPOINT,
+                        bearer_token=get_splunk_mcp_token(config),
+                        timeout_seconds=config.SPLUNK_MCP_HTTP_TIMEOUT_SECONDS,
+                    )
+                query_results = execute_hypothesis_queries(
+                    llm_response,
+                    config=config,
+                    api_token=get_splunk_api_token(config),
+                    mcp_client=mcp_client,
+                )
+                llm_response["investigation_query_results"] = query_results
+                metadata = llm_response.setdefault("metadata", {})
+                if isinstance(metadata, dict):
+                    metadata["investigation_query_backend"] = config.INVESTIGATION_QUERY_BACKEND
+                    metadata["investigation_query_executor"] = config.INVESTIGATION_QUERY_EXECUTOR
+                    metadata["investigation_query_result_count"] = len(query_results)
             
             # Generate markdown report
             logger.info("Generating markdown report")
