@@ -216,6 +216,24 @@ class NotableRestSinkTests(unittest.TestCase):
 
         self.assertEqual(token, "snow-token")
 
+    def test_get_elasticsearch_api_key_from_json_secret(self) -> None:
+        """Elasticsearch API key resolver should read api_key from Secrets Manager JSON."""
+        with (
+            patch.dict(
+                "os.environ",
+                {"ELASTICSEARCH_API_KEY_SECRET_ARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:elastic"},
+                clear=True,
+            ),
+            patch.object(
+                self.lambda_handler.secretsmanager_client,
+                "get_secret_value",
+                return_value={"SecretString": '{"api_key":"elastic-token"}'},
+            ),
+        ):
+            token = self.lambda_handler.get_elasticsearch_api_key()
+
+        self.assertEqual(token, "elastic-token")
+
 
 class CompressedInputTests(unittest.TestCase):
     """Tests for gzip-aware S3 input decoding."""

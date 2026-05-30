@@ -28,6 +28,8 @@ from .idempotency import (
     complete_side_effect_success,
     release_side_effect_lock,
 )
+from .elasticsearch_investigation import execute_hypothesis_elasticsearch_queries
+from .elasticsearch_query_grounding import retrieve_elasticsearch_grounding
 from .query_result_enrichment import enrich_analysis_with_query_results
 from .servicenow import (
     build_servicenow_incident_draft,
@@ -483,6 +485,37 @@ def get_servicenow_api_token(config: Config | None = None) -> str:
         return ""
 
 
+def get_elasticsearch_api_key(config: Config | None = None) -> str:
+    """Resolve Elasticsearch API key from Secrets Manager."""
+
+    config = config or load_config()
+    secret_arn = (config.ELASTICSEARCH_API_KEY_SECRET_ARN or '').strip()
+    if not secret_arn or secret_arn == "*":
+        return ""
+
+    try:
+        secret_response = secretsmanager_client.get_secret_value(SecretId=secret_arn)
+        secret_string = secret_response.get('SecretString') or ''
+        if not secret_string:
+            logger.error("Elasticsearch API key secret has no SecretString content")
+            return ""
+        try:
+            parsed = json.loads(secret_string)
+        except json.JSONDecodeError:
+            return secret_string
+        if isinstance(parsed, dict):
+            token_value = parsed.get("api_key") or parsed.get("token")
+            if isinstance(token_value, str) and token_value.strip():
+                return token_value
+            logger.error("Elasticsearch API key secret JSON missing api_key/token field")
+            return ""
+        logger.error("Elasticsearch API key secret JSON must be an object or plain string")
+        return ""
+    except Exception as e:
+        logger.error("Error resolving Elasticsearch API key from Secrets Manager: %s", str(e))
+        return ""
+
+
 def write_to_splunk_rest(
     analysis_result: Dict[str, Any],
     source_key: str,
@@ -718,6 +751,54 @@ def handler(event, context):
                 if isinstance(metadata, dict):
                     metadata["investigation_query_backend"] = config.INVESTIGATION_QUERY_BACKEND
                     metadata["investigation_query_executor"] = config.INVESTIGATION_QUERY_EXECUTOR
+                    metadata["investigation_query_result_count"] = len(query_results)
+
+            if (
+                isinstance(llm_response, dict)
+                and config.INVESTIGATION_QUERY_BACKEND == "elasticsearch"
+                and config.ELASTIC_QUERY_GENERATION_ENABLED
+            ):
+                elastic_grounding = retrieve_elasticsearch_grounding(
+                    alert_text=alert_text,
+                    hypotheses=llm_response.get("competing_hypotheses", []),
+                    config=config,
+                )
+                llm_response = analyzer.generate_elastic_queries(
+                    alert_text=alert_text,
+                    analysis_result=llm_response,
+                    config=config,
+                    soc_operational_context=rag_result.context,
+                    elasticsearch_grounding_context=elastic_grounding.context,
+                )
+                metadata = llm_response.setdefault("metadata", {})
+                if isinstance(metadata, dict):
+                    metadata["elasticsearch_grounding_status"] = elastic_grounding.status
+                    metadata["elasticsearch_grounding_snippet_count"] = elastic_grounding.snippet_count
+                    if elastic_grounding.message:
+                        metadata["elasticsearch_grounding_message"] = elastic_grounding.message
+
+            if (
+                isinstance(llm_response, dict)
+                and config.INVESTIGATION_QUERY_BACKEND == "elasticsearch"
+                and config.INVESTIGATION_QUERY_EXECUTION_ENABLED
+            ):
+                query_results = execute_hypothesis_elasticsearch_queries(
+                    llm_response,
+                    config=config,
+                    api_key=get_elasticsearch_api_key(config),
+                )
+                llm_response["investigation_query_results"] = query_results
+                llm_response = enrich_analysis_with_query_results(llm_response, query_results)
+                if config.QUERY_RESULT_INTERPRETATION_ENABLED:
+                    llm_response = analyzer.interpret_query_results(
+                        alert_text=alert_text,
+                        analysis_result=llm_response,
+                        config=config,
+                    )
+                metadata = llm_response.setdefault("metadata", {})
+                if isinstance(metadata, dict):
+                    metadata["investigation_query_backend"] = config.INVESTIGATION_QUERY_BACKEND
+                    metadata["investigation_query_executor"] = "elasticsearch"
                     metadata["investigation_query_result_count"] = len(query_results)
 
             if isinstance(llm_response, dict) and (

@@ -220,6 +220,22 @@ class Config:
         ).strip().lower()
         if self.INVESTIGATION_QUERY_EXECUTOR not in {"rest", "mcp"}:
             raise ValueError("INVESTIGATION_QUERY_EXECUTOR must be rest or mcp")
+        if (
+            self.INVESTIGATION_QUERY_BACKEND == "elasticsearch"
+            and self.INVESTIGATION_QUERY_EXECUTION_ENABLED
+        ):
+            if not self.ELASTICSEARCH_BASE_URL.startswith("https://"):
+                raise ValueError(
+                    "ELASTICSEARCH_BASE_URL must be HTTPS when Elasticsearch execution is enabled"
+                )
+            if not self.ELASTICSEARCH_INDEX_ALLOWLIST.strip():
+                raise ValueError(
+                    "ELASTICSEARCH_INDEX_ALLOWLIST is required when Elasticsearch execution is enabled"
+                )
+            if not self.ELASTICSEARCH_ALLOWED_FIELDS.strip():
+                raise ValueError(
+                    "ELASTICSEARCH_ALLOWED_FIELDS is required when Elasticsearch execution is enabled"
+                )
 
 
 def load_config() -> Config:

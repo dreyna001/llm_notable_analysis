@@ -76,13 +76,6 @@ Unit tests must mock clients and must not require AWS credentials. Local
 integration tests, if added later, must use `AWS_ENDPOINT_URL` and local test
 credentials.
 
-## Open Sections For Later Diffs
-
-The following sections must be completed in the same diff that implements the
-feature:
-
-- Elasticsearch generation, grounding, and execution contract.
-
 ## Bedrock Knowledge Base Retrieval Contract
 
 General SOC RAG is implemented in `bedrock_kb_retrieval.py`.
@@ -159,6 +152,39 @@ Rules:
 - REST and MCP execution return the same normalized result shape and are stored
   under `investigation_query_results` until deterministic enrichment is added in
   Diff 4.
+
+## Elasticsearch Generation, Grounding, And Execution Contract
+
+Elasticsearch read-only investigation is implemented in
+`elastic_query_generation.py`, `elasticsearch_query_grounding.py`,
+`elasticsearch_investigation.py`, and
+`BedrockAnalyzer.generate_elastic_queries()`.
+
+Rules:
+
+- Elasticsearch generation is default-off and enabled by `elastic_readonly` or
+  `ELASTIC_QUERY_GENERATION_ENABLED=true`.
+- The Elastic call is a second bounded Bedrock call. It may only add
+  `query_strategy`, `primary_elastic_query`, `why_this_query`, `supports_if`,
+  and `weakens_if` to the six existing competing hypotheses.
+- Elastic-specific grounding uses `ELASTICSEARCH_GROUNDING_BEDROCK_KB_ID`.
+  Retrieved grounding is advisory environment context, not current-alert
+  evidence.
+- Generated `primary_elastic_query` values must contain `index_pattern` and
+  read-only `_search` Query DSL `body`.
+- Query DSL must not use scripts, `query_string`, wildcard clauses,
+  aggregations, highlighting, or runtime mappings.
+- Query bodies must include a bounded range filter on
+  `ELASTICSEARCH_TIMESTAMP_FIELD`, stay within `ELASTICSEARCH_MAX_TIME_RANGE`,
+  and use only allowlisted fields or fields grounded by alert or KB context.
+- `_search` execution runs only when
+  `INVESTIGATION_QUERY_EXECUTION_ENABLED=true` with
+  `INVESTIGATION_QUERY_BACKEND=elasticsearch`.
+- `ELASTICSEARCH_BASE_URL` must be HTTPS when execution is enabled. The API key
+  is read from `ELASTICSEARCH_API_KEY_SECRET_ARN` and is never logged.
+- Execution returns the same normalized `investigation_query_results` shape used
+  by Splunk results so deterministic enrichment and optional interpretation can
+  remain backend-neutral.
 
 ## Query-Result Enrichment And Interpretation Contract
 

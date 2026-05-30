@@ -81,12 +81,38 @@ class ConfigTests(unittest.TestCase):
 
     def test_elastic_readonly_profile_sets_elasticsearch_backend(self) -> None:
         """Elastic read-only profile should enable Elastic investigation flags."""
-        with patch.dict("os.environ", {"CAPABILITY_PROFILES": "core,elastic_readonly"}, clear=True):
+        with patch.dict(
+            "os.environ",
+            {
+                "CAPABILITY_PROFILES": "core,elastic_readonly",
+                "ELASTICSEARCH_BASE_URL": "https://elastic.example.test",
+                "ELASTICSEARCH_INDEX_ALLOWLIST": "logs-*",
+                "ELASTICSEARCH_ALLOWED_FIELDS": "@timestamp,user,host",
+            },
+            clear=True,
+        ):
             config = load_config()
 
         self.assertTrue(config.ELASTIC_QUERY_GENERATION_ENABLED)
         self.assertTrue(config.INVESTIGATION_QUERY_EXECUTION_ENABLED)
         self.assertEqual(config.INVESTIGATION_QUERY_BACKEND, "elasticsearch")
+
+    def test_elasticsearch_execution_requires_https_base_url(self) -> None:
+        """Elastic execution should fail fast for non-HTTPS endpoints."""
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "CAPABILITY_PROFILES": "core,elastic_readonly",
+                    "ELASTICSEARCH_BASE_URL": "http://elastic.example.test",
+                    "ELASTICSEARCH_INDEX_ALLOWLIST": "logs-*",
+                    "ELASTICSEARCH_ALLOWED_FIELDS": "@timestamp,user,host",
+                },
+                clear=True,
+            ),
+            self.assertRaisesRegex(ValueError, "must be HTTPS"),
+        ):
+            load_config()
 
 
 if __name__ == "__main__":

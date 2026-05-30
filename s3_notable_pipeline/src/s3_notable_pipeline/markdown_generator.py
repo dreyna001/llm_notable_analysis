@@ -1,5 +1,6 @@
 """Generate markdown reports for TTP analysis results."""
 
+import json
 from typing import Any, Dict, List
 
 
@@ -7,14 +8,28 @@ def _render_hypothesis_query_block(hyp: Dict[str, Any]) -> list[str]:
     """Render optional investigation query fields for one hypothesis."""
 
     query = str(hyp.get("primary_spl_query", "")).strip()
-    if not query:
+    elastic_query = hyp.get("primary_elastic_query")
+    if query:
+        lines: list[str] = [
+            "  - **Primary SPL query:**\n",
+            "    ```spl\n",
+            f"    {query}\n",
+            "    ```\n",
+        ]
+        refs = hyp.get("primary_spl_query_grounding_refs")
+        refs_label = "SPL grounding refs"
+    elif isinstance(elastic_query, dict) and elastic_query:
+        rendered_query = json.dumps(elastic_query, indent=2, ensure_ascii=True)
+        lines = [
+            "  - **Primary Elasticsearch query:**\n",
+            "    ```json\n",
+            *(f"    {line}\n" for line in rendered_query.splitlines()),
+            "    ```\n",
+        ]
+        refs = hyp.get("primary_elastic_query_grounding_refs")
+        refs_label = "Elasticsearch grounding refs"
+    else:
         return []
-    lines: list[str] = [
-        "  - **Primary SPL query:**\n",
-        "    ```spl\n",
-        f"    {query}\n",
-        "    ```\n",
-    ]
     for label, key in (
         ("Query strategy", "query_strategy"),
         ("Why this query", "why_this_query"),
@@ -24,9 +39,8 @@ def _render_hypothesis_query_block(hyp: Dict[str, Any]) -> list[str]:
         value = str(hyp.get(key, "")).strip()
         if value:
             lines.append(f"  - **{label}:** {value}\n")
-    refs = hyp.get("primary_spl_query_grounding_refs")
     if isinstance(refs, list) and refs:
-        lines.append("  - **SPL grounding refs:**\n")
+        lines.append(f"  - **{refs_label}:**\n")
         for ref in refs:
             if isinstance(ref, dict):
                 source = ref.get("source_file", "unknown_source")

@@ -41,11 +41,15 @@ flowchart TB
     LAM[Lambda container<br/>notable-analyzer-s3]
     READ[Read + normalize JSON or plaintext]
     PRM[Prompt stack + output contract:<br/>doctrine, evidence-gate,<br/>stateless / unknown discipline,<br/>6-way competing hypotheses,<br/>analyze_notable tool JSON schema]
-    BD[Bedrock Converse<br/>Claude inference profile]
+    KB[Optional Bedrock KB retrieve:<br/>SOC RAG, SPL grounding,<br/>Elastic grounding]
+    BD[Bedrock Converse<br/>base analysis + optional<br/>query generation / interpretation]
     VAL["Hallucination controls:<br/>required keys, parse + repair,<br/>content rules, ATT&CK v17.1 allowlist<br/>raw fallback for human review"]
+    QRY[Optional read-only investigation:<br/>Splunk REST/MCP or Elasticsearch _search<br/>policy validated and bounded]
     MD[Markdown report assembly]
     OUT[("Output bucket<br/>reports/{stem}.md")]
     SPLK{{Splunk REST<br/>notable comment?}}
+    SN{{ServiceNow<br/>incident create?}}
+    DDB[(DynamoDB<br/>side-effect idempotency)]
   end
 
   subgraph Consume["E. Who consumes the output"]
@@ -63,30 +67,40 @@ flowchart TB
   EVT --> LAM
   LAM --> READ
   READ --> PRM
+  PRM -. optional advisory context .-> KB
+  KB -. snippets .-> BD
   PRM --> BD
   BD --> VAL
+  VAL -. optional generated queries .-> QRY
+  QRY -. normalized results .-> BD
+  QRY --> MD
   VAL --> MD
   MD --> OUT
   MD -. optional: SplunkSinkMode notable_rest .-> SPLK
+  MD -. optional: ServiceNow approval .-> SN
+  SPLK -. idempotency .-> DDB
+  SN -. idempotency .-> DDB
   OUT --> REV
   SPLK --> REV
+  SN --> REV
   ANA -. human parallel path .-> REV
 ```
 
-**Prompting & hallucination resistance (AWS path):** The model only sees **what is in the notable** plus explicit instructions to separate **evidence from inference**, use **unknown** when facts are missing, and pass an **evidence-gate** before labeling a TTP. **`analyze_notable` tool / JSON schema** tightens the answer shape. After Bedrock returns, **deterministic code** validates, **repairs once** on failure, **allowlists** technique IDs, applies **content policies**, and if structure still fails, **surfaces raw output for review** instead of pretending the run was clean.
+**Prompting & hallucination resistance (AWS path):** The model only sees **what is in the notable** plus explicit instructions to separate **evidence from inference**, use **unknown** when facts are missing, and pass an **evidence-gate** before labeling a TTP. **`analyze_notable` tool / JSON schema** tightens the answer shape. Optional RAG and query-grounding snippets are advisory context, not observed case facts. After Bedrock returns, **deterministic code** validates, **repairs once** on failure, **allowlists** technique IDs, validates generated SPL or Elastic queries before execution, applies **content policies**, and if structure still fails, **surfaces raw output for review** instead of pretending the run was clean.
 
 **Contract reminders:**
 
 - One upload under `incoming/` ⇒ one Lambda run ⇒ one report (unless the object is skipped as empty, folder marker, or placeholder filename).
 - For **Splunk `notable_rest` writeback**, `finding_id` comes from the **filename stem**: e.g. `incoming/abc-123.json` ⇒ `finding_id=abc-123`.
+- Optional `spl_readonly` and `elastic_readonly` profiles are mutually exclusive; one read-only investigation backend is active per deployment.
 
-**Out of scope today (non-goals):** The pipeline **does not** drive **remediation, suppression, case closure, or ticketing**. It **supports analyst triage** with structured reports only. **Ticketing integration** is a **planned enhancement**, designed to be **system-agnostic** (for example **ServiceNow, Archer**, or comparable GRC/ticketing targets).
+**Out of scope today (non-goals):** The pipeline **does not** drive **remediation, suppression, or case closure**. ServiceNow support is limited to incident drafting and approval-gated creation; it does not make autonomous ticketing decisions.
 
-**Planned RAG (advisory context):** Retrieval over **customer SOPs** and a **Splunk-facing knowledge pack**—for example **SPL idioms** and an **index/field data dictionary**—to tighten **pivot ideas, query framing, and procedure fit**. Retrieved material stays **advisory**; **observed case facts** remain **only what is in the notable** the pipeline ingests.
+**RAG (advisory context):** Retrieval over **customer SOPs**, **Splunk-facing knowledge packs**, and **Elasticsearch data dictionaries** can tighten **pivot ideas, query framing, and procedure fit**. Retrieved material stays **advisory**; **observed case facts** remain **only what is in the notable** the pipeline ingests.
 
-**Operations note:** S3 event notifications can **retry** Lambda; customers should expect **at-least-once** delivery semantics and treat **object key** as the natural idempotency boundary for a single analysis run.
+**Operations note:** S3 event notifications can **retry** Lambda; customers should expect **at-least-once** delivery semantics and treat **object key** as the natural idempotency boundary for a single analysis run. External side effects such as Splunk writeback and ServiceNow create use DynamoDB reservations when action-gated idempotency is enabled.
 
-**Network:** Lambda calls **Bedrock** via AWS service APIs. In **`notable_rest`** mode it also uses **HTTPS** to the customer-configured **Splunk REST** endpoint (outbound from the function execution environment).
+**Network:** Lambda calls **Bedrock** and optional **Bedrock Knowledge Bases** via AWS service APIs. Read-only investigation and writeback features use **HTTPS** to customer-configured Splunk, MCP, Elasticsearch, or ServiceNow endpoints from the function execution environment.
 
 ---
 
@@ -146,12 +160,14 @@ flowchart TB
       FN[Lambda: notable-analyzer-s3<br/>Image from ECR]
     end
 
-    subgraph AI["Model"]
+    subgraph AI["Model + Retrieval"]
       BR[Amazon Bedrock<br/>inference in target region<br/>Claude Sonnet 4.5 or comparable]
+      KB[Bedrock Knowledge Bases<br/>SOC, SPL, Elastic context]
     end
 
     subgraph Secret["Optional"]
-      SM[Secrets Manager<br/>Splunk API token]
+      SM[Secrets Manager<br/>Splunk, MCP, Elastic,<br/>ServiceNow tokens]
+      DDB[(DynamoDB<br/>side-effect idempotency)]
     end
 
     subgraph Ops["Operations"]
@@ -163,8 +179,12 @@ flowchart TB
     FN -->|GetObject| BIN
     FN -->|PutObject reports/*| BOUT
     FN -->|bounded prompt + toolSpec| BR
-    FN -. notable_rest: GetSecretValue .-> SM
-    FN -. notable_rest: HTTPS .-> SPL[Splunk REST API]
+    FN -. optional retrieve .-> KB
+    FN -. optional GetSecretValue .-> SM
+    FN -. optional idempotency .-> DDB
+    FN -. optional HTTPS .-> SPL[Splunk REST / MCP]
+    FN -. optional HTTPS .-> ES[Elasticsearch _search]
+    FN -. optional HTTPS .-> SN[ServiceNow REST]
     FN --> CW
     CFN -. provisions .-> BIN
     CFN -. provisions .-> BOUT

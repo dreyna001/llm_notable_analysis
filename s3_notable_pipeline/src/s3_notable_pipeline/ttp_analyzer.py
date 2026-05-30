@@ -1726,6 +1726,126 @@ SECURITY ALERT INPUT:
             merged_metadata["query_result_interpretation_available"] = True
         return merged
 
+    def generate_elastic_queries(
+        self,
+        *,
+        alert_text: str,
+        analysis_result: Dict[str, Any],
+        config: Any,
+        soc_operational_context: str = "",
+        elasticsearch_grounding_context: str = "",
+        alert_time: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Generate Elasticsearch query fields as a bounded second Bedrock call."""
+
+        from .elastic_query_generation import (
+            build_elastic_query_generation_prompt,
+            merge_elastic_query_fields_by_position,
+            normalize_competing_hypotheses,
+            validate_elastic_query_contract,
+        )
+
+        out = dict(analysis_result) if isinstance(analysis_result, dict) else {}
+        metadata = out.setdefault("metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+            out["metadata"] = metadata
+
+        hypotheses = out.get("competing_hypotheses", [])
+        if not bool(getattr(config, "ELASTIC_QUERY_GENERATION_ENABLED", False)):
+            out["competing_hypotheses"] = normalize_competing_hypotheses(
+                hypotheses,
+                elastic_query_enabled=False,
+            )
+            metadata["elastic_query_generation_enabled"] = False
+            return out
+
+        require_grounding = bool(getattr(config, "ELASTICSEARCH_GROUNDING_ENABLED", False))
+        failure_mode = str(
+            getattr(config, "ELASTICSEARCH_GROUNDING_FAILURE_MODE", "suppress") or "suppress"
+        ).strip().lower()
+        if require_grounding and not elasticsearch_grounding_context.strip():
+            metadata.update(
+                {
+                    "elastic_query_generation_enabled": True,
+                    "elastic_query_generation_status": "skipped",
+                    "elastic_query_generation_message": "Elasticsearch grounding unavailable",
+                }
+            )
+            if failure_mode != "fallback_to_ungrounded":
+                return out
+            require_grounding = False
+
+        prompt = build_elastic_query_generation_prompt(
+            alert_text=alert_text,
+            hypotheses=hypotheses if isinstance(hypotheses, list) else [],
+            soc_operational_context=soc_operational_context,
+            elasticsearch_grounding_context=elasticsearch_grounding_context,
+            alert_time=alert_time,
+        )
+        start_time = time.time()
+        try:
+            response = self._converse(prompt, use_tool=False)
+            parsed, error_msg, raw_content = self._parse_bedrock_response(
+                response,
+                allow_text_fallback=True,
+            )
+            if not isinstance(parsed, dict):
+                metadata.update(
+                    {
+                        "elastic_query_generation_enabled": True,
+                        "elastic_query_generation_status": "failed",
+                        "elastic_query_generation_message": error_msg or "Elastic query response was not an object",
+                    }
+                )
+                return out
+            ok, validation_error = validate_elastic_query_contract(
+                parsed,
+                alert_text=alert_text,
+                elasticsearch_grounding_context=elasticsearch_grounding_context,
+                allowed_fields=str(getattr(config, "ELASTICSEARCH_ALLOWED_FIELDS", "")),
+                allowed_index_patterns=str(getattr(config, "ELASTICSEARCH_INDEX_ALLOWLIST", "")),
+                allow_wildcard_indexes=bool(getattr(config, "ELASTICSEARCH_ALLOW_WILDCARD_INDEXES", False)),
+                max_rows=int(getattr(config, "ELASTICSEARCH_MAX_ROWS", 100)),
+                max_time_range=str(getattr(config, "ELASTICSEARCH_MAX_TIME_RANGE", "24h")),
+                timestamp_field=str(getattr(config, "ELASTICSEARCH_TIMESTAMP_FIELD", "@timestamp")),
+                require_elastic_grounding=require_grounding,
+            )
+            if not ok:
+                metadata.update(
+                    {
+                        "elastic_query_generation_enabled": True,
+                        "elastic_query_generation_status": "failed",
+                        "elastic_query_generation_message": validation_error,
+                    }
+                )
+                return out
+            out["competing_hypotheses"] = merge_elastic_query_fields_by_position(
+                base_hypotheses=hypotheses,
+                generated_payload=parsed,
+                elasticsearch_grounding_context=elasticsearch_grounding_context,
+            )
+            metadata.update(
+                {
+                    "elastic_query_generation_enabled": True,
+                    "elastic_query_generation_status": "success",
+                    "elastic_query_generation_inference_time_seconds": round(time.time() - start_time, 3),
+                    "elastic_query_generation_prompt_length": len(prompt),
+                }
+            )
+            if raw_content:
+                metadata["elastic_query_generation_raw_response_length"] = len(raw_content)
+            return out
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            metadata.update(
+                {
+                    "elastic_query_generation_enabled": True,
+                    "elastic_query_generation_status": "failed",
+                    "elastic_query_generation_message": str(exc),
+                }
+            )
+            return out
+
 
 def extract_score(ttp: Dict[str, Any]) -> float:
     """Extract score from TTP dict.
