@@ -35,6 +35,73 @@ def _render_hypothesis_query_block(hyp: Dict[str, Any]) -> list[str]:
     return lines
 
 
+def _render_query_results_section(llm_response: Dict[str, Any]) -> list[str]:
+    section = llm_response.get("query_result_section")
+    if not isinstance(section, dict):
+        return []
+    queries = section.get("queries", [])
+    if not isinstance(queries, list) or not queries:
+        return []
+    lines = ["### Query Results\n\n"]
+    summary = section.get("summary", {})
+    if isinstance(summary, dict):
+        lines.append(
+            "**Summary:** "
+            f"attempted={summary.get('attempted', 0)}, "
+            f"executed={summary.get('executed', 0)}, "
+            f"denied={summary.get('denied', 0)}, "
+            f"failed={summary.get('failed', 0)}, "
+            f"skipped={summary.get('skipped', 0)}\n\n"
+        )
+    for item in queries:
+        if not isinstance(item, dict):
+            continue
+        idx = item.get("hypothesis_index")
+        lines.append(f"**Hypothesis {idx}:** {item.get('status', 'unknown')}\n")
+        lines.append(f"- **Query:** `{item.get('query', '')}`\n")
+        lines.append(f"- **Result count:** {item.get('result_count', 0)}\n")
+        if item.get("search_reference"):
+            lines.append(f"- **Reference:** {item.get('search_reference')}\n")
+        if item.get("message"):
+            lines.append(f"- **Message:** {item.get('message')}\n")
+        rows = item.get("sample_rows")
+        if isinstance(rows, list) and rows:
+            lines.append("- **Sample rows:**\n")
+            for row in rows[:3]:
+                lines.append(f"  - `{row}`\n")
+        lines.append("\n")
+    return lines
+
+
+def _render_query_result_interpretation_section(llm_response: Dict[str, Any]) -> list[str]:
+    items = llm_response.get("query_result_interpretation")
+    if not isinstance(items, list) or not items:
+        return []
+    lines = ["### Query Result Interpretation\n\n"]
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        lines.append(f"**Hypothesis {item.get('hypothesis_index')}:** {item.get('assessment', 'unknown')}\n")
+        lines.append(f"- **Confidence delta:** {item.get('confidence_delta', 'unknown')}\n")
+        if item.get("rationale"):
+            lines.append(f"- **Rationale:** {item.get('rationale')}\n")
+        refs = item.get("source_query_refs")
+        if isinstance(refs, list) and refs:
+            lines.append(f"- **Source query refs:** {', '.join(str(ref) for ref in refs)}\n")
+        observations = item.get("key_observations")
+        if isinstance(observations, list) and observations:
+            lines.append("- **Key observations:**\n")
+            for observation in observations:
+                lines.append(f"  - {observation}\n")
+        gaps = item.get("remaining_gaps")
+        if isinstance(gaps, list) and gaps:
+            lines.append("- **Remaining gaps:**\n")
+            for gap in gaps:
+                lines.append(f"  - {gap}\n")
+        lines.append("\n")
+    return lines
+
+
 def generate_markdown_report(
     alert_text: str,
     llm_response: Dict[str, Any],
@@ -106,7 +173,14 @@ def generate_markdown_report(
                     else:
                         lines.append(f"    - {pivot}\n")
             lines.extend(_render_hypothesis_query_block(hyp))
+            if hyp.get("query_result_summary"):
+                lines.append(f"  - **Query result:** {hyp.get('query_result_summary')}\n")
+            if hyp.get("query_result_reference"):
+                lines.append(f"  - **Query result reference:** {hyp.get('query_result_reference')}\n")
             lines.append("\n")
+
+    lines.extend(_render_query_results_section(llm_response))
+    lines.extend(_render_query_result_interpretation_section(llm_response))
 
     if "evidence_vs_inference" in llm_response:
         evi = llm_response["evidence_vs_inference"]

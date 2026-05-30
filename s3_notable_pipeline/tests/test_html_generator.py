@@ -39,6 +39,43 @@ class HtmlGeneratorTests(unittest.TestCase):
         self.assertIn("&lt;PowerShell&gt;", html)
         self.assertNotIn("<script>alert(1)</script>", html)
 
+    def test_query_results_and_interpretation_are_rendered_and_escaped(self) -> None:
+        """Query result sections should render without trusting model text."""
+        html = generate_html_report(
+            "alert",
+            {
+                "alert_reconciliation": {"verdict": "unknown", "confidence": 0.5},
+                "query_result_section": {
+                    "queries": [
+                        {
+                            "hypothesis_index": 0,
+                            "status": "executed",
+                            "result_count": 1,
+                            "search_reference": "sid-1",
+                            "query": "index=main <bad>",
+                        }
+                    ]
+                },
+                "query_result_interpretation": [
+                    {
+                        "hypothesis_index": 0,
+                        "assessment": "supports",
+                        "confidence_delta": "increase",
+                        "rationale": "<script>bad()</script>",
+                        "key_observations": ["<row>"],
+                    }
+                ],
+            },
+            [],
+            "markdown",
+        )
+
+        self.assertIn("Query Results", html)
+        self.assertIn("Query Result Interpretation", html)
+        self.assertIn("index=main &lt;bad&gt;", html)
+        self.assertIn("&lt;script&gt;bad()&lt;/script&gt;", html)
+        self.assertNotIn("<script>bad()</script>", html)
+
 
 if __name__ == "__main__":
     unittest.main()

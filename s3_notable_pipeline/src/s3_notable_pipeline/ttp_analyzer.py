@@ -1605,6 +1605,127 @@ SECURITY ALERT INPUT:
             )
             return out
 
+    def interpret_query_results(
+        self,
+        *,
+        alert_text: str,
+        analysis_result: Dict[str, Any],
+        config: Any,
+    ) -> Dict[str, Any]:
+        """Interpret deterministic query results as a bounded optional third call."""
+
+        from .query_result_interpretation import (
+            build_query_result_interpretation_prompt,
+            build_query_result_interpretation_repair_prompt,
+            merge_query_result_interpretation,
+            validate_query_result_interpretation_payload,
+        )
+
+        out = dict(analysis_result) if isinstance(analysis_result, dict) else {}
+        metadata = out.setdefault("metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+            out["metadata"] = metadata
+
+        if not bool(getattr(config, "QUERY_RESULT_INTERPRETATION_ENABLED", False)):
+            metadata["query_result_interpretation_enabled"] = False
+            return out
+        if not isinstance(out.get("query_result_section"), dict):
+            metadata.update(
+                {
+                    "query_result_interpretation_enabled": True,
+                    "query_result_interpretation_available": False,
+                    "query_result_interpretation_failure_reason": "query_result_section unavailable",
+                }
+            )
+            return out
+
+        prompt = build_query_result_interpretation_prompt(
+            alert_text,
+            out,
+            context_budget_chars=int(
+                getattr(config, "QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS", 4000)
+            ),
+            max_sample_rows=int(
+                getattr(config, "QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS", 3)
+            ),
+        )
+        start_time = time.time()
+        try:
+            response = self._converse(prompt, use_tool=False)
+            parsed, error_msg, raw_content = self._parse_bedrock_response(
+                response,
+                allow_text_fallback=True,
+            )
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            metadata.update(
+                {
+                    "query_result_interpretation_enabled": True,
+                    "query_result_interpretation_attempted": True,
+                    "query_result_interpretation_available": False,
+                    "query_result_interpretation_failure_reason": str(exc),
+                }
+            )
+            return out
+
+        ok = False
+        validation_error = error_msg
+        normalized: Dict[str, Any] = {}
+        if isinstance(parsed, dict):
+            ok, validation_error, normalized = validate_query_result_interpretation_payload(
+                parsed,
+                out,
+            )
+
+        repair_attempted = False
+        if not ok:
+            repair_attempted = True
+            repair_prompt = build_query_result_interpretation_repair_prompt(
+                original_prompt=prompt,
+                validation_error=validation_error or "response failed validation",
+                prior_output=raw_content or json.dumps(parsed, ensure_ascii=True)[:2000],
+            )
+            try:
+                repair_response = self._converse(repair_prompt, use_tool=False)
+                repair_parsed, repair_error, _repair_raw = self._parse_bedrock_response(
+                    repair_response,
+                    allow_text_fallback=True,
+                )
+                if isinstance(repair_parsed, dict):
+                    ok, validation_error, normalized = validate_query_result_interpretation_payload(
+                        repair_parsed,
+                        out,
+                    )
+                else:
+                    validation_error = repair_error or validation_error
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                validation_error = str(exc)
+
+        metadata.update(
+            {
+                "query_result_interpretation_enabled": True,
+                "query_result_interpretation_attempted": True,
+                "query_result_interpretation_inference_time_seconds": round(time.time() - start_time, 3),
+                "query_result_interpretation_prompt_length": len(prompt),
+                "query_result_interpretation_repair_attempted": repair_attempted,
+            }
+        )
+        if not ok:
+            metadata.update(
+                {
+                    "query_result_interpretation_available": False,
+                    "query_result_interpretation_failure_reason": validation_error,
+                }
+            )
+            return out
+
+        merged = merge_query_result_interpretation(out, normalized)
+        merged_metadata = merged.setdefault("metadata", {})
+        if isinstance(merged_metadata, dict):
+            merged_metadata.update(metadata)
+            merged_metadata["query_result_interpretation_available"] = True
+        return merged
+
 
 def extract_score(ttp: Dict[str, Any]) -> float:
     """Extract score from TTP dict.

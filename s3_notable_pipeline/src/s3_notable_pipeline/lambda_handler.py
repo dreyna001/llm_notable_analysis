@@ -23,6 +23,7 @@ from .aws_clients import secretsmanager_client as make_secretsmanager_client
 from .bedrock_kb_retrieval import retrieve_soc_context
 from .config import Config, load_config
 from .html_generator import generate_html_report
+from .query_result_enrichment import enrich_analysis_with_query_results
 from .spl_query_grounding import retrieve_spl_query_grounding
 from .splunk_investigation import HttpSplunkMcpClient, execute_hypothesis_queries
 from .ttp_analyzer import BedrockAnalyzer
@@ -642,6 +643,13 @@ def handler(event, context):
                     mcp_client=mcp_client,
                 )
                 llm_response["investigation_query_results"] = query_results
+                llm_response = enrich_analysis_with_query_results(llm_response, query_results)
+                if config.QUERY_RESULT_INTERPRETATION_ENABLED:
+                    llm_response = analyzer.interpret_query_results(
+                        alert_text=alert_text,
+                        analysis_result=llm_response,
+                        config=config,
+                    )
                 metadata = llm_response.setdefault("metadata", {})
                 if isinstance(metadata, dict):
                     metadata["investigation_query_backend"] = config.INVESTIGATION_QUERY_BACKEND

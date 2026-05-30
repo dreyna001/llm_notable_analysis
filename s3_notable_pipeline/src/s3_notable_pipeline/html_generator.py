@@ -17,6 +17,62 @@ def _list_items(items: Any) -> str:
     return "<ul>" + "".join(f"<li>{escape(_text(item))}</li>" for item in items) + "</ul>"
 
 
+def _render_query_results(llm_response: dict[str, Any]) -> str:
+    section = llm_response.get("query_result_section")
+    if not isinstance(section, dict):
+        return ""
+    queries = section.get("queries")
+    if not isinstance(queries, list) or not queries:
+        return ""
+    rows = []
+    for item in queries:
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            "<tr>"
+            f"<td>{escape(_text(item.get('hypothesis_index')))}</td>"
+            f"<td>{escape(_text(item.get('status')))}</td>"
+            f"<td>{escape(_text(item.get('result_count', 0)))}</td>"
+            f"<td>{escape(_text(item.get('search_reference'), ''))}</td>"
+            f"<td><code>{escape(_text(item.get('query'), ''))}</code></td>"
+            "</tr>"
+        )
+    if not rows:
+        return ""
+    return f"""  <section class="card">
+    <h2>Query Results</h2>
+    <table>
+      <thead><tr><th>Hypothesis</th><th>Status</th><th>Rows</th><th>Reference</th><th>Query</th></tr></thead>
+      <tbody>{''.join(rows)}</tbody>
+    </table>
+  </section>
+"""
+
+
+def _render_query_interpretation(llm_response: dict[str, Any]) -> str:
+    items = llm_response.get("query_result_interpretation")
+    if not isinstance(items, list) or not items:
+        return ""
+    blocks = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        blocks.append(
+            "<article>"
+            f"<h3>Hypothesis {escape(_text(item.get('hypothesis_index')))}</h3>"
+            f"<p><span class=\"label\">Assessment:</span> {escape(_text(item.get('assessment')))}</p>"
+            f"<p><span class=\"label\">Confidence delta:</span> {escape(_text(item.get('confidence_delta')))}</p>"
+            f"<p>{escape(_text(item.get('rationale'), ''))}</p>"
+            f"{_list_items(item.get('key_observations'))}"
+            "</article>"
+        )
+    return f"""  <section class="card">
+    <h2>Query Result Interpretation</h2>
+    {''.join(blocks)}
+  </section>
+"""
+
+
 def generate_html_report(
     alert_text: str,
     llm_response: dict[str, Any],
@@ -45,6 +101,8 @@ def generate_html_report(
     )
     if not ttp_rows:
         ttp_rows = '<tr><td colspan="3">No TTPs scored</td></tr>'
+    query_results = _render_query_results(llm_response)
+    query_interpretation = _render_query_interpretation(llm_response)
 
     return f"""<!doctype html>
 <html lang="en">
@@ -81,6 +139,7 @@ def generate_html_report(
       <tbody>{ttp_rows}</tbody>
     </table>
   </section>
+{query_results}{query_interpretation}
   <section class="card">
     <h2>Markdown Report</h2>
     <pre>{escape(markdown)}</pre>

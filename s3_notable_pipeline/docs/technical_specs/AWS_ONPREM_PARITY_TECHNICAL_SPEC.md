@@ -81,7 +81,6 @@ credentials.
 The following sections must be completed in the same diff that implements the
 feature:
 
-- Query-result enrichment and interpretation contract.
 - ServiceNow draft/create contract.
 - DynamoDB idempotency contract.
 - Elasticsearch generation, grounding, and execution contract.
@@ -162,3 +161,27 @@ Rules:
 - REST and MCP execution return the same normalized result shape and are stored
   under `investigation_query_results` until deterministic enrichment is added in
   Diff 4.
+
+## Query-Result Enrichment And Interpretation Contract
+
+Deterministic enrichment is implemented in `query_result_enrichment.py`.
+Optional interpretation is implemented in `query_result_interpretation.py` and
+`BedrockAnalyzer.interpret_query_results()`.
+
+Rules:
+
+- Query-result enrichment is deterministic and runs after read-only query
+  execution returns normalized records.
+- Enrichment adds `query_result_section` and hypothesis-level
+  `query_result_status`, `query_result_summary`, and optional
+  `query_result_reference`.
+- Enrichment does not mutate `alert_reconciliation`, TTP scores, query status,
+  result counts, or source references.
+- Query-result interpretation is default-off.
+- When enabled, interpretation is a separate bounded Bedrock call over a pruned
+  JSON context containing only alert summary facts, hypotheses, and deterministic
+  query-result records.
+- Malformed interpretation output gets one repair attempt. If repair fails, the
+  interpretation is dropped and deterministic query results remain.
+- Interpretation may produce prose assessment, observations, gaps, and
+  `confidence_delta` labels only. It must not rewrite deterministic facts.
