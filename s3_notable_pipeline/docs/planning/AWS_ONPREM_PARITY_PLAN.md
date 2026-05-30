@@ -302,9 +302,9 @@ Files:
 
 Tests:
 
-- `python -m unittest s3_notable_pipeline.tests.test_config -v`
-- `python -m unittest s3_notable_pipeline.tests.test_aws_clients -v`
-- `python -m unittest s3_notable_pipeline.tests.test_lambda_handler -v`
+- `python -m unittest discover -s s3_notable_pipeline/tests -p "test_config.py" -v`
+- `python -m unittest discover -s s3_notable_pipeline/tests -p "test_aws_clients.py" -v`
+- `python -m unittest discover -s s3_notable_pipeline/tests -p "test_lambda_handler.py" -v`
 
 Acceptance criteria:
 
@@ -328,9 +328,9 @@ Files:
 
 Tests:
 
-- `python -m unittest s3_notable_pipeline.tests.test_bedrock_kb_retrieval -v`
-- `python -m unittest s3_notable_pipeline.tests.test_html_generator -v`
-- `python -m unittest s3_notable_pipeline.tests.test_lambda_handler -v`
+- `python -m unittest discover -s s3_notable_pipeline/tests -p "test_bedrock_kb_retrieval.py" -v`
+- `python -m unittest discover -s s3_notable_pipeline/tests -p "test_html_generator.py" -v`
+- `python -m unittest discover -s s3_notable_pipeline/tests -p "test_lambda_handler.py" -v`
 
 Acceptance criteria:
 
@@ -355,9 +355,9 @@ Files:
 
 Tests:
 
-- `python -m unittest s3_notable_pipeline.tests.test_spl_query_generation -v`
-- `python -m unittest s3_notable_pipeline.tests.test_splunk_investigation -v`
-- `python -m unittest s3_notable_pipeline.tests.test_lambda_handler -v`
+- `python -m unittest discover -s s3_notable_pipeline/tests -p "test_spl_query_generation.py" -v`
+- `python -m unittest discover -s s3_notable_pipeline/tests -p "test_splunk_investigation.py" -v`
+- `python -m unittest discover -s s3_notable_pipeline/tests -p "test_lambda_handler.py" -v`
 
 Acceptance criteria:
 
@@ -382,8 +382,8 @@ Files:
 
 Tests:
 
-- `python -m unittest s3_notable_pipeline.tests.test_query_result_enrichment -v`
-- `python -m unittest s3_notable_pipeline.tests.test_query_result_interpretation -v`
+- `python -m unittest discover -s s3_notable_pipeline/tests -p "test_query_result_enrichment.py" -v`
+- `python -m unittest discover -s s3_notable_pipeline/tests -p "test_query_result_interpretation.py" -v`
 
 Acceptance criteria:
 
@@ -408,9 +408,9 @@ Files:
 
 Tests:
 
-- `python -m unittest s3_notable_pipeline.tests.test_servicenow -v`
-- `python -m unittest s3_notable_pipeline.tests.test_idempotency -v`
-- `python -m unittest s3_notable_pipeline.tests.test_lambda_handler -v`
+- `python -m unittest discover -s s3_notable_pipeline/tests -p "test_servicenow.py" -v`
+- `python -m unittest discover -s s3_notable_pipeline/tests -p "test_idempotency.py" -v`
+- `python -m unittest discover -s s3_notable_pipeline/tests -p "test_lambda_handler.py" -v`
 
 Acceptance criteria:
 
@@ -437,8 +437,8 @@ Files:
 
 Tests:
 
-- `python -m unittest s3_notable_pipeline.tests.test_elastic_query_generation -v`
-- `python -m unittest s3_notable_pipeline.tests.test_elasticsearch_investigation -v`
+- `python -m unittest discover -s s3_notable_pipeline/tests -p "test_elastic_query_generation.py" -v`
+- `python -m unittest discover -s s3_notable_pipeline/tests -p "test_elasticsearch_investigation.py" -v`
 - `python -m unittest discover -s s3_notable_pipeline/tests -p "test_*.py" -v`
 
 Acceptance criteria:

@@ -127,6 +127,10 @@ aws secretsmanager create-secret \
 - `tests/test_lambda_handler.py` - focused Lambda sink routing tests
 - `scripts/` - deployment, test, and maintenance helpers
 - `data/test-notable.txt` - sample notable used by the test helper
+- `config.env.example` - AWS runtime contract reference for Lambda environment variables
+- `docs/operations/README.md` - AWS operations guide index
+- `docs/technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md` - AWS/on-prem parity implementation contract
+- `docs/planning/AWS_ONPREM_PARITY_PLAN.md` - reviewed parity plan and diff sequence
 - `docs/delivery_package/EXECUTIVE_AWS_WORKFLOW.md` - executive end-to-end workflow overview
 - `docs/delivery_package/end_to_end_diagrams/END_TO_END_DIAGRAMS.md` - end-to-end Mermaid diagrams (SVG exports in the same folder)
 - `docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_AWS_READINESS_OVERVIEW.md` - deployment readiness gateway (executive)

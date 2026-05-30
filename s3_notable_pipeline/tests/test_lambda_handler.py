@@ -22,7 +22,7 @@ def load_lambda_handler_module() -> types.ModuleType:
 
     fake_boto3 = types.ModuleType("boto3")
 
-    def fake_client(service_name: str):
+    def fake_client(service_name: str | None = None, **_kwargs):
         if service_name == "secretsmanager":
             return types.SimpleNamespace(get_secret_value=lambda **_kwargs: {"SecretString": ""})
         return types.SimpleNamespace(put_object=lambda **_kwargs: None)
@@ -51,6 +51,7 @@ def load_lambda_handler_module() -> types.ModuleType:
     fake_markdown_generator.generate_markdown_report = lambda *_args, **_kwargs: "markdown"
 
     sys.modules.pop(module_name, None)
+    sys.modules.pop("s3_notable_pipeline.aws_clients", None)
     with patch.dict(
         sys.modules,
         {
@@ -99,8 +100,16 @@ class NotableRestSinkTests(unittest.TestCase):
                 self.analysis_result,
             )
 
-        mock_s3.assert_called_once_with("incoming/example.json", "# Report", self.analysis_result)
-        mock_rest.assert_called_once_with(self.analysis_result, "incoming/example.json")
+        mock_s3.assert_called_once()
+        self.assertEqual(
+            mock_s3.call_args.args[:3],
+            ("incoming/example.json", "# Report", self.analysis_result),
+        )
+        mock_rest.assert_called_once()
+        self.assertEqual(
+            mock_rest.call_args.args[:2],
+            (self.analysis_result, "incoming/example.json"),
+        )
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["s3_result"]["status"], "success")
         self.assertEqual(result["rest_result"]["status"], "success")

@@ -21,6 +21,11 @@ Parameters:
       - s3
       - notable_rest
 
+  CapabilityProfiles:
+    Type: String
+    Description: Comma-separated capability profiles for the Lambda runtime.
+    Default: core
+
   SplunkBaseUrl:
     Type: String
     Default: ''
@@ -69,6 +74,27 @@ Parameters:
     Description: Maximum decompressed bytes allowed for one gzip notable input
     Default: 1048576
     MinValue: 1
+
+  LambdaTimeoutSeconds:
+    Type: Number
+    Description: Lambda timeout in seconds. Keep 360 for core; use 900 as the starting point for heavier parity profiles.
+    Default: 360
+    MinValue: 1
+    MaxValue: 900
+
+  LambdaMemorySize:
+    Type: Number
+    Description: Lambda memory in MB. Keep 512 for core; use 1024 as the starting point for heavier parity profiles.
+    Default: 512
+    MinValue: 128
+    MaxValue: 10240
+
+  LambdaEphemeralStorageMb:
+    Type: Number
+    Description: Lambda ephemeral storage in MB.
+    Default: 512
+    MinValue: 512
+    MaxValue: 10240
 
   AwsAccountId:
     Type: String
@@ -141,10 +167,13 @@ Resources:
     Properties:
       FunctionName: notable-analyzer-s3
       PackageType: Image
-      Timeout: 360
-      MemorySize: 512
+      Timeout: !Ref LambdaTimeoutSeconds
+      MemorySize: !Ref LambdaMemorySize
+      EphemeralStorage:
+        Size: !Ref LambdaEphemeralStorageMb
       Environment:
         Variables:
+          CAPABILITY_PROFILES: !Ref CapabilityProfiles
           BEDROCK_MODEL_ID: !Sub 'arn:aws:bedrock:us-east-1:${AwsAccountId}:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0'
           SPLUNK_SINK_MODE: !Ref SplunkSinkMode
           SPLUNK_BASE_URL: !Ref SplunkBaseUrl

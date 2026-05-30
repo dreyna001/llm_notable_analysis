@@ -13,21 +13,24 @@ import logging
 import time
 import traceback
 import zlib
-import boto3
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote_plus
 from typing import Dict, Any
 
+from .aws_clients import s3_client as make_s3_client
+from .aws_clients import secretsmanager_client as make_secretsmanager_client
+from .config import Config, load_config
 from .ttp_analyzer import BedrockAnalyzer
 from .markdown_generator import generate_markdown_report
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Initialize S3 client
-s3_client = boto3.client('s3')
-secretsmanager_client = boto3.client('secretsmanager')
+# Initialize AWS clients through the centralized factory so tests can use
+# mocked clients and local integration can use AWS_ENDPOINT_URL.
+s3_client = make_s3_client()
+secretsmanager_client = make_secretsmanager_client()
 
 # Placeholder filenames to skip (case-insensitive basename match)
 PLACEHOLDER_FILENAMES = frozenset({'.keep', '.gitkeep', '_success', '.placeholder'})
@@ -89,7 +92,7 @@ def normalize_notable(content: str, content_type: str = 'text') -> Any:
     return content
 
 
-def get_max_decompressed_input_bytes() -> int:
+def get_max_decompressed_input_bytes(config: Config | None = None) -> int:
     """Return the configured decompressed input byte limit.
 
     Returns:
@@ -98,9 +101,13 @@ def get_max_decompressed_input_bytes() -> int:
     Raises:
         ValueError: If MAX_DECOMPRESSED_INPUT_BYTES is not a positive integer.
     """
-    raw_limit = os.environ.get(
-        'MAX_DECOMPRESSED_INPUT_BYTES',
-        str(DEFAULT_MAX_DECOMPRESSED_INPUT_BYTES),
+    raw_limit = (
+        str(config.MAX_DECOMPRESSED_INPUT_BYTES)
+        if config is not None
+        else os.environ.get(
+            'MAX_DECOMPRESSED_INPUT_BYTES',
+            str(DEFAULT_MAX_DECOMPRESSED_INPUT_BYTES),
+        )
     )
     try:
         limit = int(raw_limit)
@@ -181,6 +188,7 @@ def decode_s3_notable_object(
     source_key: str,
     raw_bytes: bytes,
     content_encoding: str | None = None,
+    config: Config | None = None,
 ) -> DecodedNotable:
     """Decode an S3 notable object, including bounded gzip decompression.
 
@@ -199,7 +207,10 @@ def decode_s3_notable_object(
     content_bytes = raw_bytes
     if was_compressed:
         try:
-            content_bytes = decompress_gzip_bounded(raw_bytes, get_max_decompressed_input_bytes())
+            content_bytes = decompress_gzip_bounded(
+                raw_bytes,
+                get_max_decompressed_input_bytes(config),
+            )
         except (gzip.BadGzipFile, EOFError, zlib.error) as exc:
             raise ValueError(f"Invalid gzip content for S3 object {source_key!r}") from exc
 
@@ -227,7 +238,12 @@ def extract_finding_id_from_s3_key(source_key: str) -> str:
     return source_key_stem(source_key)
 
 
-def write_to_s3_sink(source_key: str, markdown: str, analysis_result: Dict[str, Any]) -> Dict[str, Any]:
+def write_to_s3_sink(
+    source_key: str,
+    markdown: str,
+    analysis_result: Dict[str, Any],
+    config: Config | None = None,
+) -> Dict[str, Any]:
     """Write markdown analysis report and Bedrock JSON to S3 output bucket.
 
     Args:
@@ -239,8 +255,9 @@ def write_to_s3_sink(source_key: str, markdown: str, analysis_result: Dict[str, 
         Dict with sink operation status.
     """
     try:
-        output_bucket = os.environ.get('OUTPUT_BUCKET_NAME')
-        output_prefix = os.environ.get('OUTPUT_PREFIX', 'reports')
+        config = config or load_config()
+        output_bucket = config.OUTPUT_BUCKET_NAME
+        output_prefix = config.OUTPUT_PREFIX
         
         if not output_bucket:
             logger.error("OUTPUT_BUCKET_NAME not set for s3/notable_rest sink mode")
@@ -285,7 +302,11 @@ def write_to_s3_sink(source_key: str, markdown: str, analysis_result: Dict[str, 
         return {"status": "error", "message": str(e)}
 
 
-def write_to_notable_rest_sink(source_key: str, analysis_result: Dict[str, Any]) -> Dict[str, Any]:
+def write_to_notable_rest_sink(
+    source_key: str,
+    analysis_result: Dict[str, Any],
+    config: Config | None = None,
+) -> Dict[str, Any]:
     """Write the markdown report to S3, then update the Splunk notable via REST.
 
     Args:
@@ -295,8 +316,14 @@ def write_to_notable_rest_sink(source_key: str, analysis_result: Dict[str, Any])
     Returns:
         Dict with the combined sink operation status and per-sink results.
     """
-    s3_result = write_to_s3_sink(source_key, analysis_result["markdown"], analysis_result)
-    rest_result = write_to_splunk_rest(analysis_result, source_key)
+    config = config or load_config()
+    s3_result = write_to_s3_sink(
+        source_key,
+        analysis_result["markdown"],
+        analysis_result,
+        config,
+    )
+    rest_result = write_to_splunk_rest(analysis_result, source_key, config)
     combined_status = (
         "success"
         if s3_result.get("status") == "success" and rest_result.get("status") == "success"
@@ -310,7 +337,7 @@ def write_to_notable_rest_sink(source_key: str, analysis_result: Dict[str, Any])
     }
 
 
-def get_splunk_api_token() -> str:
+def get_splunk_api_token(config: Config | None = None) -> str:
     """Resolve Splunk API token from env var or Secrets Manager.
 
     Returns:
@@ -321,9 +348,10 @@ def get_splunk_api_token() -> str:
     if direct_token:
         return direct_token
 
-    secret_arn = (os.environ.get('SPLUNK_API_TOKEN_SECRET_ARN') or '').strip()
-    secret_field = (os.environ.get('SPLUNK_API_TOKEN_SECRET_FIELD') or 'token').strip() or 'token'
-    if not secret_arn:
+    config = config or load_config()
+    secret_arn = (config.SPLUNK_API_TOKEN_SECRET_ARN or '').strip()
+    secret_field = (config.SPLUNK_API_TOKEN_SECRET_FIELD or 'token').strip() or 'token'
+    if not secret_arn or secret_arn == "*":
         return ""
 
     try:
@@ -356,7 +384,11 @@ def get_splunk_api_token() -> str:
         return ""
 
 
-def write_to_splunk_rest(analysis_result: Dict[str, Any], source_key: str) -> Dict[str, Any]:
+def write_to_splunk_rest(
+    analysis_result: Dict[str, Any],
+    source_key: str,
+    config: Config | None = None,
+) -> Dict[str, Any]:
     """Update notable comment via Splunk REST API using finding_id.
     
     Args:
@@ -368,9 +400,10 @@ def write_to_splunk_rest(analysis_result: Dict[str, Any], source_key: str) -> Di
     """
     try:
         import requests
-        
-        splunk_base_url = os.environ.get('SPLUNK_BASE_URL')
-        splunk_api_token = get_splunk_api_token()
+
+        config = config or load_config()
+        splunk_base_url = config.SPLUNK_BASE_URL
+        splunk_api_token = get_splunk_api_token(config)
 
         if not splunk_base_url or not splunk_api_token:
             logger.error(
@@ -388,7 +421,7 @@ def write_to_splunk_rest(analysis_result: Dict[str, Any], source_key: str) -> Di
         comment = analysis_result["markdown"]
         
         # Build REST API request
-        endpoint_path = os.environ.get('SPLUNK_NOTABLE_UPDATE_PATH', '/services/notable_update')
+        endpoint_path = config.SPLUNK_NOTABLE_UPDATE_PATH
         if not endpoint_path.startswith('/'):
             endpoint_path = f"/{endpoint_path}"
         rest_url = f"{splunk_base_url.rstrip('/')}{endpoint_path}"
@@ -431,6 +464,7 @@ def handler(event, context):
         Dict with statusCode and processing results.
     """
     logger.info(f"Received event with {len(event.get('Records', []))} record(s)")
+    config = load_config()
     
     results = []
     
@@ -460,6 +494,7 @@ def handler(event, context):
                 key,
                 response['Body'].read(),
                 response.get('ContentEncoding'),
+                config,
             )
             content = decoded_notable.content
             
@@ -476,7 +511,7 @@ def handler(event, context):
             alert_payload = normalize_notable(content, content_type)
             
             # Initialize analyzer
-            model_id = os.environ.get('BEDROCK_MODEL_ID')
+            model_id = config.BEDROCK_MODEL_ID
             if not model_id:
                 raise ValueError("BEDROCK_MODEL_ID is not configured")
             logger.info(f"Initializing analyzer with model: {model_id}")
@@ -518,13 +553,13 @@ def handler(event, context):
             }
             
             # Route to configured sink
-            sink_mode = os.environ.get('SPLUNK_SINK_MODE', 's3')
+            sink_mode = config.SPLUNK_SINK_MODE
             logger.info(f"Routing to sink: {sink_mode}")
             
             if sink_mode == 's3':
-                sink_result = write_to_s3_sink(key, markdown, analysis_result)
+                sink_result = write_to_s3_sink(key, markdown, analysis_result, config)
             elif sink_mode == 'notable_rest':
-                sink_result = write_to_notable_rest_sink(key, analysis_result)
+                sink_result = write_to_notable_rest_sink(key, analysis_result, config)
             else:
                 logger.error(f"Unknown sink mode: {sink_mode}")
                 sink_result = {"sink": sink_mode, "status": "error", "message": "Unknown sink mode"}

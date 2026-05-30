@@ -330,6 +330,17 @@ Use this later only when Splunk REST writeback is ready:
 notable_rest
 ```
 
+Parameter `CapabilityProfiles`:
+
+```text
+core
+```
+
+Why: selects the supported runtime capability bundle. Keep `core` for the
+current S3/Lambda/Bedrock behavior. Later parity profiles such as `rag`,
+`spl_readonly`, `elastic_readonly`, `ticket_draft`, and `action_gated` should be
+enabled only after their operations guides and prerequisites are satisfied.
+
 Parameter `AwsAccountId`:
 
 ```text
@@ -385,6 +396,35 @@ Parameter `MaxDecompressedInputBytes`:
 ```
 
 Why: caps the decompressed size of one gzip notable before Bedrock analysis. Increase only if the expected notable payloads require it.
+
+Parameter `LambdaTimeoutSeconds`:
+
+```text
+360
+```
+
+Why: keeps the current core timeout. Use `900` as the starting point for
+deployments that enable multiple Bedrock calls, Knowledge Base retrieval, or
+external read-only investigation.
+
+Parameter `LambdaMemorySize`:
+
+```text
+512
+```
+
+Why: keeps the current core memory allocation. Use `1024` as the starting point
+for heavier parity profiles, then tune from CloudWatch duration and memory
+evidence.
+
+Parameter `LambdaEphemeralStorageMb`:
+
+```text
+512
+```
+
+Why: keeps the current Lambda ephemeral storage baseline. Increase only if a
+future capability has measured local temporary-storage pressure.
 
 Confirm changes before deploy:
 
