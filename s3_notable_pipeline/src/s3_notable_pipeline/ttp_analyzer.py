@@ -3,6 +3,7 @@
 TTP Analyzer module for AWS Lambda + Bedrock Nova Pro.
 Ports the core logic from notable_analysis.py without modifying the original.
 """
+# pylint: disable=import-error
 
 import json
 import re
@@ -1065,7 +1066,14 @@ class BedrockAnalyzer:
         # Store raw content for retry/debugging
         self.last_raw_content = None
 
-    def _build_prompt(self, alert_text: str, alert_time: Optional[str], *, use_tool: bool) -> str:
+    def _build_prompt(
+        self,
+        alert_text: str,
+        alert_time: Optional[str],
+        *,
+        use_tool: bool,
+        advisory_context: Optional[str] = None,
+    ) -> str:
         """Assemble the full prompt from modular sections.
         
         Args:
@@ -1078,6 +1086,18 @@ class BedrockAnalyzer:
         """
         alert_time_str = f"\n**ALERT_TIME:** {alert_time}\n" if alert_time else ""
         output_schema = OUTPUT_SCHEMA if use_tool else OUTPUT_SCHEMA_RAW_JSON
+        soc_context = ""
+        if advisory_context and advisory_context.strip():
+            soc_context = f"""
+SOC_OPERATIONAL_CONTEXT (advisory only; not direct alert evidence):
+{advisory_context.strip()}
+
+Do not treat SOC_OPERATIONAL_CONTEXT as observed facts from the current alert.
+Use it only to interpret environment-specific terminology, SOPs, escalation
+guidance, field names, and operating context.
+
+---
+"""
         
         return f"""You are a cybersecurity expert mapping MITRE ATT&CK techniques from a single alert.
 {alert_time_str}
@@ -1099,6 +1119,8 @@ SECURITY ALERT INPUT:
 {alert_text}
 
 ---
+
+{soc_context}
 
 {output_schema}
 
@@ -1269,15 +1291,30 @@ SECURITY ALERT INPUT:
         except TypeError:
             return str(alert_payload)
     
-    def analyze_ttp(self, alert_text: str, alert_time: Optional[str] = None) -> List[Dict[str, Any]]:
+    def analyze_ttp(
+        self,
+        alert_text: str,
+        alert_time: Optional[str] = None,
+        advisory_context: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """Analyze one alert and return validated scored TTP entries."""
         logger.info("Starting TTP analysis")
         start_time = time.time()
         total_ttps = self.validator.get_ttp_count()
         logger.info(f"Loaded {total_ttps} valid TTPs for post-response validation")
 
-        prompt_tool = self._build_prompt(alert_text, alert_time, use_tool=True)
-        prompt_raw = self._build_prompt(alert_text, alert_time, use_tool=False)
+        prompt_tool = self._build_prompt(
+            alert_text,
+            alert_time,
+            use_tool=True,
+            advisory_context=advisory_context,
+        )
+        prompt_raw = self._build_prompt(
+            alert_text,
+            alert_time,
+            use_tool=False,
+            advisory_context=advisory_context,
+        )
 
         if not alert_text or not alert_text.strip():
             logger.error("Alert text is empty or whitespace only")

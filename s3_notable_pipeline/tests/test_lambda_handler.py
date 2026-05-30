@@ -42,7 +42,7 @@ def load_lambda_handler_module() -> types.ModuleType:
         def format_alert_input(self, alert_payload, raw_content: str, content_type: str) -> str:
             return raw_content
 
-        def analyze_ttp(self, alert_text: str) -> list[dict[str, str]]:
+        def analyze_ttp(self, alert_text: str, **_kwargs) -> list[dict[str, str]]:
             return []
 
     fake_ttp_analyzer.BedrockAnalyzer = FakeBedrockAnalyzer
@@ -258,6 +258,27 @@ class CompressedInputTests(unittest.TestCase):
         self.assertEqual(md_call.kwargs["ContentType"], "text/markdown")
         self.assertEqual(json_call.kwargs["ContentType"], "application/json")
         self.assertEqual(json_call.kwargs["Body"], b"{}")
+
+    def test_html_report_is_written_when_enabled(self) -> None:
+        """HTML reports should be a third S3 artifact only when enabled."""
+        with (
+            patch.dict(
+                "os.environ",
+                {"OUTPUT_BUCKET_NAME": "out", "HTML_REPORT_ENABLED": "true"},
+                clear=True,
+            ),
+            patch.object(self.lambda_handler.s3_client, "put_object", create=True) as mock_put,
+        ):
+            result = self.lambda_handler.write_to_s3_sink(
+                "incoming/example.json",
+                "# Report",
+                {"markdown": "# Report", "html": "<html></html>"},
+            )
+
+        self.assertEqual(result["html_key"], "reports/example.html")
+        self.assertEqual(mock_put.call_count, 3)
+        html_call = next(c for c in mock_put.call_args_list if c.kwargs["Key"].endswith(".html"))
+        self.assertEqual(html_call.kwargs["ContentType"], "text/html")
 
     def test_finding_id_strips_data_and_gzip_extensions(self) -> None:
         """Compressed source keys should derive the same finding ID as raw inputs."""

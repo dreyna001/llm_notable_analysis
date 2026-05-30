@@ -341,6 +341,61 @@ current S3/Lambda/Bedrock behavior. Later parity profiles such as `rag`,
 `spl_readonly`, `elastic_readonly`, `ticket_draft`, and `action_gated` should be
 enabled only after their operations guides and prerequisites are satisfied.
 
+Parameter `HtmlReportEnabled`:
+
+```text
+false
+```
+
+Why: keeps the current markdown/JSON output contract. Set `true` when operators
+want an additional escaped static HTML companion report in the same output
+prefix.
+
+Parameter `RagEnabled`:
+
+```text
+false
+```
+
+Why: keeps the current single Bedrock analysis behavior. Set `true` with
+`CapabilityProfiles=core,rag` and `RagBedrockKbId` after the Bedrock Knowledge
+Base is curated and IAM access is deployed.
+
+Parameter `RagBedrockKbId`:
+
+```text
+
+```
+
+Why: identifies the Bedrock Knowledge Base used for advisory SOC context. Leave
+blank unless RAG is enabled.
+
+Parameter `RagMaxSnippets`:
+
+```text
+4
+```
+
+Why: bounds retrieval volume before prompt assembly.
+
+Parameter `RagContextBudgetChars`:
+
+```text
+1600
+```
+
+Why: bounds advisory context added to the prompt.
+
+Parameter `RagFailureMode`:
+
+```text
+suppress
+```
+
+Why: keeps analysis available if retrieval fails. Use `fail_closed` only when
+operators require the Lambda to fail rather than analyze without advisory
+context.
+
 Parameter `AwsAccountId`:
 
 ```text

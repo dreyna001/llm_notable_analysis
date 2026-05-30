@@ -25,6 +25,49 @@ Parameters:
     Description: Comma-separated capability profiles for the Lambda runtime.
     Default: core
 
+  HtmlReportEnabled:
+    Type: String
+    Description: Enables optional HTML companion reports.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  RagEnabled:
+    Type: String
+    Description: Enables general SOC RAG retrieval from Bedrock Knowledge Bases.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  RagBedrockKbId:
+    Type: String
+    Description: Bedrock Knowledge Base ID for general SOC advisory context. Required when RagEnabled=true.
+    Default: ''
+
+  RagMaxSnippets:
+    Type: Number
+    Description: Maximum Bedrock Knowledge Base snippets for general SOC RAG.
+    Default: 4
+    MinValue: 1
+    MaxValue: 20
+
+  RagContextBudgetChars:
+    Type: Number
+    Description: Character budget for rendered general SOC RAG context.
+    Default: 1600
+    MinValue: 1
+    MaxValue: 10000
+
+  RagFailureMode:
+    Type: String
+    Description: RAG failure behavior. Use suppress for default fail-soft behavior.
+    Default: suppress
+    AllowedValues:
+      - suppress
+      - fail_closed
+
   SplunkBaseUrl:
     Type: String
     Default: ''
@@ -125,6 +168,7 @@ Rules:
 
 Conditions:
   IsNotableRest: !Equals [!Ref SplunkSinkMode, notable_rest]
+  HasRagKnowledgeBase: !Not [!Equals [!Ref RagBedrockKbId, '']]
 
 Resources:
   InputBucket:
@@ -207,6 +251,14 @@ Resources:
                   - bedrock:InvokeModel
                 Resource:
                   - !Sub 'arn:aws:bedrock:us-east-1:${AwsAccountId}:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0'
+              - !If
+                - HasRagKnowledgeBase
+                - Effect: Allow
+                  Action:
+                    - bedrock:Retrieve
+                  Resource:
+                    - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${RagBedrockKbId}'
+                - !Ref AWS::NoValue
         - PolicyName: CloudWatchLogsPolicy
           PolicyDocument:
             Version: '2012-10-17'
@@ -235,6 +287,12 @@ Resources:
       Environment:
         Variables:
           CAPABILITY_PROFILES: !Ref CapabilityProfiles
+          HTML_REPORT_ENABLED: !Ref HtmlReportEnabled
+          RAG_ENABLED: !Ref RagEnabled
+          RAG_BEDROCK_KB_ID: !Ref RagBedrockKbId
+          RAG_MAX_SNIPPETS: !Ref RagMaxSnippets
+          RAG_CONTEXT_BUDGET_CHARS: !Ref RagContextBudgetChars
+          RAG_FAILURE_MODE: !Ref RagFailureMode
           BEDROCK_MODEL_ID: !Sub 'arn:aws:bedrock:us-east-1:${AwsAccountId}:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0'
           SPLUNK_SINK_MODE: !Ref SplunkSinkMode
           SPLUNK_BASE_URL: !Ref SplunkBaseUrl

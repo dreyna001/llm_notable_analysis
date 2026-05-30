@@ -81,11 +81,42 @@ credentials.
 The following sections must be completed in the same diff that implements the
 feature:
 
-- Bedrock Knowledge Base retrieval contract.
-- HTML report output contract.
 - SPL generation and grounding contract.
 - Splunk REST/MCP execution contract.
 - Query-result enrichment and interpretation contract.
 - ServiceNow draft/create contract.
 - DynamoDB idempotency contract.
 - Elasticsearch generation, grounding, and execution contract.
+
+## Bedrock Knowledge Base Retrieval Contract
+
+General SOC RAG is implemented in `bedrock_kb_retrieval.py`.
+
+Rules:
+
+- RAG is default-off.
+- Retrieved content is advisory context only and must not be treated as direct
+  current-alert evidence.
+- Missing Knowledge Base ids fail soft by default with `RAG_FAILURE_MODE=suppress`.
+- `RAG_FAILURE_MODE=fail_closed` raises and causes the Lambda record processing
+  path to fail.
+- Retrieval is bounded by `RAG_MAX_SNIPPETS` and
+  `RAG_CONTEXT_BUDGET_CHARS`.
+- JSON output metadata records `rag_status`, `rag_snippet_count`, and optional
+  `rag_message`.
+
+The prompt uses a `SOC_OPERATIONAL_CONTEXT` block and explicitly instructs the
+model that this context is not observed alert evidence.
+
+## HTML Report Output Contract
+
+HTML reporting is implemented in `html_generator.py` and wired through
+`write_to_s3_sink`.
+
+Rules:
+
+- HTML is default-off.
+- When enabled, HTML is written as `<output_prefix>/<base_name>.html`.
+- Markdown and JSON output keys are unchanged.
+- HTML rendering is deterministic and does not call the model.
+- Alert text and model-controlled text are HTML-escaped before rendering.

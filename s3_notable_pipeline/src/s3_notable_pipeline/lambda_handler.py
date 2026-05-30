@@ -20,7 +20,9 @@ from typing import Dict, Any
 
 from .aws_clients import s3_client as make_s3_client
 from .aws_clients import secretsmanager_client as make_secretsmanager_client
+from .bedrock_kb_retrieval import retrieve_soc_context
 from .config import Config, load_config
+from .html_generator import generate_html_report
 from .ttp_analyzer import BedrockAnalyzer
 from .markdown_generator import generate_markdown_report
 
@@ -267,6 +269,7 @@ def write_to_s3_sink(
         base_name = source_key_stem(source_key)
         md_key = f"{output_prefix}/{base_name}.md"
         json_key = f"{output_prefix}/{base_name}.json"
+        html_key = f"{output_prefix}/{base_name}.html"
 
         llm_response = analysis_result.get("llm_response")
         if llm_response is None:
@@ -290,12 +293,25 @@ def write_to_s3_sink(
         )
         logger.info(f"Wrote Bedrock JSON to s3://{output_bucket}/{json_key}")
 
-        return {
+        html_report = analysis_result.get("html")
+        if config.HTML_REPORT_ENABLED and isinstance(html_report, str) and html_report:
+            s3_client.put_object(
+                Bucket=output_bucket,
+                Key=html_key,
+                Body=html_report.encode('utf-8'),
+                ContentType="text/html",
+            )
+            logger.info(f"Wrote HTML report to s3://{output_bucket}/{html_key}")
+
+        result = {
             "status": "success",
             "markdown_key": md_key,
             "json_key": json_key,
             "bucket": output_bucket
         }
+        if config.HTML_REPORT_ENABLED and isinstance(html_report, str) and html_report:
+            result["html_key"] = html_key
+        return result
         
     except Exception as e:
         logger.error(f"Error writing to S3 sink: {str(e)}")
@@ -523,24 +539,40 @@ def handler(event, context):
                 raw_content=content,
                 content_type=content_type,
             )
+
+            rag_result = retrieve_soc_context(alert_text, config)
             
             # Run analysis
             start_time = time.time()
             logger.info("Starting TTP analysis")
-            scored_ttps = analyzer.analyze_ttp(alert_text)
+            scored_ttps = analyzer.analyze_ttp(
+                alert_text,
+                advisory_context=rag_result.context,
+            )
             
             # Get the full LLM response
             llm_response = analyzer.last_llm_response or {}
+            if isinstance(llm_response, dict):
+                metadata = llm_response.setdefault("metadata", {})
+                if isinstance(metadata, dict):
+                    metadata["rag_status"] = rag_result.status
+                    metadata["rag_snippet_count"] = rag_result.snippet_count
+                    if rag_result.message:
+                        metadata["rag_message"] = rag_result.message
             
             # Generate markdown report
             logger.info("Generating markdown report")
             markdown = generate_markdown_report(alert_text, llm_response, scored_ttps)
+            html = None
+            if config.HTML_REPORT_ENABLED:
+                html = generate_html_report(alert_text, llm_response, scored_ttps, markdown)
             
             end_time = time.time()
             
             # Build analysis result
             analysis_result = {
                 "markdown": markdown,
+                "html": html,
                 "llm_response": llm_response,
                 "scored_ttps": scored_ttps,
                 "meta": {
