@@ -230,6 +230,12 @@ remote backend route without editing the service dependency graph.
 installs that do not run the installer, the analyzer package exposes the same
 proxy dependency as an optional extra: `pip install ".[proxy]"`.
 
+The proxy includes an optional Admin UI at `/ui`, but the default install does
+**not** set `LITELLM_MASTER_KEY`. Operators who want UI login must set a master
+key and a LiteLLM `DATABASE_URL` on the host, use an SSH tunnel from a desktop
+browser, and sign in as `admin` with that key. See
+[`LLM_INFERENCE_OPERATIONS.md` — LiteLLM Admin UI](LLM_INFERENCE_OPERATIONS.md#how-do-i-use-the-litellm-admin-ui).
+
 The included `vllm.service` expects vLLM to be installed in:
 
 - `/opt/vllm/venv` (Python venv)

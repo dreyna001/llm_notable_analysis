@@ -3,6 +3,14 @@
 # Default posture: loopback-only proxy with no committed master key. If you
 # enable LiteLLM auth, set the key in host-managed configuration and also set
 # LLM_API_TOKEN in /etc/notable-analyzer/config.env.
+#
+# Admin UI (/ui) requires a master key on the host, for example:
+#   general_settings:
+#     master_key: sk-your-chosen-secret-here
+# or LITELLM_MASTER_KEY in /etc/systemd/system/litellm.service.d/*.conf
+# Login: username admin, password = master key value.
+# Full Admin UI login also requires a LiteLLM PostgreSQL DATABASE_URL.
+# See docs/operations/LLM_INFERENCE_OPERATIONS.md#how-do-i-use-the-litellm-admin-ui
 
 model_list:
   - model_name: gemma-4-31B-it
