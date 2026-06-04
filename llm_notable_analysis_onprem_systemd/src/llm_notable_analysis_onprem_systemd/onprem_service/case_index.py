@@ -25,6 +25,7 @@ class CaseListFilters:
     processed_from: datetime | None = None
     processed_to: datetime | None = None
     verdict: str | None = None
+    search_name: str | None = None
     search_name_prefix: str | None = None
     limit: int | None = None
     offset: int = 0
@@ -135,7 +136,10 @@ def build_list_cases_query(
     if filters.verdict:
         clauses.append("verdict = %s")
         params.append(filters.verdict)
-    if filters.search_name_prefix:
+    if filters.search_name:
+        clauses.append("search_name = %s")
+        params.append(filters.search_name)
+    elif filters.search_name_prefix:
         clauses.append("search_name ILIKE %s ESCAPE '\\'")
         params.append(_escape_like_prefix(filters.search_name_prefix))
 

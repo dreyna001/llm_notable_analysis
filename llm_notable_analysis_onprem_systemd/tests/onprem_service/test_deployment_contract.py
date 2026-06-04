@@ -223,6 +223,28 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE=spl_query_chunks", config_text)
         self.assertIn("SPL_QUERY_RAG_FAILURE_MODE=suppress", config_text)
 
+    def test_portal_systemd_unit_runs_loopback_portal_module(self) -> None:
+        """Portal service should run the read-only FastAPI app on loopback."""
+        service_text = (
+            PROJECT_ROOT / "deploy" / "systemd" / "notable-portal.service"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("EnvironmentFile=/etc/notable-analyzer/config.env", service_text)
+        self.assertIn(
+            "ExecStart=/opt/notable-analyzer/venv/bin/python -m "
+            "llm_notable_analysis_onprem_systemd.onprem_service.portal_app",
+            service_text,
+        )
+        self.assertIn("SyslogIdentifier=notable-portal", service_text)
+        self.assertIn("User=notable-analyzer", service_text)
+
+    def test_pyproject_includes_portal_runtime_dependencies(self) -> None:
+        """Portal diff should declare FastAPI and Uvicorn dependencies."""
+        pyproject_text = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+        self.assertIn('"fastapi==0.115.12"', pyproject_text)
+        self.assertIn('"uvicorn[standard]==0.34.0"', pyproject_text)
+
     def test_case_archive_schema_contains_expected_tables(self) -> None:
         """Postgres case archive schema should match the portal storage contract."""
         schema_text = (

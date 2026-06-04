@@ -160,6 +160,17 @@ class TestCaseIndex(unittest.TestCase):
             ),
         )
 
+    def test_build_list_cases_query_supports_exact_search_name(self) -> None:
+        sql, params = build_list_cases_query(
+            "notable_cases",
+            CaseListFilters(search_name="Suspicious PowerShell"),
+            page_size=25,
+        )
+
+        self.assertIn("search_name = %s", sql)
+        self.assertNotIn("ILIKE", sql)
+        self.assertEqual(params, ("Suspicious PowerShell", 25, 0))
+
     def test_build_get_case_query_targets_one_case(self) -> None:
         sql = build_get_case_query("notable_cases")
 
