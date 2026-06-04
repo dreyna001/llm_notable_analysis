@@ -210,9 +210,33 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("HTML_REPORT_ENABLED=false", config_text)
         self.assertIn("RAG_FUSED_RANK_LIMIT_120B=8", config_text)
         self.assertIn("RAG_RRF_K=60", config_text)
+        self.assertIn("CASE_ARCHIVE_ENABLED=false", config_text)
+        self.assertIn("CASE_POSTGRES_SCHEMA=notable_cases", config_text)
+        self.assertIn("CASE_RETENTION_DAYS=90", config_text)
+        self.assertIn("CASE_QA_ENABLED=false", config_text)
+        self.assertIn("CASE_QA_GLOBAL_RETRIEVAL_ENABLED=false", config_text)
+        self.assertIn("CASE_QA_CHAT_HISTORY_ENABLED=false", config_text)
+        self.assertIn("CASE_QA_LEXICAL_TOP_K=30", config_text)
+        self.assertIn("PORTAL_ENABLED=false", config_text)
+        self.assertIn("PORTAL_BIND_HOST=127.0.0.1", config_text)
         self.assertIn("SPL_QUERY_RAG_ENABLED=false", config_text)
         self.assertIn("SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE=spl_query_chunks", config_text)
         self.assertIn("SPL_QUERY_RAG_FAILURE_MODE=suppress", config_text)
+
+    def test_case_archive_schema_contains_expected_tables(self) -> None:
+        """Postgres case archive schema should match the portal storage contract."""
+        schema_text = (
+            PROJECT_ROOT / "deploy" / "postgres" / "notable_cases_schema.sql"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("CREATE EXTENSION IF NOT EXISTS vector", schema_text)
+        self.assertIn("CREATE SCHEMA IF NOT EXISTS notable_cases", schema_text)
+        self.assertIn("CREATE TABLE IF NOT EXISTS notable_cases.cases", schema_text)
+        self.assertIn("CREATE TABLE IF NOT EXISTS notable_cases.case_chunks", schema_text)
+        self.assertIn("CREATE TABLE IF NOT EXISTS notable_cases.chat_sessions", schema_text)
+        self.assertIn("CREATE TABLE IF NOT EXISTS notable_cases.chat_messages", schema_text)
+        self.assertIn("retrieval_status IN ('pending', 'ready', 'failed', 'not_indexed')", schema_text)
+        self.assertIn("embedding vector(768)", schema_text)
 
     def test_postgres_rag_smoke_uses_disposable_pgvector_container(self) -> None:
         """Live RAG smoke should validate pgvector without host psql."""

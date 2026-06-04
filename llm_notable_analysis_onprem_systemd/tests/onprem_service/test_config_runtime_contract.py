@@ -37,6 +37,18 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.RAG_VECTOR_TOP_K, 30)
         self.assertEqual(config.RAG_CANDIDATE_POOL_LIMIT, 40)
         self.assertEqual(config.RAG_RRF_K, 60)
+        self.assertFalse(config.CASE_ARCHIVE_ENABLED)
+        self.assertEqual(config.CASE_POSTGRES_SCHEMA, "notable_cases")
+        self.assertEqual(config.CASE_RETENTION_DAYS, 90)
+        self.assertFalse(config.PORTAL_ENABLED)
+        self.assertFalse(config.CASE_QA_ENABLED)
+        self.assertFalse(config.CASE_QA_GLOBAL_RETRIEVAL_ENABLED)
+        self.assertFalse(config.CASE_QA_CHAT_HISTORY_ENABLED)
+        self.assertEqual(config.CASE_QA_EMBEDDING_MODEL, "BAAI/bge-base-en-v1.5")
+        self.assertEqual(config.CASE_QA_VECTOR_DIMENSIONS, 768)
+        self.assertEqual(config.CASE_QA_LEXICAL_TOP_K, 30)
+        self.assertEqual(config.CASE_QA_VECTOR_TOP_K, 30)
+        self.assertEqual(config.CASE_QA_RRF_K, 60)
         self.assertEqual(config.LLM_MODEL_NAME, "gemma-4-31B-it")
         self.assertEqual(config.LLM_TIMEOUT, 240)
         self.assertEqual(config.MAX_WORKERS, 1)
@@ -116,6 +128,21 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertTrue(config.SERVICENOW_CREATE_REQUIRES_APPROVAL)
         self.assertTrue(config.SIDE_EFFECT_IDEMPOTENCY_ENABLED)
         self.assertEqual(config.INVESTIGATION_QUERY_BACKEND, "splunk")
+
+    def test_analyst_portal_profile_enables_archive_portal_and_case_qa(self) -> None:
+        """Analyst portal profile should enable only portal/archive capabilities."""
+        with patch.dict(os.environ, {"CAPABILITY_PROFILES": "analyst_portal"}, clear=True):
+            config = load_config()
+
+        self.assertEqual(config.CAPABILITY_PROFILES, "core,analyst_portal")
+        self.assertTrue(config.CASE_ARCHIVE_ENABLED)
+        self.assertTrue(config.PORTAL_ENABLED)
+        self.assertTrue(config.CASE_QA_ENABLED)
+        self.assertTrue(config.CASE_QA_GLOBAL_RETRIEVAL_ENABLED)
+        self.assertFalse(config.CASE_QA_CHAT_HISTORY_ENABLED)
+        self.assertFalse(config.SPLUNK_SINK_ENABLED)
+        self.assertFalse(config.SERVICENOW_CREATE_ENABLED)
+        self.assertFalse(config.INVESTIGATION_QUERY_EXECUTION_ENABLED)
 
     def test_elastic_readonly_profile_enables_elastic_backend(self) -> None:
         """Elastic profile should mirror spl_readonly without enabling Splunk queries."""
@@ -279,6 +306,115 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.RAG_VECTOR_TOP_K, 21)
         self.assertEqual(config.RAG_CANDIDATE_POOL_LIMIT, 22)
         self.assertEqual(config.RAG_RRF_K, 50)
+
+    def test_case_archive_contract_loads_from_environment(self) -> None:
+        """Case archive and portal settings should be explicit env values."""
+        env = {
+            "CASE_ARCHIVE_ENABLED": "true",
+            "CASE_POSTGRES_DSN": "postgresql://cases@127.0.0.1:5432/notables",
+            "CASE_POSTGRES_SCHEMA": "customer_cases",
+            "CASE_RETENTION_DAYS": "120",
+            "CASE_ARCHIVE_WRITE_MAX_ATTEMPTS": "4",
+            "CASE_ARCHIVE_WRITE_RETRY_BACKOFF_SECONDS": "2",
+            "CASE_POSTGRES_STATEMENT_TIMEOUT_MS": "2500",
+            "CASE_SCHEMA_VERSION": "2",
+            "CASE_ANALYSIS_SCHEMA_VERSION": "3",
+            "CASE_QA_ENABLED": "true",
+            "CASE_QA_GLOBAL_RETRIEVAL_ENABLED": "true",
+            "CASE_QA_MAX_RETRIEVED_CASES": "7",
+            "CASE_QA_MAX_CHUNKS_PER_LANE": "8",
+            "CASE_QA_MAX_TOTAL_CHUNKS": "20",
+            "CASE_QA_CONTEXT_BUDGET_CHARS": "15000",
+            "CASE_QA_MAX_QUESTION_CHARS": "3000",
+            "CASE_QA_MAX_ANSWER_TOKENS": "900",
+            "CASE_QA_CHUNK_SCHEMA_VERSION": "2",
+            "CASE_QA_EMBEDDING_MODEL": "custom/bge",
+            "CASE_QA_VECTOR_DIMENSIONS": "768",
+            "CASE_QA_CHAT_HISTORY_ENABLED": "true",
+            "CASE_QA_CHAT_HISTORY_RETENTION_DAYS": "14",
+            "CASE_QA_MAX_MESSAGES_PER_SESSION": "40",
+            "CASE_QA_MAX_STORED_MESSAGE_BYTES": "5000",
+            "CASE_QA_LEXICAL_TOP_K": "31",
+            "CASE_QA_VECTOR_TOP_K": "32",
+            "CASE_QA_RRF_K": "61",
+            "PORTAL_ENABLED": "true",
+            "PORTAL_BIND_HOST": "127.0.0.2",
+            "PORTAL_PORT": "8081",
+            "PORTAL_PAGE_SIZE": "25",
+            "PORTAL_TRUSTED_USER_HEADER": "X-Test-User",
+        }
+
+        with patch.dict(os.environ, env, clear=True):
+            config = load_config()
+
+        self.assertTrue(config.CASE_ARCHIVE_ENABLED)
+        self.assertEqual(config.CASE_POSTGRES_DSN, "postgresql://cases@127.0.0.1:5432/notables")
+        self.assertEqual(config.CASE_POSTGRES_SCHEMA, "customer_cases")
+        self.assertEqual(config.CASE_RETENTION_DAYS, 120)
+        self.assertEqual(config.CASE_ARCHIVE_WRITE_MAX_ATTEMPTS, 4)
+        self.assertEqual(config.CASE_ARCHIVE_WRITE_RETRY_BACKOFF_SECONDS, 2)
+        self.assertEqual(config.CASE_POSTGRES_STATEMENT_TIMEOUT_MS, 2500)
+        self.assertEqual(config.CASE_SCHEMA_VERSION, 2)
+        self.assertEqual(config.CASE_ANALYSIS_SCHEMA_VERSION, 3)
+        self.assertTrue(config.CASE_QA_ENABLED)
+        self.assertTrue(config.CASE_QA_GLOBAL_RETRIEVAL_ENABLED)
+        self.assertEqual(config.CASE_QA_MAX_RETRIEVED_CASES, 7)
+        self.assertEqual(config.CASE_QA_MAX_CHUNKS_PER_LANE, 8)
+        self.assertEqual(config.CASE_QA_MAX_TOTAL_CHUNKS, 20)
+        self.assertEqual(config.CASE_QA_CONTEXT_BUDGET_CHARS, 15000)
+        self.assertEqual(config.CASE_QA_MAX_QUESTION_CHARS, 3000)
+        self.assertEqual(config.CASE_QA_MAX_ANSWER_TOKENS, 900)
+        self.assertEqual(config.CASE_QA_CHUNK_SCHEMA_VERSION, 2)
+        self.assertEqual(config.CASE_QA_EMBEDDING_MODEL, "custom/bge")
+        self.assertEqual(config.CASE_QA_VECTOR_DIMENSIONS, 768)
+        self.assertTrue(config.CASE_QA_CHAT_HISTORY_ENABLED)
+        self.assertEqual(config.CASE_QA_CHAT_HISTORY_RETENTION_DAYS, 14)
+        self.assertEqual(config.CASE_QA_MAX_MESSAGES_PER_SESSION, 40)
+        self.assertEqual(config.CASE_QA_MAX_STORED_MESSAGE_BYTES, 5000)
+        self.assertEqual(config.CASE_QA_LEXICAL_TOP_K, 31)
+        self.assertEqual(config.CASE_QA_VECTOR_TOP_K, 32)
+        self.assertEqual(config.CASE_QA_RRF_K, 61)
+        self.assertTrue(config.PORTAL_ENABLED)
+        self.assertEqual(config.PORTAL_BIND_HOST, "127.0.0.2")
+        self.assertEqual(config.PORTAL_PORT, 8081)
+        self.assertEqual(config.PORTAL_PAGE_SIZE, 25)
+        self.assertEqual(config.PORTAL_TRUSTED_USER_HEADER, "X-Test-User")
+
+    def test_case_qa_vector_dimensions_are_fixed_for_v1(self) -> None:
+        """Case archive schema is vector(768), so v1 config must not drift."""
+        with patch.dict(
+            os.environ,
+            {"CASE_QA_VECTOR_DIMENSIONS": "1024"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(ValueError, "CASE_QA_VECTOR_DIMENSIONS"):
+                load_config()
+
+    def test_case_archive_enabled_rejects_invalid_postgres_schema(self) -> None:
+        """Archive writes should fail at startup for unsafe schema names."""
+        with patch.dict(
+            os.environ,
+            {
+                "CASE_ARCHIVE_ENABLED": "true",
+                "CASE_POSTGRES_SCHEMA": "bad-schema",
+            },
+            clear=True,
+        ):
+            with self.assertRaisesRegex(ValueError, "CASE_POSTGRES_SCHEMA"):
+                load_config()
+
+    def test_case_archive_enabled_requires_postgres_dsn(self) -> None:
+        """Archive-enabled deployments should not fall through to libpq defaults."""
+        with patch.dict(
+            os.environ,
+            {
+                "CASE_ARCHIVE_ENABLED": "true",
+                "CASE_POSTGRES_DSN": "",
+            },
+            clear=True,
+        ):
+            with self.assertRaisesRegex(ValueError, "CASE_POSTGRES_DSN"):
+                load_config()
 
     def test_spl_query_rag_contract_loads_from_environment(self) -> None:
         """SPL-dedicated RAG should expose a separate config contract."""

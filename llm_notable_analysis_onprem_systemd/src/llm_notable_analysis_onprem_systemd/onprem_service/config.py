@@ -5,6 +5,7 @@ All paths default to RHEL-standard locations.
 """
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ from urllib.parse import urlparse
 
 _TRUE_VALUES = {"true", "1", "yes"}
 _FALSE_VALUES = {"false", "0", "no"}
+_POSTGRES_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 
 _CAPABILITY_PROFILE_FLAGS: dict[str, dict[str, Any]] = {
     "core": {},
@@ -32,6 +34,12 @@ _CAPABILITY_PROFILE_FLAGS: dict[str, dict[str, Any]] = {
         "SERVICENOW_CREATE_ENABLED": True,
         "SERVICENOW_CREATE_REQUIRES_APPROVAL": True,
         "SIDE_EFFECT_IDEMPOTENCY_ENABLED": True,
+    },
+    "analyst_portal": {
+        "CASE_ARCHIVE_ENABLED": True,
+        "PORTAL_ENABLED": True,
+        "CASE_QA_ENABLED": True,
+        "CASE_QA_GLOBAL_RETRIEVAL_ENABLED": True,
     },
 }
 
@@ -131,6 +139,12 @@ def _csv_has_values(value: str) -> bool:
     return any(part.strip() for part in str(value or "").split(","))
 
 
+def _validate_postgres_identifier(value: str, name: str) -> None:
+    """Validate a simple Postgres identifier used in generated SQL."""
+    if not _POSTGRES_IDENTIFIER_RE.fullmatch((value or "").strip()):
+        raise ValueError(f"{name} must be a simple PostgreSQL identifier")
+
+
 def _validate_elasticsearch_runtime_contract(config: "Config") -> None:
     """Fail fast on unsafe or incomplete Elasticsearch read-only configuration."""
     if config.INVESTIGATION_QUERY_BACKEND != "elasticsearch":
@@ -214,6 +228,38 @@ class Config:
         RAG_VECTOR_TOP_K: pgvector/FAISS candidate pull size.
         RAG_CANDIDATE_POOL_LIMIT: Candidate cap before quality gates.
         RAG_RRF_K: Reciprocal-rank-fusion smoothing constant.
+        CASE_ARCHIVE_ENABLED: Enables Postgres case archive writes.
+        CASE_POSTGRES_DSN: PostgreSQL DSN for case archive storage.
+        CASE_POSTGRES_SCHEMA: PostgreSQL schema for case archive tables.
+        CASE_RETENTION_DAYS: Retention window for archived cases.
+        CASE_ARCHIVE_WRITE_MAX_ATTEMPTS: Max attempts for transient archive write failures.
+        CASE_ARCHIVE_WRITE_RETRY_BACKOFF_SECONDS: Backoff between archive write attempts.
+        CASE_POSTGRES_STATEMENT_TIMEOUT_MS: Per-write timeout for case archive operations.
+        CASE_SCHEMA_VERSION: Case record schema version.
+        CASE_ANALYSIS_SCHEMA_VERSION: Structured analysis schema version.
+        CASE_QA_ENABLED: Enables portal case Q&A.
+        CASE_QA_GLOBAL_RETRIEVAL_ENABLED: Enables global case archive retrieval.
+        CASE_QA_MAX_RETRIEVED_CASES: Max distinct cases retrieved by chat.
+        CASE_QA_MAX_CHUNKS_PER_LANE: Max chunks per chat source lane.
+        CASE_QA_MAX_TOTAL_CHUNKS: Max total chunks supplied to chat.
+        CASE_QA_CONTEXT_BUDGET_CHARS: Max retrieval context characters for chat.
+        CASE_QA_MAX_QUESTION_CHARS: Max analyst question length.
+        CASE_QA_MAX_ANSWER_TOKENS: Max chat answer generation tokens.
+        CASE_QA_CHUNK_SCHEMA_VERSION: Case chunk schema version.
+        CASE_QA_EMBEDDING_MODEL: Embedding model used for case chunks.
+        CASE_QA_VECTOR_DIMENSIONS: pgvector dimensions for case chunks.
+        CASE_QA_CHAT_HISTORY_ENABLED: Enables persisted portal chat history.
+        CASE_QA_CHAT_HISTORY_RETENTION_DAYS: Retention window for chat sessions.
+        CASE_QA_MAX_MESSAGES_PER_SESSION: Max persisted chat messages per session.
+        CASE_QA_MAX_STORED_MESSAGE_BYTES: Max stored chat message size.
+        CASE_QA_LEXICAL_TOP_K: Case chat lexical retrieval candidate count.
+        CASE_QA_VECTOR_TOP_K: Case chat vector retrieval candidate count.
+        CASE_QA_RRF_K: Case chat reciprocal-rank-fusion smoothing constant.
+        PORTAL_ENABLED: Enables the FastAPI analyst portal.
+        PORTAL_BIND_HOST: Portal bind host.
+        PORTAL_PORT: Portal bind port.
+        PORTAL_PAGE_SIZE: Default portal page size.
+        PORTAL_TRUSTED_USER_HEADER: Trusted reverse-proxy user header.
         SPLUNK_BASE_URL: Splunk base URL for notable update sink.
         SPLUNK_API_TOKEN: Splunk token for REST sink authentication.
         SPLUNK_NOTABLE_UPDATE_PATH: Splunk notable update endpoint path.
@@ -327,6 +373,40 @@ class Config:
     RAG_VECTOR_TOP_K: int = 30
     RAG_CANDIDATE_POOL_LIMIT: int = 40
     RAG_RRF_K: int = 60
+
+    # Analyst portal and case archive (planned portal path, disabled by default)
+    CASE_ARCHIVE_ENABLED: bool = False
+    CASE_POSTGRES_DSN: str = "postgresql://notable_analyzer@127.0.0.1:5432/notable_rag"
+    CASE_POSTGRES_SCHEMA: str = "notable_cases"
+    CASE_RETENTION_DAYS: int = 90
+    CASE_ARCHIVE_WRITE_MAX_ATTEMPTS: int = 3
+    CASE_ARCHIVE_WRITE_RETRY_BACKOFF_SECONDS: int = 1
+    CASE_POSTGRES_STATEMENT_TIMEOUT_MS: int = 5000
+    CASE_SCHEMA_VERSION: int = 1
+    CASE_ANALYSIS_SCHEMA_VERSION: int = 1
+    CASE_QA_ENABLED: bool = False
+    CASE_QA_GLOBAL_RETRIEVAL_ENABLED: bool = False
+    CASE_QA_MAX_RETRIEVED_CASES: int = 5
+    CASE_QA_MAX_CHUNKS_PER_LANE: int = 6
+    CASE_QA_MAX_TOTAL_CHUNKS: int = 18
+    CASE_QA_CONTEXT_BUDGET_CHARS: int = 12000
+    CASE_QA_MAX_QUESTION_CHARS: int = 2000
+    CASE_QA_MAX_ANSWER_TOKENS: int = 800
+    CASE_QA_CHUNK_SCHEMA_VERSION: int = 1
+    CASE_QA_EMBEDDING_MODEL: str = "BAAI/bge-base-en-v1.5"
+    CASE_QA_VECTOR_DIMENSIONS: int = 768
+    CASE_QA_CHAT_HISTORY_ENABLED: bool = False
+    CASE_QA_CHAT_HISTORY_RETENTION_DAYS: int = 7
+    CASE_QA_MAX_MESSAGES_PER_SESSION: int = 30
+    CASE_QA_MAX_STORED_MESSAGE_BYTES: int = 4000
+    CASE_QA_LEXICAL_TOP_K: int = 30
+    CASE_QA_VECTOR_TOP_K: int = 30
+    CASE_QA_RRF_K: int = 60
+    PORTAL_ENABLED: bool = False
+    PORTAL_BIND_HOST: str = "127.0.0.1"
+    PORTAL_PORT: int = 8080
+    PORTAL_PAGE_SIZE: int = 50
+    PORTAL_TRUSTED_USER_HEADER: str = "X-Forwarded-User"
 
     # Splunk integration (optional)
     SPLUNK_BASE_URL: str = ""
@@ -450,6 +530,15 @@ class Config:
             and self.INVESTIGATION_QUERY_BACKEND == "elasticsearch"
         ):
             self.SPL_QUERY_GENERATION_ENABLED = False
+        if self.CASE_QA_VECTOR_DIMENSIONS != 768:
+            raise ValueError("CASE_QA_VECTOR_DIMENSIONS must be 768 for v1")
+        if bool(self.CASE_ARCHIVE_ENABLED):
+            if not str(self.CASE_POSTGRES_DSN or "").strip():
+                raise ValueError("CASE_POSTGRES_DSN is required when CASE_ARCHIVE_ENABLED=true")
+            _validate_postgres_identifier(
+                self.CASE_POSTGRES_SCHEMA,
+                "CASE_POSTGRES_SCHEMA",
+            )
         _validate_elasticsearch_runtime_contract(self)
 
 
@@ -541,6 +630,89 @@ def load_config() -> Config:
         RAG_VECTOR_TOP_K=int(os.getenv("RAG_VECTOR_TOP_K", "30")),
         RAG_CANDIDATE_POOL_LIMIT=int(os.getenv("RAG_CANDIDATE_POOL_LIMIT", "40")),
         RAG_RRF_K=int(os.getenv("RAG_RRF_K", "60")),
+        CASE_ARCHIVE_ENABLED=_profile_bool(
+            "CASE_ARCHIVE_ENABLED", False, profile_flags
+        ),
+        CASE_POSTGRES_DSN=os.getenv(
+            "CASE_POSTGRES_DSN",
+            "postgresql://notable_analyzer@127.0.0.1:5432/notable_rag",
+        ),
+        CASE_POSTGRES_SCHEMA=os.getenv("CASE_POSTGRES_SCHEMA", "notable_cases"),
+        CASE_RETENTION_DAYS=_positive_int_env(
+            "CASE_RETENTION_DAYS", 90, max_value=3650
+        ),
+        CASE_ARCHIVE_WRITE_MAX_ATTEMPTS=_positive_int_env(
+            "CASE_ARCHIVE_WRITE_MAX_ATTEMPTS", 3, max_value=10
+        ),
+        CASE_ARCHIVE_WRITE_RETRY_BACKOFF_SECONDS=_positive_int_env(
+            "CASE_ARCHIVE_WRITE_RETRY_BACKOFF_SECONDS", 1, max_value=300
+        ),
+        CASE_POSTGRES_STATEMENT_TIMEOUT_MS=_positive_int_env(
+            "CASE_POSTGRES_STATEMENT_TIMEOUT_MS", 5000, max_value=300000
+        ),
+        CASE_SCHEMA_VERSION=_positive_int_env(
+            "CASE_SCHEMA_VERSION", 1, max_value=1000
+        ),
+        CASE_ANALYSIS_SCHEMA_VERSION=_positive_int_env(
+            "CASE_ANALYSIS_SCHEMA_VERSION", 1, max_value=1000
+        ),
+        CASE_QA_ENABLED=_profile_bool("CASE_QA_ENABLED", False, profile_flags),
+        CASE_QA_GLOBAL_RETRIEVAL_ENABLED=_profile_bool(
+            "CASE_QA_GLOBAL_RETRIEVAL_ENABLED", False, profile_flags
+        ),
+        CASE_QA_MAX_RETRIEVED_CASES=_positive_int_env(
+            "CASE_QA_MAX_RETRIEVED_CASES", 5, max_value=100
+        ),
+        CASE_QA_MAX_CHUNKS_PER_LANE=_positive_int_env(
+            "CASE_QA_MAX_CHUNKS_PER_LANE", 6, max_value=100
+        ),
+        CASE_QA_MAX_TOTAL_CHUNKS=_positive_int_env(
+            "CASE_QA_MAX_TOTAL_CHUNKS", 18, max_value=300
+        ),
+        CASE_QA_CONTEXT_BUDGET_CHARS=_positive_int_env(
+            "CASE_QA_CONTEXT_BUDGET_CHARS", 12000, max_value=200000
+        ),
+        CASE_QA_MAX_QUESTION_CHARS=_positive_int_env(
+            "CASE_QA_MAX_QUESTION_CHARS", 2000, max_value=20000
+        ),
+        CASE_QA_MAX_ANSWER_TOKENS=_positive_int_env(
+            "CASE_QA_MAX_ANSWER_TOKENS", 800, max_value=16000
+        ),
+        CASE_QA_CHUNK_SCHEMA_VERSION=_positive_int_env(
+            "CASE_QA_CHUNK_SCHEMA_VERSION", 1, max_value=1000
+        ),
+        CASE_QA_EMBEDDING_MODEL=os.getenv(
+            "CASE_QA_EMBEDDING_MODEL", "BAAI/bge-base-en-v1.5"
+        ),
+        CASE_QA_VECTOR_DIMENSIONS=_positive_int_env(
+            "CASE_QA_VECTOR_DIMENSIONS", 768, max_value=100000
+        ),
+        CASE_QA_CHAT_HISTORY_ENABLED=_profile_bool(
+            "CASE_QA_CHAT_HISTORY_ENABLED", False, profile_flags
+        ),
+        CASE_QA_CHAT_HISTORY_RETENTION_DAYS=_positive_int_env(
+            "CASE_QA_CHAT_HISTORY_RETENTION_DAYS", 7, max_value=365
+        ),
+        CASE_QA_MAX_MESSAGES_PER_SESSION=_positive_int_env(
+            "CASE_QA_MAX_MESSAGES_PER_SESSION", 30, max_value=1000
+        ),
+        CASE_QA_MAX_STORED_MESSAGE_BYTES=_positive_int_env(
+            "CASE_QA_MAX_STORED_MESSAGE_BYTES", 4000, max_value=100000
+        ),
+        CASE_QA_LEXICAL_TOP_K=_positive_int_env(
+            "CASE_QA_LEXICAL_TOP_K", 30, max_value=1000
+        ),
+        CASE_QA_VECTOR_TOP_K=_positive_int_env(
+            "CASE_QA_VECTOR_TOP_K", 30, max_value=1000
+        ),
+        CASE_QA_RRF_K=_positive_int_env("CASE_QA_RRF_K", 60, max_value=10000),
+        PORTAL_ENABLED=_profile_bool("PORTAL_ENABLED", False, profile_flags),
+        PORTAL_BIND_HOST=os.getenv("PORTAL_BIND_HOST", "127.0.0.1"),
+        PORTAL_PORT=_positive_int_env("PORTAL_PORT", 8080, max_value=65535),
+        PORTAL_PAGE_SIZE=_positive_int_env("PORTAL_PAGE_SIZE", 50, max_value=100),
+        PORTAL_TRUSTED_USER_HEADER=os.getenv(
+            "PORTAL_TRUSTED_USER_HEADER", "X-Forwarded-User"
+        ),
         SPLUNK_BASE_URL=os.getenv("SPLUNK_BASE_URL", ""),
         SPLUNK_API_TOKEN=os.getenv("SPLUNK_API_TOKEN", ""),
         SPLUNK_NOTABLE_UPDATE_PATH=os.getenv(

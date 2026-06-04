@@ -290,7 +290,7 @@ approval boundaries.
 ```mermaid
 flowchart TB
   Intake["Notable intake\nfile drop / S3 / SOAR"] --> Normalize["Normalize and preserve direct evidence"]
-  Normalize --> Context["Advisory context\nRAG, SPL KB, TI, CMDB, case history"]
+  Normalize --> Context["Advisory context\nRAG, SPL KB, TI, CMDB"]
   Context --> Analyze["Bounded LLM analysis\nstructured output"]
   Analyze --> Validate["Parse, validate, repair, allowlists"]
   Validate --> Report["Markdown / HTML / structured case artifact"]

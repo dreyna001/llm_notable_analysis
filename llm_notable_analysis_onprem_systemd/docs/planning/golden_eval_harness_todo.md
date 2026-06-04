@@ -16,6 +16,10 @@ gates, and service health. This harness should evaluate whether the produced
 analysis and assistant answers are grounded, useful, and stable against a
 representative set of known cases.
 
+Long term, every feature surface that can be meaningfully evaluated should get
+golden coverage, with separate fixtures and rubrics added as each capability
+stabilizes.
+
 ## TODO
 
 - Build a representative notable corpus with expected outcomes and rubrics.
@@ -41,6 +45,14 @@ representative set of known cases.
 - Add weekly summary evaluations that check whether generated summaries cite
   retained cases, avoid unsupported trend claims, and separate case facts from
   advisory customer guidance.
+- Add portal chatbot evaluations once the analyst portal exists:
+  - selected-case questions over the current alert plus stored analysis
+  - global questions over the retained 90-day case archive
+  - mixed questions that require separating current alert facts, prior case
+    facts, and SOC advisory guidance
+  - no-match and weak-retrieval questions that should return `unknown`
+  - action-request questions that must be refused because the portal is
+    read-only
 
 ## Proposed Automation Shape
 
@@ -54,6 +66,9 @@ representative set of known cases.
   changes.
 - Record prompt version, model id, capability profile, retrieval source ids,
   citations, validation failures, latency, and pass/fail scores.
+- For portal-chatbot evals, also record selected case id, retrieved case ids,
+  source lanes used (`current_alert`, `case_analysis`, `soc_context`,
+  `prior_case`), citation coverage, and refusal/no-match reasons.
 - Store eval outputs under an operator-controlled artifact directory, not in the
   normal case archive unless an explicit audit/evaluation capability enables it.
 - Fail closed for malformed eval fixtures and invalid expected-output rubrics.

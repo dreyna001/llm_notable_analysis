@@ -27,7 +27,10 @@ Optional deep dives:
 - **[SPL operations](operations/SPL_OPERATIONS.md)** — Indexes, Splunk execution limits, REST vs MCP, rollout; values that change every deployment.
 - **[Feature enhancements architecture](architecture/feature_enhancements_architecture.md)** — Locked runtime shape, payloads (including `servicenow_create_approval`), policies.
 - **[Feature enhancements technical spec](technical_specs/feature_enhancements_technical_spec.md)** — Contract-level detail for SPL, Splunk execution, ServiceNow.
-- **[RAG model endpoint plan](planning/rag_model_endpoint_plan.md)** — Planning-only proposal for loopback embedding and rerank endpoints.
+- **[Analyst portal technical spec](technical_specs/analyst_portal_case_archive_technical_spec.md)** — Draft implementation contract and diff plan for the Postgres-backed portal/archive/chatbot.
+- **[Analyst portal and case archive plan](planning/ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md)** — Living scope for the on-prem 90-day case archive, read-only portal, and archive-backed chatbot.
+- **[Analyst portal networking plan](planning/ANALYST_PORTAL_NETWORKING_PLAN.md)** — Planned internal URL, DNS, TLS, nginx, firewall, and FastAPI serving shape.
+- **[Compressed inputs plan](planning/COMPRESSED_INPUTS_PLAN.md)** — Planned on-prem gzip intake parity with AWS (`*.json.gz`, `MAX_DECOMPRESSED_INPUT_BYTES`, stem/writeback rules).
 - **[Golden evaluation harness TODO](planning/golden_eval_harness_todo.md)** — Planning TODO for future regression, hallucination, weak-retrieval, and assistant Q&A quality evaluation.
 - **[AI integrity and drift monitoring plan](planning/ai_integrity_drift_monitoring_plan.md)** — Planning proposal for model/prompt/KB hash checks plus simple Evidently-based drift reporting.
 
@@ -37,8 +40,10 @@ Optional deep dives:
 |-------|-------------|
 | Executive on-prem build summary | [EXECUTIVE_ONPREM_BUILD_WRITEUP.md](delivery_package/EXECUTIVE_ONPREM_BUILD_WRITEUP.md) |
 | Capability profiles | [CAPABILITY_PROFILES.md](operations/CAPABILITY_PROFILES.md), [`config.env.example`](../config.env.example) (`CAPABILITY_PROFILES`) |
+| Analyst portal technical spec | [analyst_portal_case_archive_technical_spec.md](technical_specs/analyst_portal_case_archive_technical_spec.md) |
+| Planned analyst portal and case archive | [ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md](planning/ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md) |
+| Planned analyst portal networking | [ANALYST_PORTAL_NETWORKING_PLAN.md](planning/ANALYST_PORTAL_NETWORKING_PLAN.md) |
 | RAG grounding for analysis | [EXECUTIVE_ONPREM_WORKFLOW.md § RAG](delivery_package/EXECUTIVE_ONPREM_WORKFLOW.md), [RAG_OPERATIONS.md](operations/RAG_OPERATIONS.md), [KNOWLEDGE_BASE_OPERATIONS.md](operations/KNOWLEDGE_BASE_OPERATIONS.md), [`config.env.example`](../config.env.example) |
-| Planned RAG model endpoints | [rag_model_endpoint_plan.md](planning/rag_model_endpoint_plan.md) |
 | Planned golden eval / quality regression harness | [golden_eval_harness_todo.md](planning/golden_eval_harness_todo.md) |
 | Planned AI integrity / drift monitoring | [ai_integrity_drift_monitoring_plan.md](planning/ai_integrity_drift_monitoring_plan.md) |
 | LLM inference | [LLM_INFERENCE_OPERATIONS.md](operations/LLM_INFERENCE_OPERATIONS.md), [LLM_INFERENCE_BENCHMARKING.md](operations/LLM_INFERENCE_BENCHMARKING.md), [INSTALL.md](operations/INSTALL.md), [`config.env.example`](../config.env.example) (`LLM_*`) |
@@ -48,6 +53,7 @@ Optional deep dives:
 | Splunk notable writeback | [SPLUNK_WRITEBACK_OPERATIONS.md](operations/SPLUNK_WRITEBACK_OPERATIONS.md), [CAPABILITY_PROFILES.md](operations/CAPABILITY_PROFILES.md) (`action_gated`) |
 | ServiceNow draft/create | [SERVICENOW_OPERATIONS.md](operations/SERVICENOW_OPERATIONS.md), [CAPABILITY_PROFILES.md](operations/CAPABILITY_PROFILES.md) (`ticket_draft`, `action_gated`), [EXECUTIVE_ONPREM_WORKFLOW.md § ServiceNow](delivery_package/EXECUTIVE_ONPREM_WORKFLOW.md), [feature_enhancements_architecture.md](architecture/feature_enhancements_architecture.md) (approval JSON) |
 | File drop and retention | [FILE_DROP_AND_RETENTION_OPERATIONS.md](operations/FILE_DROP_AND_RETENTION_OPERATIONS.md), [`config.env.example`](../config.env.example) (`INCOMING_DIR`, `RETENTION_*`, `CONCURRENCY_*`) |
+| Planned gzip file intake (AWS parity) | [COMPRESSED_INPUTS_PLAN.md](planning/COMPRESSED_INPUTS_PLAN.md) |
 | MITRE/TTP validation | [MITRE_TTP_OPERATIONS.md](operations/MITRE_TTP_OPERATIONS.md), [`config.env.example`](../config.env.example) (`MITRE_IDS_PATH`) |
 | Offline / air-gap prep | [OFFLINE_PRESTAGE_GUIDE.md](operations/OFFLINE_PRESTAGE_GUIDE.md) |
 | Developer / maintainer guide | [DEVELOPER_MAINTAINER_GUIDE.md](internal/DEVELOPER_MAINTAINER_GUIDE.md) |

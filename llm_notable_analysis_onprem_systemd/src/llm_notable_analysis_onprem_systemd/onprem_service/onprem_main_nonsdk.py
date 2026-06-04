@@ -32,6 +32,7 @@ from .sinks import write_html_to_file, write_markdown_to_file, update_splunk_not
 from .markdown_generator import generate_markdown_report
 from .html_generator import generate_html_report
 from .query_result_enrichment import enrich_analysis_with_query_results
+from .case_store import write_case_archive_record
 from .servicenow import (
     build_servicenow_incident_draft,
     create_servicenow_incident,
@@ -268,10 +269,24 @@ def process_notable(
         report_path = write_markdown_to_file(notable_id, markdown, config)
         logger.info(f"Wrote report: {report_path}")
 
+        html_report_path: Path | None = None
         if bool(getattr(config, "HTML_REPORT_ENABLED", False)):
             html = generate_html_report(alert_text, llm_response, scored_ttps)
             html_report_path = write_html_to_file(notable_id, html, config)
             logger.info("Wrote HTML report: %s", html_report_path)
+
+        if bool(getattr(config, "CASE_ARCHIVE_ENABLED", False)):
+            write_case_archive_record(
+                config=config,
+                case_id=notable_id,
+                finding_id=finding_id,
+                source_filename=file_path.name,
+                alert_payload=alert_payload,
+                analysis=llm_response,
+                report_md_path=report_path,
+                report_html_path=html_report_path,
+            )
+            logger.info("Archived case to Postgres: %s", notable_id)
 
         # Optional: Update Splunk notable via REST API
         if config.SPLUNK_SINK_ENABLED:

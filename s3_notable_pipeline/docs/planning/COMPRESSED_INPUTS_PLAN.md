@@ -2,6 +2,8 @@
 
 Branch: `feature/s3-compressed-inputs`
 
+**On-prem parity plan:** `llm_notable_analysis_onprem_systemd/docs/planning/COMPRESSED_INPUTS_PLAN.md`
+
 ## Goal
 
 Allow the S3 notable pipeline to process compressed notable files uploaded under `incoming/` without changing the Bedrock analysis, markdown rendering, or sink routing contracts.

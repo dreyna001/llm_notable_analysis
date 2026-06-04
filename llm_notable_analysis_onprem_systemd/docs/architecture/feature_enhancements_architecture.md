@@ -49,7 +49,11 @@ This architecture answers:
 
 The current service:
 
-- reads `.json` and `.txt` files from `INCOMING_DIR`
+- reads `.json` and `.txt` files from `INCOMING_DIR` (gzip file-drop is
+  **planned**; see
+  [`../planning/COMPRESSED_INPUTS_PLAN.md`](../planning/COMPRESSED_INPUTS_PLAN.md).
+  AWS `s3_notable_pipeline` already supports `.json.gz` / `.txt.gz` with
+  `MAX_DECOMPRESSED_INPUT_BYTES`.)
 - sends one structured prompt to the local LLM client
 - optionally adds RAG/SOC context with `RAG_ENABLED`
 - when `SPL_QUERY_GENERATION_ENABLED=true`, runs a second bounded LLM call for SPL query fields using the alert, the six hypotheses, optional **`SOC_OPERATIONAL_CONTEXT`**, and optional **`SPL_QUERY_GROUNDING_CONTEXT`** (`SPL_QUERY_RAG_ENABLED=true`)
@@ -535,10 +539,6 @@ Enrich downstream reasoning with authoritative **advisory** context (never asser
 - **On‑prem / enterprise:** CMDB, IdP/group membership, owner, workload criticality, business unit, VIP or admin tagging.
 - **AWS:** AWS account Id, Organizations OU, resolver attributes (tags), environment/classification labels, workload owner/contact, assessed exposure posture where available (**Config**, **IAM Access Analyzer** signals, VPC exposure context as policy allows).
 
-### Case history retrieval
-
-Retrieve **prior** similar notables, analyst disposition, tuning notes, and remediation outcomes as advisory retrieval—bounded count, TTL, ownership checks. Optional durable store differs by deployment (**on‑prem** DB/files vs **Dynamo/S3** summaries on AWS).
-
 ### Structured investigation planner (pattern)
 
 Separate **planned checks** from **allowed executions**: LLM may propose next checks; deterministic policy **allowlists** which integrations, queries, and budget classes may run—aligned with SOC workflow maturity targets (bounded tools, no open-ended autonomy).
@@ -709,10 +709,10 @@ This is adequate for **today / this week** and small labs. It is **not** a case 
 
 | Property | Requirement |
 |----------|-------------|
-| Interaction model | **Browse-only**—list cases, filter, open detail; **no data entry**, no re-run analysis, no SOAR/ticket actions from the UI |
+| Interaction model | **Read-only interactive**—list cases, filter, open detail, and use retrieval-bound chat; **no data entry**, no re-run analysis, no SOAR/ticket actions from the UI |
 | Retention target | **~90 days** (`CASE_RETENTION_DAYS=90`) as the default design point; operator-tunable |
-| Detail view | Reuse existing tabbed HTML dashboard (Verdict, Hypotheses, TTPs, IOCs, Evidence, optional Query/ServiceNow sections) |
-| Optional Case Q&A / Notable Archive Assistant | Read-only natural-language questions over the same 90-day case index and retrieved report evidence; answers must cite source cases/reports and may return `unknown` / no-match |
+| Detail view | Render from canonical Postgres JSONB case records; existing markdown/HTML outputs may still be generated for compatibility |
+| Optional Case Q&A / Notable Archive Assistant | Read-only natural-language questions over the same 90-day Postgres case archive plus SOC/SPL/RAG context; answers must cite source cases/reports/context and may return `unknown` / no-match |
 | System of record | Analyzer pipeline remains the **only writer**; portal is read-only |
 | Auth | Corporate SSO or reverse-proxy auth in front of portal; fail closed |
 | Default posture | **Off** until `analyst_portal` (or equivalent) capability profile + explicit config |
@@ -721,28 +721,28 @@ This is adequate for **today / this week** and small labs. It is **not** a case 
 
 A three-month browse window requires changes **beyond** a nicer front end:
 
-1. **Case metadata store** — filename and mtime are not enough for verdict filters, date ranges, or stable pagination.
-2. **Artifact contract** — persist pointers (and optionally a redacted structured snapshot) at write time so list views do not parse markdown/HTML.
+1. **Postgres case store** — filename and mtime are not enough for verdict filters, date ranges, stable pagination, or chatbot retrieval.
+2. **Artifact contract** — persist full-fidelity alert payload plus validated analysis JSONB at write time so list views and chat do not parse markdown/HTML.
 3. **Retention decoupling** — report/case retention must be **independent** of input/processed retention; default 21-day delete would undermine a 90-day portal.
 4. **Separate read service** — the long-running analyzer loop should not serve HTTP to analysts; a small read-only portal process (or AWS equivalent) limits blast radius.
-5. **Retrieval substrate for Case Q&A** — if enabled, Q&A needs bounded retrieval over case metadata, report text snippets, and/or validated JSON sections; it must not answer from model memory alone.
-6. **Storage sizing & lifecycle** — ~90 days of `.md` + `.html` (+ optional JSON envelope/snippet index) needs documented disk/S3 envelopes and optional warm/cold tiers.
+5. **Retrieval substrate for Case Q&A** — if enabled, Q&A needs bounded retrieval over Postgres case JSONB and derived pgvector chunks; it must not answer from model memory alone.
+6. **Storage sizing & lifecycle** — ~90 days of case JSONB plus derived chunks needs documented database sizing, backup, and retention behavior.
 
 Rough sizing at **90 days** (order of magnitude):
 
-| Volume | Artifacts per case | Total (~90 days) |
+| Volume | Stored case data per case | Total (~90 days) |
 |--------|-------------------|------------------|
-| 50/day | ~100–200 KB (md + html + metadata) | ~450 MB–900 MB |
+| 50/day | ~100–200 KB (JSONB + metadata + retrieval chunks) | ~450 MB–900 MB |
 | 200/day | same | ~1.8–3.2 GB |
 | 1,000/day | same | ~9–18 GB |
 
-These remain modest on a dedicated analyzer host or S3 bucket; the architectural cost is **index + retention policy**, not raw bytes.
+These remain modest for a managed Postgres/pgvector footprint on a dedicated analyzer host; the architectural cost is **schema, migrations, backup, and retention policy**, not raw bytes.
 
 #### Locked design principles
 
 - **Write path unchanged in spirit:** file-drop (on‑prem) or S3 trigger (AWS) → analyze → validate → render → **append case record** → existing sinks (Splunk/SNOW) when enabled.
 - **Read path isolated:** the baseline portal never calls Bedrock/vLLM, never drops files into `INCOMING_DIR`, and never triggers side effects. If Case Q&A is enabled, its only LLM use is bounded answer synthesis over retrieved archive sources.
-- **Reuse renderers:** `html_generator.py` / `markdown_generator.py` stay deterministic; portal serves artifacts or pre-rendered HTML—it does not re-invoke the LLM.
+- **Keep renderers optional:** `html_generator.py` / `markdown_generator.py` stay deterministic and may continue producing human artifacts, but the portal reads canonical Postgres JSONB rather than parsing filesystem markdown/HTML.
 - **Evidence discipline:** stored JSON snapshots, if written, are the **validated structured object** already used for reports—not raw model text unless `poc_unstructured_output` fallback (then flag clearly in metadata).
 - **Q&A is retrieval-bound:** a Case Q&A assistant may summarize or route the analyst to relevant reports, but every answer must be grounded in retrieved 90-day archive sources and cite the case/report evidence used.
 - **No dual backlog:** one case-archive contract; on‑prem and AWS differ only in **instantiation** (see table below).
@@ -754,19 +754,20 @@ flowchart TB
   subgraph WritePath["Write path (existing analyzer)"]
     IN[Incoming notable] --> AN[Analyzer orchestration]
     AN --> VAL[Validate structured result]
-    VAL --> RND[Render md / html]
-    RND --> ART[Write artifacts]
-    ART --> IDX[Upsert case metadata]
-    IDX --> MOV[Move input / retention hooks]
+    VAL --> DB[Upsert Postgres case JSONB]
+    DB --> CHUNK[Build derived pgvector chunks]
+    DB --> RND[Optional render md / html]
+    RND --> ART[Optional write human artifacts]
+    CHUNK --> MOV[Move input / retention hooks]
   end
 
   subgraph ReadPath["Read path (new, browse-only)"]
     UI[Analyst browser] --> PORT[Portal API / static host]
     PORT --> IDX
-    PORT --> ART
+    PORT --> DB
     PORT --> QA[Optional Case Q&A]
     QA --> IDX
-    QA --> ART
+    QA --> DB
   end
 ```
 
@@ -776,13 +777,12 @@ flowchart TB
 
 | Location | Purpose |
 |----------|---------|
-| `REPORT_DIR/` | Hot artifacts: `{finding_id}.md`, `{finding_id}.html` (unchanged) |
-| `CASE_ARCHIVE_DIR/` or `REPORT_DIR/archive/` | Optional warm tier after N days; portal reads both hot + warm |
-| `CASE_DB_PATH` (default e.g. `/var/notables/cases/cases.sqlite3`) | SQLite index: one row per processed case |
-| Optional snippet/FTS table | Read-only Case Q&A retrieval over report sections or validated JSON excerpts |
-| Optional `{finding_id}.analysis.json` | Redacted validated structured snapshot for re-render / audit (policy-gated) |
+| Postgres `cases` table | Canonical case record: full-fidelity alert payload, validated analysis JSONB, metadata, retention fields |
+| Postgres `case_chunks` table with pgvector | Derived retrieval chunks for read-only portal chat over retained cases |
+| Postgres optional chat tables | Bounded chat transcript metadata and answers when chat history is explicitly enabled |
+| `REPORT_DIR/` | Optional compatibility artifacts: `{finding_id}.md`, `{finding_id}.html` when current report settings enable them |
 
-**Case index (SQLite v1 recommended)**
+**Case archive (Postgres v1 required)**
 
 Minimal columns (normative detail deferred to technical spec after review):
 
@@ -792,13 +792,17 @@ Minimal columns (normative detail deferred to technical spec after review):
 | `processed_at` | Sort/filter default |
 | `verdict`, `confidence` | List badges and filters |
 | `search_name`, `threat_category`, `risk_score` | Optional facets from incoming JSON |
-| `report_md_path`, `report_html_path` | Artifact pointers |
-| `analysis_json_path` | Optional |
-| `source_sections` / snippet refs | Optional pointers used by Case Q&A to cite report evidence |
+| `alert_payload_jsonb` | Full-fidelity original notable / alert payload |
+| `analysis_jsonb` | Validated structured analysis output |
+| `report_md_path`, `report_html_path` | Optional compatibility artifact pointers |
+| `source_sections` / snippet refs | Pointers used by Case Q&A to cite case evidence |
 | `correlation_id` | Join to journald traces |
 | `capability_snapshot` | Which profiles were active (html, spl, snow, etc.) |
 
-SQLite keeps the on‑prem footprint small and matches existing `RAG_SQLITE_PATH` patterns. SQLite FTS5 is adequate for a bounded 90-day Case Q&A proof point; Postgres or OpenSearch remain Tier 3 choices when search scale, RBAC, or archive governance outgrow the v1 footprint.
+Postgres is required for the portal/archive feature. There is no SQLite/FAISS or
+filesystem-backed fallback for portal storage. Existing filesystem reports can
+continue as human-facing compatibility output, but the portal and chatbot read
+from Postgres.
 
 **Retention changes**
 
@@ -809,24 +813,32 @@ SQLite keeps the on‑prem footprint small and matches existing `RAG_SQLITE_PATH
 | `INPUT_RETENTION_DAYS` | 2 | Unchanged—inputs need not live 90 days |
 | `CASE_RETENTION_DAYS` | *(new)* | 90 default when portal profile on |
 
-Retention job must **delete case index rows and artifacts together** to avoid orphan metadata.
+Retention job must **delete Postgres case rows, derived chunks, and optional chat
+references together** to avoid orphan metadata. Optional markdown/HTML artifacts
+follow their existing report retention unless a later technical spec ties them
+to case retention.
 
 **New components (concrete, minimal)**
 
 | Component | Role |
 |-----------|------|
-| `case_store.py` | Upsert case row + optional JSON snapshot after successful report write |
-| `case_index.py` | Read-only queries: list, get-by-id, date range, verdict filter |
-| `case_search.py` / FTS table (optional) | Retrieve bounded report snippets for read-only Case Q&A |
-| `portal_app.py` (or `deploy/systemd/notable-portal.service` + thin package) | Read-only HTTP: `GET /health`, `GET /api/cases`, `GET /api/cases/{id}`, `GET /api/cases/{id}/html` |
-| `html_generator.py` | Unchanged producer; portal serves its output |
-| `retention.py` | Extended to honor `CASE_RETENTION_DAYS` and index cleanup |
+| `case_store.py` | Upsert Postgres case row after successful validation / analysis |
+| `case_index.py` | Read-only Postgres queries: list, get-by-id, date range, verdict filter |
+| `case_search.py` | Build/query bounded pgvector chunks for read-only Case Q&A |
+| `portal_app.py` (or `deploy/systemd/notable-portal.service` + thin package) | Read-only HTTP: `GET /health`, `GET /api/cases`, `GET /api/cases/{id}`, chat endpoints |
+| `html_generator.py` / `markdown_generator.py` | Unchanged optional human artifact producers; portal does not parse them |
+| `retention.py` | Extended to honor `CASE_RETENTION_DAYS` and Postgres cleanup |
 
 **Deployment**
 
 - Separate **systemd unit** `notable-portal.service` bound to **loopback** (`127.0.0.1`) or internal VLAN; nginx/Apache with SSO terminates TLS and proxies.
-- `ReadWritePaths` for portal: `CASE_DB_PATH`, `REPORT_DIR`, warm archive path—**not** `INCOMING_DIR`.
-- New capability profile: **`analyst_portal`** (implies `html_reports`, case index, extended retention defaults).
+- Portal requires read-only database credentials for browse/detail/chat retrieval
+  plus separate limited credentials for optional bounded chat-history writes.
+  It should not have filesystem write access to `INCOMING_DIR` or action secrets.
+- New capability profile: **`analyst_portal`** enables the case archive,
+  read-only portal, Case Q&A, and global case archive retrieval. It does not
+  imply `html_reports`; add that profile separately when static HTML artifacts
+  are required.
 
 **Portal API behavior (v1)**
 
@@ -840,7 +852,7 @@ Retention job must **delete case index rows and artifacts together** to avoid or
 
 - Questions are scoped to cases retained in the portal archive, default **90 days**.
 - Retrieval runs before generation and returns a bounded source set, such as top N matching cases/snippets.
-- The LLM answer is constrained to retrieved case metadata, report snippets, and optional validated JSON snapshots.
+- The LLM answer is constrained to retrieved Postgres case metadata, canonical case JSONB, and derived case chunks.
 - Retrieval may also include approved customer context, such as SOC SOPs, escalation doctrine, Splunk index/field/macro references, detection notes, and threat-hunting playbooks. These sources help interpret notables; they are advisory context, not current-alert evidence.
 - Responses cite case IDs, report links/sections, and evidence snippets; weak retrieval returns `unknown` or no-match rather than a freeform guess. Prefer stable deep links to report sections such as `Evidence`, `Hypotheses`, `IOCs`, `TTPs`, query results, and SOP guidance rather than only linking to the whole report.
 - Supported read-only workflows include working through one specific alert, asking threat-hunting questions across recent notables, looking for recurring patterns, and generating weekly alert summaries with links back to source cases/reports.
@@ -861,15 +873,14 @@ case evidence and should cite them as advisory guidance when they materially
 influence the response.
 
 The assistant should not introduce a separate chatbot memory store or parallel
-knowledge backend. It should reuse the configured knowledge base already used by
-the `rag`, `spl_readonly`, and related capability profiles, such as
-Postgres/pgvector, SQLite/FAISS, Bedrock Knowledge Bases, or a
-deployment-approved equivalent. The assistant adds a read-only orchestration
-layer over existing retrieval surfaces:
+knowledge backend. On-prem portal retrieval uses Postgres/pgvector only:
+case-derived chunks live in dedicated case tables, while SOP/RAG/SPL grounding
+continues to use its existing Postgres-backed corpora. The assistant adds a
+read-only orchestration layer over these retrieval surfaces:
 
 ```text
 question
--> case/archive retrieval from retained case metadata, reports, snippets, or validated JSON
+-> case/archive retrieval from retained Postgres case JSONB and derived chunks
 -> advisory retrieval from the existing customer KB / RAG / SPL-grounding store
 -> bounded answer synthesis with citations
 ```
@@ -901,7 +912,7 @@ there only when a customer needs one or more of:
 
 - deterministic audit search or repeatable export results outside a
   conversational answer path
-- large-scale retrieval where SQLite/DynamoDB metadata plus bounded snippets no
+- large-scale retrieval where Postgres/DynamoDB metadata plus bounded snippets no
   longer gives fast, explainable Case Q&A sources
 - report-body search with ranking, highlighting, broader facets, and stable
   pagination across a larger corpus
@@ -977,11 +988,13 @@ Proposed profile **`analyst_portal`** (off by default):
 |----------------|---------|-----|
 | `CASE_ARCHIVE_ENABLED` | true when profile on | true when profile on |
 | `CASE_RETENTION_DAYS` | 90 | 90 |
-| `HTML_REPORT_ENABLED` | true (required for tabbed UI) | parity flag |
-| `CASE_DB_PATH` / `CASE_INDEX_TABLE` | SQLite path | DynamoDB table name |
+| `PORTAL_ENABLED` | true when profile on | true when profile on |
+| `HTML_REPORT_ENABLED` | not changed by `analyst_portal`; enable `html_reports` separately for static HTML artifacts | parity flag/profile, separate from `analyst_portal` |
+| `CASE_POSTGRES_DSN` / `CASE_INDEX_TABLE` | Postgres DSN / schema | DynamoDB table name |
 | `PORTAL_BIND_HOST` | `127.0.0.1` | n/a (API Gateway/ALB) |
 | `PORTAL_PAGE_SIZE` | 50 | 50 |
-| `CASE_QA_ENABLED` | false by default; optional Tier 2+ | false by default; optional Tier 2+ |
+| `CASE_QA_ENABLED` | true when profile on | true when profile on |
+| `CASE_QA_GLOBAL_RETRIEVAL_ENABLED` | true when profile on | true when profile on |
 | `CASE_QA_MAX_SOURCES` | bounded source count | bounded source count |
 
 Explicit env overrides remain supported; profile only sets defaults.
@@ -990,8 +1003,7 @@ Explicit env overrides remain supported; profile only sets defaults.
 
 | Related item | Relationship |
 |--------------|--------------|
-| **[Case history retrieval](#case-history-retrieval)** | Advisory *similar-case* retrieval for prompts; **case archive** is durable storage of **this product’s** analysis outputs. Converge schemas later; do not block portal v1. |
-| **`html_reports` profile** | Prerequisite UI artifact; portal serves it. |
+| **`html_reports` profile** | Optional static HTML artifact generation; add alongside `analyst_portal` only when operators want compatibility HTML files. |
 | **Read-only Case Q&A / Notable Archive Assistant** | Preferred Tier 2+ portal surface over the 90-day archive; citations required and no action/write path. |
 | **Splunk / ServiceNow writeback** | Long-term SoR for some customers; portal is a **local convenience window** over analyzer outputs, not a replacement for SIEM/ticket history. |
 | **`aws_notable_ecs_demo`** | Reference for Bedrock **interactive** UI patterns—not the browse portal; do not conflate. |
@@ -1005,10 +1017,9 @@ Explicit env overrides remain supported; profile only sets defaults.
 
 #### Open decisions before technical spec
 
-- Store **full validated JSON** vs **list metadata + html/md only** (privacy/storage tradeoff).
-- If Case Q&A is enabled, decide whether retrieval uses report-text chunks, validated JSON sections, SQLite FTS5, or a deployment-standard search service.
-- SQLite vs Postgres for on‑prem when pgvector RAG already on Postgres (single DB vs separation).
-- Whether warm tier uses filesystem archive subdirs or separate mount.
+- Finalize Postgres table shape for full-fidelity alert payloads, validated analysis JSONB, metadata columns, derived chunks, and optional chat transcripts.
+- Decide whether optional markdown/HTML compatibility artifacts follow report retention or case retention.
+- Decide whether case-derived chunks include full alert fields, selected fields, or redacted subsets.
 - AWS portal pattern: API Gateway + Lambda vs internal ALB + ECS.
 - Dynamo TTL vs nightly compaction job for index/S3 consistency on partial failures.
 
@@ -1022,11 +1033,11 @@ Reference table for roadmap bullets above; **architecture truth** stays in prose
 
 | Cross-cutting roadmap area | Primary on‑prem pattern | Primary AWS (`s3_notable_pipeline` / Step Functions parity) pattern |
 |---|---|---|
+| Gzip notable intake | `*.json.gz` / `*.txt.gz` in `INCOMING_DIR`; `MAX_DECOMPRESSED_INPUT_BYTES` (planned; [`COMPRESSED_INPUTS_PLAN.md`](../planning/COMPRESSED_INPUTS_PLAN.md)) | `incoming/*.gz` + optional S3 `ContentEncoding: gzip`; **implemented** |
 | TI adapters | systemd host egress + cache dir | Lambda egress + Dynamo/S3 TTL cache |
 | Bounded investigation | Splunk MCP/REST (implemented when enabled) | Security Lake / Athena + similar policy envelope when built |
 | RAG/runbooks | `RAG_*` paths + embeddings | KB / OpenSearch / pgvector-backed retrieve |
-| Case history | local store / corp DB abstraction | DynamoDB / Aurora / curated S3 |
-| Browse-only analyst portal (~90d) | SQLite case index + `REPORT_DIR` artifacts + read-only `notable-portal` systemd unit | DynamoDB `CaseIndex` + S3 md/html + read-only API Gateway/Lambda (or internal ALB) |
+| Read-only analyst portal (~90d) | Postgres JSONB case archive + pgvector chunks + read-only `notable-portal` systemd unit | DynamoDB/Aurora case index + S3/JSON artifacts + read-only API Gateway/Lambda (or internal ALB) |
 | Orchestration | single service loop (+ optional playbook) | EventBridge → Lambda; optional Step Functions for fan-out retries |
 | Writeback approvals | SNOW payload approvals (implemented paths) | same semantics + IAM-scoped gated AWS actions |
 | SOC SOAR playbook runs | catalog + policy gate + thin SOAR adapter on analyzer host | catalog in SSM/S3/Dynamo + gated Lambda/Step Functions branch |

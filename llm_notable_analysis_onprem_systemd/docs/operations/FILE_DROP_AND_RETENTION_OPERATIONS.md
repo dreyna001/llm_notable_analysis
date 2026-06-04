@@ -28,6 +28,14 @@ Retention settings archive and later delete older runtime artifacts.
 
 The analyzer processes files matching `*.json` or `*.txt` in `INCOMING_DIR`.
 
+**Planned (AWS parity):** single-payload gzip notables (`*.json.gz`, `*.txt.gz`,
+and `.gzip` suffix variants) with bounded decompression and the same
+`MAX_DECOMPRESSED_INPUT_BYTES` default (`1048576`) as
+`s3_notable_pipeline`. See
+[`../planning/COMPRESSED_INPUTS_PLAN.md`](../planning/COMPRESSED_INPUTS_PLAN.md).
+Until that ships, do not drop `.gz` files into `INCOMING_DIR`; they will not be
+discovered.
+
 - JSON is preferred: the file should contain a UTF-8 JSON object.
 - Text is supported as a fallback: the full file contents are treated as raw
   alert text.
@@ -93,6 +101,8 @@ patterns.
 | Area | Primary variables |
 |------|-------------------|
 | Ingest | `INGEST_MODE`, `POLL_INTERVAL` |
+| Input size (today) | `MAX_INPUT_FILE_BYTES` (on-disk cap for `.json` / `.txt`) |
+| Input size (planned gzip parity) | `MAX_INPUT_FILE_BYTES` (compressed on-disk cap), `MAX_DECOMPRESSED_INPUT_BYTES` (decompressed UTF-8 cap; AWS default `1048576`) |
 | Runtime paths | `INCOMING_DIR`, `PROCESSED_DIR`, `QUARANTINE_DIR`, `REPORT_DIR`, `ARCHIVE_DIR`, `CAPABILITY_PROFILES` |
 | Retention | `INPUT_RETENTION_DAYS`, `REPORT_RETENTION_DAYS`, `ARCHIVE_RETENTION_DAYS`, `RETENTION_RUN_INTERVAL_SECONDS` |
 | Concurrency | `CONCURRENCY_ENABLED`, `MAX_WORKERS`, `MAX_QUEUE_DEPTH` |
@@ -115,4 +125,5 @@ patterns.
 - [`../integrations/SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md`](../integrations/SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md)
 - [`RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`](RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md)
 - [`SECURITY_OPERATIONS.md`](SECURITY_OPERATIONS.md)
+- [`../planning/COMPRESSED_INPUTS_PLAN.md`](../planning/COMPRESSED_INPUTS_PLAN.md) (planned gzip intake)
 

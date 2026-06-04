@@ -317,6 +317,118 @@ class TestOnpremMainInvestigation(unittest.TestCase):
             report_text = (reports / "notable2.md").read_text(encoding="utf-8")
             self.assertNotIn("### Query Results", report_text)
 
+    def test_process_notable_writes_case_archive_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            incoming = Path(td) / "incoming"
+            processed = Path(td) / "processed"
+            quarantine = Path(td) / "quarantine"
+            reports = Path(td) / "reports"
+            for d in (incoming, processed, quarantine, reports):
+                d.mkdir(parents=True, exist_ok=True)
+
+            notable_file = incoming / "archive-case.json"
+            alert_payload = {
+                "summary": "alert",
+                "notable_id": "abc-123",
+                "search_name": "Suspicious PowerShell",
+            }
+            notable_file.write_text(json.dumps(alert_payload), encoding="utf-8")
+
+            config = Config(
+                INCOMING_DIR=incoming,
+                PROCESSED_DIR=processed,
+                QUARANTINE_DIR=quarantine,
+                REPORT_DIR=reports,
+                CASE_ARCHIVE_ENABLED=True,
+            )
+            llm_client = MagicMock()
+            llm_client.analyze_alert.return_value = self._make_base_llm_response()
+            logger = logging.getLogger("test_onprem_main_archive")
+
+            with patch(
+                "llm_notable_analysis_onprem_systemd.onprem_service.onprem_main.write_case_archive_record"
+            ) as archive_write:
+                ok = process_notable(notable_file, config, llm_client, logger)
+
+            self.assertTrue(ok)
+            archive_write.assert_called_once()
+            kwargs = archive_write.call_args.kwargs
+            self.assertEqual(kwargs["case_id"], "archive-case")
+            self.assertEqual(kwargs["finding_id"], "archive-case")
+            self.assertEqual(kwargs["source_filename"], "archive-case.json")
+            self.assertEqual(kwargs["alert_payload"], alert_payload)
+            self.assertEqual(kwargs["report_md_path"], reports / "archive-case.md")
+            self.assertIsNone(kwargs["report_html_path"])
+            self.assertTrue((processed / "archive-case.json").exists())
+
+    def test_process_notable_quarantines_when_case_archive_write_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            incoming = Path(td) / "incoming"
+            processed = Path(td) / "processed"
+            quarantine = Path(td) / "quarantine"
+            reports = Path(td) / "reports"
+            for d in (incoming, processed, quarantine, reports):
+                d.mkdir(parents=True, exist_ok=True)
+
+            notable_file = incoming / "archive-failure.json"
+            notable_file.write_text(json.dumps({"summary": "alert"}), encoding="utf-8")
+
+            config = Config(
+                INCOMING_DIR=incoming,
+                PROCESSED_DIR=processed,
+                QUARANTINE_DIR=quarantine,
+                REPORT_DIR=reports,
+                CASE_ARCHIVE_ENABLED=True,
+            )
+            llm_client = MagicMock()
+            llm_client.analyze_alert.return_value = self._make_base_llm_response()
+            logger = logging.getLogger("test_onprem_main_archive_failure")
+
+            with patch(
+                "llm_notable_analysis_onprem_systemd.onprem_service.onprem_main.write_case_archive_record",
+                side_effect=RuntimeError("postgres unavailable"),
+            ):
+                ok = process_notable(notable_file, config, llm_client, logger)
+
+            self.assertFalse(ok)
+            self.assertFalse((processed / "archive-failure.json").exists())
+            self.assertTrue((quarantine / "archive-failure.json").exists())
+
+    def test_nonsdk_process_notable_writes_case_archive_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            incoming = Path(td) / "incoming"
+            processed = Path(td) / "processed"
+            quarantine = Path(td) / "quarantine"
+            reports = Path(td) / "reports"
+            for d in (incoming, processed, quarantine, reports):
+                d.mkdir(parents=True, exist_ok=True)
+
+            notable_file = incoming / "archive-case-nonsdk.json"
+            notable_file.write_text(json.dumps({"summary": "alert"}), encoding="utf-8")
+
+            config = Config(
+                INCOMING_DIR=incoming,
+                PROCESSED_DIR=processed,
+                QUARANTINE_DIR=quarantine,
+                REPORT_DIR=reports,
+                CASE_ARCHIVE_ENABLED=True,
+            )
+            llm_client = MagicMock()
+            llm_client.analyze_alert.return_value = self._make_base_llm_response()
+            logger = logging.getLogger("test_onprem_main_nonsdk_archive")
+
+            with patch(
+                "llm_notable_analysis_onprem_systemd.onprem_service.onprem_main_nonsdk.write_case_archive_record"
+            ) as archive_write:
+                ok = process_notable_nonsdk(notable_file, config, llm_client, logger)
+
+            self.assertTrue(ok)
+            archive_write.assert_called_once()
+            kwargs = archive_write.call_args.kwargs
+            self.assertEqual(kwargs["case_id"], "archive-case-nonsdk")
+            self.assertEqual(kwargs["source_filename"], "archive-case-nonsdk.json")
+            self.assertTrue((processed / "archive-case-nonsdk.json").exists())
+
     def test_process_notable_writes_html_report_when_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             incoming = Path(td) / "incoming"

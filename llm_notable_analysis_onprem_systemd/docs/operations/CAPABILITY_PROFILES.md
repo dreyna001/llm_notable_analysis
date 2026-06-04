@@ -20,6 +20,7 @@ takes precedence; remove the profile to turn that capability off.
 | `elastic_readonly` | Elasticsearch Query DSL generation and bounded read-only `_search` execution. | Read-only external queries. |
 | `ticket_draft` | ServiceNow incident draft payloads in reports. | Local draft only; no ServiceNow POST. |
 | `action_gated` | Splunk notable writeback, ServiceNow draft/create, required ServiceNow approval, and side-effect idempotency. | External write/action path. |
+| `analyst_portal` | Postgres case archive writes, read-only portal service, Case Q&A, and global case archive retrieval. | Local case persistence and read-only archive retrieval. |
 
 Profiles are additive. `core` is automatically included when omitted.
 Profiles may be separated with commas or semicolons.
@@ -31,6 +32,7 @@ CAPABILITY_PROFILES=core,rag,spl_readonly
 CAPABILITY_PROFILES=core,rag,elastic_readonly
 CAPABILITY_PROFILES=core,ticket_draft
 CAPABILITY_PROFILES=core,action_gated
+CAPABILITY_PROFILES=core,analyst_portal
 ```
 
 ## Operator Workflow
@@ -162,6 +164,32 @@ Primary follow-up values:
 - `SERVICENOW_API_TOKEN`
 - `SERVICENOW_ASSIGNMENT_GROUP`
 - `SERVICENOW_TIMEOUT_SECONDS`
+
+### `analyst_portal`
+
+Use when operators are ready to persist validated cases to Postgres and expose
+the read-only analyst portal and archive-backed Case Q&A workflow.
+
+This profile enables:
+
+- `CASE_ARCHIVE_ENABLED`
+- `PORTAL_ENABLED`
+- `CASE_QA_ENABLED`
+- `CASE_QA_GLOBAL_RETRIEVAL_ENABLED`
+
+It does not enable `HTML_REPORT_ENABLED`. Add the `html_reports` profile
+separately when static HTML artifacts are required.
+
+Primary follow-up values:
+
+- `CASE_POSTGRES_DSN`
+- `CASE_POSTGRES_SCHEMA`
+- `CASE_RETENTION_DAYS`
+- `PORTAL_BIND_HOST`
+- `PORTAL_PAGE_SIZE`
+- `CASE_QA_MAX_RETRIEVED_CASES`
+- `CASE_QA_MAX_CHUNKS_PER_LANE`
+- `CASE_QA_MAX_TOTAL_CHUNKS`
 
 ## Advanced Overrides
 
