@@ -33,6 +33,7 @@ from .markdown_generator import generate_markdown_report
 from .html_generator import generate_html_report
 from .query_result_enrichment import enrich_analysis_with_query_results
 from .case_store import write_case_archive_record
+from .case_search import mark_case_retrieval_status, store_case_chunks
 from .servicenow import (
     build_servicenow_incident_draft,
     create_servicenow_incident,
@@ -276,7 +277,7 @@ def process_notable(
             logger.info("Wrote HTML report: %s", html_report_path)
 
         if bool(getattr(config, "CASE_ARCHIVE_ENABLED", False)):
-            write_case_archive_record(
+            case_record = write_case_archive_record(
                 config=config,
                 case_id=notable_id,
                 finding_id=finding_id,
@@ -286,7 +287,22 @@ def process_notable(
                 report_md_path=report_path,
                 report_html_path=html_report_path,
             )
+            try:
+                chunk_count = store_case_chunks(record=case_record, config=config)
+            except Exception:
+                try:
+                    mark_case_retrieval_status(
+                        config=config,
+                        case_id=notable_id,
+                        status="failed",
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to mark case retrieval failure: %s", notable_id
+                    )
+                raise
             logger.info("Archived case to Postgres: %s", notable_id)
+            logger.info("Stored %s case retrieval chunks: %s", chunk_count, notable_id)
 
         # Optional: Update Splunk notable via REST API
         if config.SPLUNK_SINK_ENABLED:

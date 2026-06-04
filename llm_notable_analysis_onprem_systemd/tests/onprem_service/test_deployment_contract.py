@@ -237,6 +237,10 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("CREATE TABLE IF NOT EXISTS notable_cases.chat_messages", schema_text)
         self.assertIn("retrieval_status IN ('pending', 'ready', 'failed', 'not_indexed')", schema_text)
         self.assertIn("embedding vector(768)", schema_text)
+        self.assertIn("search_vector tsvector GENERATED ALWAYS AS", schema_text)
+        self.assertIn("case_chunks_search_vector_gin_idx", schema_text)
+        self.assertIn("case_chunks_embedding_hnsw_idx", schema_text)
+        self.assertIn("cases_processed_at_case_id_idx", schema_text)
 
     def test_postgres_rag_smoke_uses_disposable_pgvector_container(self) -> None:
         """Live RAG smoke should validate pgvector without host psql."""

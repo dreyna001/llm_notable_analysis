@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS notable_cases.cases (
 CREATE INDEX IF NOT EXISTS cases_processed_at_idx
     ON notable_cases.cases (processed_at DESC);
 
+CREATE INDEX IF NOT EXISTS cases_processed_at_case_id_idx
+    ON notable_cases.cases (processed_at DESC, case_id ASC);
+
 CREATE INDEX IF NOT EXISTS cases_expires_at_idx
     ON notable_cases.cases (expires_at);
 
@@ -73,6 +76,9 @@ CREATE TABLE IF NOT EXISTS notable_cases.case_chunks (
     field_path text NOT NULL,
     text text NOT NULL,
     embedding vector(768),
+    search_vector tsvector GENERATED ALWAYS AS (
+        to_tsvector('english'::regconfig, section || ' ' || field_path || ' ' || text)
+    ) STORED,
     metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
     chunk_schema_version integer NOT NULL,
     embedding_model text NOT NULL,
@@ -87,6 +93,12 @@ CREATE INDEX IF NOT EXISTS case_chunks_case_id_idx
 
 CREATE INDEX IF NOT EXISTS case_chunks_section_idx
     ON notable_cases.case_chunks (section);
+
+CREATE INDEX IF NOT EXISTS case_chunks_search_vector_gin_idx
+    ON notable_cases.case_chunks USING gin (search_vector);
+
+CREATE INDEX IF NOT EXISTS case_chunks_embedding_hnsw_idx
+    ON notable_cases.case_chunks USING hnsw (embedding vector_cosine_ops);
 
 CREATE TABLE IF NOT EXISTS notable_cases.chat_sessions (
     session_id text PRIMARY KEY,

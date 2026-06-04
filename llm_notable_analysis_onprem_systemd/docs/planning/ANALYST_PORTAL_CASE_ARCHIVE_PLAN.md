@@ -481,6 +481,23 @@ embedding model change, run a manual operator script that deletes old chunks and
 re-makes them from the saved `cases` rows. This should be scripted and
 repeatable, but not automatic in v1.
 
+Diff 2 rebuild command examples:
+
+```bash
+python scripts/rebuild_case_chunks.py --case-id CASE-123 --dry-run
+python scripts/rebuild_case_chunks.py --case-id CASE-123
+python scripts/rebuild_case_chunks.py --all --dry-run --batch-size 100
+python scripts/rebuild_case_chunks.py --all --batch-size 100
+```
+
+Use `--config-env /etc/notable-analyzer/config.env` when running outside the
+systemd environment. Keep batch size conservative until database and embedding
+latency are measured.
+
+The case chunk migration must include the derived `search_vector`, a GIN index
+for lexical retrieval, a pgvector HNSW index for semantic retrieval, and a
+`cases(processed_at DESC, case_id ASC)` index for paged rebuild scans.
+
 ## FastAPI Portal Shape
 
 FastAPI is acceptable for the portal service.

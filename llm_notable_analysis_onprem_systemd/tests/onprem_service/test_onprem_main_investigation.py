@@ -347,11 +347,16 @@ class TestOnpremMainInvestigation(unittest.TestCase):
 
             with patch(
                 "llm_notable_analysis_onprem_systemd.onprem_service.onprem_main.write_case_archive_record"
-            ) as archive_write:
+            ) as archive_write, patch(
+                "llm_notable_analysis_onprem_systemd.onprem_service.onprem_main.store_case_chunks"
+            ) as store_chunks:
+                archive_write.return_value = "case-record"
+                store_chunks.return_value = 3
                 ok = process_notable(notable_file, config, llm_client, logger)
 
             self.assertTrue(ok)
             archive_write.assert_called_once()
+            store_chunks.assert_called_once_with(record="case-record", config=config)
             kwargs = archive_write.call_args.kwargs
             self.assertEqual(kwargs["case_id"], "archive-case")
             self.assertEqual(kwargs["finding_id"], "archive-case")
@@ -387,12 +392,61 @@ class TestOnpremMainInvestigation(unittest.TestCase):
             with patch(
                 "llm_notable_analysis_onprem_systemd.onprem_service.onprem_main.write_case_archive_record",
                 side_effect=RuntimeError("postgres unavailable"),
-            ):
+            ) as archive_write, patch(
+                "llm_notable_analysis_onprem_systemd.onprem_service.onprem_main.store_case_chunks"
+            ) as store_chunks:
                 ok = process_notable(notable_file, config, llm_client, logger)
 
             self.assertFalse(ok)
+            archive_write.assert_called_once()
+            store_chunks.assert_not_called()
             self.assertFalse((processed / "archive-failure.json").exists())
             self.assertTrue((quarantine / "archive-failure.json").exists())
+
+    def test_process_notable_marks_failed_when_case_chunk_write_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            incoming = Path(td) / "incoming"
+            processed = Path(td) / "processed"
+            quarantine = Path(td) / "quarantine"
+            reports = Path(td) / "reports"
+            for d in (incoming, processed, quarantine, reports):
+                d.mkdir(parents=True, exist_ok=True)
+
+            notable_file = incoming / "archive-chunk-failure.json"
+            notable_file.write_text(json.dumps({"summary": "alert"}), encoding="utf-8")
+
+            config = Config(
+                INCOMING_DIR=incoming,
+                PROCESSED_DIR=processed,
+                QUARANTINE_DIR=quarantine,
+                REPORT_DIR=reports,
+                CASE_ARCHIVE_ENABLED=True,
+            )
+            llm_client = MagicMock()
+            llm_client.analyze_alert.return_value = self._make_base_llm_response()
+            logger = logging.getLogger("test_onprem_main_archive_chunk_failure")
+
+            with patch(
+                "llm_notable_analysis_onprem_systemd.onprem_service.onprem_main.write_case_archive_record",
+                return_value="case-record",
+            ) as archive_write, patch(
+                "llm_notable_analysis_onprem_systemd.onprem_service.onprem_main.store_case_chunks",
+                side_effect=RuntimeError("embedding failed"),
+            ) as store_chunks, patch(
+                "llm_notable_analysis_onprem_systemd.onprem_service.onprem_main.mark_case_retrieval_status"
+            ) as mark_status:
+                ok = process_notable(notable_file, config, llm_client, logger)
+
+            self.assertFalse(ok)
+            archive_write.assert_called_once()
+            store_chunks.assert_called_once_with(record="case-record", config=config)
+            mark_status.assert_called_once_with(
+                config=config,
+                case_id="archive-chunk-failure",
+                status="failed",
+            )
+            self.assertFalse((processed / "archive-chunk-failure.json").exists())
+            self.assertTrue((quarantine / "archive-chunk-failure.json").exists())
 
     def test_nonsdk_process_notable_writes_case_archive_when_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -419,11 +473,16 @@ class TestOnpremMainInvestigation(unittest.TestCase):
 
             with patch(
                 "llm_notable_analysis_onprem_systemd.onprem_service.onprem_main_nonsdk.write_case_archive_record"
-            ) as archive_write:
+            ) as archive_write, patch(
+                "llm_notable_analysis_onprem_systemd.onprem_service.onprem_main_nonsdk.store_case_chunks"
+            ) as store_chunks:
+                archive_write.return_value = "case-record"
+                store_chunks.return_value = 3
                 ok = process_notable_nonsdk(notable_file, config, llm_client, logger)
 
             self.assertTrue(ok)
             archive_write.assert_called_once()
+            store_chunks.assert_called_once_with(record="case-record", config=config)
             kwargs = archive_write.call_args.kwargs
             self.assertEqual(kwargs["case_id"], "archive-case-nonsdk")
             self.assertEqual(kwargs["source_filename"], "archive-case-nonsdk.json")

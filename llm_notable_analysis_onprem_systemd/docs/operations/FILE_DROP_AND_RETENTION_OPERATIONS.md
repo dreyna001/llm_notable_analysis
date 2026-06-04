@@ -9,7 +9,9 @@ The analyzer watches an incoming directory, processes supported files, writes
 reports, then moves inputs to processed or quarantine paths. Reports are
 markdown by default; when the `html_reports` profile is selected, a static
 `.html` dashboard is written next to the `.md` report in `REPORT_DIR`.
-Retention settings archive and later delete older runtime artifacts.
+Retention settings archive and later delete older runtime artifacts. When the
+`analyst_portal` profile enables the Postgres case archive, retention also
+deletes expired case rows and derived chunks.
 
 ## Recommended Starting Posture
 
@@ -80,11 +82,15 @@ patterns.
 ### How long should evidence and reports stay?
 
 **Settings:** `INPUT_RETENTION_DAYS`, `REPORT_RETENTION_DAYS`,
-`ARCHIVE_RETENTION_DAYS`, `RETENTION_RUN_INTERVAL_SECONDS`
+`ARCHIVE_RETENTION_DAYS`, `CASE_RETENTION_DAYS`,
+`RETENTION_RUN_INTERVAL_SECONDS`
 
 - Align with incident evidence, privacy, and storage policies.
 - Keep quarantine long enough for operator review.
 - Make sure archive delete timing is acceptable before production.
+- With `analyst_portal`, `CASE_RETENTION_DAYS` controls Postgres case row
+  expiry; derived `case_chunks` rows are deleted by database cascade when the
+  case row expires.
 - Document who owns exports if reports must be preserved elsewhere.
 
 ### Should processing be concurrent?
@@ -104,7 +110,7 @@ patterns.
 | Input size (today) | `MAX_INPUT_FILE_BYTES` (on-disk cap for `.json` / `.txt`) |
 | Input size (planned gzip parity) | `MAX_INPUT_FILE_BYTES` (compressed on-disk cap), `MAX_DECOMPRESSED_INPUT_BYTES` (decompressed UTF-8 cap; AWS default `1048576`) |
 | Runtime paths | `INCOMING_DIR`, `PROCESSED_DIR`, `QUARANTINE_DIR`, `REPORT_DIR`, `ARCHIVE_DIR`, `CAPABILITY_PROFILES` |
-| Retention | `INPUT_RETENTION_DAYS`, `REPORT_RETENTION_DAYS`, `ARCHIVE_RETENTION_DAYS`, `RETENTION_RUN_INTERVAL_SECONDS` |
+| Retention | `INPUT_RETENTION_DAYS`, `REPORT_RETENTION_DAYS`, `ARCHIVE_RETENTION_DAYS`, `CASE_RETENTION_DAYS`, `RETENTION_RUN_INTERVAL_SECONDS` |
 | Concurrency | `CONCURRENCY_ENABLED`, `MAX_WORKERS`, `MAX_QUEUE_DEPTH` |
 | Payload correlation | Filename stem, `finding_id`, `event_id`, `notable_id` in incoming JSON |
 

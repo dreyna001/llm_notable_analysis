@@ -5,6 +5,9 @@ Implements two-stage retention:
 2) Delete files from archive after N days in archive.
 """
 
+# Optional database dependency is imported lazily for archive-enabled installs.
+# pylint: disable=import-error,broad-exception-caught
+
 from __future__ import annotations
 
 import logging
@@ -12,12 +15,15 @@ import os
 import shutil
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
+from .case_store import quote_identifier
 from .config import Config
 
 logger = logging.getLogger(__name__)
+ConnectionFactory = Callable[[str], Any]
 
 
 @dataclass(frozen=True)
@@ -169,7 +175,70 @@ def delete_older_than_days(
     return RetentionStats(moved=moved, deleted=deleted, errors=errors)
 
 
-def run_retention(config: Config) -> RetentionStats:
+def _default_connect(dsn: str) -> Any:
+    """Open a psycopg connection for case retention cleanup."""
+    try:
+        import psycopg  # type: ignore
+    except Exception as exc:  # pragma: no cover - import guard
+        raise RuntimeError("psycopg is unavailable in the runtime.") from exc
+    return psycopg.connect(dsn, connect_timeout=5)
+
+
+def _set_statement_timeout(conn: Any, timeout_ms: int) -> None:
+    """Set a transaction-local Postgres statement timeout."""
+    if int(timeout_ms) > 0:
+        conn.execute(
+            "SELECT set_config('statement_timeout', %s, true)",
+            (f"{int(timeout_ms)}ms",),
+        )
+
+
+def _fetchall(result: Any) -> list[Any]:
+    """Read rows from a cursor-like result."""
+    fetchall = getattr(result, "fetchall", None)
+    if callable(fetchall):
+        return list(fetchall())
+    return []
+
+
+def build_delete_expired_cases_sql(schema: str) -> str:
+    """Build SQL that deletes expired cases and cascades derived chunks."""
+    return (
+        f"DELETE FROM {quote_identifier(schema, 'schema')}.cases "
+        "WHERE expires_at < %s RETURNING case_id"
+    )
+
+
+def delete_expired_cases(
+    *,
+    config: Config,
+    now: datetime | None = None,
+    connect: ConnectionFactory | None = None,
+) -> RetentionStats:
+    """Delete expired Postgres cases, relying on ON DELETE CASCADE for chunks."""
+    if not bool(getattr(config, "CASE_ARCHIVE_ENABLED", False)):
+        return RetentionStats()
+    cutoff = now or datetime.now(timezone.utc)
+    if cutoff.tzinfo is None:
+        cutoff = cutoff.replace(tzinfo=timezone.utc)
+
+    connect_fn = connect or _default_connect
+    sql = build_delete_expired_cases_sql(config.CASE_POSTGRES_SCHEMA)
+    try:
+        with connect_fn(config.CASE_POSTGRES_DSN) as conn:
+            _set_statement_timeout(conn, config.CASE_POSTGRES_STATEMENT_TIMEOUT_MS)
+            rows = _fetchall(conn.execute(sql, (cutoff,)))
+            return RetentionStats(deleted=len(rows))
+    except Exception:
+        logger.exception("Failed to delete expired case archive rows")
+        return RetentionStats(errors=1)
+
+
+def run_retention(
+    config: Config,
+    *,
+    connect: ConnectionFactory | None = None,
+) -> RetentionStats:
     """Run retention housekeeping for processed/quarantine/reports + archive delete.
 
     Stage 1: Move old files from live dirs to archive subdirs.
@@ -224,8 +293,13 @@ def run_retention(config: Config) -> RetentionStats:
         config.SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS,
         now_epoch_seconds=now,
     )
+    s2e = delete_expired_cases(
+        config=config,
+        now=datetime.fromtimestamp(now, tz=timezone.utc),
+        connect=connect,
+    )
 
-    for s in (s1a, s1b, s1c, s2a, s2b, s2c, s2d):
+    for s in (s1a, s1b, s1c, s2a, s2b, s2c, s2d, s2e):
         total_moved += s.moved
         total_deleted += s.deleted
         total_errors += s.errors
