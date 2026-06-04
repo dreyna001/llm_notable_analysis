@@ -238,6 +238,57 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("SyslogIdentifier=notable-portal", service_text)
         self.assertIn("User=notable-analyzer", service_text)
 
+    def test_portal_nginx_example_documents_auth_tls_and_loopback_proxy(self) -> None:
+        """Nginx example should keep portal behind TLS/auth and loopback Uvicorn."""
+        nginx_text = (
+            PROJECT_ROOT / "deploy" / "nginx" / "notable-portal.conf"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("server_name notable-portal.internal.example.com", nginx_text)
+        self.assertIn("ssl_certificate", nginx_text)
+        self.assertIn("auth_basic", nginx_text)
+        self.assertIn("client_max_body_size 1m", nginx_text)
+        self.assertIn("proxy_pass http://127.0.0.1:8080", nginx_text)
+        self.assertIn("proxy_set_header X-Forwarded-User $remote_user", nginx_text)
+
+    def test_analyst_portal_operations_doc_covers_delivery_contract(self) -> None:
+        """Portal operations doc should cover enablement, maintenance, and safety."""
+        doc_text = (
+            PROJECT_ROOT / "docs" / "operations" / "ANALYST_PORTAL_OPERATIONS.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("CAPABILITY_PROFILES=core,analyst_portal", doc_text)
+        self.assertIn("notable-portal.service", doc_text)
+        self.assertIn("deploy/nginx/notable-portal.conf", doc_text)
+        self.assertIn("GET /health", doc_text)
+        self.assertIn("GET /ready", doc_text)
+        self.assertIn("scripts/rebuild_case_chunks.py", doc_text)
+        self.assertIn("scripts/backfill_case_archive.py", doc_text)
+        self.assertIn("answer_status=refused", doc_text)
+        self.assertIn("all retained cases", doc_text)
+
+    def test_docs_indexes_link_analyst_portal_operations(self) -> None:
+        """Docs indexes should expose the shipped portal operations guide."""
+        docs_index = (PROJECT_ROOT / "docs" / "README.md").read_text(encoding="utf-8")
+        ops_index = (
+            PROJECT_ROOT / "docs" / "operations" / "README.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("ANALYST_PORTAL_OPERATIONS.md", docs_index)
+        self.assertIn("ANALYST_PORTAL_OPERATIONS.md", ops_index)
+
+    def test_backfill_script_documents_dry_run_and_legacy_summary(self) -> None:
+        """Backfill script should expose dry-run and legacy-summary behavior."""
+        script_text = (
+            PROJECT_ROOT / "scripts" / "backfill_case_archive.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("build_backfill_case_id", script_text)
+        self.assertIn("backfill:<sha256-prefix>", script_text)
+        self.assertIn("legacy_summary", script_text)
+        self.assertIn("markdown_only", script_text)
+        self.assertIn("--dry-run", script_text)
+
     def test_pyproject_includes_portal_runtime_dependencies(self) -> None:
         """Portal diff should declare FastAPI and Uvicorn dependencies."""
         pyproject_text = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")

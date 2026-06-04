@@ -8,7 +8,7 @@ Use this page to pick **where to start** without reading the whole root [`README
 
 2. **[End-to-end behavior](delivery_package/EXECUTIVE_ONPREM_WORKFLOW.md)** and **[end-to-end diagrams](delivery_package/end_to_end_diagrams/END_TO_END_DIAGRAMS.md)** — File-drop flow, optional RAG (advisory context), SPL generation, read-only Splunk execution, Splunk writeback, ServiceNow draft/create and approval gates. Read these for what the service does.
 
-3. **[Operations guide index](operations/README.md)** — Customer-facing tuning guides organized by area: SPL, KB, RAG, LLM inference, file-drop/retention, Splunk writeback, ServiceNow, MITRE, security, install, prestage, and recovery.
+3. **[Operations guide index](operations/README.md)** — Customer-facing tuning guides organized by area: analyst portal, SPL, KB, RAG, LLM inference, file-drop/retention, Splunk writeback, ServiceNow, MITRE, security, install, prestage, and recovery.
 
 4. **[Installation](operations/INSTALL.md)** — Bring-up with `scripts/install.sh`, prerequisites, manual follow-ups.
 
@@ -40,6 +40,7 @@ Optional deep dives:
 |-------|-------------|
 | Executive on-prem build summary | [EXECUTIVE_ONPREM_BUILD_WRITEUP.md](delivery_package/EXECUTIVE_ONPREM_BUILD_WRITEUP.md) |
 | Capability profiles | [CAPABILITY_PROFILES.md](operations/CAPABILITY_PROFILES.md), [`config.env.example`](../config.env.example) (`CAPABILITY_PROFILES`) |
+| Analyst portal operations | [ANALYST_PORTAL_OPERATIONS.md](operations/ANALYST_PORTAL_OPERATIONS.md), [`notable-portal.service`](../deploy/systemd/notable-portal.service), [`notable-portal.conf`](../deploy/nginx/notable-portal.conf) |
 | Analyst portal technical spec | [analyst_portal_case_archive_technical_spec.md](technical_specs/analyst_portal_case_archive_technical_spec.md) |
 | Planned analyst portal and case archive | [ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md](planning/ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md) |
 | Planned analyst portal networking | [ANALYST_PORTAL_NETWORKING_PLAN.md](planning/ANALYST_PORTAL_NETWORKING_PLAN.md) |
