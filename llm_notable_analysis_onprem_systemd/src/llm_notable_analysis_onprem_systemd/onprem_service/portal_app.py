@@ -6,11 +6,13 @@
 from __future__ import annotations
 
 import html
+import ipaddress
 import logging
+import secrets
 from datetime import datetime, timezone
 from typing import Any
 
-from .case_chat import SynthesizeFn, answer_case_chat
+from .case_chat import SynthesizeFn, answer_case_chat, check_case_chat_ready
 from .case_index import (
     CaseListFilters,
     CaseSummary,
@@ -18,7 +20,7 @@ from .case_index import (
     get_case,
     list_cases,
 )
-from .case_store import CaseArchiveRecord
+from .case_store import CaseArchiveRecord, quote_identifier
 from .config import Config, load_config
 
 logger = logging.getLogger(__name__)
@@ -59,19 +61,65 @@ def _fetchone(result: Any) -> Any:
     return None
 
 
-def _requires_trusted_user_header(config: Config) -> bool:
-    return str(config.PORTAL_BIND_HOST or "").strip() != "127.0.0.1"
+def _is_loopback_bind_host(host: str) -> bool:
+    text = str(host or "").strip().lower()
+    if text == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(text).is_loopback
+    except ValueError:
+        return False
+
+
+def _portal_header_name(value: str, setting_name: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError(f"{setting_name} must be non-empty when PORTAL_ENABLED=true.")
+    return text
+
+
+def _validate_portal_security_config(config: Config) -> None:
+    """Fail closed for portal deployments that could trust spoofed proxy headers."""
+    _portal_header_name(config.PORTAL_TRUSTED_USER_HEADER, "PORTAL_TRUSTED_USER_HEADER")
+    bind_host = str(config.PORTAL_BIND_HOST or "").strip()
+    if _is_loopback_bind_host(bind_host):
+        return
+    if not bool(config.PORTAL_ALLOW_NON_LOOPBACK_BIND):
+        raise ValueError(
+            "PORTAL_BIND_HOST must be loopback unless "
+            "PORTAL_ALLOW_NON_LOOPBACK_BIND=true is explicitly configured."
+        )
+    _portal_header_name(config.PORTAL_PROXY_SECRET_HEADER, "PORTAL_PROXY_SECRET_HEADER")
+    if not str(config.PORTAL_PROXY_SECRET or "").strip():
+        raise ValueError(
+            "PORTAL_PROXY_SECRET is required when PORTAL_ALLOW_NON_LOOPBACK_BIND=true."
+        )
 
 
 def _trusted_user_from_request(request: Any, config: Config) -> str | None:
-    header = str(config.PORTAL_TRUSTED_USER_HEADER or "X-Forwarded-User").strip()
-    if not header:
-        return None
+    header = _portal_header_name(
+        config.PORTAL_TRUSTED_USER_HEADER,
+        "PORTAL_TRUSTED_USER_HEADER",
+    )
     value = request.headers.get(header)
     if value is None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _proxy_secret_matches(request: Any, config: Config) -> bool:
+    expected = str(config.PORTAL_PROXY_SECRET or "").strip()
+    if not expected:
+        return True
+    header = _portal_header_name(
+        config.PORTAL_PROXY_SECRET_HEADER,
+        "PORTAL_PROXY_SECRET_HEADER",
+    )
+    supplied = request.headers.get(header)
+    if supplied is None:
+        return False
+    return secrets.compare_digest(str(supplied).strip(), expected)
 
 
 def parse_iso8601_timestamp(value: str, field_name: str) -> datetime:
@@ -100,21 +148,36 @@ def check_case_archive_ready(
     config: Config,
     connect: ConnectionFactory | None = None,
 ) -> bool:
-    """Return True when required case archive tables exist and are reachable."""
+    """Return True when required case archive tables are readable by portal traffic."""
     schema = str(config.CASE_POSTGRES_SCHEMA or "").strip()
     if not schema:
         return False
-    cases_table = f"{schema}.cases"
-    chunks_table = f"{schema}.case_chunks"
-    sql = "SELECT to_regclass(%s) IS NOT NULL, to_regclass(%s) IS NOT NULL"
     connect_fn = connect or _default_connect
     try:
+        list_cases(
+            config=config,
+            filters=CaseListFilters(limit=1),
+            connect=connect_fn,
+        )
+        chunks_table = f"{quote_identifier(schema, 'schema')}.case_chunks"
+        sql = f"""
+SELECT
+    chunk_id,
+    case_id,
+    source_lane,
+    section,
+    field_path,
+    text,
+    metadata,
+    search_vector,
+    embedding
+FROM {chunks_table}
+LIMIT 1
+""".strip()
         with connect_fn(config.CASE_POSTGRES_DSN) as conn:
             _set_statement_timeout(conn, config.CASE_POSTGRES_STATEMENT_TIMEOUT_MS)
-            row = _fetchone(conn.execute(sql, (cases_table, chunks_table)))
-            if row is None:
-                return False
-            return bool(row[0]) and bool(row[1])
+            _fetchone(conn.execute(sql))
+        return True
     except Exception:
         logger.exception("Case archive readiness check failed")
         return False
@@ -222,9 +285,16 @@ def build_portal_app(
 ) -> Any:
     """Build the read-only analyst portal FastAPI application."""
     FastAPI, HTTPException, Request, HTMLResponse, JSONResponse = _lazy_import_fastapi()
+    _validate_portal_security_config(config)
     connect_fn = connect or _default_connect
-    require_header = _requires_trusted_user_header(config)
-    trusted_header = str(config.PORTAL_TRUSTED_USER_HEADER or "X-Forwarded-User").strip()
+    trusted_header = _portal_header_name(
+        config.PORTAL_TRUSTED_USER_HEADER,
+        "PORTAL_TRUSTED_USER_HEADER",
+    )
+    proxy_secret_header = _portal_header_name(
+        config.PORTAL_PROXY_SECRET_HEADER,
+        "PORTAL_PROXY_SECRET_HEADER",
+    )
 
     app = FastAPI(
         title="Notable Analyst Portal",
@@ -234,12 +304,43 @@ def build_portal_app(
     app.state.config = config
     app.state.connect = connect_fn
 
+    def fetch_case_detail(case_id: str) -> tuple[str, CaseArchiveRecord]:
+        normalized = str(case_id or "").strip()
+        if not normalized:
+            raise HTTPException(status_code=400, detail="case_id must be non-empty.")
+        try:
+            record = get_case(
+                config=config,
+                case_id=normalized,
+                connect=connect_fn,
+            )
+        except Exception as exc:
+            logger.exception("Failed to fetch case %s", normalized)
+            raise HTTPException(
+                status_code=503,
+                detail="Case archive unavailable.",
+            ) from exc
+        if record is None:
+            raise HTTPException(status_code=404, detail="Case not found.")
+        return normalized, record
+
     @app.middleware("http")
     async def trusted_user_middleware(request: Request, call_next):
         path = request.url.path
         if path in _PUBLIC_PATHS:
             return await call_next(request)
-        if require_header and not _trusted_user_from_request(request, config):
+        if not _proxy_secret_matches(request, config):
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "detail": (
+                        f"Missing or invalid proxy secret header {proxy_secret_header!r}. "
+                        "Requests must come through the trusted reverse proxy."
+                    )
+                },
+            )
+        trusted_user = _trusted_user_from_request(request, config)
+        if trusted_user is None:
             return JSONResponse(
                 status_code=401,
                 content={
@@ -249,7 +350,7 @@ def build_portal_app(
                     )
                 },
             )
-        request.state.trusted_user = _trusted_user_from_request(request, config)
+        request.state.trusted_user = trusted_user
         return await call_next(request)
 
     @app.get("/health")
@@ -258,7 +359,13 @@ def build_portal_app(
 
     @app.get("/ready")
     async def ready() -> Any:
-        if check_case_archive_ready(config=config, connect=connect_fn):
+        archive_ready = check_case_archive_ready(config=config, connect=connect_fn)
+        chat_ready = check_case_chat_ready(
+            config=config,
+            connect=connect_fn,
+            embedding_model=chat_embedding_model,
+        )
+        if archive_ready and chat_ready:
             return {"status": "ready"}
         return JSONResponse(status_code=503, content={"status": "not_ready"})
 
@@ -285,34 +392,27 @@ def build_portal_app(
 
         page_size = _bounded_page_size(config, filters.limit)
         try:
-            items = list_cases(config=config, filters=filters, connect=connect_fn)
+            items = list_cases(
+                config=config,
+                filters=filters,
+                connect=connect_fn,
+                fetch_extra=True,
+            )
         except Exception as exc:
             logger.exception("Failed to list cases")
             raise HTTPException(status_code=503, detail="Case archive unavailable.") from exc
+        response_items = items[:page_size]
 
         return {
-            "items": [_summary_item(item) for item in items],
+            "items": [_summary_item(item) for item in response_items],
             "limit": page_size,
             "offset": filters.offset,
-            "has_more": len(items) == page_size,
+            "has_more": len(items) > page_size,
         }
 
     @app.get("/api/cases/{case_id}")
     async def api_get_case(case_id: str) -> dict[str, Any]:
-        normalized = str(case_id or "").strip()
-        if not normalized:
-            raise HTTPException(status_code=400, detail="case_id must be non-empty.")
-        try:
-            record = get_case(
-                config=config,
-                case_id=normalized,
-                connect=connect_fn,
-            )
-        except Exception as exc:
-            logger.exception("Failed to fetch case %s", normalized)
-            raise HTTPException(status_code=503, detail="Case archive unavailable.") from exc
-        if record is None:
-            raise HTTPException(status_code=404, detail="Case not found.")
+        _normalized, record = fetch_case_detail(case_id)
         return _detail_payload(record)
 
     @app.post("/api/chat")
@@ -336,7 +436,9 @@ def build_portal_app(
     async def portal_home(request: Request) -> str:
         user = getattr(request.state, "trusted_user", None)
         user_line = (
-            f"<p>Signed in as: {html.escape(user)}</p>" if user else "<p>Local portal view</p>"
+            f"<p>Signed in as: {html.escape(user)}</p>"
+            if user
+            else "<p>Local portal view</p>"
         )
         return f"""<!DOCTYPE html>
 <html lang="en">
@@ -394,7 +496,11 @@ def build_portal_app(
                 f"<td>{html.escape(item.retrieval_status)}</td>"
                 "</tr>"
             )
-        body_rows = "\n".join(rows) if rows else "<tr><td colspan=\"5\">No cases found.</td></tr>"
+        body_rows = (
+            "\n".join(rows)
+            if rows
+            else '<tr><td colspan="5">No cases found.</td></tr>'
+        )
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -423,12 +529,7 @@ def build_portal_app(
 
     @app.get("/cases/{case_id}", response_class=HTMLResponse)
     async def portal_case_detail(case_id: str) -> str:
-        normalized = str(case_id or "").strip()
-        if not normalized:
-            raise HTTPException(status_code=400, detail="case_id must be non-empty.")
-        record = get_case(config=config, case_id=normalized, connect=connect_fn)
-        if record is None:
-            raise HTTPException(status_code=404, detail="Case not found.")
+        normalized, record = fetch_case_detail(case_id)
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>

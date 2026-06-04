@@ -17,6 +17,12 @@ from llm_notable_analysis_onprem_systemd.onprem_service.portal_app import (
     parse_iso8601_timestamp,
 )
 
+_AUTH_HEADERS = {"X-Forwarded-User": "analyst@example.com"}
+_PROXY_SECRET_HEADERS = {
+    **_AUTH_HEADERS,
+    "X-Notable-Portal-Proxy-Secret": "portal-secret",
+}
+
 
 class _FakeResult:
     def __init__(self, rows=None, row=None):
@@ -46,7 +52,7 @@ class _FakeConnection:
         return False
 
     def execute(self, sql, params=None):
-        if self.fail:
+        if self.fail or (not self.ready and "set_config" not in sql):
             raise OSError("database unavailable")
         self.executed.append((sql, params))
         if "to_regclass" in sql:
@@ -63,6 +69,12 @@ class _FakeEmbeddingModel:
     def encode(self, texts, show_progress_bar=False, convert_to_numpy=True):
         del texts, show_progress_bar, convert_to_numpy
         return [[1.0] + [0.0] * 767]
+
+
+class _BadEmbeddingModel:
+    def encode(self, texts, show_progress_bar=False, convert_to_numpy=True):
+        del texts, show_progress_bar, convert_to_numpy
+        return [[1.0, 0.0]]
 
 
 def _analysis() -> dict:
@@ -164,7 +176,7 @@ class TestPortalApp(unittest.TestCase):
         parsed = parse_iso8601_timestamp("2026-06-04T00:00:00Z", "start")
         self.assertEqual(parsed, datetime(2026, 6, 4, tzinfo=timezone.utc))
 
-    def test_check_case_archive_ready_requires_both_tables(self) -> None:
+    def test_check_case_archive_ready_requires_read_access(self) -> None:
         ready = check_case_archive_ready(
             config=self._config(),
             connect=lambda _dsn: _FakeConnection(ready=True),
@@ -199,6 +211,23 @@ class TestPortalApp(unittest.TestCase):
         self.assertEqual(ready.json(), {"status": "ready"})
         self.assertEqual(not_ready.status_code, 503)
 
+    def test_ready_includes_chat_retrieval_dependencies_when_enabled(self) -> None:
+        config = Config(
+            PORTAL_ENABLED=True,
+            CASE_ARCHIVE_ENABLED=True,
+            CASE_QA_ENABLED=True,
+        )
+
+        response = TestClient(
+            build_portal_app(
+                config,
+                connect=lambda _dsn: _FakeConnection(row_pages=[[], []]),
+                chat_embedding_model=_BadEmbeddingModel(),
+            )
+        ).get("/ready")
+
+        self.assertEqual(response.status_code, 503)
+
     def test_api_cases_returns_paginated_items(self) -> None:
         record = _record(self._config())
         client = TestClient(
@@ -208,7 +237,7 @@ class TestPortalApp(unittest.TestCase):
             )
         )
 
-        response = client.get("/api/cases")
+        response = client.get("/api/cases", headers=_AUTH_HEADERS)
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -216,6 +245,29 @@ class TestPortalApp(unittest.TestCase):
         self.assertEqual(payload["offset"], 0)
         self.assertFalse(payload["has_more"])
         self.assertEqual(payload["items"][0]["case_id"], "case-1")
+
+    def test_api_cases_uses_extra_row_for_has_more(self) -> None:
+        record = _record(self._config())
+        full_page_client = TestClient(
+            build_portal_app(
+                self._config(),
+                connect=lambda _dsn: _FakeConnection(rows=[_summary_row(record)] * 50),
+            )
+        )
+        extra_row_client = TestClient(
+            build_portal_app(
+                self._config(),
+                connect=lambda _dsn: _FakeConnection(rows=[_summary_row(record)] * 51),
+            )
+        )
+
+        full_page = full_page_client.get("/api/cases", headers=_AUTH_HEADERS).json()
+        extra_row = extra_row_client.get("/api/cases", headers=_AUTH_HEADERS).json()
+
+        self.assertEqual(len(full_page["items"]), 50)
+        self.assertFalse(full_page["has_more"])
+        self.assertEqual(len(extra_row["items"]), 50)
+        self.assertTrue(extra_row["has_more"])
 
     def test_api_cases_rejects_invalid_filters(self) -> None:
         client = TestClient(
@@ -225,7 +277,11 @@ class TestPortalApp(unittest.TestCase):
             )
         )
 
-        response = client.get("/api/cases", params={"limit": "0"})
+        response = client.get(
+            "/api/cases",
+            params={"limit": "0"},
+            headers=_AUTH_HEADERS,
+        )
 
         self.assertEqual(response.status_code, 400)
 
@@ -237,9 +293,21 @@ class TestPortalApp(unittest.TestCase):
             )
         )
 
-        response = client.get("/api/cases/missing-case")
+        response = client.get("/api/cases/missing-case", headers=_AUTH_HEADERS)
 
         self.assertEqual(response.status_code, 404)
+
+    def test_portal_case_detail_maps_database_failures_to_unavailable(self) -> None:
+        client = TestClient(
+            build_portal_app(
+                self._config(),
+                connect=lambda _dsn: _FakeConnection(fail=True),
+            )
+        )
+
+        response = client.get("/cases/case-1", headers=_AUTH_HEADERS)
+
+        self.assertEqual(response.status_code, 503)
 
     def test_api_case_detail_returns_canonical_payload(self) -> None:
         record = _record(self._config())
@@ -250,7 +318,7 @@ class TestPortalApp(unittest.TestCase):
             )
         )
 
-        response = client.get("/api/cases/case-1")
+        response = client.get("/api/cases/case-1", headers=_AUTH_HEADERS)
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -258,7 +326,7 @@ class TestPortalApp(unittest.TestCase):
         self.assertEqual(payload["metadata"]["retrieval_status"], "pending")
         self.assertEqual(payload["alert_payload"]["notable_id"], "abc-123")
 
-    def test_trusted_user_header_optional_on_loopback(self) -> None:
+    def test_trusted_user_header_required_on_loopback(self) -> None:
         client = TestClient(
             build_portal_app(
                 self._config(),
@@ -266,16 +334,43 @@ class TestPortalApp(unittest.TestCase):
             )
         )
 
-        response = client.get("/api/cases")
+        missing = client.get("/api/cases")
+        allowed = client.get("/api/cases", headers=_AUTH_HEADERS)
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(missing.status_code, 401)
+        self.assertEqual(allowed.status_code, 200)
 
-    def test_trusted_user_header_required_off_loopback(self) -> None:
+    def test_non_loopback_bind_requires_explicit_allow(self) -> None:
         config = Config(
             PORTAL_ENABLED=True,
             CASE_ARCHIVE_ENABLED=True,
             PORTAL_BIND_HOST="0.0.0.0",
             PORTAL_TRUSTED_USER_HEADER="X-Forwarded-User",
+        )
+
+        with self.assertRaisesRegex(ValueError, "PORTAL_BIND_HOST"):
+            build_portal_app(config, connect=lambda _dsn: _FakeConnection(rows=[]))
+
+    def test_non_loopback_bind_requires_proxy_secret(self) -> None:
+        config = Config(
+            PORTAL_ENABLED=True,
+            CASE_ARCHIVE_ENABLED=True,
+            PORTAL_BIND_HOST="0.0.0.0",
+            PORTAL_TRUSTED_USER_HEADER="X-Forwarded-User",
+            PORTAL_ALLOW_NON_LOOPBACK_BIND=True,
+        )
+
+        with self.assertRaisesRegex(ValueError, "PORTAL_PROXY_SECRET"):
+            build_portal_app(config, connect=lambda _dsn: _FakeConnection(rows=[]))
+
+    def test_non_loopback_proxy_secret_required_for_requests(self) -> None:
+        config = Config(
+            PORTAL_ENABLED=True,
+            CASE_ARCHIVE_ENABLED=True,
+            PORTAL_BIND_HOST="0.0.0.0",
+            PORTAL_TRUSTED_USER_HEADER="X-Forwarded-User",
+            PORTAL_ALLOW_NON_LOOPBACK_BIND=True,
+            PORTAL_PROXY_SECRET="portal-secret",
         )
         client = TestClient(
             build_portal_app(
@@ -284,11 +379,8 @@ class TestPortalApp(unittest.TestCase):
             )
         )
 
-        missing = client.get("/api/cases")
-        allowed = client.get(
-            "/api/cases",
-            headers={"X-Forwarded-User": "analyst@example.com"},
-        )
+        missing = client.get("/api/cases", headers=_AUTH_HEADERS)
+        allowed = client.get("/api/cases", headers=_PROXY_SECRET_HEADERS)
 
         self.assertEqual(missing.status_code, 401)
         self.assertEqual(allowed.status_code, 200)
@@ -318,6 +410,7 @@ class TestPortalApp(unittest.TestCase):
                     PORTAL_ENABLED=True,
                     CASE_ARCHIVE_ENABLED=True,
                     CASE_QA_ENABLED=True,
+                    CASE_QA_GLOBAL_RETRIEVAL_ENABLED=True,
                 ),
                 connect=lambda _dsn: _FakeConnection(rows=[]),
             )
@@ -329,6 +422,7 @@ class TestPortalApp(unittest.TestCase):
                 "mode": "global_archive",
                 "question": "Run a Splunk search and create a ticket",
             },
+            headers=_AUTH_HEADERS,
         )
 
         self.assertEqual(response.status_code, 200)
@@ -349,6 +443,7 @@ class TestPortalApp(unittest.TestCase):
         response = client.post(
             "/api/chat",
             json={"mode": "selected_case", "question": "What happened?"},
+            headers=_AUTH_HEADERS,
         )
 
         self.assertEqual(response.status_code, 400)
@@ -377,6 +472,7 @@ class TestPortalApp(unittest.TestCase):
                 "question": "What evidence supports this?",
                 "selected_case_id": "case-1",
             },
+            headers=_AUTH_HEADERS,
         )
 
         self.assertEqual(response.status_code, 200)

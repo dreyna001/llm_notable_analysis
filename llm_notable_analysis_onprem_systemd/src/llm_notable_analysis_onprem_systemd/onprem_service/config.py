@@ -262,6 +262,9 @@ class Config:
         PORTAL_PORT: Portal bind port.
         PORTAL_PAGE_SIZE: Default portal page size.
         PORTAL_TRUSTED_USER_HEADER: Trusted reverse-proxy user header.
+        PORTAL_ALLOW_NON_LOOPBACK_BIND: Allows explicitly reviewed non-loopback portal binds.
+        PORTAL_PROXY_SECRET: Optional shared secret required for non-loopback proxy mode.
+        PORTAL_PROXY_SECRET_HEADER: Header carrying the proxy shared secret.
         SPLUNK_BASE_URL: Splunk base URL for notable update sink.
         SPLUNK_API_TOKEN: Splunk token for REST sink authentication.
         SPLUNK_NOTABLE_UPDATE_PATH: Splunk notable update endpoint path.
@@ -411,6 +414,9 @@ class Config:
     PORTAL_PORT: int = 8080
     PORTAL_PAGE_SIZE: int = 50
     PORTAL_TRUSTED_USER_HEADER: str = "X-Forwarded-User"
+    PORTAL_ALLOW_NON_LOOPBACK_BIND: bool = False
+    PORTAL_PROXY_SECRET: str = ""
+    PORTAL_PROXY_SECRET_HEADER: str = "X-Notable-Portal-Proxy-Secret"
 
     # Splunk integration (optional)
     SPLUNK_BASE_URL: str = ""
@@ -722,6 +728,11 @@ def load_config() -> Config:
         PORTAL_PAGE_SIZE=_positive_int_env("PORTAL_PAGE_SIZE", 50, max_value=100),
         PORTAL_TRUSTED_USER_HEADER=os.getenv(
             "PORTAL_TRUSTED_USER_HEADER", "X-Forwarded-User"
+        ),
+        PORTAL_ALLOW_NON_LOOPBACK_BIND=_bool_env("PORTAL_ALLOW_NON_LOOPBACK_BIND", False),
+        PORTAL_PROXY_SECRET=os.getenv("PORTAL_PROXY_SECRET", ""),
+        PORTAL_PROXY_SECRET_HEADER=os.getenv(
+            "PORTAL_PROXY_SECRET_HEADER", "X-Notable-Portal-Proxy-Secret"
         ),
         SPLUNK_BASE_URL=os.getenv("SPLUNK_BASE_URL", ""),
         SPLUNK_API_TOKEN=os.getenv("SPLUNK_API_TOKEN", ""),

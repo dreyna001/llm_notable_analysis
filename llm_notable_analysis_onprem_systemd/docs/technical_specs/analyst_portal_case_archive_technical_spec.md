@@ -605,10 +605,10 @@ Backfill rules:
   `source_completeness='markdown_only'`.
 - Backfill is idempotent by `case_id`.
 - Backfill supports dry-run and bounded batch size.
-- Chunk rebuild runs after imported case rows are written.
-- Markdown-only `legacy_summary` imports may be chunked with
-  `case_chunks.source_lane='legacy_summary'`, but UI and citations must label
-  them as legacy summaries, not validated structured analysis.
+- Execute mode must fail closed unless `CASE_ARCHIVE_ENABLED=true` and an
+  explicit config env file is supplied.
+- Markdown-only `legacy_summary` imports are not indexed for retrieval in v1.
+  Chunk rebuild runs only for native cases with structured alert/analysis data.
 
 ## Portal API Contract
 

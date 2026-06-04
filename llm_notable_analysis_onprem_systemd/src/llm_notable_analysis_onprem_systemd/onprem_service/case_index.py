@@ -251,14 +251,16 @@ def list_cases(
     config: Config,
     filters: CaseListFilters | None = None,
     connect: ConnectionFactory | None = None,
+    fetch_extra: bool = False,
 ) -> list[CaseSummary]:
     """List cases ordered by processed_at descending."""
     filters = filters or CaseListFilters()
     page_size = _bounded_limit(config, filters.limit)
+    fetch_size = page_size + 1 if fetch_extra else page_size
     sql, params = build_list_cases_query(
         config.CASE_POSTGRES_SCHEMA,
         filters,
-        page_size=page_size,
+        page_size=fetch_size,
     )
     connect_fn = connect or _default_connect
     with connect_fn(config.CASE_POSTGRES_DSN) as conn:

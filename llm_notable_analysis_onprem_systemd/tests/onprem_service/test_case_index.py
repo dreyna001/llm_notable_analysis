@@ -197,6 +197,21 @@ class TestCaseIndex(unittest.TestCase):
         )
         self.assertEqual(connection.executed[1][1], (100, 0))
 
+    def test_list_cases_can_fetch_extra_pagination_sentinel(self) -> None:
+        config = Config(PORTAL_PAGE_SIZE=50)
+        record = _record(config)
+        connection = _FakeConnection(rows=[_summary_row(record)])
+
+        results = list_cases(
+            config=config,
+            filters=CaseListFilters(limit=50),
+            connect=lambda _dsn: connection,
+            fetch_extra=True,
+        )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(connection.executed[1][1], (51, 0))
+
     def test_get_case_maps_detail_row(self) -> None:
         config = Config()
         record = _record(config)

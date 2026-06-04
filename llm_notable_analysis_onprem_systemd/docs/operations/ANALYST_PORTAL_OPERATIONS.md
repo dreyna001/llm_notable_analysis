@@ -27,6 +27,9 @@ PORTAL_BIND_HOST=127.0.0.1
 PORTAL_PORT=8080
 PORTAL_PAGE_SIZE=50
 PORTAL_TRUSTED_USER_HEADER=X-Forwarded-User
+PORTAL_ALLOW_NON_LOOPBACK_BIND=false
+PORTAL_PROXY_SECRET=
+PORTAL_PROXY_SECRET_HEADER=X-Notable-Portal-Proxy-Secret
 ```
 
 The `analyst_portal` profile enables `CASE_ARCHIVE_ENABLED`, `PORTAL_ENABLED`,
@@ -69,7 +72,9 @@ sudo journalctl -u notable-portal.service -n 100 --no-pager
 ## Nginx Front Door
 
 Use nginx as the first documented production path. FastAPI/Uvicorn should stay
-on loopback by default.
+on loopback by default. Non-public portal routes require
+`PORTAL_TRUSTED_USER_HEADER` even on loopback, so direct local requests to case
+data fail closed unless they came through the reverse proxy auth path.
 
 The example config is `deploy/nginx/notable-portal.conf`. It documents:
 
@@ -90,7 +95,11 @@ sudo systemctl reload nginx
 ```
 
 V1 trusts `PORTAL_TRUSTED_USER_HEADER` only when nginx is the front door. Do not
-expose Uvicorn directly to the analyst network.
+expose Uvicorn directly to the analyst network. `PORTAL_BIND_HOST` values other
+than loopback are rejected unless `PORTAL_ALLOW_NON_LOOPBACK_BIND=true` and
+`PORTAL_PROXY_SECRET` are both configured. Use that mode only after an explicit
+network review, with host firewall rules allowing the approved reverse proxy and
+nginx forwarding `PORTAL_PROXY_SECRET_HEADER` from protected local config.
 
 ## Health Checks
 
@@ -109,9 +118,13 @@ Readiness:
 curl -fsS http://127.0.0.1:8080/ready
 ```
 
-`/health` returns `200` when the FastAPI process is running. `/ready` checks
-Postgres connectivity and required case tables; it returns `503` when the portal
-cannot serve case data.
+`/health` returns `200` when the FastAPI process is running. `/ready` runs the
+bounded case list query and a bounded `case_chunks` read using the portal role.
+When `CASE_QA_ENABLED=true`, it also checks the chat embedding path and bounded
+lexical/vector retrieval queries. It returns `503` when the portal cannot serve
+case data or chat retrieval is misconfigured. `/ready` does not call the LLM for
+answer synthesis; validate that path with a sample authenticated `POST /api/chat`
+after deployment so load balancer probes do not generate model traffic.
 
 ## Database Setup And Maintenance
 
@@ -180,7 +193,7 @@ python scripts/backfill_case_archive.py --dry-run --report-dir /var/notables/rep
 Execute:
 
 ```bash
-python scripts/backfill_case_archive.py --report-dir /var/notables/reports --config-env /etc/notable-analyzer/config.env
+python scripts/backfill_case_archive.py --report-dir /var/notables/reports --batch-size 100 --config-env /etc/notable-analyzer/config.env
 ```
 
 Backfill behavior:
@@ -189,14 +202,20 @@ Backfill behavior:
   and content.
 - Markdown-only imports are marked `backfill_status=legacy_summary`,
   `source_completeness=markdown_only`, and `retrieval_status=not_indexed`.
-- Dry-run reports importable files and generated case IDs without writing rows.
+- Dry-run reports importable files, generated case IDs, skipped files, and
+  validation failures without writing rows.
+- Execute mode requires `--config-env` and `CASE_ARCHIVE_ENABLED=true`.
+- Each run imports at most `--batch-size` markdown files. Oversized files,
+  symlinked reports, and paths that do not remain under `--report-dir` are
+  skipped and reported in the JSON output.
 - Re-run is safe; the case-store upsert path updates the same backfill ID.
 
 Operator review points:
 
 - Confirm the report directory is correct before execute.
 - Keep the dry-run JSON output for change records.
-- Review row counts after execute.
+- Review `cases`, `skipped`, and `failures` after execute. A non-empty
+  `failures` list returns a nonzero exit code.
 - Run chunk rebuild only for native cases with structured alert/analysis data;
   markdown-only legacy summaries are intentionally not indexed for retrieval.
 
@@ -243,7 +262,10 @@ Auth or trusted-header issues:
 
 - Confirm nginx basic auth succeeds.
 - Confirm nginx forwards `X-Forwarded-User`.
+- Direct local requests to non-public routes should return `401` without that header.
 - Keep `PORTAL_BIND_HOST=127.0.0.1` unless the reverse proxy design is reviewed.
+- For reviewed non-loopback binds, confirm nginx forwards
+  `X-Notable-Portal-Proxy-Secret` and the host firewall only allows the proxy.
 
 Portal startup failures:
 
@@ -255,7 +277,7 @@ Portal startup failures:
 
 - All authenticated analysts can see all retained cases in v1.
 - Nginx terminates TLS and authentication.
-- The FastAPI app should stay behind nginx on loopback.
+- The FastAPI app should stay behind nginx on loopback by default.
 - Treat case data as sensitive incident evidence.
 - Do not log tokens, auth headers, or raw sensitive payloads.
 - The portal and chat path are read-only by design.

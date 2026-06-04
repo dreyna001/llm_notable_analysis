@@ -221,6 +221,12 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("CASE_QA_LEXICAL_TOP_K=30", config_text)
         self.assertIn("PORTAL_ENABLED=false", config_text)
         self.assertIn("PORTAL_BIND_HOST=127.0.0.1", config_text)
+        self.assertIn("PORTAL_ALLOW_NON_LOOPBACK_BIND=false", config_text)
+        self.assertIn("PORTAL_PROXY_SECRET=", config_text)
+        self.assertIn(
+            "PORTAL_PROXY_SECRET_HEADER=X-Notable-Portal-Proxy-Secret",
+            config_text,
+        )
         self.assertIn("SPL_QUERY_RAG_ENABLED=false", config_text)
         self.assertIn("SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE=spl_query_chunks", config_text)
         self.assertIn("SPL_QUERY_RAG_FAILURE_MODE=suppress", config_text)
@@ -252,6 +258,7 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("client_max_body_size 1m", nginx_text)
         self.assertIn("proxy_pass http://127.0.0.1:8080", nginx_text)
         self.assertIn("proxy_set_header X-Forwarded-User $remote_user", nginx_text)
+        self.assertIn("X-Notable-Portal-Proxy-Secret", nginx_text)
 
     def test_analyst_portal_operations_doc_covers_delivery_contract(self) -> None:
         """Portal operations doc should cover enablement, maintenance, and safety."""
@@ -268,6 +275,8 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("scripts/backfill_case_archive.py", doc_text)
         self.assertIn("answer_status=refused", doc_text)
         self.assertIn("all retained cases", doc_text)
+        self.assertIn("PORTAL_ALLOW_NON_LOOPBACK_BIND=false", doc_text)
+        self.assertIn("PORTAL_PROXY_SECRET_HEADER", doc_text)
 
     def test_docs_indexes_link_analyst_portal_operations(self) -> None:
         """Docs indexes should expose the shipped portal operations guide."""
@@ -290,6 +299,10 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("legacy_summary", script_text)
         self.assertIn("markdown_only", script_text)
         self.assertIn("--dry-run", script_text)
+        self.assertIn("--batch-size", script_text)
+        self.assertIn("--max-file-bytes", script_text)
+        self.assertIn("CASE_ARCHIVE_ENABLED must be true", script_text)
+        self.assertIn("--config-env is required", script_text)
 
     def test_pyproject_includes_portal_runtime_dependencies(self) -> None:
         """Portal diff should declare FastAPI and Uvicorn dependencies."""

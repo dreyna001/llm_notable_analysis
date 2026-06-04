@@ -14,7 +14,7 @@ import shlex
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 PROJECT_SRC = Path(__file__).resolve().parents[1] / "src"
 if PROJECT_SRC.exists() and str(PROJECT_SRC) not in sys.path:
@@ -27,6 +27,40 @@ from llm_notable_analysis_onprem_systemd.onprem_service.case_store import (
 from llm_notable_analysis_onprem_systemd.onprem_service.config import Config, load_config
 
 _BACKFILL_HASH_PREFIX = 16
+_DEFAULT_BATCH_SIZE = 100
+
+
+def _result(
+    *,
+    dry_run: int,
+    reports_found: int,
+    cases: int,
+    case_ids: list[str] | None = None,
+    skipped: list[dict[str, str]] | None = None,
+    failures: list[dict[str, str]] | None = None,
+) -> dict[str, object]:
+    """Build the stable JSON result shape emitted by the operator command."""
+    return {
+        "dry_run": dry_run,
+        "reports_found": reports_found,
+        "cases": cases,
+        "case_ids": case_ids or [],
+        "skipped": skipped or [],
+        "failures": failures or [],
+    }
+
+
+def _skip(path: Path, reason: str) -> dict[str, str]:
+    """Return a serializable skipped-file record."""
+    return {"path": str(path), "reason": reason}
+
+
+def _validate_positive_int(value: int, name: str) -> int:
+    """Validate a positive integer CLI/runtime bound."""
+    parsed = int(value)
+    if parsed < 1:
+        raise ValueError(f"{name} must be greater than zero.")
+    return parsed
 
 
 def _load_config_env(path: Path) -> None:
@@ -54,11 +88,85 @@ def _load_config_env(path: Path) -> None:
         os.environ[key] = value
 
 
-def _iter_markdown_reports(report_dir: Path) -> Iterable[Path]:
-    """Yield markdown report files in stable path order."""
+def _walk_markdown_reports(report_dir: Path) -> Iterable[Path]:
+    """Yield markdown report paths in stable directory order without following dirs."""
+    for current_dir, dirnames, filenames in os.walk(report_dir):
+        dirnames[:] = sorted(dirnames)
+        for filename in sorted(filenames):
+            if filename.endswith(".md"):
+                yield Path(current_dir) / filename
+
+
+def _report_dir_problem(report_dir: Path) -> str | None:
+    """Return a report-dir validation problem, if any."""
     if not report_dir.exists():
-        return []
-    return sorted(path for path in report_dir.rglob("*.md") if path.is_file())
+        return "report_dir_missing"
+    if not report_dir.is_dir():
+        return "report_dir_not_directory"
+    return None
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    """Return True when path is under root after resolution."""
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _validate_report_path(
+    report_path: Path,
+    *,
+    root: Path,
+    max_file_bytes: int,
+) -> None:
+    """Reject unsafe or oversized report paths before reading content."""
+    if report_path.is_symlink():
+        raise ValueError("symlinked reports are not supported")
+    root_resolved = root.resolve(strict=True)
+    resolved = report_path.resolve(strict=True)
+    if not _is_relative_to(resolved, root_resolved):
+        raise ValueError("report path must remain under report_dir")
+    if not report_path.is_file():
+        raise ValueError("report path is not a file")
+    size = report_path.stat().st_size
+    if size > max_file_bytes:
+        raise ValueError(
+            f"report exceeds max file size: {size} > {max_file_bytes} bytes"
+        )
+
+
+def _scan_markdown_reports(
+    report_dir: Path,
+    *,
+    batch_size: int,
+    max_file_bytes: int,
+) -> tuple[list[Path], list[dict[str, str]]]:
+    """Return importable markdown reports plus skipped-path diagnostics."""
+    batch_limit = _validate_positive_int(batch_size, "batch_size")
+    max_bytes = _validate_positive_int(max_file_bytes, "max_file_bytes")
+    problem = _report_dir_problem(report_dir)
+    if problem is not None:
+        raise ValueError(problem)
+
+    reports: list[Path] = []
+    skipped: list[dict[str, str]] = []
+    for report_path in _walk_markdown_reports(report_dir):
+        if len(reports) >= batch_limit:
+            skipped.append(_skip(report_dir, "batch_size_limit_reached"))
+            break
+        try:
+            _validate_report_path(
+                report_path,
+                root=report_dir,
+                max_file_bytes=max_bytes,
+            )
+        except (OSError, ValueError) as exc:
+            skipped.append(_skip(report_path, str(exc)))
+            continue
+        reports.append(report_path)
+    return reports, skipped
 
 
 def _report_hash(report_path: Path, text: str, *, root: Path) -> str:
@@ -95,9 +203,12 @@ def build_legacy_case_record(
     config: Config,
     report_path: Path,
     root: Path | None = None,
+    max_file_bytes: int | None = None,
 ) -> CaseArchiveRecord:
     """Build a markdown-only legacy summary case archive record."""
     root = root or config.REPORT_DIR
+    max_bytes = max_file_bytes or int(config.MAX_INPUT_FILE_BYTES)
+    _validate_report_path(report_path, root=root, max_file_bytes=max_bytes)
     text = report_path.read_text(encoding="utf-8", errors="replace")
     stat = report_path.stat()
     processed_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
@@ -145,46 +256,85 @@ def dry_run_backfill(
     *,
     config: Config,
     report_dir: Path | None = None,
+    batch_size: int = _DEFAULT_BATCH_SIZE,
+    max_file_bytes: int | None = None,
 ) -> dict[str, object]:
     """Report which markdown files would be imported without writing rows."""
     root = report_dir or config.REPORT_DIR
-    reports = list(_iter_markdown_reports(root))
+    max_bytes = max_file_bytes or int(config.MAX_INPUT_FILE_BYTES)
+    problem = _report_dir_problem(root)
+    if problem is not None:
+        return _result(
+            dry_run=1,
+            reports_found=0,
+            cases=0,
+            skipped=[_skip(root, problem)],
+        )
+    reports, skipped = _scan_markdown_reports(
+        root,
+        batch_size=batch_size,
+        max_file_bytes=max_bytes,
+    )
     records = [
-        build_legacy_case_record(config=config, report_path=path, root=root)
+        build_legacy_case_record(
+            config=config,
+            report_path=path,
+            root=root,
+            max_file_bytes=max_bytes,
+        )
         for path in reports
     ]
-    return {
-        "dry_run": 1,
-        "reports_found": len(reports),
-        "cases": len(records),
-        "case_ids": [record.case_id for record in records],
-    }
+    return _result(
+        dry_run=1,
+        reports_found=len(reports),
+        cases=len(records),
+        case_ids=[record.case_id for record in records],
+        skipped=skipped,
+    )
 
 
 def execute_backfill(
     *,
     config: Config,
     report_dir: Path | None = None,
+    batch_size: int = _DEFAULT_BATCH_SIZE,
+    max_file_bytes: int | None = None,
 ) -> dict[str, object]:
     """Import markdown reports as idempotent legacy summary cases."""
+    if not bool(config.CASE_ARCHIVE_ENABLED):
+        raise ValueError("CASE_ARCHIVE_ENABLED must be true to execute backfill.")
     root = report_dir or config.REPORT_DIR
+    max_bytes = max_file_bytes or int(config.MAX_INPUT_FILE_BYTES)
+    reports, skipped = _scan_markdown_reports(
+        root,
+        batch_size=batch_size,
+        max_file_bytes=max_bytes,
+    )
     imported = 0
     case_ids: list[str] = []
-    for report_path in _iter_markdown_reports(root):
-        record = build_legacy_case_record(
-            config=config,
-            report_path=report_path,
-            root=root,
-        )
-        write_case_record_with_retries(record=record, config=config)
+    failures: list[dict[str, str]] = []
+    for report_path in reports:
+        try:
+            record = build_legacy_case_record(
+                config=config,
+                report_path=report_path,
+                root=root,
+                max_file_bytes=max_bytes,
+            )
+            write_case_record_with_retries(record=record, config=config)
+        except Exception as exc:
+            failures.append(_skip(report_path, str(exc)))
+            continue
         imported += 1
         case_ids.append(record.case_id)
-    return {
-        "dry_run": 0,
-        "reports_found": imported,
-        "cases": imported,
-        "case_ids": case_ids,
-    }
+    return _result(
+        dry_run=0,
+        reports_found=len(reports),
+        cases=imported,
+        case_ids=case_ids,
+        skipped=skipped,
+        failures=failures,
+    )
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -203,9 +353,20 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Report importable files without writing Postgres rows.",
     )
     parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=_DEFAULT_BATCH_SIZE,
+        help="Maximum markdown reports to import or preview in one run.",
+    )
+    parser.add_argument(
+        "--max-file-bytes",
+        type=int,
+        help="Maximum markdown report size; defaults to MAX_INPUT_FILE_BYTES.",
+    )
+    parser.add_argument(
         "--config-env",
         type=Path,
-        help="Optional config.env file to read before loading environment config.",
+        help="Config env file to read before loading config; required for execute.",
     )
     return parser.parse_args(argv)
 
@@ -213,17 +374,25 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """Run the markdown report backfill command."""
     args = _parse_args(argv)
+    if not args.dry_run and args.config_env is None:
+        raise ValueError("--config-env is required when executing backfill.")
     if args.config_env is not None:
         _load_config_env(args.config_env)
     config = load_config()
     report_dir = args.report_dir or config.REPORT_DIR
+    kwargs: dict[str, Any] = {
+        "config": config,
+        "report_dir": report_dir,
+        "batch_size": args.batch_size,
+        "max_file_bytes": args.max_file_bytes,
+    }
     result = (
-        dry_run_backfill(config=config, report_dir=report_dir)
+        dry_run_backfill(**kwargs)
         if args.dry_run
-        else execute_backfill(config=config, report_dir=report_dir)
+        else execute_backfill(**kwargs)
     )
     print(json.dumps(result, ensure_ascii=True, sort_keys=True))
-    return 0
+    return 1 if result.get("failures") else 0
 
 
 if __name__ == "__main__":
