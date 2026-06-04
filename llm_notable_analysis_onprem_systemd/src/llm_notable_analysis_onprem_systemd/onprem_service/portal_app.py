@@ -10,6 +10,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from .case_chat import SynthesizeFn, answer_case_chat
 from .case_index import (
     CaseListFilters,
     CaseSummary,
@@ -215,6 +216,9 @@ def build_portal_app(
     config: Config,
     *,
     connect: ConnectionFactory | None = None,
+    chat_synthesizer: SynthesizeFn | None = None,
+    chat_embedding_model: Any = None,
+    chat_soc_context_provider: Any = None,
 ) -> Any:
     """Build the read-only analyst portal FastAPI application."""
     FastAPI, HTTPException, Request, HTMLResponse, JSONResponse = _lazy_import_fastapi()
@@ -310,6 +314,23 @@ def build_portal_app(
         if record is None:
             raise HTTPException(status_code=404, detail="Case not found.")
         return _detail_payload(record)
+
+    @app.post("/api/chat")
+    async def api_chat(payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return answer_case_chat(
+                payload=payload,
+                config=config,
+                connect=connect_fn,
+                embedding_model=chat_embedding_model,
+                synthesize=chat_synthesizer,
+                soc_context_provider=chat_soc_context_provider,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Failed to answer portal chat request")
+            raise HTTPException(status_code=503, detail="Case chat unavailable.") from exc
 
     @app.get("/", response_class=HTMLResponse)
     async def portal_home(request: Request) -> str:

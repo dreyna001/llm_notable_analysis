@@ -31,10 +31,11 @@ class _FakeResult:
 
 
 class _FakeConnection:
-    def __init__(self, *, rows=None, row=None, ready=True, fail=False):
+    def __init__(self, *, rows=None, row=None, row_pages=None, ready=True, fail=False):
         self.executed = []
         self.rows = rows or []
         self.row = row
+        self.row_pages = list(row_pages or [])
         self.ready = ready
         self.fail = fail
 
@@ -50,9 +51,18 @@ class _FakeConnection:
         self.executed.append((sql, params))
         if "to_regclass" in sql:
             return _FakeResult(row=(self.ready, self.ready))
+        if "case_chunks" in sql:
+            rows = self.row_pages.pop(0) if self.row_pages else []
+            return _FakeResult(rows=rows)
         if "WHERE case_id = %s" in sql:
             return _FakeResult(row=self.row)
         return _FakeResult(rows=self.rows)
+
+
+class _FakeEmbeddingModel:
+    def encode(self, texts, show_progress_bar=False, convert_to_numpy=True):
+        del texts, show_progress_bar, convert_to_numpy
+        return [[1.0] + [0.0] * 767]
 
 
 def _analysis() -> dict:
@@ -124,6 +134,19 @@ def _detail_row(record):
         record.retrieval_status,
         record.backfill_status,
         record.source_completeness,
+    )
+
+
+def _chunk_row(record):
+    return (
+        "case-1:case_analysis:analysis.evidence_vs_inference:0",
+        record.case_id,
+        "case_analysis",
+        "analysis.evidence_vs_inference",
+        "$.evidence_vs_inference.evidence[0]",
+        "The alert contains admin PowerShell execution evidence.",
+        {"field_path": "$.evidence_vs_inference.evidence[0]"},
+        0.9,
     )
 
 
@@ -286,7 +309,81 @@ class TestPortalApp(unittest.TestCase):
             for item in methods
             if item[1] in {"POST", "PUT", "PATCH", "DELETE"}
         }
-        self.assertEqual(mutating, set())
+        self.assertEqual(mutating, {("/api/chat", "POST")})
+
+    def test_api_chat_returns_refusal_for_action_request(self) -> None:
+        client = TestClient(
+            build_portal_app(
+                Config(
+                    PORTAL_ENABLED=True,
+                    CASE_ARCHIVE_ENABLED=True,
+                    CASE_QA_ENABLED=True,
+                ),
+                connect=lambda _dsn: _FakeConnection(rows=[]),
+            )
+        )
+
+        response = client.post(
+            "/api/chat",
+            json={
+                "mode": "global_archive",
+                "question": "Run a Splunk search and create a ticket",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["answer_status"], "refused")
+
+    def test_api_chat_validates_request(self) -> None:
+        client = TestClient(
+            build_portal_app(
+                Config(
+                    PORTAL_ENABLED=True,
+                    CASE_ARCHIVE_ENABLED=True,
+                    CASE_QA_ENABLED=True,
+                ),
+                connect=lambda _dsn: _FakeConnection(rows=[]),
+            )
+        )
+
+        response = client.post(
+            "/api/chat",
+            json={"mode": "selected_case", "question": "What happened?"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_api_chat_returns_answer_with_citations(self) -> None:
+        record = _record(self._config())
+        client = TestClient(
+            build_portal_app(
+                Config(
+                    PORTAL_ENABLED=True,
+                    CASE_ARCHIVE_ENABLED=True,
+                    CASE_QA_ENABLED=True,
+                ),
+                connect=lambda _dsn: _FakeConnection(row_pages=[[_chunk_row(record)], []]),
+                chat_embedding_model=_FakeEmbeddingModel(),
+                chat_synthesizer=lambda _question, sources: (
+                    f"Answered with {len(sources)} source."
+                ),
+            )
+        )
+
+        response = client.post(
+            "/api/chat",
+            json={
+                "mode": "selected_case",
+                "question": "What evidence supports this?",
+                "selected_case_id": "case-1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["answer_status"], "answered")
+        self.assertEqual(payload["retrieved_case_ids"], ["case-1"])
+        self.assertEqual(payload["citations"][0]["source_lane"], "current_case")
 
 
 if __name__ == "__main__":
