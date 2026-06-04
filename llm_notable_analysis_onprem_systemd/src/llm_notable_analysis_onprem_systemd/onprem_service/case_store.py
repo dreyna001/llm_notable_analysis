@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import time
 from dataclasses import dataclass
@@ -30,6 +31,8 @@ _RETRYABLE_EXCEPTION_NAMES = {
 _SEARCH_NAME_KEYS = ("search_name", "searchName", "rule_name", "rule", "signature", "title")
 _CORRELATION_ID_KEYS = ("correlation_id", "notable_id", "event_id", "sid", "id")
 _RISK_SCORE_KEYS = ("risk_score", "riskScore")
+_CASE_ID_SAFE_RE = re.compile(r"[^A-Za-z0-9_-]+")
+_MAX_CASE_ID_CHARS = 100
 
 
 class CaseArchiveWriteError(RuntimeError):
@@ -146,6 +149,32 @@ def _archive_alert_payload(alert_payload: Any) -> Any:
     if isinstance(alert_payload, str):
         return {"input_type": "text", "text": alert_payload}
     return alert_payload
+
+
+def _sanitize_case_id(raw_value: Any, *, fallback: str = "unknown") -> str:
+    """Normalize a source identifier into a bounded portal-safe case id."""
+    raw_text = str(raw_value or "").strip()
+    sanitized = _CASE_ID_SAFE_RE.sub("_", raw_text).strip("_")
+    if not sanitized:
+        return fallback
+    if sanitized != raw_text or len(sanitized) > _MAX_CASE_ID_CHARS:
+        digest = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()[:12]
+        prefix = sanitized[: (_MAX_CASE_ID_CHARS - 13)].strip("_") or "case"
+        return f"{prefix}_{digest}"
+    return sanitized
+
+
+def build_native_case_id(alert_payload: Any, source_filename: str | Path) -> str:
+    """Build the stable native archive id for an analyzed source alert.
+
+    The report path keeps using the input filename stem, but archive replay must
+    prefer upstream alert identity when available so transport filename changes
+    do not duplicate retained cases.
+    """
+    source_identity = _first_alert_value(alert_payload, _CORRELATION_ID_KEYS)
+    if source_identity is not None:
+        return _sanitize_case_id(source_identity)
+    return _sanitize_case_id(Path(source_filename).stem)
 
 
 def _capability_snapshot(config: Config) -> dict[str, Any]:

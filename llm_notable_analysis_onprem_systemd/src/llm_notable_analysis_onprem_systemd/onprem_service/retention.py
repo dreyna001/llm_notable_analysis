@@ -203,10 +203,20 @@ def _fetchall(result: Any) -> list[Any]:
 
 def build_delete_expired_cases_sql(schema: str) -> str:
     """Build SQL that deletes expired cases and cascades derived chunks."""
-    return (
-        f"DELETE FROM {quote_identifier(schema, 'schema')}.cases "
-        "WHERE expires_at < %s RETURNING case_id"
-    )
+    table = f"{quote_identifier(schema, 'schema')}.cases"
+    return f"""
+WITH expired AS (
+    SELECT case_id
+    FROM {table}
+    WHERE expires_at < %s
+    ORDER BY expires_at ASC, case_id ASC
+    LIMIT %s
+)
+DELETE FROM {table} AS cases
+USING expired
+WHERE cases.case_id = expired.case_id
+RETURNING cases.case_id
+""".strip()
 
 
 def delete_expired_cases(
@@ -224,11 +234,17 @@ def delete_expired_cases(
 
     connect_fn = connect or _default_connect
     sql = build_delete_expired_cases_sql(config.CASE_POSTGRES_SCHEMA)
+    batch_size = max(1, int(config.CASE_RETENTION_DELETE_BATCH_SIZE))
+    deleted = 0
     try:
         with connect_fn(config.CASE_POSTGRES_DSN) as conn:
             _set_statement_timeout(conn, config.CASE_POSTGRES_STATEMENT_TIMEOUT_MS)
-            rows = _fetchall(conn.execute(sql, (cutoff,)))
-            return RetentionStats(deleted=len(rows))
+            while True:
+                rows = _fetchall(conn.execute(sql, (cutoff, batch_size)))
+                deleted += len(rows)
+                if len(rows) < batch_size:
+                    break
+            return RetentionStats(deleted=deleted)
     except Exception:
         logger.exception("Failed to delete expired case archive rows")
         return RetentionStats(errors=1)

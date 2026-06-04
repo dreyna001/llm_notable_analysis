@@ -2,6 +2,9 @@ from datetime import datetime, timezone
 import json
 import unittest
 
+# Tests run with PYTHONPATH pointing at the src layout.
+# pylint: disable=import-error,no-name-in-module
+
 from llm_notable_analysis_onprem_systemd.onprem_service.case_search import (
     CaseChunkWriteError,
     build_case_chunks,
@@ -172,6 +175,12 @@ class TestCaseSearch(unittest.TestCase):
             self.assertEqual(chunk.metadata["chunk_id"], chunk.chunk_id)
             self.assertEqual(chunk.metadata["stored_source_lane"], chunk.source_lane)
             self.assertEqual(chunk.metadata["field_path"], chunk.field_path)
+
+    def test_build_case_chunks_enforces_per_case_index_budget(self) -> None:
+        config = Config(CASE_QA_MAX_INDEX_CHUNKS_PER_CASE=2)
+        chunks = build_case_chunks(_record(config), config)
+
+        self.assertEqual(len(chunks), 2)
 
     def test_build_insert_sql_targets_case_chunks(self) -> None:
         sql = build_insert_case_chunks_sql("notable_cases")

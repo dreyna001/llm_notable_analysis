@@ -25,9 +25,10 @@ class _FakeResult:
 
 
 class _FakeConnection:
-    def __init__(self, *, rows=None, fail=False):
+    def __init__(self, *, rows=None, row_pages=None, fail=False):
         self.executed = []
         self.rows = rows or []
+        self.row_pages = list(row_pages or [])
         self.fail = fail
 
     def __enter__(self):
@@ -41,6 +42,8 @@ class _FakeConnection:
             raise OSError("database unavailable")
         self.executed.append((sql, params))
         if "DELETE FROM" in sql:
+            if self.row_pages:
+                return _FakeResult(self.row_pages.pop(0))
             return _FakeResult(self.rows)
         return _FakeResult()
 
@@ -49,10 +52,11 @@ class TestRetention(unittest.TestCase):
     def test_build_delete_expired_cases_sql_targets_cases_for_cascade(self) -> None:
         sql = build_delete_expired_cases_sql("notable_cases")
 
-        self.assertEqual(
-            sql,
-            'DELETE FROM "notable_cases".cases WHERE expires_at < %s RETURNING case_id',
-        )
+        self.assertIn('FROM "notable_cases".cases', sql)
+        self.assertIn("ORDER BY expires_at ASC, case_id ASC", sql)
+        self.assertIn("LIMIT %s", sql)
+        self.assertIn("DELETE FROM", sql)
+        self.assertIn("RETURNING cases.case_id", sql)
 
     def test_delete_expired_cases_is_disabled_without_case_archive(self) -> None:
         connection = _FakeConnection(rows=[("case-1",)])
@@ -86,7 +90,30 @@ class TestRetention(unittest.TestCase):
             connection.executed[0],
             ("SELECT set_config('statement_timeout', %s, true)", ("2500ms",)),
         )
-        self.assertEqual(connection.executed[1][1], (now,))
+        self.assertEqual(connection.executed[1][1], (now, 500))
+
+    def test_delete_expired_cases_deletes_in_batches(self) -> None:
+        connection = _FakeConnection(
+            row_pages=[
+                [("case-1",), ("case-2",)],
+                [("case-3",)],
+            ]
+        )
+        now = datetime(2026, 6, 4, tzinfo=timezone.utc)
+
+        stats = delete_expired_cases(
+            config=Config(
+                CASE_ARCHIVE_ENABLED=True,
+                CASE_RETENTION_DELETE_BATCH_SIZE=2,
+            ),
+            now=now,
+            connect=lambda _dsn: connection,
+        )
+
+        self.assertEqual(stats.deleted, 3)
+        self.assertEqual(stats.errors, 0)
+        self.assertEqual(connection.executed[1][1], (now, 2))
+        self.assertEqual(connection.executed[2][1], (now, 2))
 
     def test_delete_expired_cases_reports_database_error(self) -> None:
         connection = _FakeConnection(fail=True)

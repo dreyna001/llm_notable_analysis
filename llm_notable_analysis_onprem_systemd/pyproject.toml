@@ -34,3 +34,6 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "llm_notable_analysis_onprem_systemd.onprem_service" = ["enterprise_attack_v17.1_ids.json"]
+
+[tool.pytest.ini_options]
+pythonpath = ["tests", "src"]

@@ -94,6 +94,11 @@ CREATE INDEX IF NOT EXISTS case_chunks_case_id_idx
 CREATE INDEX IF NOT EXISTS case_chunks_section_idx
     ON notable_cases.case_chunks (section);
 
+ALTER TABLE notable_cases.case_chunks
+    ADD COLUMN IF NOT EXISTS search_vector tsvector GENERATED ALWAYS AS (
+        to_tsvector('english'::regconfig, section || ' ' || field_path || ' ' || text)
+    ) STORED;
+
 CREATE INDEX IF NOT EXISTS case_chunks_search_vector_gin_idx
     ON notable_cases.case_chunks USING gin (search_vector);
 
@@ -127,3 +132,14 @@ CREATE INDEX IF NOT EXISTS chat_messages_session_id_idx
 
 CREATE INDEX IF NOT EXISTS chat_sessions_expires_at_idx
     ON notable_cases.chat_sessions (expires_at);
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'notable_analyzer') THEN
+        EXECUTE 'GRANT USAGE ON SCHEMA notable_cases TO notable_analyzer';
+        EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES '
+            || 'IN SCHEMA notable_cases TO notable_analyzer';
+        EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA notable_cases '
+            || 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO notable_analyzer';
+    END IF;
+END $$;

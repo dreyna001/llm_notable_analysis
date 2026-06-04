@@ -8,6 +8,7 @@ import unittest
 from llm_notable_analysis_onprem_systemd.onprem_service.case_store import (
     CaseArchiveConflictError,
     CaseArchiveWriteError,
+    build_native_case_id,
     build_case_archive_record,
     build_upsert_case_sql,
     write_case_record_once,
@@ -55,6 +56,25 @@ class TestCaseStore(unittest.TestCase):
             "ioc_extraction": {},
             "ttp_analysis": [],
         }
+
+    def test_build_native_case_id_prefers_upstream_identity_over_filename(self) -> None:
+        first_id = build_native_case_id(
+            {"notable_id": "abc-123", "summary": "alert"},
+            "transport-a.json",
+        )
+        replay_id = build_native_case_id(
+            {"notable_id": "abc-123", "summary": "alert"},
+            "transport-b.json",
+        )
+
+        self.assertEqual(first_id, "abc-123")
+        self.assertEqual(replay_id, "abc-123")
+
+    def test_build_native_case_id_falls_back_to_sanitized_filename(self) -> None:
+        case_id = build_native_case_id("raw text alert", "raw alert!.txt")
+
+        self.assertTrue(case_id.startswith("raw_alert_"))
+        self.assertEqual(len(case_id.rsplit("_", 1)[-1]), 12)
 
     def test_build_case_archive_record_extracts_filter_columns(self) -> None:
         config = Config(CASE_RETENTION_DAYS=90)

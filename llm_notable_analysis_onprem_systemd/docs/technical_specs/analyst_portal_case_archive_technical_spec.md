@@ -72,6 +72,7 @@ CASE_ARCHIVE_ENABLED=false
 CASE_POSTGRES_DSN=postgresql://notable_analyzer@127.0.0.1:5432/notable_rag
 CASE_POSTGRES_SCHEMA=notable_cases
 CASE_RETENTION_DAYS=90
+CASE_RETENTION_DELETE_BATCH_SIZE=500
 CASE_ARCHIVE_WRITE_MAX_ATTEMPTS=3
 CASE_ARCHIVE_WRITE_RETRY_BACKOFF_SECONDS=1
 CASE_POSTGRES_STATEMENT_TIMEOUT_MS=5000
@@ -87,6 +88,7 @@ CASE_QA_GLOBAL_RETRIEVAL_ENABLED=false
 CASE_QA_MAX_RETRIEVED_CASES=5
 CASE_QA_MAX_CHUNKS_PER_LANE=6
 CASE_QA_MAX_TOTAL_CHUNKS=18
+CASE_QA_MAX_INDEX_CHUNKS_PER_CASE=200
 CASE_QA_CONTEXT_BUDGET_CHARS=12000
 CASE_QA_MAX_QUESTION_CHARS=2000
 CASE_QA_MAX_ANSWER_TOKENS=800
@@ -299,12 +301,19 @@ CREATE INDEX IF NOT EXISTS chat_sessions_expires_at_idx
     ON notable_cases.chat_sessions (expires_at);
 ```
 
+The migration grants schema usage and table DML privileges to the default
+runtime role `notable_analyzer` when that role exists. Deployments using a
+custom `CASE_POSTGRES_DSN` role must grant equivalent least-privilege access to
+the `notable_cases` schema and tables.
+
 ## Case Identity And Replay Contract
 
-Native analyzer cases use the same deterministic identifier already used for
-report filenames: `case_id = get_notable_id(alert_payload, file_path)`. Today
-that means the sanitized input filename stem, with the existing fallback to
-common alert keys only if the stem is unusable.
+Native analyzer cases use a deterministic archive identity separate from the
+report filename. `case_id` prefers the first non-empty upstream source identity
+from `correlation_id`, `notable_id`, `event_id`, `sid`, or `id`; if none is
+available, it falls back to the sanitized input filename stem. Report filenames
+continue to use `get_notable_id(alert_payload, file_path)` so existing file
+output behavior is unchanged.
 
 Native writes use `INSERT ... ON CONFLICT (case_id) DO UPDATE` only when the
 existing row represents the same source identity. The implementation must treat
@@ -330,7 +339,7 @@ derived from the best stable source available, in this order:
 3. Markdown report bytes.
 
 Use at least the first 16 hex characters of the SHA-256 digest. Backfill is
-idempotent by this `case_id` and must not collide with native filename-derived
+idempotent by this `case_id` and must not collide with native source-identity
 case IDs.
 
 ## Case Record Contract
@@ -427,6 +436,11 @@ domain, and the normalized alert summary when available.
 V1 analysis chunks must cover the full validated structured analysis. If an
 analysis field is too large for one chunk, split it deterministically by array
 item or object field while preserving `field_path`.
+
+Chunk indexing must stop deterministically at
+`CASE_QA_MAX_INDEX_CHUNKS_PER_CASE` before embedding so one large case cannot
+produce an unbounded model encode batch. Preserve the traversal order above when
+trimming.
 
 Stored `case_chunks.source_lane` values describe what the chunk is inside the
 stored archive record:
@@ -555,12 +569,13 @@ When `CASE_ARCHIVE_ENABLED=true`:
   `CASE_ARCHIVE_WRITE_MAX_ATTEMPTS`.
 - Do not retry schema errors, validation errors, malformed case records, or
   invalid config.
-- If case archive write still fails, the analyzer attempt fails for portal/archive
-  purposes.
-- Optional markdown/HTML may exist, but the case is not considered successfully
-  processed for portal/archive.
+- If case archive write still fails after retries, log the failure and continue
+  moving the input through the normal processed path. Archive identity conflicts
+  remain hard failures because they indicate a deterministic-id safety violation.
+- Optional markdown/HTML may exist even when the archive write is deferred.
 - If case insert succeeds but chunk creation fails, keep the case row and set
-  `retrieval_status='failed'`.
+  `retrieval_status='failed'`; continue moving the input through the normal
+  processed path.
 - Portal chat must not answer from model memory when retrieval fails.
 
 Write ordering for the analyzer:
@@ -570,10 +585,12 @@ Write ordering for the analyzer:
 2. Generate existing markdown/HTML compatibility artifacts when enabled.
 3. Write the Postgres case row with any report paths that exist.
 4. Build case chunks.
-5. Move the input to processed only after required archive steps succeed.
+5. Move the input to processed unless analysis itself failed or a hard archive
+   identity conflict occurred.
 
-If step 3 fails after markdown/HTML was written, the attempt still fails for
-portal/archive purposes and the failure is visible.
+If step 3 fails after markdown/HTML was written, the failure is visible in logs
+and should be remediated through replay/backfill rather than by quarantining a
+valid source alert.
 
 ## Backfill Contract
 
@@ -767,10 +784,11 @@ Migration verification must check:
 - Analyzer and portal roles have only the intended privileges.
 
 Retention deletes expired rows from `notable_cases.cases` where
-`expires_at < now()`. Chunk deletion relies on `ON DELETE CASCADE`. Chat history
-retention deletes expired `chat_sessions`, also relying on cascade for messages.
-Run retention from the existing retention loop or a documented operator command;
-do not make retention depend on portal traffic.
+`expires_at < now()` in batches no larger than
+`CASE_RETENTION_DELETE_BATCH_SIZE`. Chunk deletion relies on `ON DELETE CASCADE`.
+Chat history retention deletes expired `chat_sessions`, also relying on cascade
+for messages. Run retention from the existing retention loop or a documented
+operator command; do not make retention depend on portal traffic.
 
 Vector index posture for v1:
 

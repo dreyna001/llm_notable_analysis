@@ -232,6 +232,7 @@ class Config:
         CASE_POSTGRES_DSN: PostgreSQL DSN for case archive storage.
         CASE_POSTGRES_SCHEMA: PostgreSQL schema for case archive tables.
         CASE_RETENTION_DAYS: Retention window for archived cases.
+        CASE_RETENTION_DELETE_BATCH_SIZE: Max expired case rows deleted per retention batch.
         CASE_ARCHIVE_WRITE_MAX_ATTEMPTS: Max attempts for transient archive write failures.
         CASE_ARCHIVE_WRITE_RETRY_BACKOFF_SECONDS: Backoff between archive write attempts.
         CASE_POSTGRES_STATEMENT_TIMEOUT_MS: Per-write timeout for case archive operations.
@@ -242,6 +243,7 @@ class Config:
         CASE_QA_MAX_RETRIEVED_CASES: Max distinct cases retrieved by chat.
         CASE_QA_MAX_CHUNKS_PER_LANE: Max chunks per chat source lane.
         CASE_QA_MAX_TOTAL_CHUNKS: Max total chunks supplied to chat.
+        CASE_QA_MAX_INDEX_CHUNKS_PER_CASE: Max chunks built and embedded per archived case.
         CASE_QA_CONTEXT_BUDGET_CHARS: Max retrieval context characters for chat.
         CASE_QA_MAX_QUESTION_CHARS: Max analyst question length.
         CASE_QA_MAX_ANSWER_TOKENS: Max chat answer generation tokens.
@@ -379,6 +381,7 @@ class Config:
     CASE_POSTGRES_DSN: str = "postgresql://notable_analyzer@127.0.0.1:5432/notable_rag"
     CASE_POSTGRES_SCHEMA: str = "notable_cases"
     CASE_RETENTION_DAYS: int = 90
+    CASE_RETENTION_DELETE_BATCH_SIZE: int = 500
     CASE_ARCHIVE_WRITE_MAX_ATTEMPTS: int = 3
     CASE_ARCHIVE_WRITE_RETRY_BACKOFF_SECONDS: int = 1
     CASE_POSTGRES_STATEMENT_TIMEOUT_MS: int = 5000
@@ -389,6 +392,7 @@ class Config:
     CASE_QA_MAX_RETRIEVED_CASES: int = 5
     CASE_QA_MAX_CHUNKS_PER_LANE: int = 6
     CASE_QA_MAX_TOTAL_CHUNKS: int = 18
+    CASE_QA_MAX_INDEX_CHUNKS_PER_CASE: int = 200
     CASE_QA_CONTEXT_BUDGET_CHARS: int = 12000
     CASE_QA_MAX_QUESTION_CHARS: int = 2000
     CASE_QA_MAX_ANSWER_TOKENS: int = 800
@@ -641,6 +645,9 @@ def load_config() -> Config:
         CASE_RETENTION_DAYS=_positive_int_env(
             "CASE_RETENTION_DAYS", 90, max_value=3650
         ),
+        CASE_RETENTION_DELETE_BATCH_SIZE=_positive_int_env(
+            "CASE_RETENTION_DELETE_BATCH_SIZE", 500, max_value=10000
+        ),
         CASE_ARCHIVE_WRITE_MAX_ATTEMPTS=_positive_int_env(
             "CASE_ARCHIVE_WRITE_MAX_ATTEMPTS", 3, max_value=10
         ),
@@ -668,6 +675,9 @@ def load_config() -> Config:
         ),
         CASE_QA_MAX_TOTAL_CHUNKS=_positive_int_env(
             "CASE_QA_MAX_TOTAL_CHUNKS", 18, max_value=300
+        ),
+        CASE_QA_MAX_INDEX_CHUNKS_PER_CASE=_positive_int_env(
+            "CASE_QA_MAX_INDEX_CHUNKS_PER_CASE", 200, max_value=5000
         ),
         CASE_QA_CONTEXT_BUDGET_CHARS=_positive_int_env(
             "CASE_QA_CONTEXT_BUDGET_CHARS", 12000, max_value=200000

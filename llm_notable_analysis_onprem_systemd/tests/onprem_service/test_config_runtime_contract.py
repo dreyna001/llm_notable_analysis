@@ -40,6 +40,7 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertFalse(config.CASE_ARCHIVE_ENABLED)
         self.assertEqual(config.CASE_POSTGRES_SCHEMA, "notable_cases")
         self.assertEqual(config.CASE_RETENTION_DAYS, 90)
+        self.assertEqual(config.CASE_RETENTION_DELETE_BATCH_SIZE, 500)
         self.assertFalse(config.PORTAL_ENABLED)
         self.assertFalse(config.CASE_QA_ENABLED)
         self.assertFalse(config.CASE_QA_GLOBAL_RETRIEVAL_ENABLED)
@@ -49,6 +50,7 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.CASE_QA_LEXICAL_TOP_K, 30)
         self.assertEqual(config.CASE_QA_VECTOR_TOP_K, 30)
         self.assertEqual(config.CASE_QA_RRF_K, 60)
+        self.assertEqual(config.CASE_QA_MAX_INDEX_CHUNKS_PER_CASE, 200)
         self.assertEqual(config.LLM_MODEL_NAME, "gemma-4-31B-it")
         self.assertEqual(config.LLM_TIMEOUT, 240)
         self.assertEqual(config.MAX_WORKERS, 1)
@@ -314,6 +316,7 @@ class TestConfigRuntimeContract(unittest.TestCase):
             "CASE_POSTGRES_DSN": "postgresql://cases@127.0.0.1:5432/notables",
             "CASE_POSTGRES_SCHEMA": "customer_cases",
             "CASE_RETENTION_DAYS": "120",
+            "CASE_RETENTION_DELETE_BATCH_SIZE": "250",
             "CASE_ARCHIVE_WRITE_MAX_ATTEMPTS": "4",
             "CASE_ARCHIVE_WRITE_RETRY_BACKOFF_SECONDS": "2",
             "CASE_POSTGRES_STATEMENT_TIMEOUT_MS": "2500",
@@ -324,6 +327,7 @@ class TestConfigRuntimeContract(unittest.TestCase):
             "CASE_QA_MAX_RETRIEVED_CASES": "7",
             "CASE_QA_MAX_CHUNKS_PER_LANE": "8",
             "CASE_QA_MAX_TOTAL_CHUNKS": "20",
+            "CASE_QA_MAX_INDEX_CHUNKS_PER_CASE": "210",
             "CASE_QA_CONTEXT_BUDGET_CHARS": "15000",
             "CASE_QA_MAX_QUESTION_CHARS": "3000",
             "CASE_QA_MAX_ANSWER_TOKENS": "900",
@@ -351,6 +355,7 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.CASE_POSTGRES_DSN, "postgresql://cases@127.0.0.1:5432/notables")
         self.assertEqual(config.CASE_POSTGRES_SCHEMA, "customer_cases")
         self.assertEqual(config.CASE_RETENTION_DAYS, 120)
+        self.assertEqual(config.CASE_RETENTION_DELETE_BATCH_SIZE, 250)
         self.assertEqual(config.CASE_ARCHIVE_WRITE_MAX_ATTEMPTS, 4)
         self.assertEqual(config.CASE_ARCHIVE_WRITE_RETRY_BACKOFF_SECONDS, 2)
         self.assertEqual(config.CASE_POSTGRES_STATEMENT_TIMEOUT_MS, 2500)
@@ -361,6 +366,7 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.CASE_QA_MAX_RETRIEVED_CASES, 7)
         self.assertEqual(config.CASE_QA_MAX_CHUNKS_PER_LANE, 8)
         self.assertEqual(config.CASE_QA_MAX_TOTAL_CHUNKS, 20)
+        self.assertEqual(config.CASE_QA_MAX_INDEX_CHUNKS_PER_CASE, 210)
         self.assertEqual(config.CASE_QA_CONTEXT_BUDGET_CHARS, 15000)
         self.assertEqual(config.CASE_QA_MAX_QUESTION_CHARS, 3000)
         self.assertEqual(config.CASE_QA_MAX_ANSWER_TOKENS, 900)

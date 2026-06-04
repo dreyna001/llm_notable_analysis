@@ -353,9 +353,15 @@ def _make_chunk(
     )
 
 
+def _index_chunk_budget(config: Config) -> int:
+    """Return the per-case chunk build budget for indexing."""
+    return max(1, int(config.CASE_QA_MAX_INDEX_CHUNKS_PER_CASE))
+
+
 def build_case_chunks(record: CaseArchiveRecord, config: Config) -> list[CaseChunkRecord]:
     """Build deterministic case chunks from JSON fields, never rendered reports."""
     chunks: list[CaseChunkRecord] = []
+    chunk_budget = _index_chunk_budget(config)
 
     alert_summary = _build_alert_summary_text(record.alert_payload)
     if alert_summary:
@@ -372,6 +378,8 @@ def build_case_chunks(record: CaseArchiveRecord, config: Config) -> list[CaseChu
                     config=config,
                 )
             )
+            if len(chunks) >= chunk_budget:
+                return chunks
 
     ordinal = 0
     for field_path, text in _iter_alert_key_fields(record.alert_payload):
@@ -389,6 +397,8 @@ def build_case_chunks(record: CaseArchiveRecord, config: Config) -> list[CaseChu
                 )
             )
             ordinal += 1
+            if len(chunks) >= chunk_budget:
+                return chunks
 
     if record.analysis is None:
         return chunks
@@ -411,6 +421,8 @@ def build_case_chunks(record: CaseArchiveRecord, config: Config) -> list[CaseChu
                     config=config,
                 )
             )
+            if len(chunks) >= chunk_budget:
+                return chunks
     return chunks
 
 
