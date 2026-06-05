@@ -23,7 +23,36 @@ class NotableReadError(Exception):
         super().__init__(message)
 
 
-def read_notable_text(file_path: Path, max_bytes: int) -> str:
+def _is_relative_to(path: Path, root: Path) -> bool:
+    """Return whether path is under root after resolution."""
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _validate_incoming_path(file_path: Path, *, root: Path | None = None) -> None:
+    """Reject symlinks and paths that escape the incoming directory."""
+    if file_path.is_symlink():
+        raise NotableReadError("symlinked notable files are not supported")
+    if root is None:
+        return
+    try:
+        root_resolved = root.resolve(strict=True)
+        resolved = file_path.resolve(strict=True)
+    except OSError as exc:
+        raise NotableReadError(f"cannot resolve notable file: {exc}") from exc
+    if not _is_relative_to(resolved, root_resolved):
+        raise NotableReadError("notable file must remain under INCOMING_DIR")
+
+
+def read_notable_text(
+    file_path: Path,
+    max_bytes: int,
+    *,
+    root: Path | None = None,
+) -> str:
     """Read a notable file as UTF-8 after verifying on-disk size.
 
     Uses :func:`Path.stat` before :meth:`Path.read_text` so arbitrarily large
@@ -40,6 +69,7 @@ def read_notable_text(file_path: Path, max_bytes: int) -> str:
         NotableReadError: If the file cannot be stat'd, exceeds ``max_bytes``,
             or cannot be read.
     """
+    _validate_incoming_path(file_path, root=root)
     try:
         size = file_path.stat().st_size
     except OSError as exc:
@@ -67,10 +97,20 @@ def discover_files(config: Config) -> List[Path]:
     """
     incoming = config.INCOMING_DIR
     if not incoming.exists():
-        logger.warning(f"INCOMING_DIR does not exist: {incoming}")
+        logger.warning("INCOMING_DIR does not exist: %s", incoming)
         return []
 
-    files = list(incoming.glob("*.json")) + list(incoming.glob("*.txt"))
+    candidates = list(incoming.glob("*.json")) + list(incoming.glob("*.txt"))
+    files: list[Path] = []
+    for candidate in candidates:
+        try:
+            _validate_incoming_path(candidate, root=incoming)
+            if not candidate.is_file():
+                continue
+        except NotableReadError as exc:
+            logger.warning("Skipping unsafe incoming file %s: %s", candidate.name, exc)
+            continue
+        files.append(candidate)
     # Sort by modification time (oldest first for FIFO processing)
     files.sort(key=lambda f: f.stat().st_mtime)
     return files
@@ -142,7 +182,7 @@ def move_to_processed(file_path: Path, config: Config) -> Path:
             dest = config.PROCESSED_DIR / f"{stem}_{counter}{suffix}"
             counter += 1
     shutil.move(str(file_path), str(dest))
-    logger.info(f"Moved processed file to {dest}")
+    logger.info("Moved processed file to %s", dest)
     return dest
 
 
@@ -170,5 +210,8 @@ def move_to_quarantine(
             dest = config.QUARANTINE_DIR / f"{stem}_{counter}{suffix}"
             counter += 1
     shutil.move(str(file_path), str(dest))
-    logger.warning(f"Quarantined file to {dest}" + (f": {reason}" if reason else ""))
+    if reason:
+        logger.warning("Quarantined file to %s: %s", dest, reason)
+    else:
+        logger.warning("Quarantined file to %s", dest)
     return dest

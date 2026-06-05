@@ -13,7 +13,7 @@ class TestQueryResultInterpretation(unittest.TestCase):
     def _analysis_result(self) -> dict:
         return {
             "alert_reconciliation": {
-                "verdict": "likely malicious",
+                "verdict": "likely_malicious",
                 "confidence": "0.82",
                 "one_sentence_summary": "Possible beaconing observed.",
             },

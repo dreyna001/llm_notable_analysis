@@ -52,7 +52,7 @@ class _FakeConnection:
 def _analysis() -> dict:
     return {
         "alert_reconciliation": {
-            "verdict": "likely malicious",
+            "verdict": "likely_malicious",
             "confidence": "0.82",
             "one_sentence_summary": "Suspicious PowerShell from admin host.",
         },
@@ -135,7 +135,7 @@ class TestCaseIndex(unittest.TestCase):
             CaseListFilters(
                 processed_from=processed_from,
                 processed_to=processed_to,
-                verdict="likely malicious",
+                verdict="likely_malicious",
                 search_name_prefix=r"Power_%Shell",
                 offset=10,
             ),
@@ -143,6 +143,7 @@ class TestCaseIndex(unittest.TestCase):
         )
 
         self.assertIn('FROM "notable_cases".cases', sql)
+        self.assertIn("expires_at > now()", sql)
         self.assertIn("processed_at >= %s", sql)
         self.assertIn("processed_at <= %s", sql)
         self.assertIn("verdict = %s", sql)
@@ -153,29 +154,29 @@ class TestCaseIndex(unittest.TestCase):
             (
                 processed_from,
                 processed_to,
-                "likely malicious",
+                "likely_malicious",
                 r"Power\_\%Shell%",
                 25,
                 10,
             ),
         )
 
-    def test_build_list_cases_query_supports_exact_search_name(self) -> None:
+    def test_build_list_cases_query_supports_substring_search_name(self) -> None:
         sql, params = build_list_cases_query(
             "notable_cases",
-            CaseListFilters(search_name="Suspicious PowerShell"),
+            CaseListFilters(search_name="PowerShell"),
             page_size=25,
         )
 
-        self.assertIn("search_name = %s", sql)
-        self.assertNotIn("ILIKE", sql)
-        self.assertEqual(params, ("Suspicious PowerShell", 25, 0))
+        self.assertIn("search_name ILIKE %s", sql)
+        self.assertEqual(params, ("%PowerShell%", 25, 0))
 
     def test_build_get_case_query_targets_one_case(self) -> None:
         sql = build_get_case_query("notable_cases")
 
         self.assertIn('FROM "notable_cases".cases', sql)
         self.assertIn("WHERE case_id = %s", sql)
+        self.assertIn("expires_at > now()", sql)
 
     def test_list_cases_maps_summary_rows_and_bounds_limit(self) -> None:
         config = Config(PORTAL_PAGE_SIZE=50, CASE_POSTGRES_STATEMENT_TIMEOUT_MS=2500)

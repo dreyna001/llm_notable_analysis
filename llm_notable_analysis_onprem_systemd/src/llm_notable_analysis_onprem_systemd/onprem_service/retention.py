@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
+from .case_chat_history import delete_expired_chat_sessions
 from .case_store import quote_identifier
 from .config import Config
 
@@ -314,10 +315,16 @@ def run_retention(
         now=datetime.fromtimestamp(now, tz=timezone.utc),
         connect=connect,
     )
+    chat_deleted = delete_expired_chat_sessions(
+        config=config,
+        now=datetime.fromtimestamp(now, tz=timezone.utc),
+        connect=connect,
+    )
 
     for s in (s1a, s1b, s1c, s2a, s2b, s2c, s2d, s2e):
         total_moved += s.moved
         total_deleted += s.deleted
         total_errors += s.errors
+    total_deleted += chat_deleted
 
     return RetentionStats(moved=total_moved, deleted=total_deleted, errors=total_errors)

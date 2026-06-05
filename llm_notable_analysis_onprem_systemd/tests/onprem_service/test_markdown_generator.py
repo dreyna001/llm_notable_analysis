@@ -10,7 +10,7 @@ class TestMarkdownGenerator(unittest.TestCase):
     def test_section_order_matches_onprem_contract(self) -> None:
         llm_response = {
             "alert_reconciliation": {
-                "verdict": "likely malicious",
+                "verdict": "likely_malicious",
                 "confidence": "0.88",
                 "one_sentence_summary": "Suspicious auth activity appears adversarial.",
                 "decision_drivers": ["failed logins then success"],
@@ -71,7 +71,7 @@ class TestMarkdownGenerator(unittest.TestCase):
         markdown = generate_markdown_report("alert", llm_response, [])
 
         self.assertIn("### Alert Reconciliation", markdown)
-        self.assertIn("**Verdict:** uncertain", markdown)
+        self.assertIn("**Verdict:** Unknown", markdown)
         self.assertIn("**Confidence:** N/A", markdown)
         self.assertIn("**Summary:** N/A", markdown)
 

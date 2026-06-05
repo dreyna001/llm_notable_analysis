@@ -19,7 +19,7 @@ class TestOnpremMainInvestigation(unittest.TestCase):
     def _make_base_llm_response(self) -> dict:
         return {
             "alert_reconciliation": {
-                "verdict": "likely malicious",
+                "verdict": "likely_malicious",
                 "confidence": "0.81",
                 "one_sentence_summary": "Suspicious auth chain observed.",
                 "decision_drivers": ["failed logins followed by success"],

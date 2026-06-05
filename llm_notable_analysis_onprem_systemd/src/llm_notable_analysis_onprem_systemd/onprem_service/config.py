@@ -39,7 +39,6 @@ _CAPABILITY_PROFILE_FLAGS: dict[str, dict[str, Any]] = {
         "CASE_ARCHIVE_ENABLED": True,
         "PORTAL_ENABLED": True,
         "CASE_QA_ENABLED": True,
-        "CASE_QA_GLOBAL_RETRIEVAL_ENABLED": True,
     },
 }
 
@@ -250,7 +249,8 @@ class Config:
         CASE_QA_CHUNK_SCHEMA_VERSION: Case chunk schema version.
         CASE_QA_EMBEDDING_MODEL: Embedding model used for case chunks.
         CASE_QA_VECTOR_DIMENSIONS: pgvector dimensions for case chunks.
-        CASE_QA_CHAT_HISTORY_ENABLED: Enables persisted portal chat history.
+        CASE_QA_CHAT_HISTORY_ENABLED: Enables bounded persisted portal chat history.
+        CASE_QA_GENERAL_KNOWLEDGE_ENABLED: Enables broad technology fallback when archive context is insufficient.
         CASE_QA_CHAT_HISTORY_RETENTION_DAYS: Retention window for chat sessions.
         CASE_QA_MAX_MESSAGES_PER_SESSION: Max persisted chat messages per session.
         CASE_QA_MAX_STORED_MESSAGE_BYTES: Max stored chat message size.
@@ -383,7 +383,7 @@ class Config:
     CASE_ARCHIVE_ENABLED: bool = False
     CASE_POSTGRES_DSN: str = "postgresql://notable_analyzer@127.0.0.1:5432/notable_rag"
     CASE_POSTGRES_SCHEMA: str = "notable_cases"
-    CASE_RETENTION_DAYS: int = 90
+    CASE_RETENTION_DAYS: int = 30
     CASE_RETENTION_DELETE_BATCH_SIZE: int = 500
     CASE_ARCHIVE_WRITE_MAX_ATTEMPTS: int = 3
     CASE_ARCHIVE_WRITE_RETRY_BACKOFF_SECONDS: int = 1
@@ -403,6 +403,7 @@ class Config:
     CASE_QA_EMBEDDING_MODEL: str = "BAAI/bge-base-en-v1.5"
     CASE_QA_VECTOR_DIMENSIONS: int = 768
     CASE_QA_CHAT_HISTORY_ENABLED: bool = False
+    CASE_QA_GENERAL_KNOWLEDGE_ENABLED: bool = True
     CASE_QA_CHAT_HISTORY_RETENTION_DAYS: int = 7
     CASE_QA_MAX_MESSAGES_PER_SESSION: int = 30
     CASE_QA_MAX_STORED_MESSAGE_BYTES: int = 4000
@@ -549,6 +550,17 @@ class Config:
                 self.CASE_POSTGRES_SCHEMA,
                 "CASE_POSTGRES_SCHEMA",
             )
+        if bool(self.PORTAL_ENABLED):
+            if not bool(self.CASE_ARCHIVE_ENABLED):
+                raise ValueError("CASE_ARCHIVE_ENABLED is required when PORTAL_ENABLED=true")
+            if not str(self.PORTAL_PROXY_SECRET or "").strip():
+                raise ValueError("PORTAL_PROXY_SECRET is required when PORTAL_ENABLED=true")
+        if bool(self.CASE_QA_ENABLED) and not bool(self.CASE_ARCHIVE_ENABLED):
+            raise ValueError("CASE_ARCHIVE_ENABLED is required when CASE_QA_ENABLED=true")
+        if bool(self.CASE_QA_CHAT_HISTORY_ENABLED) and not bool(self.CASE_QA_ENABLED):
+            raise ValueError(
+                "CASE_QA_ENABLED is required when CASE_QA_CHAT_HISTORY_ENABLED=true"
+            )
         _validate_elasticsearch_runtime_contract(self)
 
 
@@ -649,7 +661,7 @@ def load_config() -> Config:
         ),
         CASE_POSTGRES_SCHEMA=os.getenv("CASE_POSTGRES_SCHEMA", "notable_cases"),
         CASE_RETENTION_DAYS=_positive_int_env(
-            "CASE_RETENTION_DAYS", 90, max_value=3650
+            "CASE_RETENTION_DAYS", 30, max_value=3650
         ),
         CASE_RETENTION_DELETE_BATCH_SIZE=_positive_int_env(
             "CASE_RETENTION_DELETE_BATCH_SIZE", 500, max_value=10000
@@ -705,6 +717,9 @@ def load_config() -> Config:
         ),
         CASE_QA_CHAT_HISTORY_ENABLED=_profile_bool(
             "CASE_QA_CHAT_HISTORY_ENABLED", False, profile_flags
+        ),
+        CASE_QA_GENERAL_KNOWLEDGE_ENABLED=_profile_bool(
+            "CASE_QA_GENERAL_KNOWLEDGE_ENABLED", True, profile_flags
         ),
         CASE_QA_CHAT_HISTORY_RETENTION_DAYS=_positive_int_env(
             "CASE_QA_CHAT_HISTORY_RETENTION_DAYS", 7, max_value=365

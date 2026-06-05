@@ -804,6 +804,15 @@ def fetch_case_records(
         return [_record_from_row(row) for row in _fetchall(result)]
 
 
+def _record_is_rebuildable(record: CaseArchiveRecord) -> bool:
+    """Return whether a stored case should be indexed for archive chat."""
+    if record.retrieval_status == "not_indexed":
+        return False
+    if record.backfill_status == "legacy_summary":
+        return False
+    return record.source_completeness == "complete"
+
+
 def rebuild_case_chunks(
     *,
     config: Config,
@@ -815,6 +824,7 @@ def rebuild_case_chunks(
     """Rebuild chunks for one case or all retained cases."""
     rebuilt = 0
     chunks = 0
+    skipped = 0
     cursor_processed_at: datetime | None = None
     cursor_case_id: str | None = None
     page_size = 1 if case_id is not None else max(1, int(batch_size))
@@ -830,6 +840,9 @@ def rebuild_case_chunks(
         if not records:
             break
         for record in records:
+            if not _record_is_rebuildable(record):
+                skipped += 1
+                continue
             chunks += store_case_chunks(
                 record=record,
                 config=config,
@@ -841,7 +854,7 @@ def rebuild_case_chunks(
             break
         cursor_processed_at = records[-1].processed_at
         cursor_case_id = records[-1].case_id
-    return {"cases": rebuilt, "chunks": chunks}
+    return {"cases": rebuilt, "chunks": chunks, "skipped": skipped}
 
 
 def dry_run_case_chunk_rebuild(
@@ -854,6 +867,7 @@ def dry_run_case_chunk_rebuild(
     """Count rebuildable cases and deterministic chunks without writing."""
     rebuilt = 0
     chunks = 0
+    skipped = 0
     cursor_processed_at: datetime | None = None
     cursor_case_id: str | None = None
     page_size = 1 if case_id is not None else max(1, int(batch_size))
@@ -868,10 +882,14 @@ def dry_run_case_chunk_rebuild(
         )
         if not records:
             break
-        rebuilt += len(records)
-        chunks += sum(len(build_case_chunks(record, config)) for record in records)
+        for record in records:
+            if not _record_is_rebuildable(record):
+                skipped += 1
+                continue
+            rebuilt += 1
+            chunks += len(build_case_chunks(record, config))
         if case_id is not None or len(records) < page_size:
             break
         cursor_processed_at = records[-1].processed_at
         cursor_case_id = records[-1].case_id
-    return {"cases": rebuilt, "chunks": chunks}
+    return {"cases": rebuilt, "chunks": chunks, "skipped": skipped}

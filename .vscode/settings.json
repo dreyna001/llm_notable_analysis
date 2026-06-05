@@ -1,0 +1,14 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+  "python.terminal.activateEnvironment": true,
+  "pylint.enabled": false,
+  "pylint.interpreter": ["${workspaceFolder}/.venv/Scripts/python.exe"],
+  "pylint.importStrategy": "fromEnvironment",
+  "pylint.lintOnChange": false,
+  "pylint.ignorePatterns": [
+    "**/.venv/**",
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/__pycache__/**"
+  ]
+}

@@ -12,7 +12,7 @@ from llm_notable_analysis_onprem_systemd.onprem_service.onprem_main import proce
 def _base_llm_response() -> dict:
     return {
         "alert_reconciliation": {
-            "verdict": "likely malicious",
+            "verdict": "likely_malicious",
             "confidence": "0.82",
             "one_sentence_summary": "Potential credential misuse detected.",
             "decision_drivers": ["failed logins then success"],

@@ -84,7 +84,11 @@ def process_notable(
 
     try:
         try:
-            content = read_notable_text(file_path, config.MAX_INPUT_FILE_BYTES)
+            content = read_notable_text(
+                file_path,
+                config.MAX_INPUT_FILE_BYTES,
+                root=config.INCOMING_DIR,
+            )
         except NotableReadError as exc:
             logger.warning("Rejected notable (read/size): %s: %s", file_path.name, exc)
             move_to_quarantine(file_path, config, str(exc))

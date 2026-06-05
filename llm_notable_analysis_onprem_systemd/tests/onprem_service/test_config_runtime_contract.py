@@ -39,7 +39,7 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.RAG_RRF_K, 60)
         self.assertFalse(config.CASE_ARCHIVE_ENABLED)
         self.assertEqual(config.CASE_POSTGRES_SCHEMA, "notable_cases")
-        self.assertEqual(config.CASE_RETENTION_DAYS, 90)
+        self.assertEqual(config.CASE_RETENTION_DAYS, 30)
         self.assertEqual(config.CASE_RETENTION_DELETE_BATCH_SIZE, 500)
         self.assertFalse(config.PORTAL_ENABLED)
         self.assertFalse(config.CASE_QA_ENABLED)
@@ -133,14 +133,21 @@ class TestConfigRuntimeContract(unittest.TestCase):
 
     def test_analyst_portal_profile_enables_archive_portal_and_case_qa(self) -> None:
         """Analyst portal profile should enable only portal/archive capabilities."""
-        with patch.dict(os.environ, {"CAPABILITY_PROFILES": "analyst_portal"}, clear=True):
+        with patch.dict(
+            os.environ,
+            {
+                "CAPABILITY_PROFILES": "analyst_portal",
+                "PORTAL_PROXY_SECRET": "portal-secret",
+            },
+            clear=True,
+        ):
             config = load_config()
 
         self.assertEqual(config.CAPABILITY_PROFILES, "core,analyst_portal")
         self.assertTrue(config.CASE_ARCHIVE_ENABLED)
         self.assertTrue(config.PORTAL_ENABLED)
         self.assertTrue(config.CASE_QA_ENABLED)
-        self.assertTrue(config.CASE_QA_GLOBAL_RETRIEVAL_ENABLED)
+        self.assertFalse(config.CASE_QA_GLOBAL_RETRIEVAL_ENABLED)
         self.assertFalse(config.CASE_QA_CHAT_HISTORY_ENABLED)
         self.assertFalse(config.SPLUNK_SINK_ENABLED)
         self.assertFalse(config.SERVICENOW_CREATE_ENABLED)
@@ -334,7 +341,6 @@ class TestConfigRuntimeContract(unittest.TestCase):
             "CASE_QA_CHUNK_SCHEMA_VERSION": "2",
             "CASE_QA_EMBEDDING_MODEL": "custom/bge",
             "CASE_QA_VECTOR_DIMENSIONS": "768",
-            "CASE_QA_CHAT_HISTORY_ENABLED": "true",
             "CASE_QA_CHAT_HISTORY_RETENTION_DAYS": "14",
             "CASE_QA_MAX_MESSAGES_PER_SESSION": "40",
             "CASE_QA_MAX_STORED_MESSAGE_BYTES": "5000",
@@ -346,6 +352,7 @@ class TestConfigRuntimeContract(unittest.TestCase):
             "PORTAL_PORT": "8081",
             "PORTAL_PAGE_SIZE": "25",
             "PORTAL_TRUSTED_USER_HEADER": "X-Test-User",
+            "PORTAL_PROXY_SECRET": "portal-secret",
         }
 
         with patch.dict(os.environ, env, clear=True):
@@ -373,7 +380,7 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.CASE_QA_CHUNK_SCHEMA_VERSION, 2)
         self.assertEqual(config.CASE_QA_EMBEDDING_MODEL, "custom/bge")
         self.assertEqual(config.CASE_QA_VECTOR_DIMENSIONS, 768)
-        self.assertTrue(config.CASE_QA_CHAT_HISTORY_ENABLED)
+        self.assertFalse(config.CASE_QA_CHAT_HISTORY_ENABLED)
         self.assertEqual(config.CASE_QA_CHAT_HISTORY_RETENTION_DAYS, 14)
         self.assertEqual(config.CASE_QA_MAX_MESSAGES_PER_SESSION, 40)
         self.assertEqual(config.CASE_QA_MAX_STORED_MESSAGE_BYTES, 5000)
@@ -385,6 +392,48 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.PORTAL_PORT, 8081)
         self.assertEqual(config.PORTAL_PAGE_SIZE, 25)
         self.assertEqual(config.PORTAL_TRUSTED_USER_HEADER, "X-Test-User")
+
+    def test_portal_enabled_requires_proxy_secret(self) -> None:
+        """Portal deployments should not trust a forgeable user header alone."""
+        with patch.dict(
+            os.environ,
+            {"PORTAL_ENABLED": "true", "CASE_ARCHIVE_ENABLED": "true"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(ValueError, "PORTAL_PROXY_SECRET"):
+                load_config()
+
+    def test_chat_enabled_requires_case_archive(self) -> None:
+        """Archive-backed chat should not start without the case archive."""
+        with patch.dict(os.environ, {"CASE_QA_ENABLED": "true"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "CASE_ARCHIVE_ENABLED"):
+                load_config()
+
+    def test_chat_history_enabled_requires_case_qa(self) -> None:
+        """Persisted chat history should not start without portal chat."""
+        with patch.dict(
+            os.environ,
+            {
+                "CASE_ARCHIVE_ENABLED": "true",
+                "CASE_QA_CHAT_HISTORY_ENABLED": "true",
+            },
+            clear=True,
+        ):
+            with self.assertRaisesRegex(ValueError, "CASE_QA_ENABLED"):
+                load_config()
+
+    def test_chat_history_enabled_loads_with_case_qa(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "CASE_ARCHIVE_ENABLED": "true",
+                "CASE_QA_ENABLED": "true",
+                "CASE_QA_CHAT_HISTORY_ENABLED": "true",
+            },
+            clear=True,
+        ):
+            config = load_config()
+        self.assertTrue(config.CASE_QA_CHAT_HISTORY_ENABLED)
 
     def test_case_qa_vector_dimensions_are_fixed_for_v1(self) -> None:
         """Case archive schema is vector(768), so v1 config must not drift."""

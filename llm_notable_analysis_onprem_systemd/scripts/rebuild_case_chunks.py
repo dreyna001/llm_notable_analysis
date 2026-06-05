@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Rebuild Postgres case archive chunks for portal retrieval."""
 
+# Tests and operator execution add the local src layout dynamically.
+# pylint: disable=import-error,no-name-in-module
+
 from __future__ import annotations
 
 import argparse
@@ -78,10 +81,14 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     if args.batch_size < 1:
         raise ValueError("--batch-size must be greater than zero")
+    if not args.dry_run and args.config_env is None:
+        raise ValueError("--config-env is required when executing chunk rebuild.")
     if args.config_env is not None:
         _load_config_env(args.config_env)
 
     config = load_config()
+    if not args.dry_run and not bool(config.CASE_ARCHIVE_ENABLED):
+        raise ValueError("CASE_ARCHIVE_ENABLED must be true to execute chunk rebuild.")
     case_id = args.case_id if not args.all else None
     if args.dry_run:
         result = dry_run_case_chunk_rebuild(

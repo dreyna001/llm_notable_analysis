@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .config import Config
+from .verdicts import normalize_verdict
 
 ConnectionFactory = Callable[[str], Any]
 SleepFn = Callable[[float], None]
@@ -29,7 +30,7 @@ _RETRYABLE_EXCEPTION_NAMES = {
     "Timeout",
 }
 _SEARCH_NAME_KEYS = ("search_name", "searchName", "rule_name", "rule", "signature", "title")
-_CORRELATION_ID_KEYS = ("correlation_id", "notable_id", "event_id", "sid", "id")
+_CORRELATION_ID_KEYS = ("correlation_id", "notable_id", "event_id", "sid")
 _RISK_SCORE_KEYS = ("risk_score", "riskScore")
 _CASE_ID_SAFE_RE = re.compile(r"[^A-Za-z0-9_-]+")
 _MAX_CASE_ID_CHARS = 100
@@ -224,6 +225,11 @@ def build_case_archive_record(
 
     archive_metadata: dict[str, Any] = {}
     stored_analysis: dict[str, Any] | None = dict(analysis)
+    verdict = normalize_verdict(alert_reconciliation.get("verdict"))
+    if stored_analysis is not None:
+        stored_reconciliation = stored_analysis.get("alert_reconciliation")
+        if isinstance(stored_reconciliation, dict):
+            stored_reconciliation["verdict"] = verdict
     retrieval_status = "pending"
     source_completeness = "complete"
     if is_poc_fallback:
@@ -248,7 +254,7 @@ def build_case_archive_record(
         analysis=stored_analysis,
         case_schema_version=config.CASE_SCHEMA_VERSION,
         analysis_schema_version=config.CASE_ANALYSIS_SCHEMA_VERSION,
-        verdict=_string_or_none(alert_reconciliation.get("verdict")),
+        verdict=verdict,
         confidence=_numeric_or_none(alert_reconciliation.get("confidence")),
         search_name=_first_alert_value(alert_payload, _SEARCH_NAME_KEYS),
         risk_score=_first_alert_numeric(alert_payload, _RISK_SCORE_KEYS),

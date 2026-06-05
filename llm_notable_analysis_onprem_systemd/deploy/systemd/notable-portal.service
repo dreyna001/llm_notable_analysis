@@ -1,7 +1,8 @@
 [Unit]
 Description=Notable Analyst Portal (read-only FastAPI)
 Documentation=https://github.com/your-org/notable-analyzer
-After=network.target
+After=network.target litellm.service
+Wants=litellm.service
 
 [Service]
 Type=simple
@@ -9,7 +10,9 @@ User=notable-analyzer
 Group=notable-analyzer
 
 WorkingDirectory=/opt/notable-analyzer
-EnvironmentFile=/etc/notable-analyzer/config.env
+EnvironmentFile=/etc/notable-analyzer/portal.env
+Environment=HF_HOME=/var/notables/cache/huggingface
+Environment=SENTENCE_TRANSFORMERS_HOME=/var/notables/cache/sentence-transformers
 
 ExecStart=/opt/notable-analyzer/venv/bin/python -m llm_notable_analysis_onprem_systemd.onprem_service.portal_app
 
@@ -36,6 +39,7 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 ReadOnlyPaths=/etc/notable-analyzer
+ReadWritePaths=/var/notables/cache
 
 LimitNOFILE=65535
 

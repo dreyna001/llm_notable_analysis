@@ -54,6 +54,7 @@ from .query_result_interpretation import (
     validate_query_result_interpretation_payload,
 )
 from .ttp_validator import TTPValidator
+from .verdicts import ALLOWED_VERDICTS, normalize_verdict
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +203,33 @@ def _analysis_tool_spec() -> Dict[str, Any]:
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "alert_reconciliation": {"type": "object"},
+                    "alert_reconciliation": {
+                        "type": "object",
+                        "properties": {
+                            "verdict": {
+                                "type": "string",
+                                "enum": list(ALLOWED_VERDICTS),
+                            },
+                            "confidence": {"type": "string"},
+                            "one_sentence_summary": {"type": "string"},
+                            "decision_drivers": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "recommended_actions": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                        },
+                        "required": [
+                            "verdict",
+                            "confidence",
+                            "one_sentence_summary",
+                            "decision_drivers",
+                            "recommended_actions",
+                        ],
+                        "additionalProperties": True,
+                    },
                     "competing_hypotheses": {"type": "array"},
                     "evidence_vs_inference": {"type": "object"},
                     "ioc_extraction": {"type": "object"},
@@ -448,6 +475,12 @@ Additional constraints:
 - URLs are only allowed in ioc_extraction.urls[]; no URLs elsewhere.
 - Leave arrays empty [] when no items apply.
 - alert_reconciliation: object with verdict, confidence, one_sentence_summary, decision_drivers (list), recommended_actions (list).
+- alert_reconciliation.verdict MUST be exactly one of: "likely_benign", "likely_malicious", "unknown".
+- Use "likely_malicious" when direct alert evidence supports adversary activity or a true-positive security concern.
+- Use "likely_benign" when direct alert evidence supports benign, administrative, expected, or false-positive activity.
+- Use "unknown" when the evidence is insufficient, conflicting, missing critical context, or only supports competing benign/adversary hypotheses.
+- ATT&CK techniques are behavior labels, not verdicts; benign activity may resemble ATT&CK techniques, so do not mark a verdict malicious solely because a technique can be mapped.
+- alert_reconciliation.confidence is confidence in the selected verdict, not an independent probability that the alert is malicious.
 
 Top-level keys (required):
 - alert_reconciliation
@@ -505,6 +538,14 @@ def validate_response_schema(result: Dict[str, Any]) -> Tuple[bool, Optional[str
                 False,
                 f"Key '{key}' must be {expected_type.__name__}, got {type(result[key]).__name__}",
             )
+
+    verdict = result["alert_reconciliation"].get("verdict")
+    if verdict not in ALLOWED_VERDICTS:
+        return (
+            False,
+            "alert_reconciliation.verdict must be one of: "
+            + ", ".join(ALLOWED_VERDICTS),
+        )
 
     return True, None
 
@@ -821,7 +862,7 @@ def _normalize_and_fill_defaults(
     if not isinstance(ar, dict):
         ar = {}
     out["alert_reconciliation"] = {
-        "verdict": str(ar.get("verdict", "")) if ar.get("verdict") is not None else "",
+        "verdict": normalize_verdict(ar.get("verdict")),
         "confidence": str(ar.get("confidence", ""))
         if ar.get("confidence") is not None
         else "",

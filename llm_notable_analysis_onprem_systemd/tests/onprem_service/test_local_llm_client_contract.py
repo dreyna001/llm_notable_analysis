@@ -13,6 +13,9 @@ from llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client import 
     validate_content_policies,
     validate_response_schema,
 )
+from llm_notable_analysis_onprem_systemd.onprem_service.verdicts import (
+    normalize_verdict,
+)
 
 
 class _DummyValidator:
@@ -35,7 +38,7 @@ class TestLocalLlmClientContract(unittest.TestCase):
         self.assertEqual(
             out["alert_reconciliation"],
             {
-                "verdict": "",
+                "verdict": "unknown",
                 "confidence": "",
                 "one_sentence_summary": "",
                 "decision_drivers": [],
@@ -44,6 +47,28 @@ class TestLocalLlmClientContract(unittest.TestCase):
         )
         is_valid, err = validate_response_schema(out)
         self.assertTrue(is_valid, msg=err)
+
+    def test_normalize_verdict_maps_legacy_values_to_stable_enum(self) -> None:
+        self.assertEqual(normalize_verdict("likely malicious"), "likely_malicious")
+        self.assertEqual(normalize_verdict("false positive"), "likely_benign")
+        self.assertEqual(normalize_verdict("needs review"), "unknown")
+
+    def test_validate_response_schema_rejects_unsupported_verdict(self) -> None:
+        payload = _normalize_and_fill_defaults(
+            {
+                "alert_reconciliation": {"verdict": "maybe_bad"},
+                "competing_hypotheses": [],
+                "evidence_vs_inference": {},
+                "ioc_extraction": {},
+                "ttp_analysis": [],
+            }
+        )
+        payload["alert_reconciliation"]["verdict"] = "maybe_bad"
+
+        ok, err = validate_response_schema(payload)
+
+        self.assertFalse(ok)
+        self.assertIn("alert_reconciliation.verdict", err or "")
 
     def test_extract_json_object_from_preamble_and_trailing_text(self) -> None:
         raw = 'model preamble {"k": 1, "nested": {"v": 2}} trailing'
@@ -63,7 +88,7 @@ class TestLocalLlmClientContract(unittest.TestCase):
     def test_validate_content_policies_rejects_url_outside_ioc_urls(self) -> None:
         payload = {
             "alert_reconciliation": {
-                "verdict": "likely malicious",
+                "verdict": "likely_malicious",
                 "confidence": "0.7",
                 "one_sentence_summary": "N/A",
                 "decision_drivers": [],
@@ -113,7 +138,7 @@ class TestLocalLlmClientContract(unittest.TestCase):
             "evidence_vs_inference": {},
             "competing_hypotheses": [],
             "alert_reconciliation": {
-                "verdict": 1,
+                "verdict": "likely malicious",
                 "confidence": 0.95,
                 "one_sentence_summary": None,
                 "decision_drivers": "driver-one",
@@ -123,7 +148,7 @@ class TestLocalLlmClientContract(unittest.TestCase):
         out = _normalize_and_fill_defaults(parsed)
         ar = out["alert_reconciliation"]
 
-        self.assertEqual(ar["verdict"], "1")
+        self.assertEqual(ar["verdict"], "likely_malicious")
         self.assertEqual(ar["confidence"], "0.95")
         self.assertEqual(ar["one_sentence_summary"], "")
         self.assertEqual(ar["decision_drivers"], ["driver-one"])
@@ -132,7 +157,7 @@ class TestLocalLlmClientContract(unittest.TestCase):
     def test_validate_content_policies_rejects_placeholder_token(self) -> None:
         payload = {
             "alert_reconciliation": {
-                "verdict": "likely malicious",
+                "verdict": "likely_malicious",
                 "confidence": "0.7",
                 "one_sentence_summary": "placeholder used here",
                 "decision_drivers": [],

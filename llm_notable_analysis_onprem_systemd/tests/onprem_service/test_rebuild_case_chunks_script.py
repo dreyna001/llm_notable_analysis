@@ -37,30 +37,51 @@ class TestRebuildCaseChunksScript(unittest.TestCase):
         with patch.object(module, "load_config", return_value=config), patch.object(
             module,
             "dry_run_case_chunk_rebuild",
-            return_value={"cases": 1, "chunks": 9},
+            return_value={"cases": 1, "chunks": 9, "skipped": 0},
         ) as dry_run, patch("builtins.print") as mock_print:
             exit_code = module.main(["--case-id", "case-1", "--dry-run"])
 
         self.assertEqual(exit_code, 0)
         dry_run.assert_called_once_with(config=config, case_id="case-1", batch_size=100)
         printed = json.loads(mock_print.call_args.args[0])
-        self.assertEqual(printed, {"cases": 1, "chunks": 9, "dry_run": 1})
+        self.assertEqual(printed, {"cases": 1, "chunks": 9, "dry_run": 1, "skipped": 0})
 
     def test_main_execute_rebuilds_all_cases(self) -> None:
         module = _load_script_module()
-        config = Config()
+        config = Config(CASE_ARCHIVE_ENABLED=True)
 
-        with patch.object(module, "load_config", return_value=config), patch.object(
-            module,
-            "rebuild_case_chunks",
-            return_value={"cases": 2, "chunks": 18},
-        ) as rebuild, patch("builtins.print") as mock_print:
-            exit_code = module.main(["--all", "--batch-size", "25"])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_env = Path(tmpdir) / "config.env"
+            config_env.write_text("CASE_ARCHIVE_ENABLED=true", encoding="utf-8")
+            with patch.object(module, "load_config", return_value=config), patch.object(
+                module,
+                "rebuild_case_chunks",
+                return_value={"cases": 2, "chunks": 18, "skipped": 0},
+            ) as rebuild, patch("builtins.print") as mock_print:
+                exit_code = module.main(
+                    ["--all", "--batch-size", "25", "--config-env", str(config_env)]
+                )
 
         self.assertEqual(exit_code, 0)
         rebuild.assert_called_once_with(config=config, case_id=None, batch_size=25)
         printed = json.loads(mock_print.call_args.args[0])
-        self.assertEqual(printed, {"cases": 2, "chunks": 18, "dry_run": 0})
+        self.assertEqual(printed, {"cases": 2, "chunks": 18, "dry_run": 0, "skipped": 0})
+
+    def test_main_execute_requires_config_env(self) -> None:
+        module = _load_script_module()
+
+        with self.assertRaisesRegex(ValueError, "--config-env is required"):
+            module.main(["--all"])
+
+    def test_main_execute_requires_case_archive_enabled(self) -> None:
+        module = _load_script_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_env = Path(tmpdir) / "config.env"
+            config_env.write_text("CASE_ARCHIVE_ENABLED=false", encoding="utf-8")
+            with patch.object(module, "load_config", return_value=Config()):
+                with self.assertRaisesRegex(ValueError, "CASE_ARCHIVE_ENABLED"):
+                    module.main(["--all", "--config-env", str(config_env)])
 
     def test_main_rejects_non_positive_batch_size(self) -> None:
         module = _load_script_module()

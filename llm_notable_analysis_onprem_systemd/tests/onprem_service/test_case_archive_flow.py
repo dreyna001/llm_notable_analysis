@@ -78,25 +78,30 @@ class TestCaseArchiveFlow(unittest.TestCase):
             status="failed",
         )
 
-    def test_identity_conflict_remains_hard_failure(self) -> None:
+    def test_identity_conflict_is_deferred_without_quarantining_ingest(self) -> None:
         config = Config()
         logger = logging.getLogger("test_archive_conflict")
 
         with patch(
             "llm_notable_analysis_onprem_systemd.onprem_service.case_archive_flow.write_case_archive_record",
             side_effect=CaseArchiveConflictError("case collision"),
-        ):
-            with self.assertRaises(CaseArchiveConflictError):
-                archive_case_for_portal(
-                    config=config,
-                    logger=logger,
-                    source_filename="transport-c.json",
-                    finding_id="transport-c",
-                    alert_payload={"notable_id": "abc-123", "summary": "alert"},
-                    analysis={"alert_reconciliation": {}},
-                    report_md_path="/reports/transport-c.md",
-                    report_html_path=None,
-                )
+        ) as write_case, patch(
+            "llm_notable_analysis_onprem_systemd.onprem_service.case_archive_flow.store_case_chunks"
+        ) as store_chunks:
+            archived = archive_case_for_portal(
+                config=config,
+                logger=logger,
+                source_filename="transport-c.json",
+                finding_id="transport-c",
+                alert_payload={"notable_id": "abc-123", "summary": "alert"},
+                analysis={"alert_reconciliation": {}},
+                report_md_path="/reports/transport-c.md",
+                report_html_path=None,
+            )
+
+        self.assertFalse(archived)
+        write_case.assert_called_once()
+        store_chunks.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -1,12 +1,19 @@
 # On-Prem Test Guide
 
-Run commands from the repository root.
+Run commands from the repository root. Use the shared dev virtualenv at `.venv/`
+(see [`DEVELOPING.md`](../../../DEVELOPING.md)).
 
 ## Unit Tests
 
 ```bash
-PYTHONPATH=.:llm_notable_analysis_onprem_systemd/src:onprem-llm-sdk/src \
-  llm_notable_analysis_onprem_systemd/.venv/bin/python -m unittest discover \
+source .venv/bin/activate
+pytest llm_notable_analysis_onprem_systemd/tests/onprem_service -q
+```
+
+Legacy unittest entrypoint:
+
+```bash
+.venv/bin/python -m unittest discover \
   -s llm_notable_analysis_onprem_systemd/tests/onprem_service -p "test_*.py"
 ```
 

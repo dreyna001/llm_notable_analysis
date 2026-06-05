@@ -454,6 +454,246 @@ ensure_dir() {
     chmod "$mode" "$dir" || err "Failed to set permissions on: $dir"
 }
 
+generate_random_hex_secret() {
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -hex 32
+        return 0
+    fi
+    python3 - <<'PY'
+import secrets
+print(secrets.token_hex(32))
+PY
+}
+
+install_portal_env_config() {
+    local portal_env="$CONFIG_DIR/portal.env"
+    local portal_secret=""
+    if [[ -f "$portal_env" ]]; then
+        info "Portal config exists: $portal_env (not overwritten)"
+        return 0
+    fi
+
+    [[ -f "$REPO_DIR/config.portal.env.example" ]] \
+        || err "Missing config.portal.env.example"
+    cp "$REPO_DIR/config.portal.env.example" "$portal_env" \
+        || err "Failed to copy config.portal.env.example"
+    portal_secret="$(generate_random_hex_secret)"
+    python3 - "$portal_env" "$CONFIG_DIR/config.env" "$portal_secret" <<'PY'
+import re
+import shlex
+import sys
+from pathlib import Path
+from urllib.parse import urlunparse, urlparse, unquote, quote
+
+
+def parse_env(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path.is_file():
+        return values
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        try:
+            tokens = shlex.split(stripped, comments=True, posix=True)
+        except ValueError:
+            continue
+        if not tokens:
+            continue
+        if tokens[0] == "export":
+            tokens = tokens[1:]
+        if len(tokens) == 1 and "=" in tokens[0]:
+            key, value = tokens[0].split("=", 1)
+            values[key] = value
+    return values
+
+
+def replace_line(text: str, key: str, value: str) -> str:
+    pattern = re.compile(rf"^(\s*(?:export\s+)?{re.escape(key)}=).*$", re.MULTILINE)
+    if pattern.search(text):
+        return pattern.sub(rf"\1{value}", text, count=1)
+    return text
+
+
+portal_path = Path(sys.argv[1])
+config_path = Path(sys.argv[2])
+secret = sys.argv[3]
+text = portal_path.read_text(encoding="utf-8")
+text = text.replace("<generate-a-random-shared-secret>", secret)
+text = replace_line(text, "PORTAL_PROXY_SECRET", secret)
+
+config = parse_env(config_path)
+analyzer_dsn = config.get(
+    "CASE_POSTGRES_DSN",
+    "postgresql://notable_analyzer@127.0.0.1:5432/notable_rag",
+)
+portal_values = parse_env(portal_path)
+portal_dsn = portal_values.get(
+    "CASE_POSTGRES_DSN",
+    "postgresql://notable_portal@127.0.0.1:5432/notable_rag",
+)
+analyzer = urlparse(analyzer_dsn)
+portal = urlparse(portal_dsn)
+aligned = urlunparse(
+    (
+        portal.scheme or analyzer.scheme or "postgresql",
+        portal.netloc or analyzer.netloc,
+        analyzer.path or portal.path,
+        "",
+        "",
+        "",
+    )
+)
+text = replace_line(text, "CASE_POSTGRES_DSN", aligned)
+portal_path.write_text(text, encoding="utf-8")
+PY
+    chown "$SVC_USER:$SVC_USER" "$portal_env"
+    chmod 600 "$portal_env"
+    info "Portal config installed: $portal_env"
+}
+
+install_nginx_portal_proxy_secret() {
+    local portal_env="$CONFIG_DIR/portal.env"
+    local include_path="/etc/nginx/notable-portal-proxy-secret.conf"
+    local secret=""
+
+    [[ -f "$portal_env" ]] || return 0
+    secret="$(read_config_value_best_effort "$portal_env" "PORTAL_PROXY_SECRET" "")"
+    if [[ -z "$secret" || "$secret" == "<generate-a-random-shared-secret>" ]]; then
+        record_issue "PORTAL_PROXY_SECRET is unset in $portal_env; nginx proxy secret include was not created"
+        return 0
+    fi
+
+    if [[ -f "$include_path" ]]; then
+        info "Nginx portal proxy secret include exists: $include_path (not overwritten)"
+        return 0
+    fi
+
+    if ! command -v nginx >/dev/null 2>&1; then
+        record_issue "nginx is not installed; skipped $include_path (install nginx before enabling the portal front door)"
+        return 0
+    fi
+
+    mkdir -p /etc/nginx
+    cat > "$include_path" <<EOF
+# Managed by scripts/install.sh. Must match PORTAL_PROXY_SECRET in $portal_env.
+proxy_set_header X-Notable-Portal-Proxy-Secret "$secret";
+EOF
+    chown root:root "$include_path"
+    chmod 600 "$include_path"
+    info "Installed nginx portal proxy secret include: $include_path"
+}
+
+install_nginx_portal_site_config() {
+    local site_path="/etc/nginx/conf.d/notable-portal.conf"
+    local example_path="/etc/nginx/conf.d/notable-portal.conf.example"
+    local src="$REPO_DIR/deploy/nginx/notable-portal.conf"
+
+    [[ -f "$src" ]] || err "Missing nginx example config: $src"
+    if ! command -v nginx >/dev/null 2>&1; then
+        record_issue "nginx is not installed; skipped analyst portal site config"
+        return 0
+    fi
+
+    mkdir -p /etc/nginx/conf.d
+    if [[ ! -f "$site_path" ]]; then
+        cp "$src" "$site_path" || err "Failed to copy notable-portal.conf"
+        chown root:root "$site_path"
+        chmod 644 "$site_path"
+        info "Installed nginx site config: $site_path"
+        warn "Edit server_name, TLS paths, and htpasswd before reloading nginx"
+    else
+        info "Nginx site config exists: $site_path (not overwritten)"
+    fi
+
+    if [[ ! -f "$example_path" ]]; then
+        cp "$src" "$example_path" || err "Failed to copy notable-portal.conf.example"
+        chown root:root "$example_path"
+        chmod 644 "$example_path"
+        info "Installed nginx site example: $example_path"
+    fi
+}
+
+enable_analyst_portal_profile_in_config() {
+    local config_file="$CONFIG_DIR/config.env"
+    [[ -f "$config_file" ]] || err "Missing analyzer config: $config_file"
+    python3 - "$config_file" <<'PY'
+import re
+import shlex
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+lines = path.read_text(encoding="utf-8").splitlines()
+updated = False
+profile_found = False
+for index, raw_line in enumerate(lines):
+    stripped = raw_line.strip()
+    if not stripped or stripped.startswith("#"):
+        continue
+    try:
+        tokens = shlex.split(stripped, comments=True, posix=True)
+    except ValueError:
+        continue
+    if not tokens:
+        continue
+    if tokens[0] == "export":
+        tokens = tokens[1:]
+    if len(tokens) != 1 or "=" not in tokens[0]:
+        continue
+    key, value = tokens[0].split("=", 1)
+    if key != "CAPABILITY_PROFILES":
+        continue
+    profile_found = True
+    profiles = [part.strip() for part in value.split(",") if part.strip()]
+    if "analyst_portal" not in profiles:
+        profiles.append("analyst_portal")
+        lines[index] = re.sub(
+            r"^(\s*(?:export\s+)?CAPABILITY_PROFILES=).*",
+            rf"\1{','.join(profiles)}",
+            raw_line,
+            count=1,
+        )
+        updated = True
+    break
+
+if not profile_found:
+    lines.append("CAPABILITY_PROFILES=core,analyst_portal")
+    updated = True
+
+if updated:
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+PY
+    info "Enabled analyst_portal in $config_file"
+}
+
+setup_case_archive_postgres_best_effort() {
+    local setup_script="$REPO_DIR/scripts/setup_postgres_case_archive.sh"
+    [[ -x "$setup_script" ]] || chmod +x "$setup_script" 2>/dev/null || true
+    [[ -f "$setup_script" ]] || err "Missing setup script: $setup_script"
+    if ! command -v psql >/dev/null 2>&1; then
+        record_issue "psql is unavailable; skipped PostgreSQL case archive setup (install PostgreSQL client/server and rerun with INSTALL_ANALYST_PORTAL=true)"
+        return 0
+    fi
+    bash "$setup_script" \
+        --config-env "$CONFIG_DIR/config.env" \
+        --portal-env "$CONFIG_DIR/portal.env" \
+        || record_issue "PostgreSQL case archive setup failed; review output and rerun scripts/setup_postgres_case_archive.sh"
+}
+
+install_analyst_portal_bringup_assets() {
+    install_portal_env_config
+    install_nginx_portal_proxy_secret
+    if [[ "${INSTALL_ANALYST_PORTAL:-false}" == "true" ]]; then
+        enable_analyst_portal_profile_in_config
+        setup_case_archive_postgres_best_effort
+        install_nginx_portal_site_config
+    else
+        info "INSTALL_ANALYST_PORTAL=false; installed portal.env and nginx proxy secret only"
+        info "Enable full portal bring-up with: sudo INSTALL_ANALYST_PORTAL=true bash scripts/install.sh"
+    fi
+}
+
 #------------------------------------------------------------------------------
 # Preflight checks
 #------------------------------------------------------------------------------
@@ -750,6 +990,13 @@ else
 fi
 
 #------------------------------------------------------------------------------
+# 6b. Analyst portal bring-up assets
+#------------------------------------------------------------------------------
+echo ""
+echo "[6b/8] Installing analyst portal bring-up assets..."
+install_analyst_portal_bringup_assets
+
+#------------------------------------------------------------------------------
 # 7. Install systemd units
 #------------------------------------------------------------------------------
 echo "[7/8] Installing systemd units..."
@@ -760,6 +1007,7 @@ if [[ "${INSTALL_SYSTEMD_UNITS:-true}" == "true" ]]; then
     # Default units (stable baseline)
     units=(
         notable-analyzer.service
+        notable-portal.service
         litellm.service
         vllm.service
         notable-retention.service
@@ -860,6 +1108,15 @@ if [[ "${AUTO_START_SERVICES:-true}" == "true" ]]; then
         fi
         systemctl enable notable-analyzer 2>/dev/null || true
         systemctl restart notable-analyzer 2>/dev/null || systemctl start notable-analyzer 2>/dev/null || record_issue "Could not start/restart notable-analyzer.service (check systemctl/journalctl)"
+        if [[ "${INSTALL_ANALYST_PORTAL:-false}" == "true" ]]; then
+            systemctl enable notable-portal 2>/dev/null || true
+            systemctl restart notable-portal 2>/dev/null || systemctl start notable-portal 2>/dev/null || record_issue "Could not start/restart notable-portal.service (check systemctl/journalctl)"
+            if wait_for_http_200_best_effort "http://127.0.0.1:8080/health" 30; then
+                info "Portal health check OK"
+            else
+                record_issue "Portal health check timed out; check: sudo journalctl -u notable-portal -n 200 --no-pager"
+            fi
+        fi
         if [[ "${RUN_SMOKE_TEST:-true}" == "true" && "$local_vllm_ready" == "true" && "$local_litellm_ready" == "true" ]]; then
             info "RUN_SMOKE_TEST=true: running canned inference smoke test (best-effort)"
             smoke_test_inference_best_effort
@@ -881,19 +1138,30 @@ echo "=== Installation Complete ==="
 echo ""
 echo "Before starting:"
 echo "  1. Edit config:       sudo vi $CONFIG_DIR/config.env"
-echo "  2. Add model weights: $VLLM_MODEL_PATH"
-echo "  3. Add SOAR SSH key:  $SSH_DIR/authorized_keys"
-echo "  4. Restart sshd:      sudo systemctl restart sshd"
+echo "  2. Edit portal env:   sudo vi $CONFIG_DIR/portal.env"
+echo "  3. Add model weights: $VLLM_MODEL_PATH"
+echo "  4. Add SOAR SSH key:  $SSH_DIR/authorized_keys"
+echo "  5. Restart sshd:      sudo systemctl restart sshd"
+echo ""
+echo "Analyst portal bring-up:"
+echo "  - Default install writes $CONFIG_DIR/portal.env and nginx proxy secret include when nginx is present."
+echo "  - Full portal wiring (Postgres schema, analyst_portal profile, nginx site):"
+echo "      sudo INSTALL_ANALYST_PORTAL=true bash scripts/install.sh"
+echo "  - Or run Postgres setup alone after editing env files:"
+echo "      sudo bash scripts/setup_postgres_case_archive.sh"
+echo "  - See docs/operations/ANALYST_PORTAL_OPERATIONS.md"
 echo ""
 echo "Start services:"
 echo "  sudo systemctl enable --now vllm"
 echo "  sudo systemctl enable --now litellm"
 echo "  sudo systemctl enable --now notable-analyzer"
+echo "  sudo systemctl enable --now notable-portal      # when analyst_portal is enabled"
 echo "  sudo systemctl enable --now notable-retention.timer  # optional"
 echo ""
 echo "Verify:"
-echo "  sudo systemctl status vllm litellm notable-analyzer"
+echo "  sudo systemctl status vllm litellm notable-analyzer notable-portal"
 echo "  sudo journalctl -u notable-analyzer -f"
+echo "  curl -fsS http://127.0.0.1:8080/health   # portal liveness when enabled"
 echo ""
 echo "Troubleshooting vLLM:"
 echo "  - If vllm.service fails with status=203/EXEC:"
@@ -931,6 +1199,8 @@ echo "  - Reset existing vLLM systemd drop-ins (recommended when standardizing u
 echo "      sudo VLLM_RESET_OVERRIDES=true bash scripts/install.sh"
 echo "  - Override smoke test timeout seconds (default: 240):"
 echo "      sudo SMOKE_TEST_TIMEOUT_SECONDS=240 bash scripts/install.sh"
+echo "  - Install analyst portal Postgres schema, profile, and nginx site:"
+echo "      sudo INSTALL_ANALYST_PORTAL=true bash scripts/install.sh"
 
 echo ""
 if [[ ${#NON_FATAL_ISSUES[@]} -gt 0 ]]; then

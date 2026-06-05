@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementation contract for the on-prem analyst portal, 90-day Postgres case
+Implementation contract for the on-prem analyst portal, 30-day Postgres case
 archive, and retrieval-bound portal chatbot.
 
 The planning sources are:
@@ -18,8 +18,8 @@ questions over:
 
 - the full original alert/notable payload,
 - the validated structured analysis output,
-- approved SOC/RAG/SPL context,
-- related retained cases from the 90-day archive.
+- approved Knowledge Base context,
+- related retained cases from the 30-day archive.
 
 AWS implementation is explicitly out of scope for this spec.
 
@@ -71,7 +71,7 @@ Add these config values to `config.py` and `config.env.example`.
 CASE_ARCHIVE_ENABLED=false
 CASE_POSTGRES_DSN=postgresql://notable_analyzer@127.0.0.1:5432/notable_rag
 CASE_POSTGRES_SCHEMA=notable_cases
-CASE_RETENTION_DAYS=90
+CASE_RETENTION_DAYS=30
 CASE_RETENTION_DELETE_BATCH_SIZE=500
 CASE_ARCHIVE_WRITE_MAX_ATTEMPTS=3
 CASE_ARCHIVE_WRITE_RETRY_BACKOFF_SECONDS=1
@@ -127,7 +127,7 @@ CAPABILITY_PROFILES=core,analyst_portal
 - `CASE_ARCHIVE_ENABLED=true`
 - `PORTAL_ENABLED=true`
 - `CASE_QA_ENABLED=true`
-- `CASE_QA_GLOBAL_RETRIEVAL_ENABLED=true`
+- `CASE_QA_GLOBAL_RETRIEVAL_ENABLED=false`
 
 It must not enable:
 
@@ -380,7 +380,7 @@ Use these extraction rules for native cases:
 | `expires_at` | `processed_at + CASE_RETENTION_DAYS` |
 | `correlation_id` | First non-empty known alert identifier, such as `correlation_id`, `notable_id`, or `event_id` |
 | `capability_snapshot` | Enabled capability flags plus key model/retrieval config values at processing time |
-| `verdict` | `analysis.alert_reconciliation.verdict` |
+| `verdict` | Normalized `analysis.alert_reconciliation.verdict`; one of `likely_benign`, `likely_malicious`, or `unknown` |
 | `confidence` | Numeric parse of `analysis.alert_reconciliation.confidence`; `"n/a"`, empty, missing, or invalid values become `NULL` |
 | `search_name` | First non-empty alert field from `search_name`, `searchName`, `rule_name`, `rule`, `signature`, or `title` |
 | `risk_score` | Numeric parse of common alert risk fields such as `risk_score` or `riskScore`; invalid values become `NULL` |
@@ -388,6 +388,14 @@ Use these extraction rules for native cases:
 Confidence coercion must accept numeric strings such as `"0.72"` and numeric
 values such as `0.72`. It must not fail the archive write solely because the
 model emitted `"n/a"` or another non-numeric confidence value.
+The confidence value represents confidence in the selected verdict, not an
+independent probability that the alert is malicious.
+
+Verdict normalization must keep the stored/API contract bounded. The prompt asks
+for `likely_benign`, `likely_malicious`, or `unknown`; legacy/free-form values
+such as `false positive`, `benign`, `true positive`, or `likely malicious` are
+coerced into the closest allowed value, with unsupported values stored as
+`unknown`.
 
 ### PoC Fallback Behavior
 
@@ -450,8 +458,8 @@ stored archive record:
 - `legacy_summary`
 
 Do not store contextual lanes such as `current_case`, `prior_case`, or
-`soc_context` in `case_chunks.source_lane`; those are chat response citation
-lanes.
+`knowledge_base` in `case_chunks.source_lane`; those are chat retrieval context
+lanes assigned at answer time.
 
 Chunk IDs must be deterministic and stable across rebuilds:
 
@@ -478,38 +486,19 @@ Every chunk must include:
 If a new validated analysis section becomes part of the product, the chunk
 builder must either index it or explicitly document why it is excluded.
 
-## Citation Contract
+## Chat Response Contract
 
-Every retrieved source used by chat must carry machine-readable citation
-metadata:
+Portal chat returns a bounded synthesized answer and `answer_status` only. The
+API does not expose retrieved-source citations or case-id lists to the client.
+Retrieved chunks still carry internal section metadata for retrieval and prompt
+assembly.
 
-```json
-{
-  "source_lane": "current_case",
-  "stored_source_lane": "case_analysis",
-  "case_id": "abc-123",
-  "section": "analysis.evidence_vs_inference",
-  "field_path": "$.evidence_vs_inference.evidence[0]",
-  "chunk_id": "abc-123:case_analysis:analysis.evidence_vs_inference:0"
-}
-```
+Chat response `source_lane` values used during retrieval are contextual to the
+request:
 
-The chat API response must return citations alongside the answer. The UI may
-render these as labels or links, but tests should validate the machine-readable
-source references.
-
-Chat response `source_lane` values are contextual to the request:
-
-- `current_case`: the selected case in `selected_case` or
-  `selected_case_plus_archive` mode.
-- `prior_case`: any retained case retrieved from global/archive search that is
-  not the selected case.
-- `soc_context`: existing RAG/SPL grounding context outside the case archive.
-
-Case-archive citations should include `stored_source_lane` copied from
-`case_chunks.source_lane`. `soc_context` citations must use the same response
-shape but may omit `case_id`, `stored_source_lane`, and `chunk_id` when the
-source is not a retained case chunk.
+- `current_case`: the selected case in `selected_case` mode.
+- `prior_case`: any case retrieved from all-case search.
+- `knowledge_base`: advisory Knowledge Base grounding used by chat.
 
 ## Chat Modes
 
@@ -517,10 +506,8 @@ Supported modes:
 
 | Mode | Backend behavior |
 |------|------------------|
-| `selected_case` | Pin selected case as primary context; optionally retrieve SOC context |
-| `global_archive` | Search retained case chunks across the archive; no pinned case |
-| `selected_case_plus_archive` | Include selected case first, then retrieve related prior cases |
-| `soc_context_only` | Search approved SOC/RAG/SPL context; no case facts unless selected |
+| `selected_case` | Search the selected case and configured Knowledge Base context |
+| `global_archive` | Search retained case chunks and configured Knowledge Base context; no pinned case |
 
 All modes are read-only. Chat must return `unknown` or no-match when retrieval
 is weak.
@@ -547,19 +534,19 @@ existing RAG embedding model. Retrieve archive chunks with hybrid search:
 
 Mode-specific retrieval:
 
-- `selected_case`: retrieve chunks only from `selected_case_id`, then optional
-  `soc_context`.
+- `selected_case`: retrieve chunks from `selected_case_id`, then append
+  configured Knowledge Base context as `knowledge_base`.
 - `global_archive`: retrieve chunks across retained cases where
   `retrieval_status='ready'`, capped to `CASE_QA_MAX_RETRIEVED_CASES` distinct
-  cases.
-- `selected_case_plus_archive`: include selected-case chunks first, then retrieve
-  other retained cases as `prior_case`.
-- `soc_context_only`: retrieve only existing RAG/SPL grounding context.
+  cases, then append configured Knowledge Base context as `knowledge_base`.
 
 When chat history is disabled, ignore incoming `session_id` and return
-`session_id=null`. When it is enabled later, enforce
-`CASE_QA_MAX_MESSAGES_PER_SESSION`, `CASE_QA_MAX_STORED_MESSAGE_BYTES`, and
-`CASE_QA_CHAT_HISTORY_RETENTION_DAYS`.
+`session_id=null`. When `CASE_QA_CHAT_HISTORY_ENABLED=true`, persist bounded
+user/assistant transcript rows in `chat_messages`, return the active
+`session_id`, and enforce `CASE_QA_MAX_MESSAGES_PER_SESSION`,
+`CASE_QA_MAX_STORED_MESSAGE_BYTES`, and `CASE_QA_CHAT_HISTORY_RETENTION_DAYS`.
+Prior chat history is not used as retrieval memory; answers still come only from
+case archive and Knowledge Base sources.
 
 ## Failure And Retry Contract
 
@@ -659,7 +646,7 @@ Response `200`:
       "case_id": "case-123",
       "processed_at": "2026-06-04T00:00:00Z",
       "expires_at": "2026-09-02T00:00:00Z",
-      "verdict": "true_positive",
+      "verdict": "likely_malicious",
       "confidence": 0.72,
       "search_name": "Suspicious PowerShell",
       "retrieval_status": "ready",
@@ -715,17 +702,6 @@ Response `200`:
 {
   "answer": "The retained evidence shows ...",
   "answer_status": "answered",
-  "citations": [
-    {
-      "source_lane": "current_case",
-      "stored_source_lane": "case_analysis",
-      "case_id": "case-123",
-      "section": "analysis.evidence_vs_inference",
-      "field_path": "$.evidence_vs_inference.evidence[0]",
-      "chunk_id": "case-123:case_analysis:analysis.evidence_vs_inference:0"
-    }
-  ],
-  "retrieved_case_ids": ["case-123"],
   "session_id": null
 }
 ```
@@ -733,7 +709,8 @@ Response `200`:
 Weak retrieval returns `200` with `answer_status="unknown"` and an answer that
 states the archive did not contain enough grounded context. Action requests
 return `200` with `answer_status="refused"`. Invalid mode, oversized question,
-or missing required `selected_case_id` return `400`.
+or missing required `selected_case_id` return `400`. Unknown `selected_case_id`
+values return `404` with `detail="Case not found."` before retrieval runs.
 
 Initial UI should be server-rendered or minimal static HTML served by FastAPI.
 No separate frontend app in v1.
@@ -821,7 +798,7 @@ It must cover:
   warnings.
 - Backfill runbook: dry-run, execute, idempotency, markdown-only legacy behavior,
   retry/rollback expectations, and operator review points.
-- Chatbot behavior: supported modes, citation expectations, weak-retrieval
+- Chatbot behavior: supported modes, weak-retrieval
   `unknown` behavior, action refusal behavior, and the read-only boundary.
 - Troubleshooting: Postgres unavailable, migration mismatch, embedding failures,
   chunk rebuild failures, auth/header issues, stale chunks, and portal service
@@ -938,7 +915,7 @@ Acceptance criteria:
 - Chunks cover every initial section listed in this spec.
 - Stored chunk lanes are limited to `alert_payload`, `case_analysis`, and
   `legacy_summary`.
-- Every chunk includes citation metadata.
+- Every chunk includes section and field-path metadata for retrieval.
 - Rebuild script can dry-run and execute for one case or all cases.
 
 ### Diff 3: Case Index And Retention
@@ -980,16 +957,14 @@ Objective:
 
 - Add `POST /api/chat`.
 - Implement chat modes.
-- Retrieve from selected case, archive chunks, and SOC/RAG/SPL context as
-  configured.
+- Retrieve from selected case plus Knowledge Base, or all-case archive chunks
+  plus Knowledge Base.
 
 Acceptance criteria:
 
-- Chat answers include citations.
+- Chat answers return `answer` and `answer_status` only.
 - Archive retrieval uses the hybrid lexical/vector/RRF contract and configured
   retrieval limits.
-- Chat citations use contextual lanes (`current_case`, `prior_case`,
-  `soc_context`) and preserve stored case chunk lanes when available.
 - Weak retrieval returns `unknown` or no-match.
 - Action requests are refused.
 - Chat does not call Splunk, ServiceNow, SOAR, or external action systems.

@@ -6,6 +6,8 @@ This module mirrors the report structure used in `s3_testing/markdown_generator.
 import json
 from typing import Dict, Any, List
 
+from .verdicts import verdict_label
+
 
 _MARKDOWN_ESCAPE_CHARS = "\\`*_{}[]()#+-.!|<>"
 
@@ -267,7 +269,7 @@ def generate_markdown_report(
     if "alert_reconciliation" in llm_response:
         ar = llm_response["alert_reconciliation"]
         lines.append("### Alert Reconciliation\n\n")
-        verdict = ar.get("verdict", "N/A")
+        verdict = verdict_label(ar.get("verdict"))
         confidence = ar.get("confidence", "N/A")
         summary = ar.get("one_sentence_summary", "N/A")
         lines.append(f"**Verdict:** {verdict}\n")

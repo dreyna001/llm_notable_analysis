@@ -9,6 +9,10 @@ from pathlib import Path
 # pylint: disable=import-error,no-name-in-module
 
 from llm_notable_analysis_onprem_systemd.onprem_service.config import Config
+from llm_notable_analysis_onprem_systemd.onprem_service.case_chat_history import (
+    build_delete_expired_chat_sessions_sql,
+    delete_expired_chat_sessions,
+)
 from llm_notable_analysis_onprem_systemd.onprem_service.retention import (
     build_delete_expired_cases_sql,
     delete_expired_cases,
@@ -114,6 +118,23 @@ class TestRetention(unittest.TestCase):
         self.assertEqual(stats.errors, 0)
         self.assertEqual(connection.executed[1][1], (now, 2))
         self.assertEqual(connection.executed[2][1], (now, 2))
+
+    def test_build_delete_expired_chat_sessions_sql_targets_sessions(self) -> None:
+        sql = build_delete_expired_chat_sessions_sql("notable_cases")
+
+        self.assertIn('FROM "notable_cases".chat_sessions', sql)
+        self.assertIn("RETURNING sessions.session_id", sql)
+
+    def test_delete_expired_chat_sessions_skips_when_disabled(self) -> None:
+        connection = _FakeConnection(rows=[("session-1",)])
+
+        deleted = delete_expired_chat_sessions(
+            config=Config(CASE_QA_CHAT_HISTORY_ENABLED=False),
+            connect=lambda _dsn: connection,
+        )
+
+        self.assertEqual(deleted, 0)
+        self.assertEqual(connection.executed, [])
 
     def test_delete_expired_cases_reports_database_error(self) -> None:
         connection = _FakeConnection(fail=True)

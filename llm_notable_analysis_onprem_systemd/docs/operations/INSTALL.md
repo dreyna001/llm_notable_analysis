@@ -104,6 +104,9 @@ After install completes, these may still require operator input:
 - Set `LLM_API_TOKEN` only if vLLM is configured with `--api-key`.
 - Set `SPLUNK_BASE_URL` / `SPLUNK_API_TOKEN` only if Splunk writeback is enabled.
 - Add SOAR key(s) to `/var/sftp/soar/.ssh/authorized_keys` only for SOAR SFTP ingest.
+- Review `/etc/notable-analyzer/portal.env` and nginx TLS/basic-auth paths before exposing the analyst portal.
+- Run full analyst portal bring-up when Postgres schema and `analyst_portal` profile are not yet enabled:
+  `sudo INSTALL_ANALYST_PORTAL=true bash scripts/install.sh`
 - Review and clear any post-install non-fatal issues reported by `scripts/install.sh`.
 
 ## What `scripts/install.sh` Does
@@ -116,7 +119,8 @@ After install completes, these may still require operator input:
 | 4 | Copy application code to `/opt/notable-analyzer` | Fails if source missing |
 | 5 | Create Python venv and install dependencies | Fails with pip output |
 | 6 | Install config template to `/etc/notable-analyzer/config.env` | Skips if exists |
-| 7 | Install systemd units, including `litellm.service` | Fails if unit file missing |
+| 6b | Install portal env, nginx proxy secret, and optional analyst portal bring-up | Portal env always; Postgres/nginx site when `INSTALL_ANALYST_PORTAL=true` |
+| 7 | Install systemd units, including `litellm.service` and `notable-portal.service` | Fails if unit file missing |
 | 8 | Configure SFTP chroot in `/etc/ssh/sshd_config` | Skips if already present |
 | 9 | Post-install auto-start + canned inference smoke test | Best-effort (non-fatal) |
 
@@ -132,7 +136,8 @@ After install completes, these may still require operator input:
 └── requirements.txt
 
 /etc/notable-analyzer/
-└── config.env               # Runtime configuration (mode 600)
+├── config.env               # Runtime configuration (mode 600)
+└── portal.env               # Portal-only configuration (mode 600; installed by default)
 
 /etc/litellm/
 └── config.yaml              # LiteLLM proxy configuration (mode 600)
@@ -214,6 +219,41 @@ The packaged analyzer units set `HF_HOME=/var/notables/cache/huggingface` and
 `SENTENCE_TRANSFORMERS_HOME=/var/notables/cache/sentence-transformers` so BGE
 model caches remain writable under `ProtectSystem=strict`. Keep those paths
 under `/var/notables/cache` unless you also update the unit `ReadWritePaths`.
+
+### Analyst portal bring-up
+
+Every install writes `/etc/notable-analyzer/portal.env` when it does not already
+exist. The file includes a generated `PORTAL_PROXY_SECRET` and aligns
+`CASE_POSTGRES_DSN` to the same database host/path as `config.env`.
+
+When nginx is installed, the installer also writes
+`/etc/nginx/notable-portal-proxy-secret.conf` so nginx can forward
+`PORTAL_PROXY_SECRET_HEADER` to loopback FastAPI.
+
+Full portal wiring is opt-in:
+
+```bash
+sudo INSTALL_ANALYST_PORTAL=true bash scripts/install.sh
+```
+
+That flag:
+
+- adds `analyst_portal` to `CAPABILITY_PROFILES` in `config.env` when missing,
+- runs `scripts/setup_postgres_case_archive.sh` to create roles, database, and
+  `notable_cases` schema,
+- installs `/etc/nginx/conf.d/notable-portal.conf` when nginx is present,
+- best-effort starts `notable-portal.service` during post-install auto-start.
+
+Manual Postgres setup after editing env files:
+
+```bash
+sudo bash scripts/setup_postgres_case_archive.sh \
+  --config-env /etc/notable-analyzer/config.env \
+  --portal-env /etc/notable-analyzer/portal.env
+```
+
+See [`ANALYST_PORTAL_OPERATIONS.md`](ANALYST_PORTAL_OPERATIONS.md) for nginx
+TLS/basic-auth, backfill, chunk rebuild, and troubleshooting.
 
 ### 2. Install vLLM (if not already installed)
 

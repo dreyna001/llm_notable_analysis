@@ -76,6 +76,14 @@ class TestCaseStore(unittest.TestCase):
         self.assertTrue(case_id.startswith("raw_alert_"))
         self.assertEqual(len(case_id.rsplit("_", 1)[-1]), 12)
 
+    def test_build_native_case_id_ignores_generic_id_field(self) -> None:
+        case_id = build_native_case_id(
+            {"id": "generic-row-1", "summary": "alert"},
+            "transport-a.json",
+        )
+
+        self.assertEqual(case_id, "transport-a")
+
     def test_build_case_archive_record_extracts_filter_columns(self) -> None:
         config = Config(CASE_RETENTION_DAYS=90)
         processed_at = datetime(2026, 6, 4, tzinfo=timezone.utc)
@@ -98,7 +106,13 @@ class TestCaseStore(unittest.TestCase):
 
         self.assertEqual(record.case_id, "notable1")
         self.assertEqual(record.correlation_id, "abc-123")
-        self.assertEqual(record.verdict, "likely malicious")
+        self.assertEqual(record.verdict, "likely_malicious")
+        self.assertIsNotNone(record.analysis)
+        analysis = record.analysis or {}
+        self.assertEqual(
+            analysis["alert_reconciliation"]["verdict"],
+            "likely_malicious",
+        )
         self.assertEqual(record.confidence, 0.81)
         self.assertEqual(record.search_name, "Suspicious PowerShell")
         self.assertEqual(record.risk_score, 42.0)

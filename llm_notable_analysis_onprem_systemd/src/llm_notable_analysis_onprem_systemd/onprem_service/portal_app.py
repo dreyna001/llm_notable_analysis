@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import html
 import ipaddress
 import logging
@@ -12,7 +13,13 @@ import secrets
 from datetime import datetime, timezone
 from typing import Any
 
-from .case_chat import SynthesizeFn, answer_case_chat, check_case_chat_ready
+from .case_chat import (
+    CaseNotFoundError,
+    GeneralSynthesizeFn,
+    SynthesizeFn,
+    answer_case_chat,
+    check_case_chat_ready,
+)
 from .case_index import (
     CaseListFilters,
     CaseSummary,
@@ -20,13 +27,19 @@ from .case_index import (
     get_case,
     list_cases,
 )
+from .case_chat_history import delete_chat_session, get_chat_session_messages, list_chat_sessions
 from .case_store import CaseArchiveRecord, quote_identifier
 from .config import Config, load_config
+from .verdicts import verdict_label
 
 logger = logging.getLogger(__name__)
 
 _MAX_PAGE_SIZE = 100
 _PUBLIC_PATHS = frozenset({"/health", "/ready"})
+_TRUSTED_USER_CTX: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "portal_trusted_user",
+    default=None,
+)
 
 
 def _lazy_import_fastapi():
@@ -81,6 +94,9 @@ def _portal_header_name(value: str, setting_name: str) -> str:
 def _validate_portal_security_config(config: Config) -> None:
     """Fail closed for portal deployments that could trust spoofed proxy headers."""
     _portal_header_name(config.PORTAL_TRUSTED_USER_HEADER, "PORTAL_TRUSTED_USER_HEADER")
+    _portal_header_name(config.PORTAL_PROXY_SECRET_HEADER, "PORTAL_PROXY_SECRET_HEADER")
+    if not str(config.PORTAL_PROXY_SECRET or "").strip():
+        raise ValueError("PORTAL_PROXY_SECRET is required when PORTAL_ENABLED=true.")
     bind_host = str(config.PORTAL_BIND_HOST or "").strip()
     if _is_loopback_bind_host(bind_host):
         return
@@ -88,11 +104,6 @@ def _validate_portal_security_config(config: Config) -> None:
         raise ValueError(
             "PORTAL_BIND_HOST must be loopback unless "
             "PORTAL_ALLOW_NON_LOOPBACK_BIND=true is explicitly configured."
-        )
-    _portal_header_name(config.PORTAL_PROXY_SECRET_HEADER, "PORTAL_PROXY_SECRET_HEADER")
-    if not str(config.PORTAL_PROXY_SECRET or "").strip():
-        raise ValueError(
-            "PORTAL_PROXY_SECRET is required when PORTAL_ALLOW_NON_LOOPBACK_BIND=true."
         )
 
 
@@ -111,7 +122,7 @@ def _trusted_user_from_request(request: Any, config: Config) -> str | None:
 def _proxy_secret_matches(request: Any, config: Config) -> bool:
     expected = str(config.PORTAL_PROXY_SECRET or "").strip()
     if not expected:
-        return True
+        return False
     header = _portal_header_name(
         config.PORTAL_PROXY_SECRET_HEADER,
         "PORTAL_PROXY_SECRET_HEADER",
@@ -280,8 +291,9 @@ def build_portal_app(
     *,
     connect: ConnectionFactory | None = None,
     chat_synthesizer: SynthesizeFn | None = None,
+    chat_general_synthesizer: GeneralSynthesizeFn | None = None,
     chat_embedding_model: Any = None,
-    chat_soc_context_provider: Any = None,
+    chat_knowledge_base_provider: Any = None,
 ) -> Any:
     """Build the read-only analyst portal FastAPI application."""
     FastAPI, HTTPException, Request, HTMLResponse, JSONResponse = _lazy_import_fastapi()
@@ -351,14 +363,21 @@ def build_portal_app(
                 },
             )
         request.state.trusted_user = trusted_user
-        return await call_next(request)
+        token = _TRUSTED_USER_CTX.set(trusted_user)
+        try:
+            return await call_next(request)
+        finally:
+            _TRUSTED_USER_CTX.reset(token)
 
     @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
+    async def health() -> dict[str, Any]:
+        return {
+            "status": "ok",
+            "case_retention_days": int(config.CASE_RETENTION_DAYS),
+        }
 
     @app.get("/ready")
-    async def ready() -> Any:
+    def ready() -> Any:
         archive_ready = check_case_archive_ready(config=config, connect=connect_fn)
         chat_ready = check_case_chat_ready(
             config=config,
@@ -370,7 +389,7 @@ def build_portal_app(
         return JSONResponse(status_code=503, content={"status": "not_ready"})
 
     @app.get("/api/cases")
-    async def api_list_cases(
+    def api_list_cases(
         limit: str | None = None,
         offset: str | None = None,
         start: str | None = None,
@@ -411,12 +430,78 @@ def build_portal_app(
         }
 
     @app.get("/api/cases/{case_id}")
-    async def api_get_case(case_id: str) -> dict[str, Any]:
+    def api_get_case(case_id: str) -> dict[str, Any]:
         _normalized, record = fetch_case_detail(case_id)
         return _detail_payload(record)
 
+    @app.get("/api/chat/sessions")
+    def api_list_chat_sessions(limit: str | None = None) -> dict[str, Any]:
+        page_size = 50
+        if limit is not None:
+            try:
+                page_size = max(1, min(int(limit), _MAX_PAGE_SIZE))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="limit must be an integer.") from exc
+        if not bool(config.CASE_QA_CHAT_HISTORY_ENABLED):
+            return {"history_enabled": False, "items": []}
+        try:
+            items = list_chat_sessions(
+                config=config,
+                user_id=_TRUSTED_USER_CTX.get(),
+                connect=connect_fn,
+                limit=page_size,
+            )
+        except Exception as exc:
+            logger.exception("Failed to list portal chat sessions")
+            raise HTTPException(status_code=503, detail="Chat history unavailable.") from exc
+        return {"history_enabled": True, "items": items}
+
+    @app.get("/api/chat/sessions/{session_id}/messages")
+    def api_get_chat_session_messages(session_id: str) -> dict[str, Any]:
+        if not bool(config.CASE_QA_CHAT_HISTORY_ENABLED):
+            raise HTTPException(status_code=404, detail="Chat history is disabled.")
+        try:
+            return get_chat_session_messages(
+                config=config,
+                session_id=session_id,
+                user_id=_TRUSTED_USER_CTX.get(),
+                connect=connect_fn,
+            )
+        except ValueError as exc:
+            message = str(exc)
+            if "not found" in message or "expired" in message or "does not belong" in message:
+                raise HTTPException(status_code=404, detail=message) from exc
+            raise HTTPException(status_code=400, detail=message) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Failed to load portal chat session messages")
+            raise HTTPException(status_code=503, detail="Chat history unavailable.") from exc
+
+    @app.delete("/api/chat/sessions/{session_id}")
+    def api_delete_chat_session(session_id: str) -> dict[str, Any]:
+        if not bool(config.CASE_QA_CHAT_HISTORY_ENABLED):
+            raise HTTPException(status_code=404, detail="Chat history is disabled.")
+        try:
+            deleted = delete_chat_session(
+                config=config,
+                session_id=session_id,
+                user_id=_TRUSTED_USER_CTX.get(),
+                connect=connect_fn,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Failed to delete portal chat session")
+            raise HTTPException(status_code=503, detail="Chat history unavailable.") from exc
+        if not deleted:
+            raise HTTPException(status_code=404, detail="session_id was not found.")
+        return {"deleted": True, "session_id": session_id}
+
     @app.post("/api/chat")
-    async def api_chat(payload: dict[str, Any]) -> dict[str, Any]:
+    def api_chat(payload: dict[str, Any]) -> dict[str, Any]:
         try:
             return answer_case_chat(
                 payload=payload,
@@ -424,22 +509,22 @@ def build_portal_app(
                 connect=connect_fn,
                 embedding_model=chat_embedding_model,
                 synthesize=chat_synthesizer,
-                soc_context_provider=chat_soc_context_provider,
+                general_synthesize=chat_general_synthesizer,
+                knowledge_base_provider=chat_knowledge_base_provider,
+                user_id=_TRUSTED_USER_CTX.get(),
             )
+        except CaseNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Case not found.") from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except Exception as exc:
             logger.exception("Failed to answer portal chat request")
             raise HTTPException(status_code=503, detail="Case chat unavailable.") from exc
 
     @app.get("/", response_class=HTMLResponse)
-    async def portal_home(request: Request) -> str:
-        user = getattr(request.state, "trusted_user", None)
-        user_line = (
-            f"<p>Signed in as: {html.escape(user)}</p>"
-            if user
-            else "<p>Local portal view</p>"
-        )
+    def portal_home() -> str:
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -448,7 +533,6 @@ def build_portal_app(
 </head>
 <body>
   <h1>Notable Analyst Portal</h1>
-  {user_line}
   <p>Read-only access to archived cases.</p>
   <ul>
     <li><a href="/cases">Browse cases</a></li>
@@ -460,7 +544,7 @@ def build_portal_app(
 </html>"""
 
     @app.get("/cases", response_class=HTMLResponse)
-    async def portal_cases(
+    def portal_cases(
         limit: str | None = None,
         offset: str | None = None,
         start: str | None = None,
@@ -477,7 +561,13 @@ def build_portal_app(
                 verdict=verdict,
                 search_name=search_name,
             )
-            items = list_cases(config=config, filters=filters, connect=connect_fn)
+            page_size = _bounded_page_size(config, filters.limit)
+            items = list_cases(
+                config=config,
+                filters=filters,
+                connect=connect_fn,
+                fetch_extra=True,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
@@ -485,13 +575,14 @@ def build_portal_app(
             raise HTTPException(status_code=503, detail="Case archive unavailable.") from exc
 
         rows = []
-        for item in items:
+        response_items = items[:page_size]
+        for item in response_items:
             rows.append(
                 "<tr>"
                 f"<td><a href=\"/cases/{html.escape(item.case_id)}\">"
                 f"{html.escape(item.case_id)}</a></td>"
                 f"<td>{html.escape(_format_utc_timestamp(item.processed_at))}</td>"
-                f"<td>{html.escape(item.verdict or '')}</td>"
+                f"<td>{html.escape(verdict_label(item.verdict))}</td>"
                 f"<td>{html.escape(item.search_name or '')}</td>"
                 f"<td>{html.escape(item.retrieval_status)}</td>"
                 "</tr>"
@@ -501,6 +592,23 @@ def build_portal_app(
             if rows
             else '<tr><td colspan="5">No cases found.</td></tr>'
         )
+        previous_link = ""
+        if filters.offset > 0:
+            previous_offset = max(0, filters.offset - page_size)
+            previous_link = (
+                f'<a href="/cases?limit={page_size}&offset={previous_offset}">'
+                "Previous page</a>"
+            )
+        next_link = ""
+        if len(items) > page_size:
+            next_offset = filters.offset + page_size
+            next_link = (
+                f'<a href="/cases?limit={page_size}&offset={next_offset}">'
+                "Next page</a>"
+            )
+        separator = " | " if previous_link and next_link else ""
+        pagination = previous_link + separator + next_link
+        pagination_block = f"<p>{pagination}</p>" if pagination else ""
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -510,6 +618,7 @@ def build_portal_app(
 <body>
   <h1>Archived Cases</h1>
   <p><a href="/">Home</a></p>
+  {pagination_block}
   <table border="1" cellpadding="4" cellspacing="0">
     <thead>
       <tr>
@@ -528,7 +637,7 @@ def build_portal_app(
 </html>"""
 
     @app.get("/cases/{case_id}", response_class=HTMLResponse)
-    async def portal_case_detail(case_id: str) -> str:
+    def portal_case_detail(case_id: str) -> str:
         normalized, record = fetch_case_detail(case_id)
         return f"""<!DOCTYPE html>
 <html lang="en">
@@ -540,8 +649,8 @@ def build_portal_app(
   <h1>Case {html.escape(normalized)}</h1>
   <p><a href="/cases">Back to cases</a></p>
   <p>Processed: {html.escape(_format_utc_timestamp(record.processed_at))}</p>
-  <p>Verdict: {html.escape(record.verdict or '')}</p>
-  <p>Search name: {html.escape(record.search_name or '')}</p>
+  <p>Verdict: {html.escape(verdict_label(record.verdict))}</p>
+  <p>Alert name: {html.escape(record.search_name or '')}</p>
   <p>Retrieval status: {html.escape(record.retrieval_status)}</p>
   <p>Source completeness: {html.escape(record.source_completeness)}</p>
 </body>

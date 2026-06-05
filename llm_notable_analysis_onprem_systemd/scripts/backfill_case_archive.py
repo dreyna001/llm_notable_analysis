@@ -28,6 +28,7 @@ from llm_notable_analysis_onprem_systemd.onprem_service.config import Config, lo
 
 _BACKFILL_HASH_PREFIX = 16
 _DEFAULT_BATCH_SIZE = 100
+_MAX_BACKFILL_TEXT_EXCERPT_CHARS = 12000
 
 
 def _result(
@@ -214,6 +215,7 @@ def build_legacy_case_record(
     processed_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
     case_id = build_backfill_case_id(report_path, text, root=root)
     title = _first_heading(text)
+    content_sha256 = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
     return CaseArchiveRecord(
         case_id=case_id,
         finding_id=case_id,
@@ -230,12 +232,15 @@ def build_legacy_case_record(
         archive_metadata={
             "backfill_source_path": str(report_path),
             "backfill_hash_prefix": case_id.removeprefix("backfill:"),
+            "content_sha256": content_sha256,
+            "source_size_bytes": stat.st_size,
             "legacy_markdown_only": True,
         },
         alert_payload={
             "input_type": "markdown_report",
             "title": title,
-            "text": text,
+            "text_excerpt": text[:_MAX_BACKFILL_TEXT_EXCERPT_CHARS],
+            "text_truncated": len(text) > _MAX_BACKFILL_TEXT_EXCERPT_CHARS,
         },
         analysis=None,
         case_schema_version=config.CASE_SCHEMA_VERSION,

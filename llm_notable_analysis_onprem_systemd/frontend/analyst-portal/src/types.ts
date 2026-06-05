@@ -1,0 +1,74 @@
+export type CaseSummary = {
+  case_id: string;
+  processed_at: string | null;
+  expires_at: string | null;
+  verdict: string | null;
+  confidence: string | null;
+  search_name: string | null;
+  retrieval_status: string;
+  source_completeness: string;
+};
+
+export type CaseListResponse = {
+  items: CaseSummary[];
+  limit: number;
+  offset: number;
+  has_more: boolean;
+};
+
+export type CaseDetail = {
+  case_id: string;
+  metadata: {
+    processed_at: string | null;
+    expires_at: string | null;
+    retrieval_status: string;
+    source_completeness: string;
+  };
+  alert_payload: Record<string, unknown>;
+  analysis: Record<string, unknown>;
+  report_md_path: string | null;
+  report_html_path: string | null;
+};
+
+export type ChatMode =
+  | "selected_case"
+  | "global_archive";
+
+export type ChatRequest = {
+  mode: ChatMode;
+  question: string;
+  selected_case_id?: string;
+  session_id?: string | null;
+};
+
+export type ChatResponse = {
+  answer: string;
+  answer_status: "answered" | "unknown" | "refused" | string;
+  session_id: string | null;
+};
+
+export type ChatSessionSummary = {
+  session_id: string;
+  title: string;
+  updated_at: string | null;
+  mode: ChatMode;
+  selected_case_id: string | null;
+};
+
+export type ChatSessionsResponse = {
+  history_enabled: boolean;
+  items: ChatSessionSummary[];
+};
+
+export type ChatSessionMessage = {
+  role: string;
+  content: string;
+  created_at: string | null;
+};
+
+export type ChatSessionMessagesResponse = {
+  session_id: string;
+  mode: ChatMode;
+  selected_case_id: string | null;
+  messages: ChatSessionMessage[];
+};

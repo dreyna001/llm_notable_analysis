@@ -12,7 +12,7 @@ Use this page to pick **where to start** without reading the whole root [`README
 
 4. **[Installation](operations/INSTALL.md)** — Bring-up with `scripts/install.sh`, prerequisites, manual follow-ups.
 
-5. **[Capability profiles](operations/CAPABILITY_PROFILES.md)** and **[runtime env contract](../config.env.example)** — Operators choose supported bundles with `CAPABILITY_PROFILES`; endpoint, path, secret, and tuning values remain in `config.env`. Copy to `/etc/notable-analyzer/config.env` on the host.
+5. **[Capability profiles](operations/CAPABILITY_PROFILES.md)** and **[runtime env contract](../config.env.example)** — Operators choose supported bundles with `CAPABILITY_PROFILES`; endpoint, path, secret, and tuning values remain in `config.env`. Copy to `/etc/notable-analyzer/config.env` on the host. The analyst portal uses the narrower [`config.portal.env.example`](../config.portal.env.example) as `/etc/notable-analyzer/portal.env`.
 
    For host-specific vLLM and concurrency starting values, see **[deployment hardware profiles](operations/deployment_profiles/README.md)**.
 
@@ -28,7 +28,7 @@ Optional deep dives:
 - **[Feature enhancements architecture](architecture/feature_enhancements_architecture.md)** — Locked runtime shape, payloads (including `servicenow_create_approval`), policies.
 - **[Feature enhancements technical spec](technical_specs/feature_enhancements_technical_spec.md)** — Contract-level detail for SPL, Splunk execution, ServiceNow.
 - **[Analyst portal technical spec](technical_specs/analyst_portal_case_archive_technical_spec.md)** — Draft implementation contract and diff plan for the Postgres-backed portal/archive/chatbot.
-- **[Analyst portal and case archive plan](planning/ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md)** — Living scope for the on-prem 90-day case archive, read-only portal, and archive-backed chatbot.
+- **[Analyst portal and case archive plan](planning/ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md)** — Living scope for the on-prem 30-day case archive, read-only portal, and archive-backed chatbot.
 - **[Analyst portal networking plan](planning/ANALYST_PORTAL_NETWORKING_PLAN.md)** — Planned internal URL, DNS, TLS, nginx, firewall, and FastAPI serving shape.
 - **[Compressed inputs plan](planning/COMPRESSED_INPUTS_PLAN.md)** — Planned on-prem gzip intake parity with AWS (`*.json.gz`, `MAX_DECOMPRESSED_INPUT_BYTES`, stem/writeback rules).
 - **[Golden evaluation harness TODO](planning/golden_eval_harness_todo.md)** — Planning TODO for future regression, hallucination, weak-retrieval, and assistant Q&A quality evaluation.
@@ -41,9 +41,11 @@ Optional deep dives:
 | Executive on-prem build summary | [EXECUTIVE_ONPREM_BUILD_WRITEUP.md](delivery_package/EXECUTIVE_ONPREM_BUILD_WRITEUP.md) |
 | Capability profiles | [CAPABILITY_PROFILES.md](operations/CAPABILITY_PROFILES.md), [`config.env.example`](../config.env.example) (`CAPABILITY_PROFILES`) |
 | Analyst portal operations | [ANALYST_PORTAL_OPERATIONS.md](operations/ANALYST_PORTAL_OPERATIONS.md), [`notable-portal.service`](../deploy/systemd/notable-portal.service), [`notable-portal.conf`](../deploy/nginx/notable-portal.conf) |
+| Analyst portal React UI (dev spike) | [`frontend/analyst-portal/README.md`](../frontend/analyst-portal/README.md) |
+| Shared local dev venv (Python + Node) | [`DEVELOPING.md`](../../DEVELOPING.md) |
 | Analyst portal technical spec | [analyst_portal_case_archive_technical_spec.md](technical_specs/analyst_portal_case_archive_technical_spec.md) |
-| Planned analyst portal and case archive | [ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md](planning/ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md) |
-| Planned analyst portal networking | [ANALYST_PORTAL_NETWORKING_PLAN.md](planning/ANALYST_PORTAL_NETWORKING_PLAN.md) |
+| Analyst portal case archive plan | [ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md](planning/ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md) |
+| Analyst portal networking plan | [ANALYST_PORTAL_NETWORKING_PLAN.md](planning/ANALYST_PORTAL_NETWORKING_PLAN.md) |
 | RAG grounding for analysis | [EXECUTIVE_ONPREM_WORKFLOW.md § RAG](delivery_package/EXECUTIVE_ONPREM_WORKFLOW.md), [RAG_OPERATIONS.md](operations/RAG_OPERATIONS.md), [KNOWLEDGE_BASE_OPERATIONS.md](operations/KNOWLEDGE_BASE_OPERATIONS.md), [`config.env.example`](../config.env.example) |
 | Planned golden eval / quality regression harness | [golden_eval_harness_todo.md](planning/golden_eval_harness_todo.md) |
 | Planned AI integrity / drift monitoring | [ai_integrity_drift_monitoring_plan.md](planning/ai_integrity_drift_monitoring_plan.md) |

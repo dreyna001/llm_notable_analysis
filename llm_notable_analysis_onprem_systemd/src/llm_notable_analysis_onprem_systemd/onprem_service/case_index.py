@@ -116,6 +116,16 @@ def _escape_like_prefix(value: str) -> str:
     )
 
 
+def _escape_like_substring(value: str) -> str:
+    """Escape user-controlled LIKE wildcards for substring matching."""
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+    return f"%{escaped}%"
+
+
 def build_list_cases_query(
     schema: str,
     filters: CaseListFilters,
@@ -124,7 +134,7 @@ def build_list_cases_query(
 ) -> tuple[str, tuple[Any, ...]]:
     """Build a parameterized case list query."""
     table = f"{quote_identifier(schema, 'schema')}.cases"
-    clauses: list[str] = []
+    clauses: list[str] = ["expires_at > now()"]
     params: list[Any] = []
 
     if filters.processed_from is not None:
@@ -137,8 +147,8 @@ def build_list_cases_query(
         clauses.append("verdict = %s")
         params.append(filters.verdict)
     if filters.search_name:
-        clauses.append("search_name = %s")
-        params.append(filters.search_name)
+        clauses.append("search_name ILIKE %s ESCAPE '\\'")
+        params.append(_escape_like_substring(filters.search_name))
     elif filters.search_name_prefix:
         clauses.append("search_name ILIKE %s ESCAPE '\\'")
         params.append(_escape_like_prefix(filters.search_name_prefix))
@@ -170,6 +180,17 @@ LIMIT %s OFFSET %s
     )
 
 
+def build_case_exists_query(schema: str) -> str:
+    """Build a parameterized existence check for one non-expired case."""
+    return f"""
+SELECT 1
+FROM {quote_identifier(schema, 'schema')}.cases
+WHERE case_id = %s
+  AND expires_at > now()
+LIMIT 1
+""".strip()
+
+
 def build_get_case_query(schema: str) -> str:
     """Build a parameterized case detail query."""
     return f"""
@@ -197,6 +218,7 @@ SELECT
     source_completeness
 FROM {quote_identifier(schema, 'schema')}.cases
 WHERE case_id = %s
+  AND expires_at > now()
 """.strip()
 
 
@@ -267,6 +289,24 @@ def list_cases(
         _set_statement_timeout(conn, config.CASE_POSTGRES_STATEMENT_TIMEOUT_MS)
         result = conn.execute(sql, params)
         return [_summary_from_row(row) for row in _fetchall(result)]
+
+
+def case_exists(
+    *,
+    config: Config,
+    case_id: str,
+    connect: ConnectionFactory | None = None,
+) -> bool:
+    """Return True when a non-expired case row exists for case_id."""
+    normalized = str(case_id or "").strip()
+    if not normalized:
+        return False
+    connect_fn = connect or _default_connect
+    sql = build_case_exists_query(config.CASE_POSTGRES_SCHEMA)
+    with connect_fn(config.CASE_POSTGRES_DSN) as conn:
+        _set_statement_timeout(conn, config.CASE_POSTGRES_STATEMENT_TIMEOUT_MS)
+        row = _fetchone(conn.execute(sql, (normalized,)))
+        return row is not None
 
 
 def get_case(

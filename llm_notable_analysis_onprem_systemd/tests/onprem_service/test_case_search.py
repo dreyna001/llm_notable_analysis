@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timezone
 import json
 import unittest
@@ -79,7 +80,7 @@ class _BadDimensionEmbeddingModel:
 def _analysis() -> dict:
     return {
         "alert_reconciliation": {
-            "verdict": "likely malicious",
+            "verdict": "likely_malicious",
             "confidence": "0.82",
             "one_sentence_summary": "Suspicious PowerShell from admin host.",
         },
@@ -459,6 +460,29 @@ class TestCaseSearch(unittest.TestCase):
         self.assertEqual(result["cases"], 1)
         self.assertGreater(result["chunks"], 0)
         self.assertEqual(len(connection.executemany_calls), 1)
+
+    def test_rebuild_skips_markdown_only_legacy_rows(self) -> None:
+        config = Config()
+        legacy_record = replace(
+            _record(config),
+            analysis=None,
+            retrieval_status="not_indexed",
+            backfill_status="legacy_summary",
+            source_completeness="markdown_only",
+        )
+        connection = _FakeConnection(rows=[_row_from_record(legacy_record)])
+        model = _FakeEmbeddingModel()
+
+        result = rebuild_case_chunks(
+            config=config,
+            batch_size=10,
+            connect=lambda _dsn: connection,
+            embedding_model=model,
+        )
+
+        self.assertEqual(result, {"cases": 0, "chunks": 0, "skipped": 1})
+        self.assertEqual(model.encoded_texts, [])
+        self.assertEqual(connection.executemany_calls, [])
 
     def test_mark_case_retrieval_status_rejects_unknown_status(self) -> None:
         with self.assertRaises(ValueError):

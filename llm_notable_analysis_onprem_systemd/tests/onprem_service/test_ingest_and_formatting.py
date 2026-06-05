@@ -86,6 +86,39 @@ class TestIngestAndFormatting(unittest.TestCase):
                 read_notable_text(path, max_bytes=64)
             self.assertIn("exceeds MAX_INPUT_FILE_BYTES", str(ctx.exception))
 
+    def test_discover_files_skips_symlinked_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            incoming = Path(td) / "incoming"
+            incoming.mkdir(parents=True, exist_ok=True)
+            target = Path(td) / "outside.json"
+            target.write_text('{"secret": true}', encoding="utf-8")
+            link = incoming / "linked.json"
+            try:
+                link.symlink_to(target)
+            except OSError as exc:
+                self.skipTest(f"symlinks unavailable: {exc}")
+
+            files = discover_files(Config(INCOMING_DIR=incoming))
+
+        self.assertEqual(files, [])
+
+    def test_read_notable_text_rejects_symlinked_input(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            incoming = Path(td) / "incoming"
+            incoming.mkdir(parents=True, exist_ok=True)
+            target = Path(td) / "outside.json"
+            target.write_text('{"secret": true}', encoding="utf-8")
+            link = incoming / "linked.json"
+            try:
+                link.symlink_to(target)
+            except OSError as exc:
+                self.skipTest(f"symlinks unavailable: {exc}")
+
+            with self.assertRaises(NotableReadError) as ctx:
+                read_notable_text(link, max_bytes=1024, root=incoming)
+
+        self.assertIn("symlink", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

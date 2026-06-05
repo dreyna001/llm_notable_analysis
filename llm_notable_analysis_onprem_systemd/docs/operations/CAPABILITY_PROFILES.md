@@ -20,7 +20,7 @@ takes precedence; remove the profile to turn that capability off.
 | `elastic_readonly` | Elasticsearch Query DSL generation and bounded read-only `_search` execution. | Read-only external queries. |
 | `ticket_draft` | ServiceNow incident draft payloads in reports. | Local draft only; no ServiceNow POST. |
 | `action_gated` | Splunk notable writeback, ServiceNow draft/create, required ServiceNow approval, and side-effect idempotency. | External write/action path. |
-| `analyst_portal` | Postgres case archive writes, read-only portal service, Case Q&A, and global case archive retrieval. | Local case persistence and read-only archive retrieval. |
+| `analyst_portal` | Postgres case archive writes, read-only portal service, and Case Q&A. | Local case persistence and read-only archive retrieval. |
 
 Profiles are additive. `core` is automatically included when omitted.
 Profiles may be separated with commas or semicolons.
@@ -175,10 +175,11 @@ This profile enables:
 - `CASE_ARCHIVE_ENABLED`
 - `PORTAL_ENABLED`
 - `CASE_QA_ENABLED`
-- `CASE_QA_GLOBAL_RETRIEVAL_ENABLED`
 
-It does not enable `HTML_REPORT_ENABLED`. Add the `html_reports` profile
-separately when static HTML artifacts are required.
+It does not enable `CASE_QA_GLOBAL_RETRIEVAL_ENABLED` or `HTML_REPORT_ENABLED`.
+Enable cross-case/global chat retrieval only after reviewing case visibility
+policy. Add the `html_reports` profile separately when static HTML artifacts
+are required.
 
 Primary follow-up values:
 
@@ -187,6 +188,9 @@ Primary follow-up values:
 - `CASE_RETENTION_DAYS`
 - `PORTAL_BIND_HOST`
 - `PORTAL_PAGE_SIZE`
+- `PORTAL_PROXY_SECRET`
+- `PORTAL_PROXY_SECRET_HEADER`
+- `CASE_QA_GLOBAL_RETRIEVAL_ENABLED` when cross-case retrieval is approved
 - `CASE_QA_MAX_RETRIEVED_CASES`
 - `CASE_QA_MAX_CHUNKS_PER_LANE`
 - `CASE_QA_MAX_TOTAL_CHUNKS`

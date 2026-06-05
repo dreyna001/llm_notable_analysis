@@ -8,6 +8,8 @@ from datetime import datetime
 from html import escape
 from typing import Any, Dict, Iterable, List, Tuple
 
+from .verdicts import verdict_label
+
 
 _IOC_FIELDS = (
     ("ip_addresses", "IP addresses"),
@@ -683,7 +685,7 @@ def _build_metrics(alert_data: Dict[str, Any], response: Dict[str, Any], scored_
     api_call = _first_value(alert_data, ("eventName", "event_name", "api_call"), "")
     return "".join(
         [
-            _metric("Confidence", confidence_display, _clean_text(ar.get("verdict"), "")),
+            _metric("Confidence", confidence_display, verdict_label(ar.get("verdict"))),
             _metric("Window", window_value, window_sub),
             _metric("Credentials", credential_count or "unknown", "ASIA-prefix (STS temp)" if credential_count else "Not provided"),
             _metric("Source IPs", len(source_ips) if source_ips else "unknown", ", ".join(sorted(source_ips)) if source_ips else "Not provided"),
@@ -702,7 +704,7 @@ def generate_html_report(
     alert_data = _parse_alert(alert_text)
     response = _as_dict(llm_response)
     ar = _as_dict(response.get("alert_reconciliation"))
-    verdict = _clean_text(ar.get("verdict"))
+    verdict = verdict_label(ar.get("verdict"))
     actions = _actions_from_response(response)
     query_section = _as_dict(response.get("query_result_section"))
     interpretation = _as_list(response.get("query_result_interpretation"))

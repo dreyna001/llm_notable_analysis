@@ -13,7 +13,7 @@ Draft implementation detail now lives in
 ## Current Goal
 
 Build the on-prem version first: a read-only analyst portal backed by a tunable
-case archive, defaulting to 90 days. The portal includes a chatbot that can help
+case archive, defaulting to 30 days. The portal includes a chatbot that can help
 an analyst iterate on alerts using retained case evidence plus approved SOC
 context.
 
@@ -37,7 +37,7 @@ generic adapter frameworks or action surfaces now.
 
 ### In Scope
 
-- On-prem case archive with configurable retention, default `90` days.
+- On-prem case archive with configurable retention, default `30` days.
 - Read-only analyst portal with global search/chat over retained cases.
 - Full-fidelity storage of the original notable / alert payload.
 - One canonical stored analysis output per case in Postgres as structured JSONB.
@@ -179,22 +179,22 @@ Source lanes should be explicit:
 
 - `current_alert`
 - `case_analysis`
-- `soc_context`
+- `knowledge_base`
 - `prior_case`
 
 Answers should separate:
 
 - facts from the current alert,
 - facts from retained prior cases,
-- advisory SOP/SPL/runbook guidance,
+- advisory Knowledge Base guidance,
 - model inference,
 - unknowns.
 
 ## Retention And Limits
 
-Default archive retention: `CASE_RETENTION_DAYS=90`.
+Default archive retention: `CASE_RETENTION_DAYS=30`.
 
-Retention must be configurable. The 90-day default exists to bound storage,
+Retention must be configurable. The 30-day default exists to bound storage,
 retrieval scope, and chatbot answers.
 
 Planned limits:
@@ -372,34 +372,14 @@ Do not embed by default:
 The implementation should use deterministic chunk builders from JSON fields,
 not ad hoc markdown parsing.
 
-## Citation Model
+## Chat Source Metadata
 
-In simple terms: citations are how the chatbot proves what it used.
+Retrieved chunks still carry internal section metadata (`section`, `field_path`,
+`case_id`, stored lane) for hybrid retrieval and bounded prompt assembly.
 
-Every retrieved chunk should carry enough metadata to point back to a real
-source. A chat answer should cite source ids instead of saying "the report says"
-without proof.
-
-Decision: citation metadata is required for every chunk used by portal chat.
-The source reference shape is:
-
-```json
-{
-  "source_lane": "case_analysis",
-  "case_id": "abc-123",
-  "section": "analysis.evidence",
-  "field_path": "$.evidence_vs_inference.direct_evidence[0]",
-  "chunk_id": "abc-123:evidence:0"
-}
-```
-
-The answer renderer can show this as a short citation like
-`abc-123 / Evidence / direct_evidence[0]`.
-
-Portal chat answers should return citations alongside the answer. The UI can
-render them as links or labels, but the backend response must preserve the
-machine-readable source refs so tests and future golden evals can verify source
-coverage.
+Decision: portal chat does **not** expose citations, source links, or
+`retrieved_case_ids` in the API or UI. Responses return `answer`,
+`answer_status`, and optional `session_id` only.
 
 ## Failure Behavior
 
@@ -523,9 +503,27 @@ The FastAPI app should use a read-only Postgres role for case browsing and
 retrieval. If chat history is enabled, use a narrowly scoped write role only for
 chat tables.
 
-Keep the first UI simple: server-rendered pages or minimal static HTML served by
-FastAPI are enough for the first slice. Do not start with a separate frontend app
-unless the technical spec proves it is needed.
+### Frontend Delivery Sequence
+
+Finalize the React analyst portal (`frontend/analyst-portal/`) as the primary UI
+before wiring production deployment through FastAPI static serving and nginx.
+
+Current sequence:
+
+1. **Frontend stack first** — complete the React routes, case detail views,
+   chat UX, citation links, filters, and local dev workflow (`dev_portal_ui.ps1`
+   + Vite proxy).
+   - Optional: embed `ChatPanel` on `CaseDetailPage` in addition to the home
+     dashboard. Home-page chat with a pinned selected case is sufficient for v1.
+2. **Production wiring second** — after the React UI is stable, add:
+   - `npm run build` artifact packaging in install/deploy docs,
+   - FastAPI static mount (or nginx `root`/`try_files` for the SPA),
+   - nginx proxy rules for `/api`, `/health`, and `/ready`.
+3. **Cutover** — retire or demote the minimal server-rendered HTML fallback in
+   `portal_app.py` once the React build is the documented operator path.
+
+The minimal server-rendered pages in `portal_app.py` remain a temporary fallback
+during frontend development. They are not the long-term analyst UI.
 
 ### Network Serving Decision
 
@@ -559,8 +557,8 @@ Nginx owns:
 FastAPI / Uvicorn owns:
 
 - application routes,
-- server-rendered or minimal static UI,
 - portal API responses,
+- eventual static serving of the React build after frontend cutover,
 - chatbot request validation,
 - Postgres reads and optional bounded chat-history writes.
 
@@ -603,7 +601,7 @@ The chatbot input should include:
 
 - question,
 - optional selected `case_id`,
-- retrieval mode: selected case, global archive, or both,
+- retrieval mode: selected case or global archive,
 - max source limits and context budgets from config.
 
 The chatbot output should include:
@@ -618,7 +616,7 @@ Rules:
 
 - Use retrieval before generation.
 - Do not answer from broad model memory.
-- Keep current alert facts, prior case facts, SOC guidance, and inference
+- Keep current alert facts, prior case facts, Knowledge Base guidance, and inference
   separate.
 - Return `unknown` or no-match when retrieval is weak.
 - Never produce action execution claims.
@@ -631,14 +629,8 @@ These modes are both UX and backend behavior:
 
 | Mode | UX meaning | Backend retrieval behavior |
 |------|------------|----------------------------|
-| `selected_case` | Analyst is viewing one case and asks about it | Pin that case as primary context; optionally retrieve SOC context |
-| `global_archive` | Analyst asks across the retained 90-day archive | Search across retained case chunks; no pinned case |
-| `selected_case_plus_archive` | Analyst asks about one case while comparing to history | Always include the selected case first, then search the archive for related prior cases |
-| `soc_context_only` | Analyst asks about SOP/SPL/runbook guidance | Search approved SOC/RAG/SPL context; no case facts unless selected |
-
-`selected_case_plus_archive` is not the same as plain global archive. The UX
-pins the case the analyst is looking at, and the backend guarantees that case is
-included before adding related archive matches.
+| `selected_case` | Analyst asks about one case with Knowledge Base support | Search the selected case and configured Knowledge Base context |
+| `global_archive` | Analyst asks across retained cases with Knowledge Base support | Search retained case chunks and configured Knowledge Base context; no pinned case |
 
 ### Default Limits
 
@@ -671,10 +663,12 @@ rows, support multiple versions, or rebuild derived chunks.
 ## Smallest End-To-End Slice
 
 1. Store a canonical Postgres case record after a successful analysis.
-2. Add 90-day retention configuration for case records and derived chunks.
+2. Add 30-day retention configuration for case records and derived chunks.
 3. Add a read-only portal list/detail view over Postgres case records.
-4. Add chatbot over selected case + SOC RAG context.
-5. Add global archive retrieval over retained Postgres case records/chunks.
+4. Add a centralized dashboard chatbot that can pin a selected case from the
+   case detail view.
+5. Add global archive retrieval over retained Postgres case records/chunks plus
+   configured Knowledge Base context.
 6. Add optional bounded chat-history persistence.
 
 ## Open Decisions

@@ -51,7 +51,8 @@ def archive_case_for_portal(
             report_html_path=report_html_path,
         )
     except CaseArchiveConflictError:
-        raise
+        logger.exception("Case archive identity conflict; continuing ingest: %s", case_id)
+        return False
     except CaseArchiveWriteError:
         logger.exception("Case archive write failed; continuing ingest: %s", case_id)
         return False

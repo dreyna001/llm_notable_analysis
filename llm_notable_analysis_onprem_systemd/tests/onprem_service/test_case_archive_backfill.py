@@ -61,6 +61,10 @@ class TestCaseArchiveBackfill(unittest.TestCase):
         self.assertIsNone(record.analysis)
         self.assertEqual(record.search_name, "Suspicious PowerShell")
         self.assertTrue(record.archive_metadata["legacy_markdown_only"])
+        self.assertIn("content_sha256", record.archive_metadata)
+        self.assertIn("source_size_bytes", record.archive_metadata)
+        self.assertEqual(record.alert_payload["text_excerpt"], "# Suspicious PowerShell\nBody")
+        self.assertFalse(record.alert_payload["text_truncated"])
 
     def test_dry_run_backfill_reports_importable_markdown(self) -> None:
         module = _load_script_module()

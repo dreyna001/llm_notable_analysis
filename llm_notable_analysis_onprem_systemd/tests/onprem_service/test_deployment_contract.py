@@ -93,6 +93,10 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("*.egg-info", install_text)
         self.assertIn("detect_cuda_home_best_effort", install_text)
         self.assertIn("patch_vllm_cuda_environment", install_text)
+        self.assertIn("notable-portal.service", install_text)
+        self.assertIn("install_analyst_portal_bringup_assets", install_text)
+        self.assertIn("INSTALL_ANALYST_PORTAL", install_text)
+        self.assertIn("setup_postgres_case_archive.sh", install_text)
 
         pyproject_text = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         self.assertIn('"onprem-rag-notable-analysis==0.1.0"', pyproject_text)
@@ -110,6 +114,17 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("vllm==0.21.0", install_text)
         self.assertIn("huggingface_hub==1.16.4", install_text)
         self.assertNotIn('source "$config_file"', install_text)
+
+    def test_postgres_case_archive_helper_uses_config_and_portal_env(self) -> None:
+        """Case archive helper should provision schema from analyzer and portal env."""
+        script_text = (
+            PROJECT_ROOT / "scripts" / "setup_postgres_case_archive.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("--config-env", script_text)
+        self.assertIn("--portal-env", script_text)
+        self.assertIn("notable_cases_schema.sql", script_text)
+        self.assertIn("GRANT SELECT ON ALL TABLES", script_text)
 
     def test_postgres_rag_helper_uses_config_env_and_ingest_module(self) -> None:
         """Postgres helper should keep RAG setup and ingest config-bound."""
@@ -212,7 +227,7 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("RAG_RRF_K=60", config_text)
         self.assertIn("CASE_ARCHIVE_ENABLED=false", config_text)
         self.assertIn("CASE_POSTGRES_SCHEMA=notable_cases", config_text)
-        self.assertIn("CASE_RETENTION_DAYS=90", config_text)
+        self.assertIn("CASE_RETENTION_DAYS=30", config_text)
         self.assertIn("CASE_RETENTION_DELETE_BATCH_SIZE=500", config_text)
         self.assertIn("CASE_QA_ENABLED=false", config_text)
         self.assertIn("CASE_QA_GLOBAL_RETRIEVAL_ENABLED=false", config_text)
@@ -231,18 +246,35 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE=spl_query_chunks", config_text)
         self.assertIn("SPL_QUERY_RAG_FAILURE_MODE=suppress", config_text)
 
+        portal_config_text = (PROJECT_ROOT / "config.portal.env.example").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("CAPABILITY_PROFILES=core,analyst_portal", portal_config_text)
+        self.assertIn("CASE_POSTGRES_DSN=postgresql://notable_portal@", portal_config_text)
+        self.assertIn("PORTAL_PROXY_SECRET=<generate-a-random-shared-secret>", portal_config_text)
+        self.assertNotIn("SPLUNK_API_TOKEN", portal_config_text)
+        self.assertNotIn("SERVICENOW_API_TOKEN", portal_config_text)
+
     def test_portal_systemd_unit_runs_loopback_portal_module(self) -> None:
         """Portal service should run the read-only FastAPI app on loopback."""
         service_text = (
             PROJECT_ROOT / "deploy" / "systemd" / "notable-portal.service"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("EnvironmentFile=/etc/notable-analyzer/config.env", service_text)
+        self.assertIn("After=network.target litellm.service", service_text)
+        self.assertIn("Wants=litellm.service", service_text)
+        self.assertIn("EnvironmentFile=/etc/notable-analyzer/portal.env", service_text)
+        self.assertIn("HF_HOME=/var/notables/cache/huggingface", service_text)
+        self.assertIn(
+            "SENTENCE_TRANSFORMERS_HOME=/var/notables/cache/sentence-transformers",
+            service_text,
+        )
         self.assertIn(
             "ExecStart=/opt/notable-analyzer/venv/bin/python -m "
             "llm_notable_analysis_onprem_systemd.onprem_service.portal_app",
             service_text,
         )
+        self.assertIn("ReadWritePaths=/var/notables/cache", service_text)
         self.assertIn("SyslogIdentifier=notable-portal", service_text)
         self.assertIn("User=notable-analyzer", service_text)
 
@@ -258,7 +290,9 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("client_max_body_size 1m", nginx_text)
         self.assertIn("proxy_pass http://127.0.0.1:8080", nginx_text)
         self.assertIn("proxy_set_header X-Forwarded-User $remote_user", nginx_text)
-        self.assertIn("X-Notable-Portal-Proxy-Secret", nginx_text)
+        self.assertIn("include /etc/nginx/notable-portal-proxy-secret.conf", nginx_text)
+        self.assertIn("proxy_read_timeout 300s", nginx_text)
+        self.assertIn("proxy_send_timeout 300s", nginx_text)
 
     def test_analyst_portal_operations_doc_covers_delivery_contract(self) -> None:
         """Portal operations doc should cover enablement, maintenance, and safety."""
@@ -386,6 +420,7 @@ class TestDeploymentContract(unittest.TestCase):
             "spl_readonly",
             "ticket_draft",
             "action_gated",
+            "analyst_portal",
         ):
             self.assertIn(f"`{profile}`", profile_doc)
         self.assertIn("Low-level `*_ENABLED` flags remain supported", profile_doc)

@@ -42,7 +42,7 @@ class TestIntegrationMocks(unittest.TestCase):
     ) -> None:
         base_payload = {
             "alert_reconciliation": {
-                "verdict": "likely malicious",
+                "verdict": "likely_malicious",
                 "confidence": "0.84",
                 "one_sentence_summary": "Likely credential access in progress.",
                 "decision_drivers": ["failed logins then success"],
@@ -141,7 +141,7 @@ class TestIntegrationMocks(unittest.TestCase):
     ) -> None:
         payload = {
             "alert_reconciliation": {
-                "verdict": "likely malicious",
+                "verdict": "likely_malicious",
                 "confidence": "0.84",
                 "one_sentence_summary": "Likely credential access in progress.",
                 "decision_drivers": ["failed logins then success"],
@@ -180,7 +180,7 @@ class TestIntegrationMocks(unittest.TestCase):
     def test_analyze_alert_success_with_mocked_llm(self, mock_post: MagicMock) -> None:
         payload = {
             "alert_reconciliation": {
-                "verdict": "likely malicious",
+                "verdict": "likely_malicious",
                 "confidence": "0.84",
                 "one_sentence_summary": "Likely credential access in progress.",
                 "decision_drivers": ["failed logins then success"],
@@ -465,7 +465,7 @@ class TestIntegrationMocks(unittest.TestCase):
         ]
         base_payload = {
             "alert_reconciliation": {
-                "verdict": "likely malicious",
+                "verdict": "likely_malicious",
                 "confidence": "0.84",
                 "one_sentence_summary": "Likely credential access in progress.",
                 "decision_drivers": ["failed logins then success"],
@@ -567,7 +567,7 @@ class TestIntegrationMocks(unittest.TestCase):
     ) -> None:
         base_payload = {
             "alert_reconciliation": {
-                "verdict": "likely malicious",
+                "verdict": "likely_malicious",
                 "confidence": "0.84",
                 "one_sentence_summary": "Likely credential access in progress.",
                 "decision_drivers": ["failed logins then success"],
@@ -643,7 +643,7 @@ class TestIntegrationMocks(unittest.TestCase):
     ) -> None:
         base_payload = {
             "alert_reconciliation": {
-                "verdict": "likely malicious",
+                "verdict": "likely_malicious",
                 "confidence": "0.84",
                 "one_sentence_summary": "Likely credential access in progress.",
                 "decision_drivers": ["failed logins then success"],
@@ -694,7 +694,7 @@ class TestIntegrationMocks(unittest.TestCase):
     ) -> None:
         base_payload = {
             "alert_reconciliation": {
-                "verdict": "likely malicious",
+                "verdict": "likely_malicious",
                 "confidence": "0.84",
                 "one_sentence_summary": "Likely credential access in progress.",
                 "decision_drivers": ["failed logins then success"],
@@ -787,7 +787,7 @@ class TestIntegrationMocks(unittest.TestCase):
 
         repaired_payload = {
             "alert_reconciliation": {
-                "verdict": "likely malicious",
+                "verdict": "likely_malicious",
                 "confidence": "0.84",
                 "one_sentence_summary": "Likely credential access in progress.",
                 "decision_drivers": ["failed logins then success"],
@@ -1044,7 +1044,7 @@ class TestIntegrationMocks(unittest.TestCase):
     ) -> None:
         payload = {
             "alert_reconciliation": {
-                "verdict": "likely malicious",
+                "verdict": "likely_malicious",
                 "confidence": "0.84",
                 "one_sentence_summary": "Likely credential access in progress.",
                 "decision_drivers": ["failed logins then success"],

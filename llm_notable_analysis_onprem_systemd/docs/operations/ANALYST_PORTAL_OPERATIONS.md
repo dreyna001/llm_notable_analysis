@@ -22,20 +22,24 @@ Recommended enablement:
 CAPABILITY_PROFILES=core,analyst_portal
 CASE_POSTGRES_DSN=postgresql://notable_analyzer@127.0.0.1:5432/notable_rag
 CASE_POSTGRES_SCHEMA=notable_cases
-CASE_RETENTION_DAYS=90
+CASE_RETENTION_DAYS=30
+CASE_QA_GLOBAL_RETRIEVAL_ENABLED=false
 PORTAL_BIND_HOST=127.0.0.1
 PORTAL_PORT=8080
 PORTAL_PAGE_SIZE=50
 PORTAL_TRUSTED_USER_HEADER=X-Forwarded-User
 PORTAL_ALLOW_NON_LOOPBACK_BIND=false
-PORTAL_PROXY_SECRET=
+PORTAL_PROXY_SECRET=<generate-a-random-shared-secret>
 PORTAL_PROXY_SECRET_HEADER=X-Notable-Portal-Proxy-Secret
 ```
 
 The `analyst_portal` profile enables `CASE_ARCHIVE_ENABLED`, `PORTAL_ENABLED`,
-`CASE_QA_ENABLED`, and `CASE_QA_GLOBAL_RETRIEVAL_ENABLED`. It does not enable
-`HTML_REPORT_ENABLED`; add `html_reports` separately if static HTML artifacts
-are still required.
+and `CASE_QA_ENABLED`. It does not enable cross-case/global chat retrieval or
+`HTML_REPORT_ENABLED`, or `CASE_QA_CHAT_HISTORY_ENABLED`; enable
+`CASE_QA_GLOBAL_RETRIEVAL_ENABLED=true` only after reviewing case visibility
+policy, enable `CASE_QA_CHAT_HISTORY_ENABLED=true` only when bounded transcript
+persistence is required, and add `html_reports` separately if static HTML
+artifacts are still required.
 
 Rollback options:
 
@@ -53,7 +57,7 @@ The portal service unit is `deploy/systemd/notable-portal.service`.
 Expected host shape:
 
 - Service user: `notable-analyzer`
-- Environment file: `/etc/notable-analyzer/config.env`
+- Environment file: `/etc/notable-analyzer/portal.env`
 - Process: `python -m llm_notable_analysis_onprem_systemd.onprem_service.portal_app`
 - Default bind: `127.0.0.1:8080`
 - Restart behavior: `Restart=on-failure`
@@ -62,6 +66,9 @@ Expected host shape:
 Example commands:
 
 ```bash
+sudo cp config.portal.env.example /etc/notable-analyzer/portal.env
+sudo chmod 600 /etc/notable-analyzer/portal.env
+sudo vi /etc/notable-analyzer/portal.env
 sudo cp deploy/systemd/notable-portal.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now notable-portal.service
@@ -94,12 +101,21 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-V1 trusts `PORTAL_TRUSTED_USER_HEADER` only when nginx is the front door. Do not
-expose Uvicorn directly to the analyst network. `PORTAL_BIND_HOST` values other
-than loopback are rejected unless `PORTAL_ALLOW_NON_LOOPBACK_BIND=true` and
-`PORTAL_PROXY_SECRET` are both configured. Use that mode only after an explicit
-network review, with host firewall rules allowing the approved reverse proxy and
-nginx forwarding `PORTAL_PROXY_SECRET_HEADER` from protected local config.
+V1 trusts `PORTAL_TRUSTED_USER_HEADER` only after nginx authenticates the user
+and forwards `PORTAL_PROXY_SECRET_HEADER`. Do not expose Uvicorn directly to the
+analyst network. `PORTAL_PROXY_SECRET` is required even for loopback binds
+because local host access is not an authentication boundary. Store the matching
+nginx directive in `/etc/nginx/notable-portal-proxy-secret.conf` with root-only
+write permissions, for example:
+
+```nginx
+proxy_set_header X-Notable-Portal-Proxy-Secret "<PORTAL_PROXY_SECRET>";
+```
+
+`PORTAL_BIND_HOST` values other than loopback are rejected unless
+`PORTAL_ALLOW_NON_LOOPBACK_BIND=true` is configured. Use that mode only after an
+explicit network review, with host firewall rules allowing the approved reverse
+proxy.
 
 ## Health Checks
 
@@ -128,8 +144,22 @@ after deployment so load balancer probes do not generate model traffic.
 
 ## Database Setup And Maintenance
 
-Apply the schema in `deploy/postgres/notable_cases_schema.sql` before enabling
-the profile. The portal requires:
+Apply the schema before enabling the profile. Preferred path on RHEL hosts:
+
+```bash
+sudo INSTALL_ANALYST_PORTAL=true bash scripts/install.sh
+```
+
+Or run the dedicated helper after editing env files:
+
+```bash
+sudo bash scripts/setup_postgres_case_archive.sh \
+  --config-env /etc/notable-analyzer/config.env \
+  --portal-env /etc/notable-analyzer/portal.env
+```
+
+Manual SQL path: apply `deploy/postgres/notable_cases_schema.sql` after creating
+the analyzer and portal roles/database. The portal requires:
 
 - `notable_cases.cases`
 - `notable_cases.case_chunks`
@@ -147,7 +177,10 @@ SELECT retrieval_status, COUNT(*) FROM notable_cases.cases GROUP BY 1;
 
 Use separate least-privilege roles for the analyzer and portal where possible.
 The analyzer role needs writes to `cases` and `case_chunks`; the portal role only
-needs reads for browsing and retrieval.
+needs reads for browsing and retrieval unless
+`CASE_QA_CHAT_HISTORY_ENABLED=true`, in which case the portal role also needs
+read/write on `chat_sessions` and `chat_messages`. Expired chat sessions are
+deleted by the existing retention loop using `CASE_QA_CHAT_HISTORY_RETENTION_DAYS`.
 
 Backups must include the `notable_cases` schema. Restore tests should include
 case list, case detail, readiness, and a sample chat request.
@@ -202,6 +235,8 @@ Backfill behavior:
   and content.
 - Markdown-only imports are marked `backfill_status=legacy_summary`,
   `source_completeness=markdown_only`, and `retrieval_status=not_indexed`.
+- Legacy rows store the report path, content hash, source size, and a bounded
+  markdown excerpt in Postgres rather than duplicating the full report body.
 - Dry-run reports importable files, generated case IDs, skipped files, and
   validation failures without writing rows.
 - Execute mode requires `--config-env` and `CASE_ARCHIVE_ENABLED=true`.
@@ -225,16 +260,11 @@ Supported modes:
 
 - `selected_case`
 - `global_archive`
-- `selected_case_plus_archive`
-- `soc_context_only`
-
-Every answered response includes machine-readable citations. Case citations use
-contextual lanes `current_case` or `prior_case` and preserve stored chunk lanes
-such as `case_analysis` or `alert_payload`. SOC guidance uses `soc_context`.
 
 Weak retrieval returns `answer_status=unknown`. Action requests return
 `answer_status=refused`. The portal chat does not call Splunk, ServiceNow, SOAR,
-or remediation systems.
+or remediation systems. Chat responses return the synthesized answer and
+`answer_status` only; source citations are not exposed in the API or UI.
 
 ## Troubleshooting
 
@@ -262,14 +292,17 @@ Auth or trusted-header issues:
 
 - Confirm nginx basic auth succeeds.
 - Confirm nginx forwards `X-Forwarded-User`.
-- Direct local requests to non-public routes should return `401` without that header.
+- Confirm nginx forwards `X-Notable-Portal-Proxy-Secret` from the protected
+  include file.
+- Direct local requests to non-public routes should return `401` without both
+  the trusted user header and the proxy secret.
 - Keep `PORTAL_BIND_HOST=127.0.0.1` unless the reverse proxy design is reviewed.
 - For reviewed non-loopback binds, confirm nginx forwards
   `X-Notable-Portal-Proxy-Secret` and the host firewall only allows the proxy.
 
 Portal startup failures:
 
-- Check `/etc/notable-analyzer/config.env`.
+- Check `/etc/notable-analyzer/portal.env`.
 - Confirm `PORTAL_ENABLED=true` and `CASE_ARCHIVE_ENABLED=true`.
 - Run `journalctl -u notable-portal.service -n 100 --no-pager`.
 

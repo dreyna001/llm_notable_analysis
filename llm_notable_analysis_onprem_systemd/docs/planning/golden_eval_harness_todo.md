@@ -47,7 +47,7 @@ stabilizes.
   advisory customer guidance.
 - Add portal chatbot evaluations once the analyst portal exists:
   - selected-case questions over the current alert plus stored analysis
-  - global questions over the retained 90-day case archive
+  - global questions over the retained 30-day case archive
   - mixed questions that require separating current alert facts, prior case
     facts, and SOC advisory guidance
   - no-match and weak-retrieval questions that should return `unknown`
@@ -67,7 +67,7 @@ stabilizes.
 - Record prompt version, model id, capability profile, retrieval source ids,
   citations, validation failures, latency, and pass/fail scores.
 - For portal-chatbot evals, also record selected case id, retrieved case ids,
-  source lanes used (`current_alert`, `case_analysis`, `soc_context`,
+  source lanes used (`current_alert`, `case_analysis`, `knowledge_base`,
   `prior_case`), citation coverage, and refusal/no-match reasons.
 - Store eval outputs under an operator-controlled artifact directory, not in the
   normal case archive unless an explicit audit/evaluation capability enables it.

@@ -687,11 +687,11 @@ Mirrors consolidated guidance shared with **`s3_notable_pipeline`** parity narra
 | Execute | Bounded read-only search; deterministic compress/enrich (**no mandatory LLM** on this rim) |
 | 3 (**optional backlog**) | Additional bounded inference pass revising prose **only from compressed query evidence plus prior structured artifact** |
 
-### Browse-only analyst portal and case archive (~90-day retention, roadmap)
+### Browse-only analyst portal and case archive (~30-day retention, roadmap)
 
-**Goal:** Move from “open the latest `.html` on disk” to a **browse-only analyst portal** that lists, filters, and opens prior incidents for roughly **three months**, without turning the analyzer into an interactive app or a write path for analysts. The same 90-day archive can also support an optional **read-only Case Q&A / Notable Archive Assistant** surface that answers questions about indexed notables and points analysts back to source reports/evidence.
+**Goal:** Move from “open the latest `.html` on disk” to a **browse-only analyst portal** that lists, filters, and opens prior incidents for roughly **one month**, without turning the analyzer into an interactive app or a write path for analysts. The same 30-day archive can also support an optional **read-only Case Q&A / Notable Archive Assistant** surface that answers questions about indexed notables and points analysts back to source reports/evidence.
 
-**Trigger:** At ~90 days and non-trivial volume, flat `REPORT_DIR` listing stops being enough. Operators need **indexed metadata**, **retention aligned to browse expectations**, and a **separate read-only web surface**—not just more HTML files.
+**Trigger:** At ~30 days and non-trivial volume, flat `REPORT_DIR` listing stops being enough. Operators need **indexed metadata**, **retention aligned to browse expectations**, and a **separate read-only web surface**—not just more HTML files.
 
 #### Current baseline (what exists today)
 
@@ -710,9 +710,9 @@ This is adequate for **today / this week** and small labs. It is **not** a case 
 | Property | Requirement |
 |----------|-------------|
 | Interaction model | **Read-only interactive**—list cases, filter, open detail, and use retrieval-bound chat; **no data entry**, no re-run analysis, no SOAR/ticket actions from the UI |
-| Retention target | **~90 days** (`CASE_RETENTION_DAYS=90`) as the default design point; operator-tunable |
+| Retention target | **~30 days** (`CASE_RETENTION_DAYS=30`) as the default design point; operator-tunable |
 | Detail view | Render from canonical Postgres JSONB case records; existing markdown/HTML outputs may still be generated for compatibility |
-| Optional Case Q&A / Notable Archive Assistant | Read-only natural-language questions over the same 90-day Postgres case archive plus SOC/SPL/RAG context; answers must cite source cases/reports/context and may return `unknown` / no-match |
+| Optional Case Q&A / Notable Archive Assistant | Read-only natural-language questions over the same 30-day Postgres case archive plus SOC/SPL/RAG context; answers must cite source cases/reports/context and may return `unknown` / no-match |
 | System of record | Analyzer pipeline remains the **only writer**; portal is read-only |
 | Auth | Corporate SSO or reverse-proxy auth in front of portal; fail closed |
 | Default posture | **Off** until `analyst_portal` (or equivalent) capability profile + explicit config |
@@ -723,18 +723,19 @@ A three-month browse window requires changes **beyond** a nicer front end:
 
 1. **Postgres case store** — filename and mtime are not enough for verdict filters, date ranges, stable pagination, or chatbot retrieval.
 2. **Artifact contract** — persist full-fidelity alert payload plus validated analysis JSONB at write time so list views and chat do not parse markdown/HTML.
-3. **Retention decoupling** — report/case retention must be **independent** of input/processed retention; default 21-day delete would undermine a 90-day portal.
+3. **Retention decoupling** — report/case retention must be **independent** of input/processed retention; default 21-day delete would undermine a 30-day portal.
 4. **Separate read service** — the long-running analyzer loop should not serve HTTP to analysts; a small read-only portal process (or AWS equivalent) limits blast radius.
 5. **Retrieval substrate for Case Q&A** — if enabled, Q&A needs bounded retrieval over Postgres case JSONB and derived pgvector chunks; it must not answer from model memory alone.
-6. **Storage sizing & lifecycle** — ~90 days of case JSONB plus derived chunks needs documented database sizing, backup, and retention behavior.
+6. **Storage sizing & lifecycle** — ~30 days of case JSONB plus derived chunks needs documented database sizing, backup, and retention behavior.
 
-Rough sizing at **90 days** (order of magnitude):
+Rough sizing at **30 days** (order of magnitude):
 
-| Volume | Stored case data per case | Total (~90 days) |
+| Volume | Stored case data per case | Total (~30 days) |
 |--------|-------------------|------------------|
-| 50/day | ~100–200 KB (JSONB + metadata + retrieval chunks) | ~450 MB–900 MB |
-| 200/day | same | ~1.8–3.2 GB |
-| 1,000/day | same | ~9–18 GB |
+| 50/day | ~100–200 KB (JSONB + metadata + retrieval chunks) | ~150 MB–300 MB |
+| 200/day | same | ~600 MB–1.2 GB |
+| 300/day | same | ~900 MB–1.8 GB |
+| 1,000/day | same | ~3–6 GB |
 
 These remain modest for a managed Postgres/pgvector footprint on a dedicated analyzer host; the architectural cost is **schema, migrations, backup, and retention policy**, not raw bytes.
 
@@ -744,7 +745,7 @@ These remain modest for a managed Postgres/pgvector footprint on a dedicated ana
 - **Read path isolated:** the baseline portal never calls Bedrock/vLLM, never drops files into `INCOMING_DIR`, and never triggers side effects. If Case Q&A is enabled, its only LLM use is bounded answer synthesis over retrieved archive sources.
 - **Keep renderers optional:** `html_generator.py` / `markdown_generator.py` stay deterministic and may continue producing human artifacts, but the portal reads canonical Postgres JSONB rather than parsing filesystem markdown/HTML.
 - **Evidence discipline:** stored JSON snapshots, if written, are the **validated structured object** already used for reports—not raw model text unless `poc_unstructured_output` fallback (then flag clearly in metadata).
-- **Q&A is retrieval-bound:** a Case Q&A assistant may summarize or route the analyst to relevant reports, but every answer must be grounded in retrieved 90-day archive sources and cite the case/report evidence used.
+- **Q&A is retrieval-bound:** a Case Q&A assistant may summarize or route the analyst to relevant reports, but every answer must be grounded in retrieved 30-day archive sources and cite the case/report evidence used.
 - **No dual backlog:** one case-archive contract; on‑prem and AWS differ only in **instantiation** (see table below).
 
 #### Proposed runtime shape
@@ -809,9 +810,9 @@ from Postgres.
 | Setting | Today (example) | Portal-enabled target |
 |---------|-----------------|------------------------|
 | `REPORT_RETENTION_DAYS` | 7 | Decouple from case retention; e.g. 30 hot then move |
-| `ARCHIVE_RETENTION_DAYS` | 14 | Extend or replace with `CASE_RETENTION_DAYS=90` |
-| `INPUT_RETENTION_DAYS` | 2 | Unchanged—inputs need not live 90 days |
-| `CASE_RETENTION_DAYS` | *(new)* | 90 default when portal profile on |
+| `ARCHIVE_RETENTION_DAYS` | 14 | Extend or replace with `CASE_RETENTION_DAYS=30` |
+| `INPUT_RETENTION_DAYS` | 2 | Unchanged—inputs need not live 30 days |
+| `CASE_RETENTION_DAYS` | *(new)* | 30 default when portal profile on |
 
 Retention job must **delete Postgres case rows, derived chunks, and optional chat
 references together** to avoid orphan metadata. Optional markdown/HTML artifacts
@@ -836,21 +837,20 @@ to case retention.
   plus separate limited credentials for optional bounded chat-history writes.
   It should not have filesystem write access to `INCOMING_DIR` or action secrets.
 - New capability profile: **`analyst_portal`** enables the case archive,
-  read-only portal, Case Q&A, and global case archive retrieval. It does not
-  imply `html_reports`; add that profile separately when static HTML artifacts
-  are required.
+  read-only portal, and Case Q&A. It does not imply cross-case/global retrieval
+  or `html_reports`; enable those separately after policy review.
 
 **Portal API behavior (v1)**
 
 - Paginated case list (default sort: `processed_at` desc).
 - Filters: date range, verdict, optional `search_name` prefix.
 - Detail: redirect or inline-serve pre-rendered HTML; optional markdown download.
-- Optional read-only Case Q&A endpoint over retrieved 90-day archive evidence; `POST` is acceptable only as a query transport for long questions and must not mutate case state.
+- Optional read-only Case Q&A endpoint over retrieved 30-day archive evidence; `POST` is acceptable only as a query transport for long questions and must not mutate case state.
 - **No** mutating `POST`, `PUT`, `PATCH`, or `DELETE` on cases.
 
 **Optional Tier 2+ Case Q&A / Notable Archive Assistant behavior**
 
-- Questions are scoped to cases retained in the portal archive, default **90 days**.
+- Questions are scoped to cases retained in the portal archive, default **30 days**.
 - Retrieval runs before generation and returns a bounded source set, such as top N matching cases/snippets.
 - The LLM answer is constrained to retrieved Postgres case metadata, canonical case JSONB, and derived case chunks.
 - Retrieval may also include approved customer context, such as SOC SOPs, escalation doctrine, Splunk index/field/macro references, detection notes, and threat-hunting playbooks. These sources help interpret notables; they are advisory context, not current-alert evidence.
@@ -859,7 +859,7 @@ to case retention.
 - The assistant cannot execute SPL, call Splunk/ServiceNow/SOAR, re-run analysis, write notes, change case state, or answer from broad model memory.
 
 This Tier 2+ assistant is the preferred customer-facing UI direction once the
-90-day case archive exists. It should cover the common analyst need to ask
+30-day case archive exists. It should cover the common analyst need to ask
 "where did we see this?" or "what recent notables look related?" without
 building a broad faceted archive UI first.
 
@@ -923,10 +923,10 @@ there only when a customer needs one or more of:
 
 **Phased delivery (on‑prem)**
 
-1. **Persist metadata + extend retention to 90 days** — portal can wait; validates storage and retention jobs.
+1. **Persist metadata + extend retention to 30 days** — portal can wait; validates storage and retention jobs.
 2. **Nightly static `index.html` or `cases.manifest.json`** — optional bridge using same `case_store` (still browse-only).
 3. **Dedicated portal service + SSO** — full app experience.
-4. **Optional Case Q&A / Notable Archive Assistant over 90-day archive** — bounded retrieval plus cited answers over retained cases; still read-only and the preferred UI direction.
+4. **Optional Case Q&A / Notable Archive Assistant over 30-day archive** — bounded retrieval plus cited answers over retained cases; still read-only and the preferred UI direction.
 5. **Enterprise archive hardening** — Tier 3; likely needs Postgres/OpenSearch plus RBAC, legal hold, export, or stronger archive governance.
 
 #### AWS instantiation (`s3_notable_pipeline` / parity)
@@ -938,12 +938,12 @@ there only when a customer needs one or more of:
 | `s3://{output_bucket}/reports/{finding_id}.md` | Existing markdown artifact |
 | `s3://{output_bucket}/reports/{finding_id}.html` | **New:** shared `html_generator` parity |
 | `s3://{output_bucket}/cases/{yyyy}/{mm}/{dd}/{finding_id}.json` | Optional redacted analysis envelope + artifact keys |
-| **DynamoDB** `CaseIndex` table | **Recommended v1 index** for list/filter at 90-day scale |
+| **DynamoDB** `CaseIndex` table | **Recommended v1 index** for list/filter at 30-day scale |
 | Optional case snippet/search store | Bounded retrieval source for read-only Case Q&A; OpenSearch only when Tier 3 search is justified |
 
 **Why DynamoDB on AWS (vs S3 listing alone)**
 
-- S3 `ListObjectsV2` over 90 days of prefix keys does not give cheap verdict/date filters or stable pagination.
+- S3 `ListObjectsV2` over 30 days of prefix keys does not give cheap verdict/date filters or stable pagination.
 - DynamoDB item per case with GSI on `processed_at` (and optional `verdict`) matches browse UX with minimal ops.
 - S3 remains blob store; Dynamo holds **metadata only** (paths, facets, sizes—not full alert bodies unless policy requires).
 
@@ -954,7 +954,7 @@ Example access pattern:
 | List recent cases | Query GSI `processed_at` descending, paginated |
 | Open case HTML | S3 GET via presigned URL or CloudFront OAI path |
 | Ask about recent cases | Retrieve bounded metadata/snippets, then answer with source citations only |
-| Expire at 90 days | Dynamo TTL on `expires_at` + S3 lifecycle rule on `reports/` and `cases/` prefixes |
+| Expire at 30 days | Dynamo TTL on `expires_at` + S3 lifecycle rule on `reports/` and `cases/` prefixes |
 
 **Portal on AWS (v1 options)**
 
@@ -987,14 +987,14 @@ Proposed profile **`analyst_portal`** (off by default):
 | Flag / setting | On‑prem | AWS |
 |----------------|---------|-----|
 | `CASE_ARCHIVE_ENABLED` | true when profile on | true when profile on |
-| `CASE_RETENTION_DAYS` | 90 | 90 |
+| `CASE_RETENTION_DAYS` | 30 | 30 |
 | `PORTAL_ENABLED` | true when profile on | true when profile on |
 | `HTML_REPORT_ENABLED` | not changed by `analyst_portal`; enable `html_reports` separately for static HTML artifacts | parity flag/profile, separate from `analyst_portal` |
 | `CASE_POSTGRES_DSN` / `CASE_INDEX_TABLE` | Postgres DSN / schema | DynamoDB table name |
 | `PORTAL_BIND_HOST` | `127.0.0.1` | n/a (API Gateway/ALB) |
 | `PORTAL_PAGE_SIZE` | 50 | 50 |
 | `CASE_QA_ENABLED` | true when profile on | true when profile on |
-| `CASE_QA_GLOBAL_RETRIEVAL_ENABLED` | true when profile on | true when profile on |
+| `CASE_QA_GLOBAL_RETRIEVAL_ENABLED` | false by default | explicit opt-in |
 | `CASE_QA_MAX_SOURCES` | bounded source count | bounded source count |
 
 Explicit env overrides remain supported; profile only sets defaults.
@@ -1004,14 +1004,14 @@ Explicit env overrides remain supported; profile only sets defaults.
 | Related item | Relationship |
 |--------------|--------------|
 | **`html_reports` profile** | Optional static HTML artifact generation; add alongside `analyst_portal` only when operators want compatibility HTML files. |
-| **Read-only Case Q&A / Notable Archive Assistant** | Preferred Tier 2+ portal surface over the 90-day archive; citations required and no action/write path. |
+| **Read-only Case Q&A / Notable Archive Assistant** | Preferred Tier 2+ portal surface over the 30-day archive; citations required and no action/write path. |
 | **Splunk / ServiceNow writeback** | Long-term SoR for some customers; portal is a **local convenience window** over analyzer outputs, not a replacement for SIEM/ticket history. |
 | **`aws_notable_ecs_demo`** | Reference for Bedrock **interactive** UI patterns—not the browse portal; do not conflate. |
 
 #### Out of scope (portal v1)
 
 - Analyst data entry, disposition capture, or feedback forms (see **[Analyst feedback loop & evaluation](#analyst-feedback-loop--evaluation)**).
-- Re-run analysis or open-ended LLM chat that is not grounded in retrieved 90-day archive evidence.
+- Re-run analysis or open-ended LLM chat that is not grounded in retrieved 30-day archive evidence.
 - SOAR playbook triggers, Splunk query execution, or ServiceNow create from the UI.
 - Enterprise archive/search hardening: deterministic audit search, large-scale full-text, multi-tenant RBAC beyond coarse SSO, legal hold, and export bundles (Tier 3 if required).
 

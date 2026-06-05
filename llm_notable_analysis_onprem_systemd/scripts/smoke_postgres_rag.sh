@@ -94,7 +94,9 @@ if ! "$DOCKER_BIN" version >/dev/null 2>&1; then
 fi
 
 if [[ -z "$ANALYZER_PYTHON" ]]; then
-    if [[ -x "$REPO_DIR/.venv/bin/python" ]]; then
+    if [[ -x "$WORKSPACE_DIR/.venv/bin/python" ]]; then
+        ANALYZER_PYTHON="$WORKSPACE_DIR/.venv/bin/python"
+    elif [[ -x "$REPO_DIR/.venv/bin/python" ]]; then
         ANALYZER_PYTHON="$REPO_DIR/.venv/bin/python"
     else
         ANALYZER_PYTHON="/opt/notable-analyzer/venv/bin/python"
