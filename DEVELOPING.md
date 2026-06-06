@@ -37,6 +37,14 @@ bash scripts/bootstrap_dev_venv.sh
 source .venv/bin/activate
 ```
 
+If bootstrap fails with a Python 3.10 venv error, remove the old environment and
+re-run (updated bootstrap auto-recreates stale `.venv` directories):
+
+```bash
+rm -rf .venv
+bash scripts/bootstrap_dev_venv.sh --install-python
+```
+
 This installs editable copies of:
 
 - `onprem-llm-sdk`

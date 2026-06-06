@@ -154,6 +154,11 @@ echo "Virtual env: $VENV_DIR"
 
 ensure_python_bin
 
+if [[ -x "$VENV_DIR/bin/python" ]] && ! "$VENV_DIR/bin/python" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)'; then
+    echo "Removing stale .venv (Python < 3.12); recreating with $PYTHON_BIN..."
+    rm -rf "$VENV_DIR"
+fi
+
 if [[ ! -x "$VENV_DIR/bin/python" ]]; then
     "$PYTHON_BIN" -m venv "$VENV_DIR"
 fi
