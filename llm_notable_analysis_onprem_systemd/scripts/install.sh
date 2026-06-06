@@ -552,6 +552,210 @@ PY
     info "Portal config installed: $portal_env"
 }
 
+sync_portal_proxy_secret_to_config() {
+    local config_file="$CONFIG_DIR/config.env"
+    local portal_env="$CONFIG_DIR/portal.env"
+    local portal_secret=""
+
+    [[ -f "$config_file" ]] || err "Missing analyzer config: $config_file"
+    [[ -f "$portal_env" ]] || err "Missing portal config: $portal_env"
+
+    portal_secret="$(read_config_value_best_effort "$portal_env" "PORTAL_PROXY_SECRET" "")"
+    if [[ -z "$portal_secret" || "$portal_secret" == "<generate-a-random-shared-secret>" ]]; then
+        record_issue "PORTAL_PROXY_SECRET is unset in $portal_env; analyzer config was not synchronized"
+        return 0
+    fi
+
+    python3 - "$config_file" "$portal_env" <<'PY'
+import re
+import shlex
+import sys
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+portal_path = Path(sys.argv[2])
+
+
+def parse_env(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        try:
+            tokens = shlex.split(stripped, comments=True, posix=True)
+        except ValueError:
+            continue
+        if tokens and tokens[0] == "export":
+            tokens = tokens[1:]
+        if len(tokens) == 1 and "=" in tokens[0]:
+            key, value = tokens[0].split("=", 1)
+            values[key] = value
+    return values
+
+
+secret = parse_env(portal_path).get("PORTAL_PROXY_SECRET", "")
+lines = config_path.read_text(encoding="utf-8").splitlines()
+updated = False
+found = False
+warning = False
+
+for index, raw_line in enumerate(lines):
+    stripped = raw_line.strip()
+    if not stripped or stripped.startswith("#"):
+        continue
+    try:
+        tokens = shlex.split(stripped, comments=True, posix=True)
+    except ValueError:
+        continue
+    if tokens and tokens[0] == "export":
+        tokens = tokens[1:]
+    if len(tokens) != 1 or "=" not in tokens[0]:
+        continue
+    key, value = tokens[0].split("=", 1)
+    if key != "PORTAL_PROXY_SECRET":
+        continue
+    found = True
+    if value in {"", "<generate-a-random-shared-secret>"}:
+        lines[index] = re.sub(
+            r"^(\s*(?:export\s+)?PORTAL_PROXY_SECRET=).*",
+            rf"\1{secret}",
+            raw_line,
+            count=1,
+        )
+        updated = True
+    elif value != secret:
+        warning = True
+    break
+
+if not found:
+    lines.append(f"PORTAL_PROXY_SECRET={secret}")
+    updated = True
+
+if updated:
+    config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+elif warning:
+    print("WARN_DIFFERENT_SECRET")
+PY
+    chown "$SVC_USER:$SVC_USER" "$config_file"
+    chmod 600 "$config_file"
+}
+
+ensure_case_archive_postgres_passwords() {
+    local config_file="$CONFIG_DIR/config.env"
+    local portal_env="$CONFIG_DIR/portal.env"
+
+    [[ -f "$config_file" ]] || err "Missing analyzer config: $config_file"
+    [[ -f "$portal_env" ]] || err "Missing portal config: $portal_env"
+
+    python3 - "$config_file" "$portal_env" <<'PY'
+import re
+import secrets
+import shlex
+import sys
+from pathlib import Path
+from urllib.parse import quote, unquote, urlparse, urlunparse
+
+config_path = Path(sys.argv[1])
+portal_path = Path(sys.argv[2])
+
+
+def parse_env(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        try:
+            tokens = shlex.split(stripped, comments=True, posix=True)
+        except ValueError:
+            continue
+        if tokens and tokens[0] == "export":
+            tokens = tokens[1:]
+        if len(tokens) == 1 and "=" in tokens[0]:
+            key, value = tokens[0].split("=", 1)
+            values[key] = value
+    return values
+
+
+def render_host(parsed) -> str:
+    if parsed.hostname is None:
+        return ""
+    host = parsed.hostname
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    if parsed.port is not None:
+        host = f"{host}:{parsed.port}"
+    return host
+
+
+def passworded_dsn(dsn: str, default_user: str) -> tuple[str, bool]:
+    parsed = urlparse(dsn)
+    if parsed.scheme not in {"postgresql", "postgres"}:
+        raise SystemExit("CASE_POSTGRES_DSN must use postgresql:// or postgres://.")
+    if parsed.password:
+        return dsn, False
+    host = render_host(parsed)
+    if not host:
+        # Preserve explicit socket/peer-auth DSNs. Operators using this mode own
+        # pg_hba/pg_ident compatibility for the systemd service users.
+        return dsn, False
+    username = unquote(parsed.username or default_user)
+    password = secrets.token_hex(16)
+    netloc = f"{quote(username, safe='')}:{quote(password, safe='')}@{host}"
+    return urlunparse(
+        (
+            parsed.scheme or "postgresql",
+            netloc,
+            parsed.path,
+            parsed.params,
+            parsed.query,
+            parsed.fragment,
+        )
+    ), True
+
+
+def replace_line(text: str, key: str, value: str) -> str:
+    pattern = re.compile(rf"^(\s*(?:export\s+)?{re.escape(key)}=).*$", re.MULTILINE)
+    if pattern.search(text):
+        return pattern.sub(rf"\1{value}", text, count=1)
+    return text + ("\n" if text and not text.endswith("\n") else "") + f"{key}={value}\n"
+
+
+config_values = parse_env(config_path)
+portal_values = parse_env(portal_path)
+config_dsn = config_values.get(
+    "CASE_POSTGRES_DSN",
+    "postgresql://notable_analyzer@127.0.0.1:5432/notable_rag",
+)
+portal_dsn = portal_values.get(
+    "CASE_POSTGRES_DSN",
+    "postgresql://notable_portal@127.0.0.1:5432/notable_rag",
+)
+
+new_config_dsn, config_changed = passworded_dsn(config_dsn, "notable_analyzer")
+new_portal_dsn, portal_changed = passworded_dsn(portal_dsn, "notable_portal")
+
+if config_changed:
+    config_text = config_path.read_text(encoding="utf-8")
+    config_path.write_text(
+        replace_line(config_text, "CASE_POSTGRES_DSN", new_config_dsn),
+        encoding="utf-8",
+    )
+if portal_changed:
+    portal_text = portal_path.read_text(encoding="utf-8")
+    portal_path.write_text(
+        replace_line(portal_text, "CASE_POSTGRES_DSN", new_portal_dsn),
+        encoding="utf-8",
+    )
+
+if config_changed or portal_changed:
+    print("GENERATED_CASE_ARCHIVE_POSTGRES_PASSWORDS")
+PY
+    chown "$SVC_USER:$SVC_USER" "$config_file" "$portal_env"
+    chmod 600 "$config_file" "$portal_env"
+}
+
 install_nginx_portal_proxy_secret() {
     local portal_env="$CONFIG_DIR/portal.env"
     local include_path="/etc/nginx/notable-portal-proxy-secret.conf"
@@ -724,14 +928,40 @@ verify_postgresql_pgvector_extension() {
 
 install_portal_pgvector_from_source() {
     local pg_major="$1"
-    local workdir pgvector_ref="${PGVECTOR_GIT_REF:-v0.8.0}"
+    local os_family workdir pgvector_ref="${PGVECTOR_GIT_REF:-v0.8.0}"
 
     info "Building pgvector from source for PostgreSQL ${pg_major} (ref: $pgvector_ref)"
-    DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        "postgresql-server-dev-${pg_major}" \
-        build-essential \
-        git \
-        || err "Failed to install pgvector build dependencies for PostgreSQL ${pg_major}"
+    os_family="$(detect_os_family)"
+    case "$os_family" in
+        debian)
+            DEBIAN_FRONTEND=noninteractive apt-get install -y \
+                "postgresql-server-dev-${pg_major}" \
+                build-essential \
+                git \
+                || err "Failed to install pgvector build dependencies for PostgreSQL ${pg_major}"
+            ;;
+        rhel)
+            local dev_pkg=""
+            for candidate in \
+                "postgresql${pg_major}-devel" \
+                "postgresql${pg_major}-server-devel" \
+                "postgresql-server-devel" \
+                "postgresql-devel"; do
+                if dnf -q list installed "$candidate" >/dev/null 2>&1 \
+                    || dnf -q list available "$candidate" >/dev/null 2>&1; then
+                    dev_pkg="$candidate"
+                    break
+                fi
+            done
+            [[ -n "$dev_pkg" ]] \
+                || err "Could not find PostgreSQL server development headers for PostgreSQL ${pg_major}"
+            dnf install -y "$dev_pkg" gcc make git \
+                || err "Failed to install pgvector build dependencies for PostgreSQL ${pg_major}"
+            ;;
+        *)
+            err "Automatic pgvector source build is not implemented for OS family: $os_family"
+            ;;
+    esac
 
     workdir="$(mktemp -d)"
     git clone --depth 1 --branch "$pgvector_ref" https://github.com/pgvector/pgvector.git "$workdir/pgvector" \
@@ -771,12 +1001,20 @@ install_portal_pgvector_os_package() {
                     break
                 fi
             done
-            [[ -n "$pgvector_pkg" ]] \
-                || err "PostgreSQL pgvector package not found for major version $pg_major (required for analyst portal case archive)"
-            info "Installing required PostgreSQL pgvector package: $pgvector_pkg"
-            dnf install -y "$pgvector_pkg" \
-                || err "Failed to install $pgvector_pkg (required for analyst portal case archive)"
-            install_method="$pgvector_pkg"
+            if [[ -n "$pgvector_pkg" ]]; then
+                info "Installing required PostgreSQL pgvector package: $pgvector_pkg"
+                if dnf install -y "$pgvector_pkg"; then
+                    install_method="$pgvector_pkg"
+                else
+                    warn "Package $pgvector_pkg failed to install; falling back to source build"
+                    install_portal_pgvector_from_source "$pg_major"
+                    install_method="pgvector source build (PostgreSQL ${pg_major})"
+                fi
+            else
+                warn "PostgreSQL pgvector package not found for major version $pg_major; falling back to source build"
+                install_portal_pgvector_from_source "$pg_major"
+                install_method="pgvector source build (PostgreSQL ${pg_major})"
+            fi
             ;;
         *)
             err "Automatic pgvector package install is not implemented for OS family: $os_family"
@@ -912,21 +1150,32 @@ setup_case_archive_postgres_best_effort() {
     [[ -x "$setup_script" ]] || chmod +x "$setup_script" 2>/dev/null || true
     [[ -f "$setup_script" ]] || err "Missing setup script: $setup_script"
     if ! command -v psql >/dev/null 2>&1; then
-        record_issue "psql is unavailable; skipped PostgreSQL case archive setup (install PostgreSQL client/server and rerun with INSTALL_ANALYST_PORTAL=true)"
+        if [[ "${INSTALL_PORTAL_ALLOW_PARTIAL:-false}" == "true" ]]; then
+            record_issue "psql is unavailable; skipped PostgreSQL case archive setup (install PostgreSQL client/server and rerun with INSTALL_ANALYST_PORTAL=true)"
+            return 0
+        fi
+        err "psql is unavailable; cannot complete INSTALL_ANALYST_PORTAL=true (set INSTALL_PORTAL_ALLOW_PARTIAL=true to install files without DB setup)"
+    fi
+    if bash "$setup_script" \
+        --config-env "$CONFIG_DIR/config.env" \
+        --portal-env "$CONFIG_DIR/portal.env"; then
         return 0
     fi
-    bash "$setup_script" \
-        --config-env "$CONFIG_DIR/config.env" \
-        --portal-env "$CONFIG_DIR/portal.env" \
-        || record_issue "PostgreSQL case archive setup failed; review output and rerun scripts/setup_postgres_case_archive.sh"
+    if [[ "${INSTALL_PORTAL_ALLOW_PARTIAL:-false}" == "true" ]]; then
+        record_issue "PostgreSQL case archive setup failed; review output and rerun scripts/setup_postgres_case_archive.sh"
+        return 0
+    fi
+    err "PostgreSQL case archive setup failed; review output and rerun scripts/setup_postgres_case_archive.sh"
 }
 
 install_analyst_portal_bringup_assets() {
     install_portal_os_packages
     install_portal_env_config
+    sync_portal_proxy_secret_to_config
     install_nginx_portal_proxy_secret
     if [[ "${INSTALL_ANALYST_PORTAL:-false}" == "true" ]]; then
         enable_analyst_portal_profile_in_config
+        ensure_case_archive_postgres_passwords
         setup_case_archive_postgres_best_effort
         install_nginx_portal_site_config
     else

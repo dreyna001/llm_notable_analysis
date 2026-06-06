@@ -92,6 +92,10 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("install_portal_pgvector_os_package", install_text)
         self.assertIn("install_portal_pgvector_from_source", install_text)
         self.assertIn("verify_postgresql_pgvector_extension", install_text)
+        self.assertIn("sync_portal_proxy_secret_to_config", install_text)
+        self.assertIn("ensure_case_archive_postgres_passwords", install_text)
+        self.assertIn("INSTALL_PORTAL_ALLOW_PARTIAL", install_text)
+        self.assertIn("postgresql-server-devel", install_text)
         self.assertIn("postgresql-", install_text)
         self.assertIn("pgvector", install_text)
         self.assertIn("build_analyst_portal_frontend", install_text)
@@ -338,6 +342,10 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("all retained cases", doc_text)
         self.assertIn("PORTAL_ALLOW_NON_LOOPBACK_BIND=false", doc_text)
         self.assertIn("PORTAL_PROXY_SECRET_HEADER", doc_text)
+        self.assertIn("analyst-lab-change-me", doc_text)
+        self.assertIn("127.0.0.1:8080", doc_text)
+        self.assertIn("TCP `443`", doc_text)
+        self.assertIn("INSTALL_PORTAL_ALLOW_PARTIAL=true", doc_text)
 
     def test_docs_indexes_link_analyst_portal_operations(self) -> None:
         """Docs indexes should expose the shipped portal operations guide."""

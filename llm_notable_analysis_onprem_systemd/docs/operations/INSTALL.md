@@ -227,7 +227,9 @@ under `/var/notables/cache` unless you also update the unit `ReadWritePaths`.
 
 Every install writes `/etc/notable-analyzer/portal.env` when it does not already
 exist. The file includes a generated `PORTAL_PROXY_SECRET` and aligns
-`CASE_POSTGRES_DSN` to the same database host/path as `config.env`.
+`CASE_POSTGRES_DSN` to the same database host/path as `config.env`. The same
+proxy secret is also written to `config.env` when it is empty so the analyzer
+does not fail profile validation after `analyst_portal` is enabled.
 
 When nginx is installed, the installer also writes
 `/etc/nginx/notable-portal-proxy-secret.conf` so nginx can forward
@@ -242,10 +244,25 @@ sudo INSTALL_ANALYST_PORTAL=true bash scripts/install.sh
 That flag:
 
 - adds `analyst_portal` to `CAPABILITY_PROFILES` in `config.env` when missing,
+- generates Postgres passwords in the analyzer and portal `CASE_POSTGRES_DSN`
+  values when TCP localhost DSNs omit passwords,
 - runs `scripts/setup_postgres_case_archive.sh` to create roles, database, and
   `notable_cases` schema,
 - installs `/etc/nginx/conf.d/notable-portal.conf` when nginx is present,
 - best-effort starts `notable-portal.service` during post-install auto-start.
+
+Postgres schema setup is required for `INSTALL_ANALYST_PORTAL=true`. Set
+`INSTALL_PORTAL_ALLOW_PARTIAL=true` only when staging files before database
+access is available; otherwise failed schema setup fails the install.
+
+Production analyst login is nginx basic auth and is created by the operator, not
+by the application. For lab-only tunnel bring-up, `scripts/vm_portal_finish.sh`
+uses `analyst` / `analyst-lab-change-me` unless overridden with
+`PORTAL_USER` and `PORTAL_PASSWORD`; rotate that password before sharing access.
+
+Production portal ports are nginx on TCP `443` externally and FastAPI on
+`127.0.0.1:8080` internally. Local tunnel ports such as `8443` are workstation
+forwarding choices, not deployed service ports.
 
 Manual Postgres setup after editing env files:
 

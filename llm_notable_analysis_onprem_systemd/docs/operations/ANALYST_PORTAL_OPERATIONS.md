@@ -66,6 +66,15 @@ Expected host shape:
   finish; the portal does not cancel active synthesis on SIGTERM.
 - Logs: `journalctl -u notable-portal.service`
 
+Port contract:
+
+- Analysts access nginx on `https://<portal-host>/` over TCP `443`.
+- nginx proxies API and probe traffic to FastAPI on `127.0.0.1:8080`.
+- `PORTAL_PORT=8080` is the internal loopback application port, not the analyst
+  network port.
+- SSH tunnel mappings such as local `8443 -> remote 443` are operator
+  conveniences for lab access only; they do not change the production listener.
+
 Example commands:
 
 ```bash
@@ -106,6 +115,24 @@ sudo cp deploy/nginx/notable-portal.conf /etc/nginx/conf.d/notable-portal.conf
 sudo nginx -t
 sudo systemctl reload nginx
 ```
+
+Basic auth credentials are not stored in the application database and are not
+created by the production installer. Create or rotate the nginx htpasswd entry
+through your approved secret process:
+
+```bash
+sudo htpasswd -c /etc/nginx/htpasswd/notable-portal <analyst-user>
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+For one-off lab VMs, `scripts/vm_portal_finish.sh` defaults to:
+
+- Username: `analyst`
+- Password: `analyst-lab-change-me`
+
+That default is for tunnel-only lab bring-up. Rotate it before sharing the host
+or exposing nginx outside the operator workstation.
 
 V1 trusts `PORTAL_TRUSTED_USER_HEADER` only after nginx authenticates the user
 and forwards `PORTAL_PROXY_SECRET_HEADER`. Do not expose Uvicorn directly to the
@@ -194,11 +221,19 @@ sudo INSTALL_ANALYST_PORTAL=true bash scripts/install.sh
 ```
 
 With `INSTALL_ANALYST_PORTAL=true`, `scripts/install.sh` also installs portal OS
-packages (nginx, PostgreSQL, the matching `postgresql-*-pgvector` package where
-available with a source-build fallback on Debian/Ubuntu when apt has no pgvector
-package, and an `htpasswd` tool package where supported),
-runs `npm install` + `npm run build` for the React SPA, and copies
-`frontend/analyst-portal/dist` into `/opt/notable-analyzer`.
+packages (nginx, PostgreSQL, the matching pgvector package where available with
+a source-build fallback on supported Debian-like and RHEL-like hosts, and an
+`htpasswd` tool package where supported), runs `npm install` + `npm run build`
+for the React SPA, and copies `frontend/analyst-portal/dist` into
+`/opt/notable-analyzer`.
+
+The installer generates a shared `PORTAL_PROXY_SECRET`, synchronizes it into
+both `/etc/notable-analyzer/config.env` and
+`/etc/notable-analyzer/portal.env`, and writes the nginx include file that
+forwards the matching proxy-secret header. When the case archive DSNs use TCP
+localhost and omit passwords, the installer generates Postgres role passwords in
+the root-readable env files before running the schema helper; the helper then
+applies those passwords to the database roles.
 
 Operator follow-up is still required for TLS certificates, basic-auth users,
 nginx `server_name`, and optional legacy report backfill. Skip automated
@@ -208,6 +243,10 @@ package or frontend build when those assets are pre-staged:
 sudo INSTALL_PORTAL_SKIP_OS_PACKAGES=true INSTALL_ANALYST_PORTAL=true bash scripts/install.sh
 sudo INSTALL_PORTAL_SKIP_FRONTEND_BUILD=true INSTALL_ANALYST_PORTAL=true bash scripts/install.sh
 ```
+
+`INSTALL_ANALYST_PORTAL=true` treats Postgres schema setup as required. Use
+`INSTALL_PORTAL_ALLOW_PARTIAL=true` only when intentionally staging files before
+database access is available.
 
 Or run the dedicated helper after editing env files:
 
