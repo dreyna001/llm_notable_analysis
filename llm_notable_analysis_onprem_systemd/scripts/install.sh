@@ -1132,6 +1132,7 @@ build_analyst_portal_frontend() {
     info "Building analyst portal frontend in $frontend_dir"
     (
         export PATH="$PORTAL_NODE_TOOLCHAIN_PATH:$PATH"
+        export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
         cd "$frontend_dir"
         if [[ -f package-lock.json ]]; then
             "$PORTAL_NPM_BIN" ci

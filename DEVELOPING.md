@@ -14,9 +14,6 @@ under individual packages for day-to-day development.
   bootstrap if pip reports `WinError 32` file-in-use errors. OneDrive-synced repo paths
   can also lock files briefly during install.
 
-Production hosts still use `/opt/notable-analyzer/venv`; that is separate from
-this local dev layout.
-
 ## Bootstrap (once per machine)
 
 ### Windows (PowerShell)
@@ -51,8 +48,16 @@ This installs editable copies of:
 - `onprem_rag_notable_analysis`
 - `llm_notable_analysis_onprem_systemd`
 
-It also installs `pytest`, embeds **Node.js 22** into `.venv` with `nodeenv`, and
-runs `npm install` for `llm_notable_analysis_onprem_systemd/frontend/analyst-portal`.
+It also installs `pytest`, embeds **Node.js 22** into `.venv` with `nodeenv`, runs
+`npm install` for `llm_notable_analysis_onprem_systemd/frontend/analyst-portal`, and
+downloads **Playwright Chromium** for portal E2E tests.
+
+Do **not** copy `.venv` from Windows to a Linux VM (or vice versa). Sync the repo
+with git, then run `bootstrap_dev_venv.sh` on the VM so Node, npm, Playwright, and
+browser binaries match that OS.
+
+Production services on a host use `/opt/notable-analyzer/venv`; that is separate
+from this repo-root dev `.venv`.
 
 ## Daily workflow
 
@@ -91,6 +96,40 @@ npm --prefix llm_notable_analysis_onprem_systemd/frontend/analyst-portal run dev
 ```
 
 Open http://127.0.0.1:5173/ (UI) with the API on http://127.0.0.1:8765/.
+
+### Portal E2E (Playwright)
+
+Bootstrap installs `@playwright/test` under the analyst-portal frontend and
+downloads Chromium into your user cache (`%USERPROFILE%\AppData\Local\ms-playwright`
+on Windows, `~/.cache/ms-playwright` on Linux).
+
+Always use npm from the repo `.venv` (wrapper scripts set `PATH` for you):
+
+Windows (local, with SSH tunnel to VM on 8443 if testing deployed portal):
+
+```powershell
+$env:PORTAL_E2E_BASE_URL = "https://127.0.0.1:8443"
+$env:PORTAL_E2E_USER = "analyst"
+$env:PORTAL_E2E_PASSWORD = "analyst-lab-change-me"
+.\scripts\dev_portal_e2e.ps1
+```
+
+Linux VM (after `git pull` and fresh bootstrap on that machine):
+
+```bash
+bash scripts/bootstrap_dev_venv.sh
+source .venv/bin/activate
+PORTAL_E2E_BASE_URL=https://127.0.0.1:8443 \
+PORTAL_E2E_USER=analyst \
+PORTAL_E2E_PASSWORD=analyst-lab-change-me \
+bash scripts/dev_portal_e2e.sh
+```
+
+Re-download browsers only: `.\scripts\dev_portal_e2e.ps1 -InstallBrowsers` or
+`bash scripts/dev_portal_e2e.sh --install-browsers`.
+
+See [`frontend/analyst-portal/README.md`](llm_notable_analysis_onprem_systemd/frontend/analyst-portal/README.md)
+for `PORTAL_E2E_*` variables.
 
 ### Tests
 

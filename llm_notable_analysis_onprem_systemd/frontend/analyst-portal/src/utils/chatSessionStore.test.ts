@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   capChatSessionStoreWithMeta,
   createEmptySession,
+  detachActiveCase,
   type ChatSessionStore,
 } from "./chatSessionStore";
 
@@ -16,6 +17,36 @@ function makeStore(count: number): ChatSessionStore {
   });
   return { activeLocalId: sessions[0].localId, sessions };
 }
+
+describe("detachActiveCase", () => {
+  it("clears the attached case from the active session and resets server linkage", () => {
+    const active = createEmptySession("selected_case", "portal-test-123");
+    active.serverSessionId = "server-session-1";
+    active.turns = [
+      {
+        id: "turn-1",
+        question: "What is the verdict?",
+        response: { answer: "Likely benign.", answer_status: "answered" },
+      },
+    ];
+    const other = createEmptySession("selected_case", "other-case");
+    const store: ChatSessionStore = {
+      activeLocalId: active.localId,
+      sessions: [active, other],
+    };
+
+    const next = detachActiveCase(store);
+    const updated = next.sessions.find((session) => session.localId === active.localId);
+
+    expect(updated?.mode).toBe("global_archive");
+    expect(updated?.selectedCaseId).toBeUndefined();
+    expect(updated?.serverSessionId).toBeNull();
+    expect(updated?.turns).toHaveLength(1);
+    expect(next.sessions.find((session) => session.localId === other.localId)?.selectedCaseId).toBe(
+      "other-case",
+    );
+  });
+});
 
 describe("chatSessionStore cap", () => {
   it("reports evicted sessions when over the limit", () => {

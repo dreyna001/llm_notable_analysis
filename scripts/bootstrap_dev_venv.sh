@@ -10,6 +10,7 @@ fi
 INSTALL_PYTHON=false
 SKIP_NODE=false
 SKIP_FRONTEND_INSTALL=false
+SKIP_PLAYWRIGHT_INSTALL=false
 
 usage() {
     cat <<'EOF'
@@ -25,6 +26,7 @@ Options:
   --install-python        Install Python 3.12 via install_python312.sh (Linux + sudo)
   --skip-node             Do not install Node.js into the venv
   --skip-frontend-install Skip npm install for analyst-portal
+  --skip-playwright-install Skip Playwright Chromium download (after npm install)
   -h, --help              Show this help
 EOF
 }
@@ -132,6 +134,10 @@ while [[ $# -gt 0 ]]; do
             SKIP_FRONTEND_INSTALL=true
             shift
             ;;
+        --skip-playwright-install)
+            SKIP_PLAYWRIGHT_INSTALL=true
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -183,8 +189,14 @@ fi
 if [[ "$SKIP_FRONTEND_INSTALL" != true ]]; then
     echo "Installing analyst portal frontend dependencies..."
     (
+        export VIRTUAL_ENV="$VENV_DIR"
+        export PATH="$VENV_DIR/bin:$PATH"
         cd "$FRONTEND_DIR"
         "$VENV_DIR/bin/npm" install
+        if [[ "$SKIP_PLAYWRIGHT_INSTALL" != true ]]; then
+            echo "Installing Playwright Chromium for portal E2E tests..."
+            "$VENV_DIR/bin/npm" run install:e2e-browsers
+        fi
     )
 fi
 
@@ -195,5 +207,10 @@ Done. Activate the shared dev environment:
 
 Then run, for example:
   python llm_notable_analysis_onprem_systemd/scripts/preview_portal_ui.py
-  npm --prefix llm_notable_analysis_onprem_systemd/frontend/analyst-portal run dev
+  bash scripts/dev_portal_e2e.sh
+
+Portal E2E on a Linux VM (after git sync; bootstrap a fresh .venv on the VM):
+  bash scripts/bootstrap_dev_venv.sh
+  source .venv/bin/activate
+  PORTAL_E2E_BASE_URL=https://127.0.0.1:8443 bash scripts/dev_portal_e2e.sh
 EOF

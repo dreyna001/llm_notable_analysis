@@ -2,7 +2,8 @@
 param(
     [string]$Python = "python",
     [switch]$SkipNode,
-    [switch]$SkipFrontendInstall
+    [switch]$SkipFrontendInstall,
+    [switch]$SkipPlaywrightInstall
 )
 
 $ErrorActionPreference = "Stop"
@@ -65,11 +66,20 @@ if (-not $SkipFrontendInstall) {
         throw "npm not found in venv. Re-run without -SkipNode or install Node manually into .venv."
     }
     Write-Host "Installing analyst portal frontend dependencies..."
+    $env:VIRTUAL_ENV = $VenvDir
+    $env:PATH = "$(Join-Path $VenvDir 'Scripts');$env:PATH"
     Push-Location $FrontendDir
     try {
         & $NpmExe install
         if ($LASTEXITCODE -ne 0) {
             throw "npm install failed in $FrontendDir"
+        }
+        if (-not $SkipPlaywrightInstall) {
+            Write-Host "Installing Playwright Chromium for portal E2E tests..."
+            & $NpmExe run install:e2e-browsers
+            if ($LASTEXITCODE -ne 0) {
+                throw "playwright install chromium failed in $FrontendDir"
+            }
         }
     }
     finally {
@@ -83,4 +93,5 @@ Write-Host "  .\.venv\Scripts\Activate.ps1"
 Write-Host ""
 Write-Host "Then run, for example:"
 Write-Host "  python llm_notable_analysis_onprem_systemd\scripts\preview_portal_ui.py"
-Write-Host "  npm --prefix llm_notable_analysis_onprem_systemd\frontend\analyst-portal run dev"
+Write-Host "  .\scripts\dev_portal_ui.ps1"
+Write-Host "  .\scripts\dev_portal_e2e.ps1"

@@ -6,6 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { flushSync } from "react-dom";
 import {
   ApiError,
   deleteChatSession,
@@ -45,6 +46,7 @@ import {
   loadChatSessionStore,
   saveChatSessionStore,
   sessionTitleFromQuestion,
+  detachActiveCase,
   switchToChatContext,
   type ChatSessionStore,
   type StoredChatSession,
@@ -222,7 +224,7 @@ export function HomeChatWorkspace({
     [safeStore],
   );
 
-  const hasCaseContext = Boolean(selectedCaseId || activeSession?.selectedCaseId);
+  const hasCaseContext = Boolean(selectedCaseId);
 
   const capabilitiesReady =
     capabilitiesLoaded && !capabilitiesError && capabilities !== null;
@@ -286,9 +288,7 @@ export function HomeChatWorkspace({
   }, []);
 
   const effectiveSelectedCaseId =
-    activeMode === "selected_case"
-      ? selectedCaseId ?? activeSession?.selectedCaseId
-      : undefined;
+    activeMode === "selected_case" ? selectedCaseId : undefined;
 
   const resolvedCaseSummary = effectiveSelectedCaseId
     ? resolvedCaseById[effectiveSelectedCaseId]
@@ -297,14 +297,16 @@ export function HomeChatWorkspace({
   const effectiveSelectedCaseName =
     effectiveSelectedCaseId === selectedCaseId
       ? selectedCaseName
-      : attachedCasePreview?.case_id === effectiveSelectedCaseId
+      : attachedCasePreview &&
+          attachedCasePreview.case_id === effectiveSelectedCaseId
         ? attachedCasePreview.search_name ?? undefined
         : resolvedCaseSummary?.search_name ?? undefined;
 
   const effectiveSelectedCaseProcessedAt =
     effectiveSelectedCaseId === selectedCaseId
       ? selectedCaseProcessedAt
-      : attachedCasePreview?.case_id === effectiveSelectedCaseId
+      : attachedCasePreview &&
+          attachedCasePreview.case_id === effectiveSelectedCaseId
         ? attachedCasePreview.processed_at ?? undefined
         : resolvedCaseSummary?.processed_at ?? undefined;
 
@@ -321,6 +323,7 @@ export function HomeChatWorkspace({
   const panelResetKey = [
     activeSession?.localId ?? "",
     activeSession?.serverSessionId ?? "",
+    effectiveSelectedCaseId ?? "none",
     loadingSessionId === activeSession?.localId ? "loading" : "ready",
   ].join(":");
 
@@ -648,23 +651,18 @@ export function HomeChatWorkspace({
 
   const handleClearSelectedCase = useCallback(() => {
     setAttachedCasePreview(null);
-    if (capabilitiesReady && capabilities?.global_retrieval_enabled) {
+    flushSync(() => {
       setStore((current) => {
         const next = capChatSessionStore(
-          switchToChatContext(current, "global_archive"),
+          detachActiveCase(current),
           maxChatSessions,
         );
         saveChatSessionStore(next, maxChatSessions);
         return next;
       });
-    }
+    });
     onClearSelectedCase?.();
-  }, [
-    capabilities?.global_retrieval_enabled,
-    capabilitiesReady,
-    maxChatSessions,
-    onClearSelectedCase,
-  ]);
+  }, [maxChatSessions, onClearSelectedCase]);
 
   const requestDeleteSession = useCallback(
     (localId: string) => {
@@ -786,6 +784,10 @@ export function HomeChatWorkspace({
           : active.title === "New chat" && firstQuestion
             ? sessionTitleFromQuestion(firstQuestion)
             : active.title;
+        const serverSessionId =
+          state.mode === active.mode
+            ? state.sessionId ?? active.serverSessionId
+            : active.serverSessionId;
         const next: ChatSessionStore = {
           ...current,
           sessions: current.sessions.map((session) =>
@@ -794,12 +796,7 @@ export function HomeChatWorkspace({
                   ...session,
                   title,
                   updatedAt: new Date().toISOString(),
-                  mode: state.mode,
-                  selectedCaseId:
-                    state.mode === "selected_case"
-                      ? active.selectedCaseId ?? selectedCaseId
-                      : undefined,
-                  serverSessionId: state.sessionId ?? session.serverSessionId,
+                  serverSessionId,
                   turns: storedTurns,
                 }
               : session,
@@ -810,7 +807,7 @@ export function HomeChatWorkspace({
         return capped;
       });
     },
-    [maxChatSessions, selectedCaseId],
+    [maxChatSessions],
   );
 
   const handlePanelStateChange = useCallback(

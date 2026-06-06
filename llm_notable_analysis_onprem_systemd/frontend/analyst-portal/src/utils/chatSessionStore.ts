@@ -244,6 +244,33 @@ function applyContextToSession(
   };
 }
 
+/** Drop the attached case from the active chat without starting a new conversation. */
+export function detachActiveCase(store: ChatSessionStore): ChatSessionStore {
+  const active =
+    store.sessions.find((session) => session.localId === store.activeLocalId) ??
+    store.sessions[0];
+  if (!active?.selectedCaseId && active?.mode === "global_archive") {
+    return store;
+  }
+  if (!active) {
+    return store;
+  }
+  return {
+    ...store,
+    sessions: store.sessions.map((session) =>
+      session.localId === active.localId
+        ? {
+            ...session,
+            mode: "global_archive",
+            selectedCaseId: undefined,
+            serverSessionId: null,
+            updatedAt: new Date().toISOString(),
+          }
+        : session,
+    ),
+  };
+}
+
 /** Keep the active chat when context changes; start a fresh session if it already has turns. */
 export function switchToChatContext(
   store: ChatSessionStore,

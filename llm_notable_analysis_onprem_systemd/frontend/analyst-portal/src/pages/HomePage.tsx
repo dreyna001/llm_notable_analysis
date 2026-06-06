@@ -40,7 +40,16 @@ export function HomePage() {
 
   const handleClearSelectedCase = useCallback(() => {
     setAttachError(null);
-    setSearchParams({});
+    setSelectedCase(null);
+    setSelectedCaseLoading(false);
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("case_id");
+        return next;
+      },
+      { replace: true },
+    );
   }, [setSearchParams]);
 
   useEffect(() => {

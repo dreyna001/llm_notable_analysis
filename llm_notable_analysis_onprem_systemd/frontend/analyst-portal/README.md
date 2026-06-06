@@ -5,6 +5,7 @@ Minimal React + Vite + Tailwind + shadcn-style UI for the read-only analyst port
 ## Prerequisites
 
 - Shared repo virtualenv at `<repo-root>/.venv` (see [`DEVELOPING.md`](../../../DEVELOPING.md))
+  — bootstrap runs `npm install` and Playwright Chromium for E2E
 - Portal API running locally (preview script or real `portal_app`)
 
 Node and npm come from that venv (`nodeenv`), not a separate system install.
@@ -109,3 +110,54 @@ proxies `/api/`, `/health`, and `/ready` to the loopback FastAPI portal.
 | `/` | Home + API health |
 | `/cases` | Paginated case list |
 | `/cases/:caseId` | Case detail (JSON inspection) |
+
+## Playwright E2E (deployed portal)
+
+Holistic browser checks against the nginx-served portal (basic auth + TLS). Tests
+load a known archived case from the API, verify list filters, case-detail tabs,
+cross-links, error paths, and optional chat modes.
+
+Use npm from the **repo-root** `.venv` (not system Node). Bootstrap once per
+machine; on a Linux VM run `bash scripts/bootstrap_dev_venv.sh` after git sync
+(do not copy a Windows `.venv`).
+
+Prerequisites:
+
+- `scripts/bootstrap_dev_venv.ps1` (Windows) or `bootstrap_dev_venv.sh` (Linux VM)
+- SSH tunnel or direct reachability to the portal (default `https://127.0.0.1:8443`)
+- A processed case archived in Postgres (default `portal-test-1780770539`)
+
+Windows:
+
+```powershell
+.\scripts\bootstrap_dev_venv.ps1
+$env:PORTAL_E2E_BASE_URL = "https://127.0.0.1:8443"
+$env:PORTAL_E2E_USER = "analyst"
+$env:PORTAL_E2E_PASSWORD = "analyst-lab-change-me"
+$env:PORTAL_E2E_CASE_ID = "portal-test-1780770539"
+# Set PORTAL_E2E_CHAT=false to skip LLM chat steps
+.\scripts\dev_portal_e2e.ps1
+```
+
+Linux VM:
+
+```bash
+bash scripts/bootstrap_dev_venv.sh
+source .venv/bin/activate
+PORTAL_E2E_BASE_URL=https://127.0.0.1:8443 \
+PORTAL_E2E_USER=analyst \
+PORTAL_E2E_PASSWORD=analyst-lab-change-me \
+PORTAL_E2E_CASE_ID=portal-test-1780770539 \
+bash scripts/dev_portal_e2e.sh
+```
+
+Environment variables:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PORTAL_E2E_BASE_URL` | `https://127.0.0.1:8443` | Portal origin |
+| `PORTAL_E2E_USER` | `analyst` | nginx basic-auth user |
+| `PORTAL_E2E_PASSWORD` | `analyst-lab-change-me` | nginx basic-auth password |
+| `PORTAL_E2E_CASE_ID` | `portal-test-1780770539` | Sample archived case |
+| `PORTAL_E2E_CHAT` | `true` | Run selected/global chat checks |
+| `PORTAL_E2E_CHAT_TIMEOUT_MS` | `180000` | Chat response wait |
