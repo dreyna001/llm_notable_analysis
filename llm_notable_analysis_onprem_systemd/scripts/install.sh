@@ -710,39 +710,56 @@ detect_postgresql_major_version() {
     printf '%s' "$pg_major"
 }
 
+verify_postgresql_pgvector_extension() {
+    local admin_user="${POSTGRES_ADMIN_USER:-postgres}"
+    local admin_db="${POSTGRES_ADMIN_DB:-postgres}"
+    if [[ "$(id -un)" == "$admin_user" ]]; then
+        psql -v ON_ERROR_STOP=1 -d "$admin_db" \
+            -c "CREATE EXTENSION IF NOT EXISTS vector;" >/dev/null
+    else
+        sudo -u "$admin_user" psql -v ON_ERROR_STOP=1 -d "$admin_db" \
+            -c "CREATE EXTENSION IF NOT EXISTS vector;" >/dev/null
+    fi
+}
+
 install_portal_pgvector_os_package() {
     local os_family pg_major pgvector_pkg
     os_family="$(detect_os_family)"
     pg_major="$(detect_postgresql_major_version)"
     if [[ -z "$pg_major" ]]; then
-        record_issue "Could not detect PostgreSQL major version for pgvector package install"
-        return 0
+        err "Could not detect PostgreSQL major version for pgvector package install"
     fi
 
     case "$os_family" in
         debian)
             pgvector_pkg="postgresql-${pg_major}-pgvector"
-            if apt-cache show "$pgvector_pkg" >/dev/null 2>&1; then
-                DEBIAN_FRONTEND=noninteractive apt-get install -y "$pgvector_pkg"
-                info "Installed PostgreSQL pgvector package: $pgvector_pkg"
-            else
-                record_issue "PostgreSQL pgvector package not found ($pgvector_pkg); install pgvector manually, then rerun scripts/setup_postgres_case_archive.sh"
-            fi
+            info "Installing required PostgreSQL pgvector package: $pgvector_pkg"
+            DEBIAN_FRONTEND=noninteractive apt-get install -y "$pgvector_pkg" \
+                || err "Failed to install $pgvector_pkg (required for analyst portal case archive)"
             ;;
         rhel)
-            for pgvector_pkg in "postgresql${pg_major}-pgvector" "pgvector_${pg_major}"; do
-                if dnf -q list available "$pgvector_pkg" >/dev/null 2>&1; then
-                    dnf install -y "$pgvector_pkg"
-                    info "Installed PostgreSQL pgvector package: $pgvector_pkg"
-                    return 0
+            pgvector_pkg=""
+            for candidate in "postgresql${pg_major}-pgvector" "pgvector_${pg_major}"; do
+                if dnf -q list available "$candidate" >/dev/null 2>&1; then
+                    pgvector_pkg="$candidate"
+                    break
                 fi
             done
-            record_issue "PostgreSQL pgvector package not found for major version $pg_major; install pgvector manually, then rerun scripts/setup_postgres_case_archive.sh"
+            [[ -n "$pgvector_pkg" ]] \
+                || err "PostgreSQL pgvector package not found for major version $pg_major (required for analyst portal case archive)"
+            info "Installing required PostgreSQL pgvector package: $pgvector_pkg"
+            dnf install -y "$pgvector_pkg" \
+                || err "Failed to install $pgvector_pkg (required for analyst portal case archive)"
             ;;
         *)
-            record_issue "Automatic pgvector package install is not implemented for OS family: $os_family"
+            err "Automatic pgvector package install is not implemented for OS family: $os_family"
             ;;
     esac
+
+    info "Installed PostgreSQL pgvector package: $pgvector_pkg"
+    verify_postgresql_pgvector_extension \
+        || err "PostgreSQL pgvector extension is not loadable after installing $pgvector_pkg"
+    info "Verified PostgreSQL pgvector extension loads successfully"
 }
 
 install_portal_os_packages() {
