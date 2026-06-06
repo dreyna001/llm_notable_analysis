@@ -89,6 +89,8 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("RAG_PACKAGE_INSTALL_DIR", install_text)
         self.assertIn("onprem-llm-sdk from", install_text)
         self.assertIn("install_portal_os_packages", install_text)
+        self.assertIn("install_portal_pgvector_os_package", install_text)
+        self.assertIn("postgresql-", install_text)
         self.assertIn("build_analyst_portal_frontend", install_text)
         self.assertIn("resolve_portal_frontend_toolchain", install_text)
         self.assertIn("PORTAL_NODE_TOOLCHAIN_PATH", install_text)

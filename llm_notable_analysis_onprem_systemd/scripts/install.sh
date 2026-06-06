@@ -695,6 +695,56 @@ detect_os_family() {
     esac
 }
 
+detect_postgresql_major_version() {
+    local pg_major=""
+    if command -v psql >/dev/null 2>&1; then
+        pg_major="$(psql -V 2>/dev/null | sed -E 's/.* ([0-9]+).*/\1/')"
+    fi
+    if [[ -z "$pg_major" && -d /etc/postgresql ]]; then
+        pg_major="$(
+            find /etc/postgresql -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null \
+                | sort -rn \
+                | head -n1
+        )"
+    fi
+    printf '%s' "$pg_major"
+}
+
+install_portal_pgvector_os_package() {
+    local os_family pg_major pgvector_pkg
+    os_family="$(detect_os_family)"
+    pg_major="$(detect_postgresql_major_version)"
+    if [[ -z "$pg_major" ]]; then
+        record_issue "Could not detect PostgreSQL major version for pgvector package install"
+        return 0
+    fi
+
+    case "$os_family" in
+        debian)
+            pgvector_pkg="postgresql-${pg_major}-pgvector"
+            if apt-cache show "$pgvector_pkg" >/dev/null 2>&1; then
+                DEBIAN_FRONTEND=noninteractive apt-get install -y "$pgvector_pkg"
+                info "Installed PostgreSQL pgvector package: $pgvector_pkg"
+            else
+                record_issue "PostgreSQL pgvector package not found ($pgvector_pkg); install pgvector manually, then rerun scripts/setup_postgres_case_archive.sh"
+            fi
+            ;;
+        rhel)
+            for pgvector_pkg in "postgresql${pg_major}-pgvector" "pgvector_${pg_major}"; do
+                if dnf -q list available "$pgvector_pkg" >/dev/null 2>&1; then
+                    dnf install -y "$pgvector_pkg"
+                    info "Installed PostgreSQL pgvector package: $pgvector_pkg"
+                    return 0
+                fi
+            done
+            record_issue "PostgreSQL pgvector package not found for major version $pg_major; install pgvector manually, then rerun scripts/setup_postgres_case_archive.sh"
+            ;;
+        *)
+            record_issue "Automatic pgvector package install is not implemented for OS family: $os_family"
+            ;;
+    esac
+}
+
 install_portal_os_packages() {
     if [[ "${INSTALL_ANALYST_PORTAL:-false}" != "true" ]]; then
         return 0
@@ -718,6 +768,7 @@ install_portal_os_packages() {
                 apache2-utils
             systemctl enable postgresql
             systemctl start postgresql
+            install_portal_pgvector_os_package
             ;;
         rhel)
             if ! command -v dnf >/dev/null 2>&1; then
@@ -729,6 +780,7 @@ install_portal_os_packages() {
             fi
             systemctl enable postgresql
             systemctl start postgresql
+            install_portal_pgvector_os_package
             ;;
         *)
             record_issue "Unsupported OS for automatic portal package install; install nginx, PostgreSQL, and an htpasswd tool manually, then rerun with INSTALL_ANALYST_PORTAL=true"
