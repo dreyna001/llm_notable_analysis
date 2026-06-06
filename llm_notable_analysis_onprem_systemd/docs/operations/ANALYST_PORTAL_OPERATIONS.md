@@ -187,10 +187,24 @@ guards. Treat assistant output as untrusted even on trusted on-prem networks.
 
 ## Database Setup And Maintenance
 
-Apply the schema before enabling the profile. Preferred path on RHEL hosts:
+Apply the schema before enabling the profile. Preferred path:
 
 ```bash
 sudo INSTALL_ANALYST_PORTAL=true bash scripts/install.sh
+```
+
+With `INSTALL_ANALYST_PORTAL=true`, `scripts/install.sh` also installs portal OS
+packages (nginx, PostgreSQL, and an `htpasswd` tool package where supported),
+runs `npm install` + `npm run build` for the React SPA, and copies
+`frontend/analyst-portal/dist` into `/opt/notable-analyzer`.
+
+Operator follow-up is still required for TLS certificates, basic-auth users,
+nginx `server_name`, and optional legacy report backfill. Skip automated
+package or frontend build when those assets are pre-staged:
+
+```bash
+sudo INSTALL_PORTAL_SKIP_OS_PACKAGES=true INSTALL_ANALYST_PORTAL=true bash scripts/install.sh
+sudo INSTALL_PORTAL_SKIP_FRONTEND_BUILD=true INSTALL_ANALYST_PORTAL=true bash scripts/install.sh
 ```
 
 Or run the dedicated helper after editing env files:

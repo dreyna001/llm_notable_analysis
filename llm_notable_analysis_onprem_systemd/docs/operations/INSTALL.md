@@ -105,6 +105,9 @@ After install completes, these may still require operator input:
 - Set `SPLUNK_BASE_URL` / `SPLUNK_API_TOKEN` only if Splunk writeback is enabled.
 - Add SOAR key(s) to `/var/sftp/soar/.ssh/authorized_keys` only for SOAR SFTP ingest.
 - Review `/etc/notable-analyzer/portal.env` and nginx TLS/basic-auth paths before exposing the analyst portal.
+- `INSTALL_ANALYST_PORTAL=true` installs nginx/PostgreSQL packages and runs the portal
+  frontend `npm run build` on supported hosts; operator still supplies TLS, htpasswd,
+  and nginx `server_name`.
 - Run full analyst portal bring-up when Postgres schema and `analyst_portal` profile are not yet enabled:
   `sudo INSTALL_ANALYST_PORTAL=true bash scripts/install.sh`
 - Review and clear any post-install non-fatal issues reported by `scripts/install.sh`.

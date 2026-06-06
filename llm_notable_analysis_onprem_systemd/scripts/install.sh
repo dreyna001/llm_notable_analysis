@@ -667,6 +667,125 @@ PY
     info "Enabled analyst_portal in $config_file"
 }
 
+detect_os_family() {
+    if [[ ! -f /etc/os-release ]]; then
+        echo "unknown"
+        return 0
+    fi
+    # shellcheck source=/dev/null
+    source /etc/os-release
+    local distro_id="${ID:-}"
+    local id_like="${ID_LIKE:-}"
+    case "$distro_id" in
+        ubuntu|debian|linuxmint|pop)
+            echo "debian"
+            ;;
+        rhel|centos|rocky|almalinux|fedora|ol)
+            echo "rhel"
+            ;;
+        *)
+            if [[ "$id_like" == *debian* ]]; then
+                echo "debian"
+            elif [[ "$id_like" == *rhel* || "$id_like" == *fedora* ]]; then
+                echo "rhel"
+            else
+                echo "unknown"
+            fi
+            ;;
+    esac
+}
+
+install_portal_os_packages() {
+    if [[ "${INSTALL_ANALYST_PORTAL:-false}" != "true" ]]; then
+        return 0
+    fi
+    if [[ "${INSTALL_PORTAL_SKIP_OS_PACKAGES:-false}" == "true" ]]; then
+        info "INSTALL_PORTAL_SKIP_OS_PACKAGES=true; skipping portal OS package install"
+        return 0
+    fi
+
+    local os_family
+    os_family="$(detect_os_family)"
+    info "INSTALL_ANALYST_PORTAL=true: installing portal OS packages ($os_family)"
+
+    case "$os_family" in
+        debian)
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y \
+                nginx \
+                postgresql \
+                postgresql-contrib \
+                apache2-utils
+            systemctl enable postgresql
+            systemctl start postgresql
+            ;;
+        rhel)
+            if ! command -v dnf >/dev/null 2>&1; then
+                err "dnf is required to install portal OS packages on RHEL-compatible hosts"
+            fi
+            dnf install -y nginx postgresql-server postgresql httpd-tools
+            if command -v postgresql-setup >/dev/null 2>&1; then
+                postgresql-setup --initdb || true
+            fi
+            systemctl enable postgresql
+            systemctl start postgresql
+            ;;
+        *)
+            record_issue "Unsupported OS for automatic portal package install; install nginx, PostgreSQL, and an htpasswd tool manually, then rerun with INSTALL_ANALYST_PORTAL=true"
+            return 0
+            ;;
+    esac
+
+    if command -v nginx >/dev/null 2>&1; then
+        systemctl enable nginx 2>/dev/null || true
+        info "nginx installed"
+    else
+        record_issue "nginx install completed but nginx binary is missing from PATH"
+    fi
+    if command -v psql >/dev/null 2>&1; then
+        info "PostgreSQL client installed"
+    else
+        record_issue "PostgreSQL install completed but psql is missing from PATH"
+    fi
+}
+
+build_analyst_portal_frontend() {
+    if [[ "${INSTALL_ANALYST_PORTAL:-false}" != "true" ]]; then
+        return 0
+    fi
+    if [[ "${INSTALL_PORTAL_SKIP_FRONTEND_BUILD:-false}" == "true" ]]; then
+        info "INSTALL_PORTAL_SKIP_FRONTEND_BUILD=true; skipping analyst portal frontend build"
+        return 0
+    fi
+
+    local frontend_dir="$REPO_DIR/frontend/analyst-portal"
+    local npm_bin="${NPM_BIN:-npm}"
+    local venv_npm="$MONOREPO_ROOT/.venv/bin/npm"
+    [[ -f "$frontend_dir/package.json" ]] || err "Missing analyst portal package.json: $frontend_dir/package.json"
+    if ! command -v "$npm_bin" >/dev/null 2>&1; then
+        if [[ -x "$venv_npm" ]]; then
+            npm_bin="$venv_npm"
+            info "Using monorepo dev npm: $npm_bin"
+        else
+            err "npm is required for INSTALL_ANALYST_PORTAL=true (install Node.js or set NPM_BIN, e.g. $venv_npm)"
+        fi
+    fi
+
+    info "Building analyst portal frontend in $frontend_dir"
+    (
+        cd "$frontend_dir"
+        if [[ -f package-lock.json ]]; then
+            "$npm_bin" ci
+        else
+            "$npm_bin" install
+        fi
+        "$npm_bin" run build
+    ) || err "Failed to build analyst portal frontend (npm run build)"
+
+    [[ -d "$frontend_dir/dist" ]] || err "Analyst portal build did not produce dist/: $frontend_dir/dist"
+    info "Analyst portal frontend build complete: $frontend_dir/dist"
+}
+
 setup_case_archive_postgres_best_effort() {
     local setup_script="$REPO_DIR/scripts/setup_postgres_case_archive.sh"
     [[ -x "$setup_script" ]] || chmod +x "$setup_script" 2>/dev/null || true
@@ -682,6 +801,7 @@ setup_case_archive_postgres_best_effort() {
 }
 
 install_analyst_portal_bringup_assets() {
+    install_portal_os_packages
     install_portal_env_config
     install_nginx_portal_proxy_secret
     if [[ "${INSTALL_ANALYST_PORTAL:-false}" == "true" ]]; then
@@ -839,6 +959,15 @@ else
 fi
 
 #------------------------------------------------------------------------------
+# 3b. Analyst portal frontend build (before dist copy)
+#------------------------------------------------------------------------------
+if [[ "${INSTALL_ANALYST_PORTAL:-false}" == "true" ]]; then
+    echo ""
+    echo "[3b/8] Building analyst portal frontend..."
+    build_analyst_portal_frontend
+fi
+
+#------------------------------------------------------------------------------
 # 4. Copy application code
 #------------------------------------------------------------------------------
 echo "[4/8] Copying application code..."
@@ -870,7 +999,11 @@ if [[ -d "$REPO_DIR/frontend/analyst-portal/dist" ]]; then
     cp -a "$REPO_DIR/frontend/analyst-portal/dist" "$INSTALL_DIR/frontend/analyst-portal/" \
         || err "Failed to copy analyst portal React dist"
 else
-    record_issue "React analyst portal dist not found; run npm --prefix frontend/analyst-portal run build before installing the nginx SPA"
+    if [[ "${INSTALL_ANALYST_PORTAL:-false}" == "true" ]]; then
+        err "React analyst portal dist not found after frontend build"
+    else
+        record_issue "React analyst portal dist not found; run INSTALL_ANALYST_PORTAL=true bash scripts/install.sh or npm --prefix frontend/analyst-portal run build before installing the nginx SPA"
+    fi
 fi
 
 chown -R "$SVC_USER:$SVC_USER" "$INSTALL_DIR"
@@ -1169,12 +1302,13 @@ echo "  4. Add SOAR SSH key:  $SSH_DIR/authorized_keys"
 echo "  5. Restart sshd:      sudo systemctl restart sshd"
 echo ""
 echo "Analyst portal bring-up:"
-echo "  - Default install writes $CONFIG_DIR/portal.env and nginx proxy secret include when nginx is present."
-echo "  - Full portal wiring (Postgres schema, analyst_portal profile, nginx site):"
+echo "  - Full portal wiring (OS packages, npm build, Postgres schema, analyst_portal profile, nginx site):"
 echo "      sudo INSTALL_ANALYST_PORTAL=true bash scripts/install.sh"
-echo "  - Or run Postgres setup alone after editing env files:"
-echo "      sudo bash scripts/setup_postgres_case_archive.sh"
+echo "  - Operator still required: TLS certs, htpasswd, nginx server_name, optional report backfill"
 echo "  - See docs/operations/ANALYST_PORTAL_OPERATIONS.md"
+echo "  - Skip OS packages or frontend build when pre-staged:"
+echo "      sudo INSTALL_PORTAL_SKIP_OS_PACKAGES=true INSTALL_ANALYST_PORTAL=true bash scripts/install.sh"
+echo "      sudo INSTALL_PORTAL_SKIP_FRONTEND_BUILD=true INSTALL_ANALYST_PORTAL=true bash scripts/install.sh"
 echo ""
 echo "Start services:"
 echo "  sudo systemctl enable --now vllm"
@@ -1224,7 +1358,7 @@ echo "  - Reset existing vLLM systemd drop-ins (recommended when standardizing u
 echo "      sudo VLLM_RESET_OVERRIDES=true bash scripts/install.sh"
 echo "  - Override smoke test timeout seconds (default: 240):"
 echo "      sudo SMOKE_TEST_TIMEOUT_SECONDS=240 bash scripts/install.sh"
-echo "  - Install analyst portal Postgres schema, profile, and nginx site:"
+echo "  - Install analyst portal OS packages, npm build, Postgres schema, profile, and nginx site:"
 echo "      sudo INSTALL_ANALYST_PORTAL=true bash scripts/install.sh"
 
 echo ""
