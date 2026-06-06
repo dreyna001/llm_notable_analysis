@@ -90,6 +90,8 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("onprem-llm-sdk from", install_text)
         self.assertIn("install_portal_os_packages", install_text)
         self.assertIn("build_analyst_portal_frontend", install_text)
+        self.assertIn("resolve_portal_frontend_toolchain", install_text)
+        self.assertIn("PORTAL_NODE_TOOLCHAIN_PATH", install_text)
         self.assertIn("npm run build", install_text)
         self.assertIn("INSTALL_PORTAL_SKIP_OS_PACKAGES", install_text)
         self.assertIn("INSTALL_PORTAL_SKIP_FRONTEND_BUILD", install_text)

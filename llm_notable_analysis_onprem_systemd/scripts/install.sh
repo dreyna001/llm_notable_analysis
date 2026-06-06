@@ -749,6 +749,39 @@ install_portal_os_packages() {
     fi
 }
 
+resolve_portal_frontend_toolchain() {
+    local venv_bin="$MONOREPO_ROOT/.venv/bin"
+    local npm_bin="${NPM_BIN:-npm}"
+    local node_bin="${NODE_BIN:-}"
+    local toolchain_path=""
+
+    if [[ -x "$venv_bin/npm" && "$npm_bin" == "npm" ]]; then
+        npm_bin="$venv_bin/npm"
+        info "Using monorepo dev npm: $npm_bin"
+    fi
+    if [[ -z "$node_bin" && -x "$venv_bin/node" ]]; then
+        node_bin="$venv_bin/node"
+    fi
+    if [[ -n "$node_bin" ]]; then
+        toolchain_path="$(dirname "$node_bin")"
+    elif command -v node >/dev/null 2>&1; then
+        node_bin="$(command -v node)"
+        toolchain_path="$(dirname "$node_bin")"
+    fi
+    if [[ -n "$toolchain_path" ]]; then
+        info "Using Node.js toolchain from: $toolchain_path"
+    fi
+    if ! command -v "$npm_bin" >/dev/null 2>&1 && [[ ! -x "$npm_bin" ]]; then
+        err "npm is required for INSTALL_ANALYST_PORTAL=true (install Node.js or set NPM_BIN, e.g. $venv_bin/npm)"
+    fi
+    if [[ -z "$toolchain_path" ]] || [[ ! -x "$toolchain_path/node" ]]; then
+        err "node is required for INSTALL_ANALYST_PORTAL=true (bootstrap repo .venv with scripts/bootstrap_dev_venv.sh or set NODE_BIN)"
+    fi
+
+    PORTAL_NPM_BIN="$npm_bin"
+    PORTAL_NODE_TOOLCHAIN_PATH="$toolchain_path"
+}
+
 build_analyst_portal_frontend() {
     if [[ "${INSTALL_ANALYST_PORTAL:-false}" != "true" ]]; then
         return 0
@@ -759,27 +792,19 @@ build_analyst_portal_frontend() {
     fi
 
     local frontend_dir="$REPO_DIR/frontend/analyst-portal"
-    local npm_bin="${NPM_BIN:-npm}"
-    local venv_npm="$MONOREPO_ROOT/.venv/bin/npm"
     [[ -f "$frontend_dir/package.json" ]] || err "Missing analyst portal package.json: $frontend_dir/package.json"
-    if ! command -v "$npm_bin" >/dev/null 2>&1; then
-        if [[ -x "$venv_npm" ]]; then
-            npm_bin="$venv_npm"
-            info "Using monorepo dev npm: $npm_bin"
-        else
-            err "npm is required for INSTALL_ANALYST_PORTAL=true (install Node.js or set NPM_BIN, e.g. $venv_npm)"
-        fi
-    fi
+    resolve_portal_frontend_toolchain
 
     info "Building analyst portal frontend in $frontend_dir"
     (
+        export PATH="$PORTAL_NODE_TOOLCHAIN_PATH:$PATH"
         cd "$frontend_dir"
         if [[ -f package-lock.json ]]; then
-            "$npm_bin" ci
+            "$PORTAL_NPM_BIN" ci
         else
-            "$npm_bin" install
+            "$PORTAL_NPM_BIN" install
         fi
-        "$npm_bin" run build
+        "$PORTAL_NPM_BIN" run build
     ) || err "Failed to build analyst portal frontend (npm run build)"
 
     [[ -d "$frontend_dir/dist" ]] || err "Analyst portal build did not produce dist/: $frontend_dir/dist"
