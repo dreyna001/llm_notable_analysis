@@ -6,7 +6,9 @@ under individual packages for day-to-day development.
 
 ## Prerequisites
 
-- Python **3.12+** on `PATH` (or pass `--Python py -3.12` to the bootstrap script)
+- Python **3.12+** on `PATH` (bootstrap prefers `python3.12` automatically)
+- On Linux VMs without Python 3.12, use `bash scripts/bootstrap_dev_venv.sh --install-python`
+  or run `bash scripts/install_python312.sh` first
 - Network access for the first bootstrap (pip and nodeenv download Node)
 - Stop other Python dev servers (for example `preview_portal_ui.py` on port 8765) before
   bootstrap if pip reports `WinError 32` file-in-use errors. OneDrive-synced repo paths
@@ -29,6 +31,8 @@ Set-Location <repo-root>
 
 ```bash
 cd <repo-root>
+bash scripts/bootstrap_dev_venv.sh --install-python   # Linux VM without python3.12 yet
+# or, if python3.12 is already installed:
 bash scripts/bootstrap_dev_venv.sh
 source .venv/bin/activate
 ```

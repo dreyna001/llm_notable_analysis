@@ -2,7 +2,12 @@
 # Create one project-wide .venv for Python backend tools and Node/npm (via nodeenv).
 set -euo pipefail
 
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+PYTHON_BIN="${PYTHON_BIN:-}"
+PYTHON_BIN_EXPLICIT=false
+if [[ -n "$PYTHON_BIN" ]]; then
+    PYTHON_BIN_EXPLICIT=true
+fi
+INSTALL_PYTHON=false
 SKIP_NODE=false
 SKIP_FRONTEND_INSTALL=false
 
@@ -13,19 +18,111 @@ Usage: bootstrap_dev_venv.sh [options]
 Creates <repo>/.venv with editable installs for on-prem packages, pytest,
 and Node.js (nodeenv) for the analyst portal frontend.
 
+Requires Python 3.12+. By default the script prefers python3.12 on PATH.
+
 Options:
   --python PATH           Python interpreter used to create the venv
+  --install-python        Install Python 3.12 via install_python312.sh (Linux + sudo)
   --skip-node             Do not install Node.js into the venv
   --skip-frontend-install Skip npm install for analyst-portal
   -h, --help              Show this help
 EOF
 }
 
+print_python312_hints() {
+    cat <<'EOF'
+Python 3.12+ is required but was not found.
+
+Install it manually, or re-run with --install-python on a supported Linux VM:
+
+  bash scripts/install_python312.sh
+  bash scripts/bootstrap_dev_venv.sh --python python3.12
+
+Ubuntu 24.04 / Debian 12:
+  sudo apt update
+  sudo apt install -y python3.12 python3.12-venv python3.12-dev
+
+Ubuntu 22.04:
+  sudo apt update
+  sudo apt install -y software-properties-common
+  sudo add-apt-repository -y ppa:deadsnakes/ppa
+  sudo apt update
+  sudo apt install -y python3.12 python3.12-venv python3.12-dev
+
+RHEL 9 / Rocky 9 / Alma 9 / Fedora:
+  sudo dnf install -y python3.12 python3.12-devel
+EOF
+}
+
+resolve_default_python_bin() {
+    if command -v python3.12 >/dev/null 2>&1; then
+        echo "python3.12"
+        return 0
+    fi
+    if command -v python3 >/dev/null 2>&1; then
+        echo "python3"
+        return 0
+    fi
+    echo "python3.12"
+}
+
+python_version_ok() {
+    local bin="$1"
+    local version major minor
+    version="$("$bin" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+    IFS=. read -r major minor <<< "$version"
+    if (( major < 3 || (major == 3 && minor < 12) )); then
+        echo "Python 3.12+ required; found Python $version from: $bin" >&2
+        return 1
+    fi
+    return 0
+}
+
+python_bin_ready() {
+    command -v "$PYTHON_BIN" >/dev/null 2>&1 && python_version_ok "$PYTHON_BIN"
+}
+
+ensure_python_bin() {
+    if [[ -z "$PYTHON_BIN" ]]; then
+        PYTHON_BIN="$(resolve_default_python_bin)"
+    fi
+
+    if [[ "$INSTALL_PYTHON" == true ]] && ! python_bin_ready; then
+        bash "$SCRIPT_DIR/install_python312.sh"
+        PYTHON_BIN="python3.12"
+    fi
+
+    if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+        echo "Python interpreter not found: $PYTHON_BIN" >&2
+        print_python312_hints >&2
+        exit 1
+    fi
+
+    if ! python_version_ok "$PYTHON_BIN"; then
+        print_python312_hints >&2
+        exit 1
+    fi
+
+    if ! "$PYTHON_BIN" -m venv --help >/dev/null 2>&1; then
+        echo "The venv module is unavailable for: $PYTHON_BIN" >&2
+        echo "On Debian/Ubuntu install python3.12-venv." >&2
+        echo "On RHEL/Fedora install python3.12-devel." >&2
+        exit 1
+    fi
+
+    echo "Using Python: $("$PYTHON_BIN" --version) ($PYTHON_BIN)"
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --python)
             PYTHON_BIN="${2:?Missing value for --python}"
+            PYTHON_BIN_EXPLICIT=true
             shift 2
+            ;;
+        --install-python)
+            INSTALL_PYTHON=true
+            shift
             ;;
         --skip-node)
             SKIP_NODE=true
@@ -54,6 +151,8 @@ FRONTEND_DIR="$REPO_ROOT/llm_notable_analysis_onprem_systemd/frontend/analyst-po
 
 echo "Repo root: $REPO_ROOT"
 echo "Virtual env: $VENV_DIR"
+
+ensure_python_bin
 
 if [[ ! -x "$VENV_DIR/bin/python" ]]; then
     "$PYTHON_BIN" -m venv "$VENV_DIR"
