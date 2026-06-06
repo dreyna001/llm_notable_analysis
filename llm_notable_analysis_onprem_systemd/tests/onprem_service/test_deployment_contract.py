@@ -90,6 +90,7 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("onprem-llm-sdk from", install_text)
         self.assertIn("install_portal_os_packages", install_text)
         self.assertIn("install_portal_pgvector_os_package", install_text)
+        self.assertIn("install_portal_pgvector_from_source", install_text)
         self.assertIn("verify_postgresql_pgvector_extension", install_text)
         self.assertIn("postgresql-", install_text)
         self.assertIn("pgvector", install_text)

@@ -195,7 +195,8 @@ sudo INSTALL_ANALYST_PORTAL=true bash scripts/install.sh
 
 With `INSTALL_ANALYST_PORTAL=true`, `scripts/install.sh` also installs portal OS
 packages (nginx, PostgreSQL, the matching `postgresql-*-pgvector` package where
-available, and an `htpasswd` tool package where supported),
+available with a source-build fallback on Debian/Ubuntu when apt has no pgvector
+package, and an `htpasswd` tool package where supported),
 runs `npm install` + `npm run build` for the React SPA, and copies
 `frontend/analyst-portal/dist` into `/opt/notable-analyzer`.
 

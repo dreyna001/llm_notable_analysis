@@ -722,8 +722,29 @@ verify_postgresql_pgvector_extension() {
     fi
 }
 
+install_portal_pgvector_from_source() {
+    local pg_major="$1"
+    local workdir pgvector_ref="${PGVECTOR_GIT_REF:-v0.8.0}"
+
+    info "Building pgvector from source for PostgreSQL ${pg_major} (ref: $pgvector_ref)"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        "postgresql-server-dev-${pg_major}" \
+        build-essential \
+        git \
+        || err "Failed to install pgvector build dependencies for PostgreSQL ${pg_major}"
+
+    workdir="$(mktemp -d)"
+    git clone --depth 1 --branch "$pgvector_ref" https://github.com/pgvector/pgvector.git "$workdir/pgvector" \
+        || err "Failed to clone pgvector source (ref: $pgvector_ref)"
+    make -C "$workdir/pgvector" OPTFLAGS=""
+    make -C "$workdir/pgvector" install
+    rm -rf "$workdir"
+    systemctl restart postgresql
+    info "Installed pgvector from source for PostgreSQL ${pg_major}"
+}
+
 install_portal_pgvector_os_package() {
-    local os_family pg_major pgvector_pkg
+    local os_family pg_major pgvector_pkg install_method=""
     os_family="$(detect_os_family)"
     pg_major="$(detect_postgresql_major_version)"
     if [[ -z "$pg_major" ]]; then
@@ -734,8 +755,13 @@ install_portal_pgvector_os_package() {
         debian)
             pgvector_pkg="postgresql-${pg_major}-pgvector"
             info "Installing required PostgreSQL pgvector package: $pgvector_pkg"
-            DEBIAN_FRONTEND=noninteractive apt-get install -y "$pgvector_pkg" \
-                || err "Failed to install $pgvector_pkg (required for analyst portal case archive)"
+            if DEBIAN_FRONTEND=noninteractive apt-get install -y "$pgvector_pkg"; then
+                install_method="$pgvector_pkg"
+            else
+                warn "Package $pgvector_pkg is unavailable in apt; falling back to source build"
+                install_portal_pgvector_from_source "$pg_major"
+                install_method="pgvector source build (PostgreSQL ${pg_major})"
+            fi
             ;;
         rhel)
             pgvector_pkg=""
@@ -750,15 +776,16 @@ install_portal_pgvector_os_package() {
             info "Installing required PostgreSQL pgvector package: $pgvector_pkg"
             dnf install -y "$pgvector_pkg" \
                 || err "Failed to install $pgvector_pkg (required for analyst portal case archive)"
+            install_method="$pgvector_pkg"
             ;;
         *)
             err "Automatic pgvector package install is not implemented for OS family: $os_family"
             ;;
     esac
 
-    info "Installed PostgreSQL pgvector package: $pgvector_pkg"
+    info "Installed PostgreSQL pgvector via: $install_method"
     verify_postgresql_pgvector_extension \
-        || err "PostgreSQL pgvector extension is not loadable after installing $pgvector_pkg"
+        || err "PostgreSQL pgvector extension is not loadable after pgvector install"
     info "Verified PostgreSQL pgvector extension loads successfully"
 }
 
