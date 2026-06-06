@@ -711,7 +711,9 @@ check_python_version "$VLLM_PYTHON_BIN" "vLLM"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-RAG_PACKAGE_SRC_DIR="$(cd "$REPO_DIR/.." && pwd)/onprem_rag_notable_analysis"
+MONOREPO_ROOT="$(cd "$REPO_DIR/.." && pwd)"
+RAG_PACKAGE_SRC_DIR="${RAG_PACKAGE_SRC_DIR:-$MONOREPO_ROOT/onprem_rag_notable_analysis}"
+SDK_SOURCE_DIR="${SDK_SOURCE_DIR:-$MONOREPO_ROOT/onprem-llm-sdk}"
 
 # Verify required files exist
 for f in requirements.txt config.env.example; do
@@ -722,6 +724,7 @@ done
 [[ -d "$REPO_DIR/deploy/systemd" ]] || err "Missing directory: $REPO_DIR/deploy/systemd"
 [[ -f "$RAG_PACKAGE_SRC_DIR/pyproject.toml" ]] || err "Missing RAG package metadata: $RAG_PACKAGE_SRC_DIR/pyproject.toml"
 [[ -d "$RAG_PACKAGE_SRC_DIR/future" ]] || err "Missing RAG package directory: $RAG_PACKAGE_SRC_DIR/future"
+[[ -f "$SDK_SOURCE_DIR/pyproject.toml" ]] || err "Missing SDK package metadata: $SDK_SOURCE_DIR (clone full monorepo or set SDK_SOURCE_DIR)"
 
 echo ""
 
@@ -887,10 +890,24 @@ else
     info "Created venv at $INSTALL_DIR/venv"
 fi
 
-"$INSTALL_DIR/venv/bin/pip" install --upgrade pip --quiet \
+"$INSTALL_DIR/venv/bin/pip" install --upgrade pip wheel --quiet \
     || err "Failed to upgrade pip"
-"$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt" --quiet \
-    || err "Failed to install requirements"
+
+tmp_requirements="$(mktemp)"
+awk '
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*$/ { next }
+    /^[[:space:]]*onprem-llm-sdk([[:space:]]*(==|>=|<=|~=|!=).*)?$/ { next }
+    { print }
+' "$INSTALL_DIR/requirements.txt" > "$tmp_requirements"
+if [[ -s "$tmp_requirements" ]]; then
+    "$INSTALL_DIR/venv/bin/pip" install -r "$tmp_requirements" --quiet \
+        || err "Failed to install requirements"
+fi
+rm -f "$tmp_requirements"
+
+"$INSTALL_DIR/venv/bin/pip" install --upgrade "$SDK_SOURCE_DIR" --quiet \
+    || err "Failed to install onprem-llm-sdk from $SDK_SOURCE_DIR"
 "$INSTALL_DIR/venv/bin/pip" install --upgrade "$RAG_PACKAGE_INSTALL_DIR" --quiet \
     || err "Failed to install onprem_rag_notable_analysis package"
 "$INSTALL_DIR/venv/bin/pip" install --upgrade "$INSTALL_DIR" --quiet \

@@ -85,7 +85,9 @@ class TestDeploymentContract(unittest.TestCase):
         )
 
         self.assertIn("RAG_PACKAGE_SRC_DIR", install_text)
+        self.assertIn("SDK_SOURCE_DIR", install_text)
         self.assertIn("RAG_PACKAGE_INSTALL_DIR", install_text)
+        self.assertIn("onprem-llm-sdk from", install_text)
         self.assertIn("onprem_rag_notable_analysis package", install_text)
         self.assertIn("$DATA_DIR/cache/huggingface", install_text)
         self.assertIn("$DATA_DIR/cache/sentence-transformers", install_text)
