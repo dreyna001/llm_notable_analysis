@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
+import inspect
 import json
+import threading
 import unittest
 import uuid
 
@@ -208,10 +210,7 @@ class TestPortalApp(unittest.TestCase):
         ).get("/ready")
 
         self.assertEqual(health.status_code, 200)
-        self.assertEqual(
-            health.json(),
-            {"status": "ok", "case_retention_days": 30},
-        )
+        self.assertEqual(health.json(), {"status": "ok"})
         self.assertEqual(ready.status_code, 200)
         self.assertEqual(ready.json(), {"status": "ready"})
         self.assertEqual(not_ready.status_code, 503)
@@ -230,7 +229,7 @@ class TestPortalApp(unittest.TestCase):
         self.assertIn("Notable Analyst Portal", response.text)
         self.assertIn('href="/cases"', response.text)
 
-    def test_ready_includes_chat_retrieval_dependencies_when_enabled(self) -> None:
+    def test_ready_does_not_run_expensive_chat_retrieval_check(self) -> None:
         config = Config(
             PORTAL_ENABLED=True,
             CASE_ARCHIVE_ENABLED=True,
@@ -246,7 +245,60 @@ class TestPortalApp(unittest.TestCase):
             )
         ).get("/ready")
 
+        self.assertEqual(response.status_code, 200)
+
+    def test_chat_readiness_diagnostic_checks_retrieval_dependencies(self) -> None:
+        config = Config(
+            PORTAL_ENABLED=True,
+            CASE_ARCHIVE_ENABLED=True,
+            CASE_QA_ENABLED=True,
+            PORTAL_PROXY_SECRET="portal-secret",
+        )
+
+        response = TestClient(
+            build_portal_app(
+                config,
+                connect=lambda _dsn: _FakeConnection(row_pages=[[], []]),
+                chat_embedding_model=_BadEmbeddingModel(),
+            )
+        ).get("/api/diagnostics/chat-readiness", headers=_AUTH_HEADERS)
+
         self.assertEqual(response.status_code, 503)
+
+    def test_api_capabilities_returns_chat_runtime_contract(self) -> None:
+        client = TestClient(
+            build_portal_app(
+                Config(
+                    PORTAL_ENABLED=True,
+                    CASE_ARCHIVE_ENABLED=True,
+                    CASE_QA_ENABLED=True,
+                    CASE_QA_GLOBAL_RETRIEVAL_ENABLED=False,
+                    CASE_QA_CHAT_HISTORY_ENABLED=True,
+                    CASE_QA_MAX_QUESTION_CHARS=1234,
+                    CASE_QA_MAX_ANSWER_TOKENS=567,
+                    CASE_QA_MAX_SESSIONS_PER_USER=10,
+                    PORTAL_PROXY_SECRET="portal-secret",
+                ),
+                connect=lambda _dsn: _FakeConnection(rows=[]),
+            )
+        )
+
+        response = client.get("/api/capabilities", headers=_AUTH_HEADERS)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "case_qa_enabled": True,
+                "global_retrieval_enabled": False,
+                "chat_history_enabled": True,
+                "general_knowledge_enabled": True,
+                "max_question_chars": 1234,
+                "max_answer_tokens": 567,
+                "max_chat_sessions_per_user": 10,
+                "case_retention_days": 30,
+            },
+        )
 
     def test_api_cases_returns_paginated_items(self) -> None:
         record = _record(self._config())
@@ -407,6 +459,7 @@ class TestPortalApp(unittest.TestCase):
         self.assertEqual(allowed.status_code, 200)
 
     def test_portal_has_no_mutating_routes(self) -> None:
+        """Case archive routes stay read-only; chat history has bounded mutations only."""
         app = build_portal_app(
             self._config(),
             connect=lambda _dsn: _FakeConnection(rows=[]),
@@ -427,6 +480,7 @@ class TestPortalApp(unittest.TestCase):
             {
                 ("/api/chat", "POST"),
                 ("/api/chat/sessions/{session_id}", "DELETE"),
+                ("/api/chat/sessions/{session_id}/turns/last", "DELETE"),
             },
         )
 
@@ -545,6 +599,78 @@ class TestPortalApp(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["detail"], "Case not found.")
+
+    def test_api_chat_handler_is_async(self) -> None:
+        app = build_portal_app(
+            Config(
+                PORTAL_ENABLED=True,
+                CASE_ARCHIVE_ENABLED=True,
+                CASE_QA_ENABLED=True,
+                PORTAL_PROXY_SECRET="portal-secret",
+            ),
+            connect=lambda _dsn: _FakeConnection(rows=[]),
+        )
+        route = next(route for route in app.routes if getattr(route, "path", None) == "/api/chat")
+        self.assertTrue(inspect.iscoroutinefunction(route.endpoint))
+
+    def test_api_chat_returns_429_when_concurrency_exhausted(self) -> None:
+        started = threading.Event()
+        release = threading.Event()
+        record = _record(
+            Config(
+                PORTAL_ENABLED=True,
+                CASE_ARCHIVE_ENABLED=True,
+                CASE_QA_ENABLED=True,
+                PORTAL_PROXY_SECRET="portal-secret",
+                PORTAL_CHAT_MAX_CONCURRENCY=1,
+            )
+        )
+
+        def slow_synthesize(_question, _sources):
+            started.set()
+            if not release.wait(timeout=5):
+                raise RuntimeError("timed out waiting for chat release")
+            return "slow answer"
+
+        client = TestClient(
+            build_portal_app(
+                Config(
+                    PORTAL_ENABLED=True,
+                    CASE_ARCHIVE_ENABLED=True,
+                    CASE_QA_ENABLED=True,
+                    PORTAL_PROXY_SECRET="portal-secret",
+                    PORTAL_CHAT_MAX_CONCURRENCY=1,
+                ),
+                connect=lambda _dsn: _FakeConnection(
+                    row=_detail_row(record),
+                    row_pages=[[_chunk_row(record)], []],
+                ),
+                chat_embedding_model=_FakeEmbeddingModel(),
+                chat_synthesizer=slow_synthesize,
+            )
+        )
+        chat_payload = {
+            "mode": "selected_case",
+            "question": "What evidence supports this?",
+            "selected_case_id": "case-1",
+        }
+
+        first = threading.Thread(
+            target=lambda: client.post(
+                "/api/chat",
+                json=chat_payload,
+                headers=_AUTH_HEADERS,
+            )
+        )
+        first.start()
+        self.assertTrue(started.wait(timeout=5))
+
+        blocked = client.post("/api/chat", json=chat_payload, headers=_AUTH_HEADERS)
+
+        release.set()
+        first.join(timeout=10)
+        self.assertFalse(first.is_alive())
+        self.assertEqual(blocked.status_code, 429)
 
     def test_api_chat_returns_answer(self) -> None:
         record = _record(self._config())

@@ -137,6 +137,47 @@ WHERE session_id = %s
 """.strip()
 
 
+def build_lock_chat_session_row_query(schema: str) -> str:
+    """Build SQL that locks one chat session row for capacity-checked writes."""
+    table = f"{quote_identifier(schema, 'schema')}.chat_sessions"
+    return f"""
+SELECT session_id
+FROM {table}
+WHERE session_id = %s
+FOR UPDATE
+""".strip()
+
+
+def build_count_active_user_chat_sessions_query(schema: str) -> str:
+    """Build SQL to count non-expired chat sessions for one user."""
+    table = f"{quote_identifier(schema, 'schema')}.chat_sessions"
+    return f"""
+SELECT COUNT(*)::bigint
+FROM {table}
+WHERE user_id IS NOT DISTINCT FROM %s
+  AND expires_at > now()
+""".strip()
+
+
+def build_delete_oldest_user_chat_sessions_query(schema: str) -> str:
+    """Build SQL that deletes the oldest non-expired sessions for one user."""
+    table = f"{quote_identifier(schema, 'schema')}.chat_sessions"
+    return f"""
+WITH oldest AS (
+    SELECT session_id
+    FROM {table}
+    WHERE user_id IS NOT DISTINCT FROM %s
+      AND expires_at > now()
+    ORDER BY updated_at ASC, session_id ASC
+    LIMIT %s
+)
+DELETE FROM {table} AS sessions
+USING oldest
+WHERE sessions.session_id = oldest.session_id
+RETURNING sessions.session_id
+""".strip()
+
+
 def build_insert_chat_session_query(schema: str) -> str:
     """Build SQL to insert one chat session."""
     table = f"{quote_identifier(schema, 'schema')}.chat_sessions"
@@ -152,14 +193,11 @@ INSERT INTO {table} (
 
 
 def build_touch_chat_session_query(schema: str) -> str:
-    """Build SQL to refresh one chat session metadata and expiry."""
+    """Build SQL to refresh one chat session expiry without changing its scope."""
     table = f"{quote_identifier(schema, 'schema')}.chat_sessions"
     return f"""
 UPDATE {table}
 SET
-    user_id = %s,
-    mode = %s,
-    selected_case_id = %s,
     expires_at = %s,
     updated_at = now()
 WHERE session_id = %s
@@ -242,6 +280,8 @@ def list_chat_sessions(
 
     connect_fn = connect or _default_connect
     normalized_user = _normalize_user_id(user_id)
+    if normalized_user is None:
+        raise ValueError("authenticated user is required for chat history.")
     page_size = max(1, min(int(limit), 100))
     sql = build_list_chat_sessions_query(config.CASE_POSTGRES_SCHEMA)
     with connect_fn(config.CASE_POSTGRES_DSN) as conn:
@@ -290,7 +330,7 @@ def get_chat_session_messages(
 
     normalized_user = _normalize_user_id(user_id)
     stored_user = _normalize_user_id(record.user_id)
-    if stored_user and normalized_user and stored_user != normalized_user:
+    if normalized_user is None or stored_user != normalized_user:
         raise ValueError("session_id does not belong to the authenticated user.")
 
     sql = build_list_chat_messages_query(config.CASE_POSTGRES_SCHEMA)
@@ -320,6 +360,45 @@ def get_chat_session_messages(
     }
 
 
+def delete_last_chat_turn(
+    *,
+    config: Config,
+    session_id: str,
+    user_id: str | None,
+    expected_message_count: int | None = None,
+    connect: ConnectionFactory | None = None,
+) -> int:
+    """Delete the latest persisted chat turn for the authenticated user."""
+    if not bool(config.CASE_QA_CHAT_HISTORY_ENABLED):
+        raise RuntimeError("Chat history persistence is disabled.")
+
+    normalized_id = _validate_session_id(session_id)
+    normalized_user = _normalize_user_id(user_id)
+    if normalized_user is None:
+        raise ValueError("authenticated user is required for chat history.")
+    if expected_message_count is not None:
+        if expected_message_count < 2:
+            raise ValueError("expected_message_count must be at least 2.")
+        if expected_message_count % 2 != 0:
+            raise ValueError("expected_message_count must be an even turn pair count.")
+    connect_fn = connect or _default_connect
+    with connect_fn(config.CASE_POSTGRES_DSN) as conn:
+        _set_statement_timeout(conn, config.CASE_POSTGRES_STATEMENT_TIMEOUT_MS)
+        if expected_message_count is not None:
+            current = _count_chat_messages(
+                config=config,
+                session_id=normalized_id,
+                connect=lambda _dsn: conn,
+            )
+            if current != expected_message_count:
+                raise ValueError(
+                    "Message count does not match the expected orphan cleanup snapshot."
+                )
+        sql = build_delete_last_chat_turn_query(config.CASE_POSTGRES_SCHEMA)
+        rows = _fetchall(conn.execute(sql, (normalized_id, normalized_user)))
+    return len(rows)
+
+
 def delete_chat_session(
     *,
     config: Config,
@@ -333,6 +412,8 @@ def delete_chat_session(
 
     normalized_id = _validate_session_id(session_id)
     normalized_user = _normalize_user_id(user_id)
+    if normalized_user is None:
+        raise ValueError("authenticated user is required for chat history.")
     connect_fn = connect or _default_connect
     sql = build_delete_chat_session_query(config.CASE_POSTGRES_SCHEMA)
     with connect_fn(config.CASE_POSTGRES_DSN) as conn:
@@ -369,6 +450,50 @@ DELETE FROM {table}
 WHERE session_id = %s
   AND user_id IS NOT DISTINCT FROM %s
 RETURNING session_id
+""".strip()
+
+
+def build_delete_last_chat_turn_query(schema: str) -> str:
+    """Build SQL that deletes the latest user/assistant turn for one session."""
+    messages = f"{quote_identifier(schema, 'schema')}.chat_messages"
+    sessions = f"{quote_identifier(schema, 'schema')}.chat_sessions"
+    return f"""
+WITH scoped AS (
+    SELECT s.session_id
+    FROM {sessions} AS s
+    WHERE s.session_id = %s
+      AND s.user_id IS NOT DISTINCT FROM %s
+),
+latest_user AS (
+    SELECT m.message_id, m.created_at
+    FROM {messages} AS m
+    INNER JOIN scoped ON scoped.session_id = m.session_id
+    WHERE m.role = 'user'
+    ORDER BY m.created_at DESC, m.message_id DESC
+    LIMIT 1
+),
+paired_assistant AS (
+    SELECT m.message_id
+    FROM {messages} AS m
+    INNER JOIN scoped ON scoped.session_id = m.session_id
+    INNER JOIN latest_user AS lu ON TRUE
+    WHERE m.role = 'assistant'
+      AND (
+          m.created_at > lu.created_at
+          OR (m.created_at = lu.created_at AND m.message_id > lu.message_id)
+      )
+    ORDER BY m.created_at ASC, m.message_id ASC
+    LIMIT 1
+),
+to_delete AS (
+    SELECT message_id FROM latest_user
+    UNION ALL
+    SELECT message_id FROM paired_assistant
+)
+DELETE FROM {messages} AS m
+USING to_delete
+WHERE m.message_id = to_delete.message_id
+RETURNING m.message_id
 """.strip()
 
 
@@ -422,21 +547,103 @@ def _count_chat_messages(
     return int(count or 0)
 
 
-def _ensure_session_capacity(
+def _count_active_user_chat_sessions(
+    *,
+    config: Config,
+    user_id: str,
+    connect: ConnectionFactory,
+) -> int:
+    sql = build_count_active_user_chat_sessions_query(config.CASE_POSTGRES_SCHEMA)
+    with connect(config.CASE_POSTGRES_DSN) as conn:
+        _set_statement_timeout(conn, config.CASE_POSTGRES_STATEMENT_TIMEOUT_MS)
+        row = _fetchone(conn.execute(sql, (user_id,)))
+    if row is None:
+        return 0
+    return int(_row_get(row, 0, "count") or 0)
+
+
+def _trim_oldest_user_chat_sessions(
+    *,
+    config: Config,
+    user_id: str,
+    delete_count: int,
+    connect: ConnectionFactory,
+) -> int:
+    if delete_count <= 0:
+        return 0
+    sql = build_delete_oldest_user_chat_sessions_query(config.CASE_POSTGRES_SCHEMA)
+    with connect(config.CASE_POSTGRES_DSN) as conn:
+        _set_statement_timeout(conn, config.CASE_POSTGRES_STATEMENT_TIMEOUT_MS)
+        rows = _fetchall(conn.execute(sql, (user_id, delete_count)))
+    return len(rows)
+
+
+def _enforce_user_session_cap(
+    *,
+    config: Config,
+    user_id: str,
+    connect: ConnectionFactory,
+) -> None:
+    max_sessions = max(1, int(config.CASE_QA_MAX_SESSIONS_PER_USER))
+    current = _count_active_user_chat_sessions(
+        config=config,
+        user_id=user_id,
+        connect=connect,
+    )
+    if current < max_sessions:
+        return
+    _trim_oldest_user_chat_sessions(
+        config=config,
+        user_id=user_id,
+        delete_count=current - max_sessions + 1,
+        connect=connect,
+    )
+
+
+def _persist_chat_turn_messages(
     *,
     config: Config,
     session_id: str,
+    user_content: str,
+    assistant_content: str,
     connect: ConnectionFactory,
 ) -> None:
+    """Insert one user/assistant turn after an atomic capacity check."""
     max_messages = max(1, int(config.CASE_QA_MAX_MESSAGES_PER_SESSION))
-    current = _count_chat_messages(
-        config=config,
-        session_id=session_id,
-        connect=connect,
-    )
-    if current + 2 > max_messages:
-        raise ValueError(
-            f"Chat session exceeded the configured message limit of {max_messages}."
+    lock_sql = build_lock_chat_session_row_query(config.CASE_POSTGRES_SCHEMA)
+    count_sql = build_count_chat_messages_query(config.CASE_POSTGRES_SCHEMA)
+    insert_sql = build_insert_chat_message_query(config.CASE_POSTGRES_SCHEMA)
+
+    with connect(config.CASE_POSTGRES_DSN) as conn:
+        _set_statement_timeout(conn, config.CASE_POSTGRES_STATEMENT_TIMEOUT_MS)
+        locked = _fetchone(conn.execute(lock_sql, (session_id,)))
+        if locked is None:
+            raise ValueError("session_id was not found.")
+        count_row = _fetchone(conn.execute(count_sql, (session_id,)))
+        current = int(_row_get(count_row, 0, "count") or 0)
+        if current + 2 > max_messages:
+            raise ValueError(
+                f"Chat session exceeded the configured message limit of {max_messages}."
+            )
+        conn.execute(
+            insert_sql,
+            (
+                str(uuid.uuid4()),
+                session_id,
+                "user",
+                user_content,
+                "[]",
+            ),
+        )
+        conn.execute(
+            insert_sql,
+            (
+                str(uuid.uuid4()),
+                session_id,
+                "assistant",
+                assistant_content,
+                "[]",
+            ),
         )
 
 
@@ -450,6 +657,8 @@ def _resolve_session_id(
     connect: ConnectionFactory,
 ) -> str:
     normalized_user = _normalize_user_id(user_id)
+    if normalized_user is None:
+        raise ValueError("authenticated user is required for chat history.")
     expires_at = _session_expires_at(config)
 
     if requested_session_id:
@@ -465,23 +674,27 @@ def _resolve_session_id(
         if record.expires_at <= now:
             raise ValueError("session_id has expired.")
         stored_user = _normalize_user_id(record.user_id)
-        if stored_user and normalized_user and stored_user != normalized_user:
+        if stored_user != normalized_user:
             raise ValueError("session_id does not belong to the authenticated user.")
+        if record.mode != mode or record.selected_case_id != selected_case_id:
+            raise ValueError("session_id scope does not match the chat request.")
         touch_sql = build_touch_chat_session_query(config.CASE_POSTGRES_SCHEMA)
         with connect(config.CASE_POSTGRES_DSN) as conn:
             _set_statement_timeout(conn, config.CASE_POSTGRES_STATEMENT_TIMEOUT_MS)
             conn.execute(
                 touch_sql,
                 (
-                    normalized_user,
-                    mode,
-                    selected_case_id,
                     expires_at,
                     session_id,
                 ),
             )
         return session_id
 
+    _enforce_user_session_cap(
+        config=config,
+        user_id=normalized_user,
+        connect=connect,
+    )
     session_id = str(uuid.uuid4())
     insert_sql = build_insert_chat_session_query(config.CASE_POSTGRES_SCHEMA)
     with connect(config.CASE_POSTGRES_DSN) as conn:
@@ -523,11 +736,6 @@ def persist_chat_history(
         user_id=user_id,
         connect=connect_fn,
     )
-    _ensure_session_capacity(
-        config=config,
-        session_id=session_id,
-        connect=connect_fn,
-    )
 
     max_bytes = max(1, int(config.CASE_QA_MAX_STORED_MESSAGE_BYTES))
     user_content = truncate_stored_message(question, max_bytes)
@@ -536,29 +744,13 @@ def persist_chat_history(
         max_bytes,
     )
 
-    insert_sql = build_insert_chat_message_query(config.CASE_POSTGRES_SCHEMA)
-    with connect(config.CASE_POSTGRES_DSN) as conn:
-        _set_statement_timeout(conn, config.CASE_POSTGRES_STATEMENT_TIMEOUT_MS)
-        conn.execute(
-            insert_sql,
-            (
-                str(uuid.uuid4()),
-                session_id,
-                "user",
-                user_content,
-                "[]",
-            ),
-        )
-        conn.execute(
-            insert_sql,
-            (
-                str(uuid.uuid4()),
-                session_id,
-                "assistant",
-                assistant_content,
-                "[]",
-            ),
-        )
+    _persist_chat_turn_messages(
+        config=config,
+        session_id=session_id,
+        user_content=user_content,
+        assistant_content=assistant_content,
+        connect=connect_fn,
+    )
     return session_id
 
 

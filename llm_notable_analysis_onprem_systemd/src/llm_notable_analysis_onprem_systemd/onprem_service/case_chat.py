@@ -129,6 +129,7 @@ _ANSWER_CITATION_RE = re.compile(
 )
 _MAX_PROMPT_SOURCE_CHARS = 2400
 _GLOBAL_RETRIEVAL_MODES = {"global_archive"}
+_MAX_CASE_ID_LENGTH = 128
 _READINESS_CASE_ID = "__portal_chat_readiness__"
 _READINESS_QUESTION = "portal chat readiness"
 
@@ -533,6 +534,10 @@ def validate_chat_payload(payload: Any, config: Config) -> ChatRequest:
         )
     selected_case_id = payload.get("selected_case_id")
     selected_case_id = str(selected_case_id).strip() if selected_case_id else None
+    if selected_case_id and len(selected_case_id) > _MAX_CASE_ID_LENGTH:
+        raise ValueError(
+            f"selected_case_id must be at most {_MAX_CASE_ID_LENGTH} characters."
+        )
     if mode == "selected_case" and not selected_case_id:
         raise ValueError("selected_case_id is required for this mode.")
     session_id = payload.get("session_id")
@@ -597,15 +602,34 @@ def retrieve_case_sources(
     return _trim_sources(sources, config)
 
 
+def _probe_llm_reachable(config: Config) -> bool:
+    """Lightweight LLM gateway ping for operator readiness checks."""
+    try:
+        with requests.Session() as http_session:
+            openai_chat_complete(
+                http_session,
+                config,
+                prompt="portal readiness ping",
+                max_tokens=1,
+                temperature=0.0,
+                connect_timeout_sec=min(5, int(config.LLM_TIMEOUT)),
+                read_timeout_sec=min(15, int(config.LLM_TIMEOUT)),
+            )
+        return True
+    except Exception:
+        logger.exception("LLM readiness probe failed")
+        return False
+
+
 def check_case_chat_ready(
     *,
     config: Config,
     connect: ConnectionFactory | None = None,
     embedding_model: Any = None,
 ) -> bool:
-    """Return True when enabled chat retrieval dependencies are usable."""
+    """Return True when enabled chat retrieval and synthesis dependencies are usable."""
     if not bool(config.CASE_QA_ENABLED):
-        return True
+        return False
     try:
         query_vector = _encode_query_vector(
             _READINESS_QUESTION,
@@ -622,6 +646,8 @@ def check_case_chat_ready(
                 query_vector=query_vector,
                 selected_case_id=_READINESS_CASE_ID,
             )
+        if not _probe_llm_reachable(config):
+            return False
         return True
     except Exception:
         logger.exception("Case chat readiness check failed")
@@ -838,7 +864,8 @@ def _build_general_knowledge_prompt(question: str) -> str:
         "external system call. You may explain how a human analyst could do "
         "something safely, but make clear it is guidance only. You may draft "
         "SPL, SQL, shell commands, API examples, or other query text for a human "
-        "to review and run, but do not say you executed it.\n"
+        "to review and run, but do not say you executed it. Label any drafted "
+        "query text as unvalidated draft guidance.\n"
         "For cybersecurity dual-use topics, default to defensive, educational, "
         "and authorized-use guidance. If the user asks for credential theft, "
         "malware deployment, persistence, evasion, exfiltration, or exploitation "
@@ -959,7 +986,8 @@ def _build_prompt(question: str, sources: Sequence[RetrievedSource]) -> str:
         "recommend or claim that you performed any action, search, ticket write, "
         "or external system call. You may draft SPL, SQL, shell commands, API "
         "examples, or other query text for a human to review and run, but do "
-        "not say you executed it. Do not cite sources, reference source numbers, "
+        "not say you executed it. Label any drafted query text as unvalidated "
+        "draft guidance. Do not cite sources, reference source numbers, "
         "use footnotes, or include labels such as SOURCE, Source, or #1 in your "
         "answer.\n\n"
         "OUTPUT FORMAT:\n"

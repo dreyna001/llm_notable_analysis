@@ -253,6 +253,7 @@ class Config:
         CASE_QA_GENERAL_KNOWLEDGE_ENABLED: Enables broad technology fallback when archive context is insufficient.
         CASE_QA_CHAT_HISTORY_RETENTION_DAYS: Retention window for chat sessions.
         CASE_QA_MAX_MESSAGES_PER_SESSION: Max persisted chat messages per session.
+        CASE_QA_MAX_SESSIONS_PER_USER: Max active chat sessions per authenticated user.
         CASE_QA_MAX_STORED_MESSAGE_BYTES: Max stored chat message size.
         CASE_QA_LEXICAL_TOP_K: Case chat lexical retrieval candidate count.
         CASE_QA_VECTOR_TOP_K: Case chat vector retrieval candidate count.
@@ -261,6 +262,7 @@ class Config:
         PORTAL_BIND_HOST: Portal bind host.
         PORTAL_PORT: Portal bind port.
         PORTAL_PAGE_SIZE: Default portal page size.
+        PORTAL_CHAT_MAX_CONCURRENCY: Max concurrent portal chat requests.
         PORTAL_TRUSTED_USER_HEADER: Trusted reverse-proxy user header.
         PORTAL_ALLOW_NON_LOOPBACK_BIND: Allows explicitly reviewed non-loopback portal binds.
         PORTAL_PROXY_SECRET: Optional shared secret required for non-loopback proxy mode.
@@ -406,6 +408,7 @@ class Config:
     CASE_QA_GENERAL_KNOWLEDGE_ENABLED: bool = True
     CASE_QA_CHAT_HISTORY_RETENTION_DAYS: int = 7
     CASE_QA_MAX_MESSAGES_PER_SESSION: int = 30
+    CASE_QA_MAX_SESSIONS_PER_USER: int = 10
     CASE_QA_MAX_STORED_MESSAGE_BYTES: int = 4000
     CASE_QA_LEXICAL_TOP_K: int = 30
     CASE_QA_VECTOR_TOP_K: int = 30
@@ -414,6 +417,7 @@ class Config:
     PORTAL_BIND_HOST: str = "127.0.0.1"
     PORTAL_PORT: int = 8080
     PORTAL_PAGE_SIZE: int = 50
+    PORTAL_CHAT_MAX_CONCURRENCY: int = 4
     PORTAL_TRUSTED_USER_HEADER: str = "X-Forwarded-User"
     PORTAL_ALLOW_NON_LOOPBACK_BIND: bool = False
     PORTAL_PROXY_SECRET: str = ""
@@ -727,6 +731,9 @@ def load_config() -> Config:
         CASE_QA_MAX_MESSAGES_PER_SESSION=_positive_int_env(
             "CASE_QA_MAX_MESSAGES_PER_SESSION", 30, max_value=1000
         ),
+        CASE_QA_MAX_SESSIONS_PER_USER=_positive_int_env(
+            "CASE_QA_MAX_SESSIONS_PER_USER", 10, max_value=100
+        ),
         CASE_QA_MAX_STORED_MESSAGE_BYTES=_positive_int_env(
             "CASE_QA_MAX_STORED_MESSAGE_BYTES", 4000, max_value=100000
         ),
@@ -741,6 +748,9 @@ def load_config() -> Config:
         PORTAL_BIND_HOST=os.getenv("PORTAL_BIND_HOST", "127.0.0.1"),
         PORTAL_PORT=_positive_int_env("PORTAL_PORT", 8080, max_value=65535),
         PORTAL_PAGE_SIZE=_positive_int_env("PORTAL_PAGE_SIZE", 50, max_value=100),
+        PORTAL_CHAT_MAX_CONCURRENCY=_positive_int_env(
+            "PORTAL_CHAT_MAX_CONCURRENCY", 4, max_value=64
+        ),
         PORTAL_TRUSTED_USER_HEADER=os.getenv(
             "PORTAL_TRUSTED_USER_HEADER", "X-Forwarded-User"
         ),

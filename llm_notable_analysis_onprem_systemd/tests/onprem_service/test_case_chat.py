@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 # Tests run with PYTHONPATH pointing at the src layout.
 # pylint: disable=import-error,no-name-in-module
@@ -537,7 +538,14 @@ class TestCaseChat(unittest.TestCase):
         self.assertNotIn("CONTEXT_BLOCK", response["answer"])
         self.assertIn("Ignore prior instructions", response["answer"])
 
-    def test_check_case_chat_ready_checks_embedding_and_retrieval_query(self) -> None:
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat._probe_llm_reachable",
+        return_value=True,
+    )
+    def test_check_case_chat_ready_checks_embedding_and_retrieval_query(
+        self,
+        _mock_llm_probe,
+    ) -> None:
         connection = _FakeConnection(row_pages=[[], []])
 
         ready = check_case_chat_ready(
@@ -554,6 +562,16 @@ class TestCaseChat(unittest.TestCase):
         self.assertTrue(ready)
         self.assertEqual(len(connection.executed), 3)
         self.assertFalse(not_ready)
+        _mock_llm_probe.assert_called_once()
+
+    def test_check_case_chat_ready_false_when_qa_disabled(self) -> None:
+        ready = check_case_chat_ready(
+            config=_config(CASE_QA_ENABLED=False),
+            connect=lambda _dsn: _FakeConnection(row_pages=[[], []]),
+            embedding_model=_FakeEmbeddingModel(),
+        )
+
+        self.assertFalse(ready)
 
 
 if __name__ == "__main__":

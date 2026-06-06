@@ -110,6 +110,7 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("read_config_value_best_effort", install_text)
         self.assertIn("curl -fsS --max-time 5", install_text)
         self.assertIn("mktemp \"$incoming_dir/.", install_text)
+        self.assertIn("frontend/analyst-portal/dist", install_text)
         self.assertIn("litellm[proxy]==", install_text)
         self.assertIn("vllm==0.21.0", install_text)
         self.assertIn("huggingface_hub==1.16.4", install_text)
@@ -125,6 +126,11 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("--portal-env", script_text)
         self.assertIn("notable_cases_schema.sql", script_text)
         self.assertIn("GRANT SELECT ON ALL TABLES", script_text)
+        self.assertIn("notable_portal@127.0.0.1:5432/notable_rag", script_text)
+        self.assertIn("GRANT INSERT, UPDATE, DELETE ON", script_text)
+        self.assertIn(".chat_sessions TO", script_text)
+        self.assertIn("GRANT INSERT, DELETE ON", script_text)
+        self.assertIn(".chat_messages TO", script_text)
 
     def test_postgres_rag_helper_uses_config_env_and_ingest_module(self) -> None:
         """Postgres helper should keep RAG setup and ingest config-bound."""
@@ -252,6 +258,7 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("CAPABILITY_PROFILES=core,analyst_portal", portal_config_text)
         self.assertIn("CASE_POSTGRES_DSN=postgresql://notable_portal@", portal_config_text)
         self.assertIn("PORTAL_PROXY_SECRET=<generate-a-random-shared-secret>", portal_config_text)
+        self.assertIn("PORTAL_CHAT_MAX_CONCURRENCY=4", portal_config_text)
         self.assertNotIn("SPLUNK_API_TOKEN", portal_config_text)
         self.assertNotIn("SERVICENOW_API_TOKEN", portal_config_text)
 
@@ -275,6 +282,7 @@ class TestDeploymentContract(unittest.TestCase):
             service_text,
         )
         self.assertIn("ReadWritePaths=/var/notables/cache", service_text)
+        self.assertIn("TimeoutStopSec=300", service_text)
         self.assertIn("SyslogIdentifier=notable-portal", service_text)
         self.assertIn("User=notable-analyzer", service_text)
 
@@ -288,6 +296,11 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("ssl_certificate", nginx_text)
         self.assertIn("auth_basic", nginx_text)
         self.assertIn("client_max_body_size 1m", nginx_text)
+        self.assertIn("root /opt/notable-analyzer/frontend/analyst-portal/dist", nginx_text)
+        self.assertIn("try_files $uri $uri/ /index.html", nginx_text)
+        self.assertIn("location /api/", nginx_text)
+        self.assertIn("location = /health", nginx_text)
+        self.assertIn("location = /ready", nginx_text)
         self.assertIn("proxy_pass http://127.0.0.1:8080", nginx_text)
         self.assertIn("proxy_set_header X-Forwarded-User $remote_user", nginx_text)
         self.assertIn("include /etc/nginx/notable-portal-proxy-secret.conf", nginx_text)

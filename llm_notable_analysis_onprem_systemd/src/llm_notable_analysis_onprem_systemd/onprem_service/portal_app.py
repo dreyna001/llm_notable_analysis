@@ -5,11 +5,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import html
 import ipaddress
 import logging
 import secrets
+import threading
 from datetime import datetime, timezone
 from typing import Any
 
@@ -27,7 +29,12 @@ from .case_index import (
     get_case,
     list_cases,
 )
-from .case_chat_history import delete_chat_session, get_chat_session_messages, list_chat_sessions
+from .case_chat_history import (
+    delete_chat_session,
+    delete_last_chat_turn,
+    get_chat_session_messages,
+    list_chat_sessions,
+)
 from .case_store import CaseArchiveRecord, quote_identifier
 from .config import Config, load_config
 from .verdicts import verdict_label
@@ -35,6 +42,9 @@ from .verdicts import verdict_label
 logger = logging.getLogger(__name__)
 
 _MAX_PAGE_SIZE = 100
+_MAX_LIST_OFFSET = 10_000
+_MAX_CASE_ID_LENGTH = 128
+_MAX_TRUSTED_USER_LENGTH = 256
 _PUBLIC_PATHS = frozenset({"/health", "/ready"})
 _TRUSTED_USER_CTX: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "portal_trusted_user",
@@ -116,7 +126,11 @@ def _trusted_user_from_request(request: Any, config: Config) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
-    return text or None
+    if not text:
+        return None
+    if len(text) > _MAX_TRUSTED_USER_LENGTH:
+        return None
+    return text
 
 
 def _proxy_secret_matches(request: Any, config: Config) -> bool:
@@ -172,16 +186,7 @@ def check_case_archive_ready(
         )
         chunks_table = f"{quote_identifier(schema, 'schema')}.case_chunks"
         sql = f"""
-SELECT
-    chunk_id,
-    case_id,
-    source_lane,
-    section,
-    field_path,
-    text,
-    metadata,
-    search_vector,
-    embedding
+SELECT 1
 FROM {chunks_table}
 LIMIT 1
 """.strip()
@@ -247,6 +252,8 @@ def _parse_list_filters(
         parsed_offset = int(offset)
         if parsed_offset < 0:
             raise ValueError("offset must be a non-negative integer.")
+        if parsed_offset > _MAX_LIST_OFFSET:
+            raise ValueError(f"offset must be at most {_MAX_LIST_OFFSET}.")
 
     processed_from = (
         parse_iso8601_timestamp(start, "start") if start is not None else None
@@ -315,11 +322,19 @@ def build_portal_app(
     )
     app.state.config = config
     app.state.connect = connect_fn
+    chat_semaphore = threading.BoundedSemaphore(
+        max(1, int(config.PORTAL_CHAT_MAX_CONCURRENCY))
+    )
 
     def fetch_case_detail(case_id: str) -> tuple[str, CaseArchiveRecord]:
         normalized = str(case_id or "").strip()
         if not normalized:
             raise HTTPException(status_code=400, detail="case_id must be non-empty.")
+        if len(normalized) > _MAX_CASE_ID_LENGTH:
+            raise HTTPException(
+                status_code=400,
+                detail=f"case_id must be at most {_MAX_CASE_ID_LENGTH} characters.",
+            )
         try:
             record = get_case(
                 config=config,
@@ -353,16 +368,21 @@ def build_portal_app(
             )
         trusted_user = _trusted_user_from_request(request, config)
         if trusted_user is None:
+            raw_user = request.headers.get(trusted_header)
+            if raw_user is not None and str(raw_user).strip():
+                detail = (
+                    f"Trusted user header {trusted_header!r} exceeds "
+                    f"{_MAX_TRUSTED_USER_LENGTH} characters."
+                )
+            else:
+                detail = (
+                    f"Missing trusted user header {trusted_header!r}. "
+                    "Requests must come through nginx with proxy auth."
+                )
             return JSONResponse(
                 status_code=401,
-                content={
-                    "detail": (
-                        f"Missing trusted user header {trusted_header!r}. "
-                        "Requests must come through nginx with proxy auth."
-                    )
-                },
+                content={"detail": detail},
             )
-        request.state.trusted_user = trusted_user
         token = _TRUSTED_USER_CTX.set(trusted_user)
         try:
             return await call_next(request)
@@ -371,20 +391,38 @@ def build_portal_app(
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
-        return {
-            "status": "ok",
-            "case_retention_days": int(config.CASE_RETENTION_DAYS),
-        }
+        """Liveness probe for load balancers; intentionally minimal and unauthenticated."""
+        return {"status": "ok"}
 
     @app.get("/ready")
     def ready() -> Any:
+        """Archive readiness for load balancers; does not probe chat LLM dependencies."""
         archive_ready = check_case_archive_ready(config=config, connect=connect_fn)
+        if archive_ready:
+            return {"status": "ready"}
+        return JSONResponse(status_code=503, content={"status": "not_ready"})
+
+    @app.get("/api/capabilities")
+    def api_capabilities() -> dict[str, Any]:
+        return {
+            "case_qa_enabled": bool(config.CASE_QA_ENABLED),
+            "global_retrieval_enabled": bool(config.CASE_QA_GLOBAL_RETRIEVAL_ENABLED),
+            "chat_history_enabled": bool(config.CASE_QA_CHAT_HISTORY_ENABLED),
+            "general_knowledge_enabled": bool(config.CASE_QA_GENERAL_KNOWLEDGE_ENABLED),
+            "max_question_chars": int(config.CASE_QA_MAX_QUESTION_CHARS),
+            "max_answer_tokens": int(config.CASE_QA_MAX_ANSWER_TOKENS),
+            "max_chat_sessions_per_user": int(config.CASE_QA_MAX_SESSIONS_PER_USER),
+            "case_retention_days": int(config.CASE_RETENTION_DAYS),
+        }
+
+    @app.get("/api/diagnostics/chat-readiness")
+    def api_chat_readiness() -> Any:
         chat_ready = check_case_chat_ready(
             config=config,
             connect=connect_fn,
             embedding_model=chat_embedding_model,
         )
-        if archive_ready and chat_ready:
+        if chat_ready:
             return {"status": "ready"}
         return JSONResponse(status_code=503, content={"status": "not_ready"})
 
@@ -500,19 +538,60 @@ def build_portal_app(
             raise HTTPException(status_code=404, detail="session_id was not found.")
         return {"deleted": True, "session_id": session_id}
 
-    @app.post("/api/chat")
-    def api_chat(payload: dict[str, Any]) -> dict[str, Any]:
+    @app.delete("/api/chat/sessions/{session_id}/turns/last")
+    def api_delete_last_chat_turn(
+        session_id: str,
+        expected_message_count: int | None = None,
+    ) -> dict[str, Any]:
+        if not bool(config.CASE_QA_CHAT_HISTORY_ENABLED):
+            raise HTTPException(status_code=404, detail="Chat history is disabled.")
         try:
-            return answer_case_chat(
-                payload=payload,
+            deleted_count = delete_last_chat_turn(
                 config=config,
-                connect=connect_fn,
-                embedding_model=chat_embedding_model,
-                synthesize=chat_synthesizer,
-                general_synthesize=chat_general_synthesizer,
-                knowledge_base_provider=chat_knowledge_base_provider,
+                session_id=session_id,
                 user_id=_TRUSTED_USER_CTX.get(),
+                expected_message_count=expected_message_count,
+                connect=connect_fn,
             )
+        except ValueError as exc:
+            detail = str(exc)
+            if "does not match the expected orphan cleanup snapshot" in detail:
+                raise HTTPException(status_code=409, detail=detail) from exc
+            raise HTTPException(status_code=400, detail=detail) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Failed to delete last portal chat turn")
+            raise HTTPException(status_code=503, detail="Chat history unavailable.") from exc
+        if deleted_count <= 0:
+            raise HTTPException(status_code=404, detail="No chat turn was found to delete.")
+        return {
+            "deleted": True,
+            "session_id": session_id,
+            "deleted_messages": deleted_count,
+        }
+
+    def _answer_portal_chat(payload: dict[str, Any]) -> dict[str, Any]:
+        return answer_case_chat(
+            payload=payload,
+            config=config,
+            connect=connect_fn,
+            embedding_model=chat_embedding_model,
+            synthesize=chat_synthesizer,
+            general_synthesize=chat_general_synthesizer,
+            knowledge_base_provider=chat_knowledge_base_provider,
+            user_id=_TRUSTED_USER_CTX.get(),
+        )
+
+    @app.post("/api/chat")
+    async def api_chat(payload: dict[str, Any]) -> dict[str, Any]:
+        if not chat_semaphore.acquire(blocking=False):
+            raise HTTPException(
+                status_code=429,
+                detail="Too many chat requests are already running. Try again shortly.",
+            )
+        try:
+            return await asyncio.to_thread(_answer_portal_chat, payload)
         except CaseNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Case not found.") from exc
         except ValueError as exc:
@@ -522,6 +601,8 @@ def build_portal_app(
         except Exception as exc:
             logger.exception("Failed to answer portal chat request")
             raise HTTPException(status_code=503, detail="Case chat unavailable.") from exc
+        finally:
+            chat_semaphore.release()
 
     @app.get("/", response_class=HTMLResponse)
     def portal_home() -> str:

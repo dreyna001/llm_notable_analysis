@@ -42,6 +42,7 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.CASE_RETENTION_DAYS, 30)
         self.assertEqual(config.CASE_RETENTION_DELETE_BATCH_SIZE, 500)
         self.assertFalse(config.PORTAL_ENABLED)
+        self.assertEqual(config.PORTAL_CHAT_MAX_CONCURRENCY, 4)
         self.assertFalse(config.CASE_QA_ENABLED)
         self.assertFalse(config.CASE_QA_GLOBAL_RETRIEVAL_ENABLED)
         self.assertFalse(config.CASE_QA_CHAT_HISTORY_ENABLED)
@@ -351,6 +352,7 @@ class TestConfigRuntimeContract(unittest.TestCase):
             "PORTAL_BIND_HOST": "127.0.0.2",
             "PORTAL_PORT": "8081",
             "PORTAL_PAGE_SIZE": "25",
+            "PORTAL_CHAT_MAX_CONCURRENCY": "8",
             "PORTAL_TRUSTED_USER_HEADER": "X-Test-User",
             "PORTAL_PROXY_SECRET": "portal-secret",
         }
@@ -391,6 +393,7 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.PORTAL_BIND_HOST, "127.0.0.2")
         self.assertEqual(config.PORTAL_PORT, 8081)
         self.assertEqual(config.PORTAL_PAGE_SIZE, 25)
+        self.assertEqual(config.PORTAL_CHAT_MAX_CONCURRENCY, 8)
         self.assertEqual(config.PORTAL_TRUSTED_USER_HEADER, "X-Test-User")
 
     def test_portal_enabled_requires_proxy_secret(self) -> None:
