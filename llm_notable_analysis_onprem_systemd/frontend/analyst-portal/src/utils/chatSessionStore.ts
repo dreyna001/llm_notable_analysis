@@ -24,7 +24,14 @@ export type ChatSessionStore = {
   sessions: StoredChatSession[];
 };
 
+export type CappedChatSessionStore = {
+  store: ChatSessionStore;
+  evictedCount: number;
+};
+
 const STORAGE_KEY = "portal-chat-sessions-v1";
+
+export const DEFAULT_MAX_CHAT_SESSIONS = 10;
 
 function newLocalId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -60,6 +67,146 @@ export function createEmptySession(
   };
 }
 
+function isChatMode(value: unknown): value is ChatMode {
+  return value === "selected_case" || value === "global_archive";
+}
+
+function isStoredTurn(value: unknown): value is StoredChatTurn {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const turn = value as Partial<StoredChatTurn>;
+  if (typeof turn.id !== "string" || typeof turn.question !== "string") {
+    return false;
+  }
+  if (turn.response == null) {
+    return true;
+  }
+  return (
+    typeof turn.response === "object" &&
+    typeof turn.response.answer === "string" &&
+    typeof turn.response.answer_status === "string"
+  );
+}
+
+function normalizeSession(value: unknown): StoredChatSession | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const session = value as Partial<StoredChatSession>;
+  if (
+    typeof session.localId !== "string" ||
+    typeof session.title !== "string" ||
+    typeof session.updatedAt !== "string" ||
+    !isChatMode(session.mode) ||
+    !Array.isArray(session.turns)
+  ) {
+    return null;
+  }
+  const turns = session.turns.filter(isStoredTurn);
+  return {
+    localId: session.localId,
+    serverSessionId:
+      typeof session.serverSessionId === "string" ? session.serverSessionId : null,
+    title: session.title || "New chat",
+    updatedAt: session.updatedAt,
+    mode: session.mode,
+    selectedCaseId:
+      typeof session.selectedCaseId === "string" ? session.selectedCaseId : undefined,
+    turns,
+  };
+}
+
+function emptyStore(): ChatSessionStore {
+  const session = createEmptySession();
+  return { activeLocalId: session.localId, sessions: [session] };
+}
+
+/** Guarantee at least one session and a valid activeLocalId for UI rendering. */
+export function ensureChatSessionStore(store: ChatSessionStore): ChatSessionStore {
+  if (!store.sessions.length) {
+    return emptyStore();
+  }
+  const activeExists = store.sessions.some(
+    (session) => session.localId === store.activeLocalId,
+  );
+  if (activeExists) {
+    return store;
+  }
+  return {
+    activeLocalId: store.sessions[0].localId,
+    sessions: store.sessions,
+  };
+}
+
+export function capChatSessionStore(
+  store: ChatSessionStore,
+  maxSessions: number = DEFAULT_MAX_CHAT_SESSIONS,
+): ChatSessionStore {
+  return capChatSessionStoreWithMeta(store, maxSessions).store;
+}
+
+export function capChatSessionStoreWithMeta(
+  store: ChatSessionStore,
+  maxSessions: number = DEFAULT_MAX_CHAT_SESSIONS,
+): CappedChatSessionStore {
+  const limit = Math.max(1, maxSessions);
+  if (store.sessions.length <= limit) {
+    return { store: ensureChatSessionStore(store), evictedCount: 0 };
+  }
+
+  const activeId = store.activeLocalId;
+  const byRecency = [...store.sessions].sort((left, right) =>
+    right.updatedAt.localeCompare(left.updatedAt),
+  );
+  const kept = byRecency.slice(0, limit);
+  if (!kept.some((session) => session.localId === activeId)) {
+    const active = store.sessions.find((session) => session.localId === activeId);
+    if (active) {
+      kept[limit - 1] = active;
+    }
+  }
+
+  const keptIds = new Set(kept.map((session) => session.localId));
+  const evictedCount = store.sessions.filter(
+    (session) => !keptIds.has(session.localId),
+  ).length;
+
+  const activeLocalId = kept.some((session) => session.localId === activeId)
+    ? activeId
+    : (kept[0]?.localId ?? activeId);
+  return {
+    store: ensureChatSessionStore({ activeLocalId, sessions: kept }),
+    evictedCount,
+  };
+}
+
+function normalizeStore(
+  value: unknown,
+  maxSessions: number = DEFAULT_MAX_CHAT_SESSIONS,
+): ChatSessionStore {
+  if (!value || typeof value !== "object") {
+    return emptyStore();
+  }
+  const store = value as Partial<ChatSessionStore>;
+  if (!Array.isArray(store.sessions) || typeof store.activeLocalId !== "string") {
+    return emptyStore();
+  }
+  const sessions = store.sessions
+    .map(normalizeSession)
+    .filter((session): session is StoredChatSession => session !== null);
+  if (!sessions.length) {
+    return emptyStore();
+  }
+  return capChatSessionStore(
+    {
+      activeLocalId: store.activeLocalId,
+      sessions,
+    },
+    maxSessions,
+  );
+}
+
 export function isUnusedSession(session: StoredChatSession): boolean {
   return session.turns.length === 0;
 }
@@ -70,32 +217,115 @@ export function findUnusedSession(
   return sessions.find(isUnusedSession);
 }
 
-export function loadChatSessionStore(): ChatSessionStore {
-  if (typeof window === "undefined") {
-    const session = createEmptySession();
+function sessionMatchesContext(
+  session: StoredChatSession,
+  mode: ChatMode,
+  selectedCaseId?: string,
+): boolean {
+  if (session.mode !== mode) {
+    return false;
+  }
+  if (mode === "selected_case") {
+    return session.selectedCaseId === selectedCaseId;
+  }
+  return session.selectedCaseId == null;
+}
+
+function applyContextToSession(
+  session: StoredChatSession,
+  mode: ChatMode,
+  selectedCaseId?: string,
+): StoredChatSession {
+  return {
+    ...session,
+    mode,
+    selectedCaseId: mode === "selected_case" ? selectedCaseId : undefined,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/** Keep the active chat when context changes; start a fresh session if it already has turns. */
+export function switchToChatContext(
+  store: ChatSessionStore,
+  mode: ChatMode,
+  selectedCaseId?: string,
+): ChatSessionStore {
+  const active =
+    store.sessions.find((session) => session.localId === store.activeLocalId) ??
+    store.sessions[0];
+  if (!active) {
+    const session = createEmptySession(mode, selectedCaseId);
     return { activeLocalId: session.localId, sessions: [session] };
+  }
+
+  if (sessionMatchesContext(active, mode, selectedCaseId)) {
+    return store;
+  }
+
+  if (isUnusedSession(active) && !active.serverSessionId) {
+    return {
+      ...store,
+      sessions: store.sessions.map((session) =>
+        session.localId === active.localId
+          ? applyContextToSession(session, mode, selectedCaseId)
+          : session,
+      ),
+    };
+  }
+
+  const reusable = findUnusedSession(
+    store.sessions.filter((session) => session.localId !== active.localId),
+  );
+  if (reusable) {
+    return {
+      ...store,
+      activeLocalId: reusable.localId,
+      sessions: store.sessions.map((session) =>
+        session.localId === reusable.localId
+          ? {
+              ...applyContextToSession(session, mode, selectedCaseId),
+              serverSessionId: null,
+            }
+          : session,
+      ),
+    };
+  }
+
+  const session = createEmptySession(mode, selectedCaseId);
+  return {
+    activeLocalId: session.localId,
+    sessions: [session, ...store.sessions],
+  };
+}
+
+export function loadChatSessionStore(
+  maxSessions: number = DEFAULT_MAX_CHAT_SESSIONS,
+): ChatSessionStore {
+  if (typeof window === "undefined") {
+    return emptyStore();
   }
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      const session = createEmptySession();
-      return { activeLocalId: session.localId, sessions: [session] };
+      return emptyStore();
     }
-    const parsed = JSON.parse(raw) as ChatSessionStore;
-    if (!parsed?.sessions?.length || !parsed.activeLocalId) {
-      const session = createEmptySession();
-      return { activeLocalId: session.localId, sessions: [session] };
-    }
-    return parsed;
+    return normalizeStore(JSON.parse(raw), maxSessions);
   } catch {
-    const session = createEmptySession();
-    return { activeLocalId: session.localId, sessions: [session] };
+    return emptyStore();
   }
 }
 
-export function saveChatSessionStore(store: ChatSessionStore): void {
+export function saveChatSessionStore(
+  store: ChatSessionStore,
+  maxSessions: number = DEFAULT_MAX_CHAT_SESSIONS,
+): void {
   if (typeof window === "undefined") {
     return;
   }
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+  const normalized = normalizeStore(store, maxSessions);
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+  } catch {
+    // Storage can be unavailable or full; chat still works without local persistence.
+  }
 }

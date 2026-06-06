@@ -1,10 +1,20 @@
 import ReactMarkdown, { type Components } from "react-markdown";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 
 type MarkdownMessageProps = {
   text: string;
   className?: string;
+};
+
+const sanitizeSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    a: [...(defaultSchema.attributes?.a ?? []), "href", "title", "target", "rel"],
+    code: [...(defaultSchema.attributes?.code ?? []), "className"],
+  },
 };
 
 function normalizeMarkdown(text: string): string {
@@ -18,12 +28,36 @@ function normalizeMarkdown(text: string): string {
     .trim();
 }
 
+function safeHref(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  try {
+    const url = new URL(trimmed, window.location.origin);
+    if (["http:", "https:", "mailto:"].includes(url.protocol)) {
+      return trimmed;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
 const markdownComponents: Components = {
-  a({ className, node: _node, ...props }) {
+  a({ className, href, node: _node, ...props }) {
+    const safe = safeHref(href);
+    if (!safe) {
+      return <span className={className} {...props} />;
+    }
     return (
       <a
         className={cn("underline underline-offset-4", className)}
-        rel="noreferrer"
+        href={safe}
+        rel="noopener noreferrer"
         target="_blank"
         {...props}
       />
@@ -73,6 +107,13 @@ const markdownComponents: Components = {
         className={cn("mt-4 text-base font-semibold tracking-tight", className)}
         {...props}
       />
+    );
+  },
+  img({ alt }) {
+    return (
+      <span className="text-xs italic text-muted-foreground">
+        {alt ? `[image omitted: ${alt}]` : "[image omitted]"}
+      </span>
     );
   },
   li({ className, node: _node, ...props }) {
@@ -144,7 +185,11 @@ export function MarkdownMessage({ text, className }: MarkdownMessageProps) {
 
   return (
     <div className={cn("max-w-3xl text-sm leading-relaxed", className)}>
-      <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
+      <ReactMarkdown
+        components={markdownComponents}
+        rehypePlugins={[[rehypeSanitize, sanitizeSchema]]}
+        remarkPlugins={[remarkGfm]}
+      >
         {normalizedText}
       </ReactMarkdown>
     </div>

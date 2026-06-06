@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { fetchCase, fetchHealth } from "../api/client";
+import { fetchCapabilities, fetchCase } from "../api/client";
 import { HomeChatWorkspace } from "../components/HomeChatWorkspace";
 import type { CaseDetail } from "../types";
 
@@ -27,11 +27,25 @@ export function HomePage() {
   const [caseRetentionDays, setCaseRetentionDays] = useState<number>(30);
   const [selectedCase, setSelectedCase] = useState<CaseDetail | null>(null);
   const [selectedCaseLoading, setSelectedCaseLoading] = useState(false);
+  const [attachError, setAttachError] = useState<string | null>(null);
   const selectedCaseId = searchParams.get("case_id")?.trim() || undefined;
+
+  const handleAttachCase = useCallback(
+    (caseId: string) => {
+      setAttachError(null);
+      setSearchParams({ case_id: caseId });
+    },
+    [setSearchParams],
+  );
+
+  const handleClearSelectedCase = useCallback(() => {
+    setAttachError(null);
+    setSearchParams({});
+  }, [setSearchParams]);
 
   useEffect(() => {
     let cancelled = false;
-    fetchHealth()
+    fetchCapabilities()
       .then((payload) => {
         if (
           !cancelled &&
@@ -42,7 +56,7 @@ export function HomePage() {
         }
       })
       .catch(() => {
-        // Keep the default case window when health is unavailable.
+        // Keep the default case window when capabilities are unavailable.
       });
     return () => {
       cancelled = true;
@@ -53,10 +67,12 @@ export function HomePage() {
     if (!selectedCaseId) {
       setSelectedCase(null);
       setSelectedCaseLoading(false);
+      setAttachError(null);
       return;
     }
     let cancelled = false;
     setSelectedCaseLoading(true);
+    setAttachError(null);
     fetchCase(selectedCaseId)
       .then((payload) => {
         if (!cancelled) {
@@ -66,6 +82,7 @@ export function HomePage() {
       .catch(() => {
         if (!cancelled) {
           setSelectedCase(null);
+          setAttachError("Case not found or unavailable.");
         }
       })
       .finally(() => {
@@ -96,7 +113,9 @@ export function HomePage() {
         selectedCaseName={alertName(selectedCase)}
         selectedCaseProcessedAt={selectedCase?.metadata.processed_at ?? undefined}
         selectedCaseLoading={selectedCaseLoading}
-        onClearSelectedCase={() => setSearchParams({})}
+        attachError={attachError}
+        onAttachCase={handleAttachCase}
+        onClearSelectedCase={handleClearSelectedCase}
       />
     </div>
   );

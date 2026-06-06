@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,9 +11,17 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { ApiError, fetchCases } from "../api/client";
+import { ApiError, fetchCase, fetchCases } from "../api/client";
 import type { CaseSummary } from "../types";
+import { caseDetailToSummary } from "../utils/caseSummary";
 
 type CaseFilters = {
   start: string;
@@ -77,10 +85,112 @@ function retrievalBadgeVariant(
   }
 }
 
-const selectClassName = cn(
-  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm",
-  "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+function prependCaseIfMissing(
+  items: CaseSummary[],
+  exactCase: CaseSummary | null,
+): CaseSummary[] {
+  if (!exactCase || items.some((item) => item.case_id === exactCase.case_id)) {
+    return items;
+  }
+  return [exactCase, ...items];
+}
+
+function exactCaseMatchesFilters(
+  item: CaseSummary,
+  filters: CaseFilters,
+): boolean {
+  if (filters.verdict && normalizeVerdict(item.verdict) !== filters.verdict) {
+    return false;
+  }
+  if (filters.start && (!item.processed_at || item.processed_at < filters.start)) {
+    return false;
+  }
+  if (filters.end && (!item.processed_at || item.processed_at > filters.end)) {
+    return false;
+  }
+  return true;
+}
+
+function filterDateValue(value: string): string {
+  return value.split("T")[0] ?? "";
+}
+
+function localDateToIso(value: string, endOfDay = false): string {
+  const date = filterDateValue(value);
+  if (!date) {
+    return "";
+  }
+  const [year, month, day] = date.split("-").map(Number);
+  if (!year || !month || !day) {
+    return "";
+  }
+  const local = new Date(
+    year,
+    month - 1,
+    day,
+    endOfDay ? 23 : 0,
+    endOfDay ? 59 : 0,
+    endOfDay ? 59 : 0,
+    endOfDay ? 999 : 0,
+  );
+  return local.toISOString();
+}
+
+function formatFilterStart(value: string): string {
+  return localDateToIso(value);
+}
+
+function formatFilterEnd(value: string): string {
+  return localDateToIso(value, true);
+}
+
+function openNativeDatePicker(event: MouseEvent<HTMLInputElement>) {
+  const input = event.currentTarget;
+  if (typeof input.showPicker === "function") {
+    try {
+      input.showPicker();
+      return;
+    } catch {
+      // Fall through to focus when the browser blocks showPicker.
+    }
+  }
+  input.focus();
+}
+
+const dateInputClassName = cn(
+  "h-10 w-full min-w-[11rem] cursor-pointer bg-background px-3",
+  "[color-scheme:dark] appearance-none",
+  "[&::-webkit-calendar-picker-indicator]:hidden",
+  "[&::-webkit-calendar-picker-indicator]:appearance-none",
 );
+
+type DateFilterFieldProps = {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+};
+
+function DateFilterField({ id, label, value, onChange }: DateFilterFieldProps) {
+  return (
+    <div className="w-full min-w-[11rem] sm:w-44">
+      <Label className="mb-1.5 block" htmlFor={id}>
+        {label}
+      </Label>
+      <Input
+        className={dateInputClassName}
+        id={id}
+        type="date"
+        value={filterDateValue(value)}
+        onChange={(event) => onChange(event.target.value)}
+        onClick={openNativeDatePicker}
+      />
+    </div>
+  );
+}
+
+const VERDICT_FILTER_ANY = "any";
+const SEARCH_DEBOUNCE_MS = 300;
 
 export function CasesPage() {
   const [items, setItems] = useState<CaseSummary[]>([]);
@@ -94,19 +204,54 @@ export function CasesPage() {
   const currentPage = Math.floor(offset / limit) + 1;
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const nextSearch = draftFilters.search_name.trim();
+      setFilters((previous) => {
+        if (previous.search_name === nextSearch) {
+          return previous;
+        }
+        return { ...previous, search_name: nextSearch };
+      });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [draftFilters.search_name]);
+
+  useEffect(() => {
+    setOffset(0);
+  }, [filters.search_name]);
+
+  useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetchCases({
-      limit,
-      offset,
-      start: filters.start || undefined,
-      end: filters.end || undefined,
-      verdict: filters.verdict || undefined,
-      search_name: filters.search_name || undefined,
-    })
-      .then((payload) => {
+    const searchTerm = filters.search_name.trim();
+
+    Promise.all([
+      fetchCases({
+        limit,
+        offset,
+        start: filters.start || undefined,
+        end: filters.end || undefined,
+        verdict: filters.verdict || undefined,
+        search_name: searchTerm || undefined,
+      }),
+      offset === 0 && searchTerm
+        ? fetchCase(searchTerm)
+            .then(caseDetailToSummary)
+            .catch((err: unknown) => {
+              if (err instanceof ApiError && err.status === 404) {
+                return null;
+              }
+              throw err;
+            })
+        : Promise.resolve(null),
+    ])
+      .then(([payload, exactCase]) => {
         if (!cancelled) {
-          setItems(payload.items);
+          const filteredExactCase =
+            exactCase && exactCaseMatchesFilters(exactCase, filters)
+              ? exactCase
+              : null;
+          setItems(prependCaseIfMissing(payload.items, filteredExactCase));
           setHasMore(payload.has_more);
           setError(null);
         }
@@ -119,7 +264,6 @@ export function CasesPage() {
               : err instanceof Error
                 ? err.message
                 : "Unknown error";
-          setItems([]);
           setError(message);
         }
       })
@@ -134,12 +278,12 @@ export function CasesPage() {
   function applyFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setOffset(0);
-    setFilters({
-      start: draftFilters.start.trim(),
-      end: draftFilters.end.trim(),
+    setFilters((previous) => ({
+      start: formatFilterStart(draftFilters.start),
+      end: formatFilterEnd(draftFilters.end),
       verdict: draftFilters.verdict.trim(),
-      search_name: draftFilters.search_name.trim(),
-    });
+      search_name: previous.search_name,
+    }));
   }
 
   function clearFilters() {
@@ -166,83 +310,87 @@ export function CasesPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <form
-            className="grid gap-4 border-b border-border/60 pb-4 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5"
+            className="border-b border-border/60 pb-4"
             onSubmit={applyFilters}
           >
-            <div className="space-y-1.5">
-              <Label htmlFor="filter-start">Start</Label>
-              <Input
+            <div className="flex flex-wrap items-end gap-4">
+              <DateFilterField
                 id="filter-start"
-                type="datetime-local"
+                label="Start"
                 value={draftFilters.start}
-                onChange={(event) =>
+                onChange={(start) =>
                   setDraftFilters((value) => ({
                     ...value,
-                    start: event.target.value,
+                    start,
                   }))
                 }
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="filter-end">End</Label>
-              <Input
+              <DateFilterField
                 id="filter-end"
-                type="datetime-local"
+                label="End"
                 value={draftFilters.end}
-                onChange={(event) =>
+                onChange={(end) =>
                   setDraftFilters((value) => ({
                     ...value,
-                    end: event.target.value,
+                    end,
                   }))
                 }
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="filter-verdict">Verdict</Label>
-              <select
-                className={selectClassName}
-                id="filter-verdict"
-                value={draftFilters.verdict}
-                onChange={(event) =>
-                  setDraftFilters((value) => ({
-                    ...value,
-                    verdict: event.target.value,
-                  }))
-                }
-              >
-                <option value="">Any verdict</option>
-                <option value="likely_malicious">Likely malicious</option>
-                <option value="likely_benign">Likely benign</option>
-                <option value="unknown">Unknown</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="filter-search">Alert name</Label>
-              <Input
-                id="filter-search"
-                placeholder="Partial alert name"
-                type="text"
-                value={draftFilters.search_name}
-                onChange={(event) =>
-                  setDraftFilters((value) => ({
-                    ...value,
-                    search_name: event.target.value,
-                  }))
-                }
-              />
-            </div>
-            <div className="flex items-end gap-2">
-              <Button disabled={loading} type="submit">
-                Apply filters
-              </Button>
-              <Button
-                disabled={loading}
-                type="button"
-                variant="outline"
-                onClick={clearFilters}
-              >
-                Clear
-              </Button>
+              <div className="w-full min-w-[10rem] sm:w-40">
+                <Label className="mb-1.5 block" htmlFor="filter-verdict">
+                  Verdict
+                </Label>
+                <Select
+                  value={draftFilters.verdict || VERDICT_FILTER_ANY}
+                  onValueChange={(verdict) =>
+                    setDraftFilters((value) => ({
+                      ...value,
+                      verdict: verdict === VERDICT_FILTER_ANY ? "" : verdict,
+                    }))
+                  }
+                >
+                  <SelectTrigger className="h-10" id="filter-verdict">
+                    <SelectValue placeholder="Any verdict" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={VERDICT_FILTER_ANY}>Any verdict</SelectItem>
+                    <SelectItem value="likely_malicious">Likely malicious</SelectItem>
+                    <SelectItem value="likely_benign">Likely benign</SelectItem>
+                    <SelectItem value="unknown">Unknown</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="min-w-[12rem] flex-1">
+                <Label className="mb-1.5 block" htmlFor="filter-search">
+                  Alert name
+                </Label>
+                <Input
+                  className="h-10 bg-background"
+                  id="filter-search"
+                  placeholder="Partial alert name"
+                  type="search"
+                  value={draftFilters.search_name}
+                  onChange={(event) =>
+                    setDraftFilters((value) => ({
+                      ...value,
+                      search_name: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="flex shrink-0 items-center gap-2 pb-0.5">
+                <Button disabled={loading} type="submit">
+                  Apply filters
+                </Button>
+                <Button
+                  disabled={loading}
+                  type="button"
+                  variant="outline"
+                  onClick={clearFilters}
+                >
+                  Clear
+                </Button>
+              </div>
             </div>
           </form>
 
@@ -263,7 +411,7 @@ export function CasesPage() {
                     <th className="pb-3 pr-4 font-medium">Processed</th>
                     <th className="pb-3 pr-4 font-medium">Verdict</th>
                     <th className="pb-3 pr-4 font-medium">Alert name</th>
-                    <th className="pb-3 font-medium">Chatbot Readiness</th>
+                    <th className="pb-3 pr-4 font-medium">Chatbot Readiness</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -294,7 +442,7 @@ export function CasesPage() {
                       <td className="py-3 pr-4 text-muted-foreground">
                         {item.search_name ?? "-"}
                       </td>
-                      <td className="py-3">
+                      <td className="py-3 pr-4">
                         <Badge
                           variant={retrievalBadgeVariant(item.retrieval_status)}
                         >

@@ -5,15 +5,20 @@ import type {
   ChatResponse,
   ChatSessionMessagesResponse,
   ChatSessionsResponse,
+  PortalCapabilities,
 } from "../types";
+
+export type ApiErrorKind = "cancelled" | "timeout" | "http";
 
 export class ApiError extends Error {
   status: number;
+  kind: ApiErrorKind;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, kind: ApiErrorKind = "http") {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.kind = kind;
   }
 }
 
@@ -35,11 +40,84 @@ async function readJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
+type ApiFetchOptions = RequestInit & {
+  timeoutMs?: number;
+};
+
+const DEFAULT_TIMEOUT_MS = 30_000;
+const CHAT_TIMEOUT_MS = 270_000;
+
+function mergeAbortSignals(
+  timeoutMs: number,
+  callerSignal?: AbortSignal,
+): { signal: AbortSignal; cleanup: () => void } {
+  const timeoutController = new AbortController();
+  const timeout = window.setTimeout(() => timeoutController.abort(), timeoutMs);
+  const cleanup = () => window.clearTimeout(timeout);
+
+  if (!callerSignal) {
+    return { signal: timeoutController.signal, cleanup };
+  }
+
+  if (typeof AbortSignal !== "undefined" && "any" in AbortSignal) {
+    return {
+      signal: AbortSignal.any([timeoutController.signal, callerSignal]),
+      cleanup,
+    };
+  }
+
+  const linked = new AbortController();
+  const abortLinked = () => linked.abort();
+  if (callerSignal.aborted || timeoutController.signal.aborted) {
+    linked.abort();
+  }
+  callerSignal.addEventListener("abort", abortLinked, { once: true });
+  timeoutController.signal.addEventListener("abort", abortLinked, { once: true });
+  return {
+    signal: linked.signal,
+    cleanup: () => {
+      cleanup();
+      callerSignal.removeEventListener("abort", abortLinked);
+      timeoutController.signal.removeEventListener("abort", abortLinked);
+    },
+  };
+}
+
+async function apiFetch(
+  input: RequestInfo | URL,
+  { timeoutMs = DEFAULT_TIMEOUT_MS, signal, ...init }: ApiFetchOptions = {},
+): Promise<Response> {
+  const { signal: mergedSignal, cleanup } = mergeAbortSignals(
+    timeoutMs,
+    signal ?? undefined,
+  );
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: mergedSignal,
+    });
+  } catch (error) {
+    if (signal?.aborted) {
+      throw new ApiError(0, "Request cancelled.", "cancelled");
+    }
+    if (mergedSignal.aborted) {
+      throw new ApiError(0, "Request timed out.", "timeout");
+    }
+    throw error;
+  } finally {
+    cleanup();
+  }
+}
+
 export async function fetchHealth(): Promise<{
   status: string;
   case_retention_days?: number;
 }> {
-  return readJson(await fetch("/health"));
+  return readJson(await apiFetch("/health"));
+}
+
+export async function fetchCapabilities(): Promise<PortalCapabilities> {
+  return readJson(await apiFetch("/api/capabilities"));
 }
 
 export async function fetchCases(params?: {
@@ -58,19 +136,24 @@ export async function fetchCases(params?: {
   if (params?.verdict) query.set("verdict", params.verdict);
   if (params?.search_name) query.set("search_name", params.search_name);
   const suffix = query.size ? `?${query}` : "";
-  return readJson(await fetch(`/api/cases${suffix}`));
+  return readJson(await apiFetch(`/api/cases${suffix}`));
 }
 
 export async function fetchCase(caseId: string): Promise<CaseDetail> {
-  return readJson(await fetch(`/api/cases/${encodeURIComponent(caseId)}`));
+  return readJson(await apiFetch(`/api/cases/${encodeURIComponent(caseId)}`));
 }
 
-export async function postChat(payload: ChatRequest): Promise<ChatResponse> {
+export async function postChat(
+  payload: ChatRequest,
+  options?: { signal?: AbortSignal },
+): Promise<ChatResponse> {
   return readJson(
-    await fetch("/api/chat", {
+    await apiFetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+      timeoutMs: CHAT_TIMEOUT_MS,
+      signal: options?.signal,
     }),
   );
 }
@@ -78,14 +161,17 @@ export async function postChat(payload: ChatRequest): Promise<ChatResponse> {
 export async function fetchChatSessions(limit = 50): Promise<ChatSessionsResponse> {
   const query = new URLSearchParams();
   query.set("limit", String(limit));
-  return readJson(await fetch(`/api/chat/sessions?${query}`));
+  return readJson(await apiFetch(`/api/chat/sessions?${query}`));
 }
 
 export async function fetchChatSessionMessages(
   sessionId: string,
+  options?: { signal?: AbortSignal },
 ): Promise<ChatSessionMessagesResponse> {
   return readJson(
-    await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/messages`),
+    await apiFetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/messages`, {
+      signal: options?.signal,
+    }),
   );
 }
 
@@ -93,8 +179,27 @@ export async function deleteChatSession(
   sessionId: string,
 ): Promise<{ deleted: boolean; session_id: string }> {
   return readJson(
-    await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}`, {
+    await apiFetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}`, {
       method: "DELETE",
     }),
+  );
+}
+
+export async function deleteLastChatTurn(
+  sessionId: string,
+  options?: { expectedMessageCount?: number },
+): Promise<{ deleted: boolean; session_id: string; deleted_messages: number }> {
+  const query = new URLSearchParams();
+  if (options?.expectedMessageCount != null) {
+    query.set("expected_message_count", String(options.expectedMessageCount));
+  }
+  const suffix = query.size ? `?${query}` : "";
+  return readJson(
+    await apiFetch(
+      `/api/chat/sessions/${encodeURIComponent(sessionId)}/turns/last${suffix}`,
+      {
+        method: "DELETE",
+      },
+    ),
   );
 }

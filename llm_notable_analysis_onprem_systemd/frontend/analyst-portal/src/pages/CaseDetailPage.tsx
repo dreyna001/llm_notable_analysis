@@ -1,3 +1,4 @@
+import { MessageSquare } from "lucide-react";
 import {
   useEffect,
   useState,
@@ -5,10 +6,45 @@ import {
   type SetStateAction,
 } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  CollapsibleDetailCard,
+  DetailBulletList,
+  DetailCard,
+  DetailCardTitle,
+  DetailCodeBlock,
+  DetailDriverCol,
+  DetailDriverGrid,
+  DetailError,
+  DetailHero,
+  DetailHypothesisBlock,
+  DetailKvGrid,
+  DetailKvRow,
+  DetailMetaGrid,
+  DetailMetaTerm,
+  DetailMetaValue,
+  DetailMetric,
+  DetailMetricGrid,
+  DetailMiniTitle,
+  DetailMuted,
+  DetailPivotBlock,
+  DetailProgressRow,
+  DetailSectionLabel,
+  DetailStack,
+  DetailTwoCol,
+  hypothesisChipClass,
+  hypothesisTitleClass,
+  InterpretationAssessmentBadge,
+  InterpretationDeltaBadge,
+  ttpScoreBadgeVariant,
+} from "../components/case-detail/CaseDetailUi";
 import { ApiError, fetchCase } from "../api/client";
 import type { CaseDetail } from "../types";
 import {
-  parseCaseDetailTab,
+  caseDetailTabNeedsUrlCleanup,
+  resolveCaseDetailTab,
   type CaseDetailTab,
 } from "../utils/caseDetailTabs";
 
@@ -455,37 +491,6 @@ function hypothesisIndexLabel(index: unknown): string {
   return "n/a";
 }
 
-function interpretationLabel(value: unknown): string {
-  const text = asText(value, "unknown").replace(/_/g, " ");
-  return text.replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function interpretationAssessmentPill(assessment: unknown): string {
-  switch (asText(assessment, "unknown").toLowerCase()) {
-    case "supports":
-      return "interp-pill interp-pill-supports";
-    case "weakens":
-      return "interp-pill interp-pill-weakens";
-    case "inconclusive":
-      return "interp-pill interp-pill-inconclusive";
-    default:
-      return "interp-pill interp-pill-unknown";
-  }
-}
-
-function interpretationDeltaPill(delta: unknown): string {
-  switch (asText(delta, "unknown").toLowerCase()) {
-    case "increase":
-      return "interp-pill interp-pill-increase";
-    case "decrease":
-      return "interp-pill interp-pill-decrease";
-    case "unchanged":
-      return "interp-pill interp-pill-unchanged";
-    default:
-      return "interp-pill interp-pill-unknown";
-  }
-}
-
 function interpretationsForQuery(
   query: Record<string, unknown>,
   interpretations: Record<string, unknown>[],
@@ -536,7 +541,6 @@ export function CaseDetailPage() {
   const [detail, setDetail] = useState<CaseDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<CaseDetailTab>("overview");
   const [openHypotheses, setOpenHypotheses] = useState<Set<string>>(
     () => new Set(["hypothesis-0"]),
   );
@@ -549,13 +553,7 @@ export function CaseDetailPage() {
     setOpenQueries(new Set(["query-0"]));
   }, [caseId]);
 
-  useEffect(() => {
-    const tabFromUrl = parseCaseDetailTab(searchParams.get("tab"));
-    setActiveTab(tabFromUrl ?? "overview");
-  }, [caseId, searchParams]);
-
   function selectTab(tab: CaseDetailTab) {
-    setActiveTab(tab);
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
@@ -675,178 +673,158 @@ export function CaseDetailPage() {
     ...(hasRawOutput ? [["raw", "Raw Output"] as [CaseDetailTab, string]] : []),
     ["metadata", "Case Metadata"],
   ];
+  const availableTabIds = tabs.map(([tab]) => tab);
+  const availableTabsKey = availableTabIds.join(",");
+  const activeTab = resolveCaseDetailTab(searchParams.get("tab"), availableTabIds);
+
+  useEffect(() => {
+    if (!detail) return;
+    const tabParam = searchParams.get("tab");
+    const availableTabs = availableTabsKey.split(",") as CaseDetailTab[];
+    if (!caseDetailTabNeedsUrlCleanup(tabParam, availableTabs)) return;
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("tab");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [detail, caseId, availableTabsKey, searchParams, setSearchParams]);
 
   return (
-    <section className="case-detail-page">
-      <div className="case-hero">
-        <div className="case-hero-body">
-          <div>
-            <div className="eyebrow">Case reconciliation</div>
-            <h1>{caseId}</h1>
-            <p>Review the alert, Agent verdict, and source evidence.</p>
-            <p className="case-hero-action">
-              <Link
-                className="button"
-                rel="noreferrer"
-                target="_blank"
-                to={`/?case_id=${encodeURIComponent(caseId)}`}
-              >
-                Ask Assistant about this case
-              </Link>
-            </p>
-          </div>
-          <dl className="case-meta-strip">
-            <div>
-              <dt>Notable name</dt>
-              <dd>{searchName}</dd>
-            </div>
-            <div>
-              <dt>Source ID</dt>
-              <dd>{sourceId}</dd>
-            </div>
-            <div>
-              <dt>Processed</dt>
-              <dd>{detail?.metadata.processed_at ?? "loading"}</dd>
-            </div>
-          </dl>
-        </div>
-      </div>
+    <section className="space-y-6">
+      <DetailHero
+        caseId={caseId}
+        chatLink={
+          <Button asChild size="sm" variant="outline">
+            <Link to={`/?case_id=${encodeURIComponent(caseId)}`}>
+              <MessageSquare className="size-3.5" />
+              Ask Assistant about this case
+            </Link>
+          </Button>
+        }
+        meta={[
+          { label: "Notable name", value: searchName },
+          { label: "Source ID", value: sourceId },
+          { label: "Processed", value: detail?.metadata.processed_at ?? "loading" },
+        ]}
+      />
 
-      {loading ? <p className="muted">Loading case...</p> : null}
-      {error ? <p className="error">{error}</p> : null}
+      {loading ? <DetailMuted>Loading case...</DetailMuted> : null}
+      {error ? <DetailError>{error}</DetailError> : null}
 
       {detail ? (
         <>
-          <div className="metrics">
-            <div className="metric">
-              <div className="metric-label">Confidence</div>
-              <div className="metric-value" style={{ color: threatColor }}>
-                {confidence.metric}
-              </div>
-              <div className="metric-sub">{verdict}</div>
-            </div>
-            <div className="metric">
-              <div className="metric-label">Chatbot readiness</div>
-              <div
-                className="metric-value"
-                style={{ color: retrievalStatusColor(detail.metadata.retrieval_status) }}
-              >
-                {retrievalStatusLabel(detail.metadata.retrieval_status)}
-              </div>
-              <div className="metric-sub">Retrievable in chatbot</div>
-            </div>
-            <div className="metric">
-              <div className="metric-label">Analysis availability</div>
-              <div
-                className="metric-value"
-                style={{ color: completenessColor(detail.metadata.source_completeness) }}
-              >
-                {detail.metadata.source_completeness}
-              </div>
-              <div className="metric-sub">Structured analysis status</div>
-            </div>
-          </div>
+          <DetailMetricGrid>
+            <DetailMetric
+              label="Confidence"
+              sub={verdict}
+              value={confidence.metric}
+              valueStyle={{ color: threatColor }}
+            />
+            <DetailMetric
+              label="Chatbot readiness"
+              sub="Retrievable in chatbot"
+              value={retrievalStatusLabel(detail.metadata.retrieval_status)}
+              valueStyle={{
+                color: retrievalStatusColor(detail.metadata.retrieval_status),
+              }}
+            />
+            <DetailMetric
+              label="Analysis availability"
+              sub="Structured analysis status"
+              value={detail.metadata.source_completeness}
+              valueStyle={{
+                color: completenessColor(detail.metadata.source_completeness),
+              }}
+            />
+          </DetailMetricGrid>
 
-          <div className="tabs">
-            {tabs.map(([tab, label]) => (
-              <button
-                className={activeTab === tab ? "tab active" : "tab"}
-                key={tab}
-                type="button"
-                onClick={() => selectTab(tab)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) => selectTab(value as CaseDetailTab)}
+          >
+            <TabsList>
+              {tabs.map(([tab, label]) => (
+                <TabsTrigger key={tab} value={tab}>
+                  {label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
 
-          {activeTab === "overview" ? (
-            <>
-              <div className="two-col">
-                <div className="card">
-                  <div className="card-title">Confidence breakdown</div>
-                  <div className="conf-row">
-                    <span className="conf-label">Overall</span>
-                    <div className="bar-bg">
-                      <div
-                        className="bar-fill"
-                        style={{
-                          width: `${confidence.width}%`,
-                          background: threatColor,
-                        }}
+          <TabsContent value="overview">
+            <div className="space-y-4">
+              <DetailTwoCol>
+                <DetailCard>
+                  <DetailCardTitle>Confidence breakdown</DetailCardTitle>
+                  <DetailProgressRow
+                    color={threatColor}
+                    label="Overall"
+                    score={confidence.score}
+                    width={confidence.width}
+                  />
+                  {summary ? (
+                    <p className="mt-3 text-sm leading-relaxed text-foreground/90">
+                      {summary}
+                    </p>
+                  ) : null}
+                </DetailCard>
+
+                <DetailCard>
+                  <DetailCardTitle>Hypothesis summary</DetailCardTitle>
+                  <div className="space-y-3">
+                    {benignHypothesis ? (
+                      <DetailHypothesisBlock
+                        body={
+                          asTextList(benignHypothesis.evidence_support).join("; ") ||
+                          "No supporting evidence listed."
+                        }
+                        title={asText(benignHypothesis.hypothesis)}
+                        variant="benign"
                       />
-                    </div>
-                    <span className="conf-pct" style={{ color: threatColor }}>
-                      {confidence.score}
-                    </span>
+                    ) : null}
+                    {adversaryHypothesis ? (
+                      <DetailHypothesisBlock
+                        body={
+                          asTextList(adversaryHypothesis.evidence_support).join("; ") ||
+                          "No supporting evidence listed."
+                        }
+                        title={asText(adversaryHypothesis.hypothesis)}
+                        variant="adversary"
+                      />
+                    ) : null}
+                    {!benignHypothesis && !adversaryHypothesis ? (
+                      <DetailMuted>No hypothesis summary available.</DetailMuted>
+                    ) : null}
                   </div>
-                  {summary ? <p className="summary-note">{summary}</p> : null}
-                </div>
+                </DetailCard>
+              </DetailTwoCol>
 
-                <div className="card">
-                  <div className="card-title">Hypothesis summary</div>
-                  {benignHypothesis ? (
-                    <div className="hyp hyp-benign">
-                      <div className="hyp-title">
-                        {asText(benignHypothesis.hypothesis)}
-                      </div>
-                      <div className="hyp-body">
-                        {asTextList(benignHypothesis.evidence_support).join("; ") ||
-                          "No supporting evidence listed."}
-                      </div>
-                    </div>
-                  ) : null}
-                  {adversaryHypothesis ? (
-                    <div className="hyp hyp-malicious">
-                      <div className="hyp-title">
-                        {asText(adversaryHypothesis.hypothesis)}
-                      </div>
-                      <div className="hyp-body">
-                        {asTextList(adversaryHypothesis.evidence_support).join("; ") ||
-                          "No supporting evidence listed."}
-                      </div>
-                    </div>
-                  ) : null}
-                  {!benignHypothesis && !adversaryHypothesis ? (
-                    <p className="muted">No hypothesis summary available.</p>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="card">
-                <div className="card-title">Decision drivers</div>
-                <div className="driver-grid">
-                  <div className="driver-col driver-malicious">
-                    <h4>Toward malicious</h4>
+              <DetailCard>
+                <DetailCardTitle>Decision drivers</DetailCardTitle>
+                <DetailDriverGrid>
+                  <DetailDriverCol title="Toward malicious" variant="malicious">
                     {driverGroups.malicious.length ? (
-                      <ul className="analysis-list">
-                        {driverGroups.malicious.map((item) => (
-                          <li key={item}>{item}</li>
-                        ))}
-                      </ul>
+                      <DetailBulletList items={driverGroups.malicious} />
                     ) : (
-                      <p className="muted">No malicious drivers listed.</p>
+                      <DetailMuted>No malicious drivers listed.</DetailMuted>
                     )}
-                  </div>
-                  <div className="driver-col driver-benign">
-                    <h4>Toward benign</h4>
+                  </DetailDriverCol>
+                  <DetailDriverCol title="Toward benign" variant="benign">
                     {driverGroups.benign.length ? (
-                      <ul className="analysis-list">
-                        {driverGroups.benign.map((item) => (
-                          <li key={item}>{item}</li>
-                        ))}
-                      </ul>
+                      <DetailBulletList items={driverGroups.benign} />
                     ) : (
-                      <p className="muted">No benign drivers listed.</p>
+                      <DetailMuted>No benign drivers listed.</DetailMuted>
                     )}
-                  </div>
-                </div>
-              </div>
-            </>
-          ) : null}
+                  </DetailDriverCol>
+                </DetailDriverGrid>
+              </DetailCard>
+            </div>
+          </TabsContent>
 
-          {activeTab === "hypotheses" ? (
-            <div className="hypothesis-stack">
+          <TabsContent value="hypotheses">
+            <DetailStack>
               {hypothesisCards.map(({ hypothesis, index, key, label, type }) => {
                 const isOpen = openHypotheses.has(key);
                 const pivots = asArray(hypothesis.best_pivots).map((pivot) => {
@@ -858,80 +836,66 @@ export function CaseDetailPage() {
                   return asText(pivot);
                 });
                 return (
-                  <div className="card hyp-card" key={`${type}-${index}`}>
-                    <button
-                      className="hyp-card-header"
-                      type="button"
-                      onClick={() => toggleOpenKey(setOpenHypotheses, key)}
-                    >
-                      <span className={`hyp-chip ${type}`}>
-                        {label}
-                      </span>
-                      <span className={`hyp-card-title ${type}`}>
-                        {asText(hypothesis.hypothesis)}
-                      </span>
-                      <span className={isOpen ? "hyp-chevron open" : "hyp-chevron"}>
-                        v
-                      </span>
-                    </button>
-                    {isOpen ? (
-                      <div className="hyp-card-body">
-                        <div className="mini-title mini-title-support">
-                          Evidence support
-                        </div>
-                        {asTextList(hypothesis.evidence_support).length ? (
-                          <ul className="hyp-list">
-                            {asTextList(hypothesis.evidence_support).map((item, idx) => (
-                              <li key={`${item}-${idx}`}>{item}</li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <p className="muted">No supporting evidence listed.</p>
-                        )}
-                        <div className="mini-title mini-title-gap">Evidence gaps</div>
-                        {asTextList(hypothesis.evidence_gaps).length ? (
-                          <ul className="hyp-list">
-                            {asTextList(hypothesis.evidence_gaps).map((item, idx) => (
-                              <li key={`${item}-${idx}`}>{item}</li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <p className="muted">No evidence gaps listed.</p>
-                        )}
-                        <div className="mini-title mini-title-pivot">Best pivots</div>
-                        <div className="pivot-block">
-                          {pivots.join(" | ") || "No pivots provided."}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
+                  <CollapsibleDetailCard
+                    chip={
+                      <span className={hypothesisChipClass(type)}>{label}</span>
+                    }
+                    key={`${type}-${index}`}
+                    open={isOpen}
+                    title={asText(hypothesis.hypothesis)}
+                    titleClassName={hypothesisTitleClass(type)}
+                    onToggle={() => toggleOpenKey(setOpenHypotheses, key)}
+                  >
+                    <DetailMiniTitle titleClass="mini-title-support">
+                      Evidence support
+                    </DetailMiniTitle>
+                    {asTextList(hypothesis.evidence_support).length ? (
+                      <DetailBulletList
+                        items={asTextList(hypothesis.evidence_support)}
+                      />
+                    ) : (
+                      <DetailMuted>No supporting evidence listed.</DetailMuted>
+                    )}
+                    <DetailMiniTitle titleClass="mini-title-gap">
+                      Evidence gaps
+                    </DetailMiniTitle>
+                    {asTextList(hypothesis.evidence_gaps).length ? (
+                      <DetailBulletList items={asTextList(hypothesis.evidence_gaps)} />
+                    ) : (
+                      <DetailMuted>No evidence gaps listed.</DetailMuted>
+                    )}
+                    <DetailMiniTitle titleClass="mini-title-pivot">
+                      Best pivots
+                    </DetailMiniTitle>
+                    <DetailPivotBlock>
+                      {pivots.join(" | ") || "No pivots provided."}
+                    </DetailPivotBlock>
+                  </CollapsibleDetailCard>
                 );
               })}
-            </div>
-          ) : null}
+            </DetailStack>
+          </TabsContent>
 
-          {activeTab === "actions" ? (
-            <div className="card">
-              <div className="card-title">Actions</div>
+          <TabsContent value="actions">
+            <DetailCard>
+              <DetailCardTitle>Actions</DetailCardTitle>
               {groupedActions.map((group) =>
                 group.items.length ? (
-                  <div className="action-section" key={group.title}>
-                    <div className={`mini-title ${group.titleClass}`}>{group.title}</div>
-                    <ul className="hyp-list">
-                      {group.items.map((item, idx) => (
-                        <li key={`${group.title}-${idx}`}>{item}</li>
-                      ))}
-                    </ul>
+                  <div className="mb-4 last:mb-0" key={group.title}>
+                    <DetailMiniTitle titleClass={group.titleClass}>
+                      {group.title}
+                    </DetailMiniTitle>
+                    <DetailBulletList items={group.items} />
                   </div>
                 ) : null,
               )}
-            </div>
-          ) : null}
+            </DetailCard>
+          </TabsContent>
 
-          {activeTab === "ttps" ? (
-            <>
-              <div className="analysis-section-label">MITRE ATT&amp;CK</div>
-              <div className="ttp-stack">
+          <TabsContent value="ttps">
+            <div className="space-y-3">
+              <DetailSectionLabel>MITRE ATT&amp;CK</DetailSectionLabel>
+              <DetailStack>
                 {ttps.map((ttp, index) => {
                   const key = `ttp-${index}`;
                   const isOpen = openTtps.has(key);
@@ -947,113 +911,102 @@ export function CaseDetailPage() {
                     ttp.explanation || ttp.rationale,
                   );
                   return (
-                    <div className="card hyp-card" key={key}>
-                      <button
-                        className="hyp-card-header"
-                        type="button"
-                        onClick={() => toggleOpenKey(setOpenTtps, key)}
-                      >
-                        <span className="hyp-chip ttp">{ttpId}</span>
-                        <span className="hyp-card-title ttp">{ttpName}</span>
-                        <span className={`ttp-pill ttp-pill-${score.label.toLowerCase()}`}>
+                    <CollapsibleDetailCard
+                      chip={
+                        <span className={hypothesisChipClass("ttp")}>{ttpId}</span>
+                      }
+                      key={key}
+                      open={isOpen}
+                      title={ttpName}
+                      titleClassName={hypothesisTitleClass("ttp")}
+                      trailing={
+                        <Badge variant={ttpScoreBadgeVariant(score.label)}>
                           {score.label}
-                        </span>
-                        <span className={isOpen ? "hyp-chevron open" : "hyp-chevron"}>
-                          v
-                        </span>
-                      </button>
-                      {isOpen ? (
-                        <div className="hyp-card-body">
-                          <div className="conf-row ttp-score-row">
-                            <span className="conf-label">Confidence</span>
-                            <div className="bar-bg ttp-bar-bg">
-                              <div
-                                className="bar-fill"
-                                style={{
-                                  width: `${score.width}%`,
-                                  background: score.barColor,
-                                }}
-                              />
-                            </div>
-                            <span className="conf-pct" style={{ color: score.color }}>
-                              {score.score}
-                            </span>
-                          </div>
-                          <div className="mini-title mini-title-pivot">Explanation</div>
-                          <p className="summary-note">{explanation}</p>
-                          {uncertainty ? (
-                            <>
-                              <div className="mini-title mini-title-uncertainty">
-                                Uncertainty
-                              </div>
-                              <ul className="hyp-list">
-                                <li>{uncertainty}</li>
-                              </ul>
-                            </>
-                          ) : null}
-                          <div className="mini-title mini-title-support">Evidence fields</div>
-                          {evidenceRows.length ? (
-                            <div className="ttp-evidence-grid">
-                              {evidenceRows.map(([label, value]) => (
-                                <div className="kv-row" key={`${label}-${value}`}>
-                                  <span className="kv-key">{label}</span>
-                                  <span className="kv-value">{value}</span>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="muted">No evidence fields listed.</p>
-                          )}
-                        </div>
+                        </Badge>
+                      }
+                      onToggle={() => toggleOpenKey(setOpenTtps, key)}
+                    >
+                      <DetailProgressRow
+                        color={score.color}
+                        label="Confidence"
+                        score={score.score}
+                        width={score.width}
+                      />
+                      <DetailMiniTitle titleClass="mini-title-pivot">
+                        Explanation
+                      </DetailMiniTitle>
+                      <p className="text-sm leading-relaxed text-foreground/90">
+                        {explanation}
+                      </p>
+                      {uncertainty ? (
+                        <>
+                          <DetailMiniTitle titleClass="mini-title-uncertainty">
+                            Uncertainty
+                          </DetailMiniTitle>
+                          <DetailBulletList items={[uncertainty]} />
+                        </>
                       ) : null}
-                    </div>
+                      <DetailMiniTitle titleClass="mini-title-support">
+                        Evidence fields
+                      </DetailMiniTitle>
+                      {evidenceRows.length ? (
+                        <DetailKvGrid>
+                          {evidenceRows.map(([label, value]) => (
+                            <DetailKvRow key={`${label}-${value}`} label={label} value={value} />
+                          ))}
+                        </DetailKvGrid>
+                      ) : (
+                        <DetailMuted>No evidence fields listed.</DetailMuted>
+                      )}
+                    </CollapsibleDetailCard>
                   );
                 })}
-              </div>
-            </>
-          ) : null}
+              </DetailStack>
+            </div>
+          </TabsContent>
 
-          {activeTab === "iocs" ? (
-            <div className="card">
-              <div className="card-title">Indicators of Compromise</div>
-              <div className="kv-grid">
+          <TabsContent value="iocs">
+            <DetailCard>
+              <DetailCardTitle>Indicators of Compromise</DetailCardTitle>
+              <DetailKvGrid>
                 {IOC_FIELDS.map(([key, label]) => {
                   const values = asTextList(iocs[key]);
                   if (!values.length) return null;
                   return (
-                    <div className="kv-row" key={key}>
-                      <span className="kv-key">{label}</span>
-                      <span className="kv-value">{values.join(", ")}</span>
-                    </div>
+                    <DetailKvRow
+                      key={key}
+                      label={label}
+                      value={values.join(", ")}
+                    />
                   );
                 })}
-              </div>
-            </div>
-          ) : null}
+              </DetailKvGrid>
+            </DetailCard>
+          </TabsContent>
 
-          {activeTab === "evidence" ? (
-            <div className="card">
-              <div className="card-title">Raw evidence fields</div>
+          <TabsContent value="evidence">
+            <DetailCard>
+              <DetailCardTitle>Raw evidence fields</DetailCardTitle>
               {Object.keys(detail.alert_payload).length ? (
-                <div className="kv-grid">
+                <DetailKvGrid>
                   {rawEvidenceRows(detail.alert_payload).map(([key, value, isDanger]) => (
-                    <div className="kv-row" key={key}>
-                      <span className="kv-key">{key}</span>
-                      <span className={isDanger ? "kv-value danger" : "kv-value"}>
-                        {value}
-                      </span>
-                    </div>
+                    <DetailKvRow
+                      danger={isDanger}
+                      key={key}
+                      label={key}
+                      value={value}
+                    />
                   ))}
-                </div>
+                </DetailKvGrid>
               ) : (
-                <p className="muted">No raw alert fields available.</p>
+                <DetailMuted>No raw alert fields available.</DetailMuted>
               )}
-            </div>
-          ) : null}
+            </DetailCard>
+          </TabsContent>
 
-          {activeTab === "queries" ? (
-            <>
-              <div className="metrics">
+          <TabsContent value="queries">
+            <div className="space-y-4">
+              <DetailMetricGrid>
                 {(
                   [
                     ["Attempted", querySummary.attempted ?? 0],
@@ -1063,14 +1016,15 @@ export function CaseDetailPage() {
                     ["Skipped", querySummary.skipped ?? 0],
                   ] as const
                 ).map(([label, value]) => (
-                  <div className="metric" key={label}>
-                    <div className="metric-label">{label}</div>
-                    <div className="metric-value">{asText(value, "0")}</div>
-                  </div>
+                  <DetailMetric
+                    key={label}
+                    label={label}
+                    value={asText(value, "0")}
+                  />
                 ))}
-              </div>
+              </DetailMetricGrid>
               {queryItems.length ? (
-                <div className="hypothesis-stack">
+                <DetailStack>
                   {queryItems.map((query, index) => {
                     const key = `query-${index}`;
                     const isOpen = openQueries.has(key);
@@ -1088,170 +1042,146 @@ export function CaseDetailPage() {
                       interpretationItems,
                     );
                     return (
-                      <div className="card hyp-card" key={key}>
-                        <button
-                          className="hyp-card-header"
-                          type="button"
-                          onClick={() => toggleOpenKey(setOpenQueries, key)}
-                        >
-                          <span className={`hyp-chip ${chipClass}`}>
+                      <CollapsibleDetailCard
+                        chip={
+                          <span className={hypothesisChipClass(chipClass)}>
                             Query {index + 1}
                           </span>
-                          <span className={`hyp-card-title ${chipClass}`}>
-                            {status}
-                          </span>
-                          <span className={isOpen ? "hyp-chevron open" : "hyp-chevron"}>
-                            v
-                          </span>
-                        </button>
-                        {isOpen ? (
-                          <div className="hyp-card-body">
-                            <div className="mini-title mini-title-pivot">Query</div>
-                            <div className="pivot-block">
-                              {queryText || "No query text recorded."}
-                            </div>
-                            <div className="mini-title mini-title-support">
-                              Execution facts
-                            </div>
-                            <div className="ttp-evidence-grid">
-                              <div className="kv-row">
-                                <span className="kv-key">Hypothesis</span>
-                                <span className="kv-value">
-                                  {hypothesisIndexLabel(query.hypothesis_index)}
-                                </span>
-                              </div>
-                              <div className="kv-row">
-                                <span className="kv-key">Result count</span>
-                                <span className="kv-value">{resultCount}</span>
-                              </div>
-                              <div className="kv-row">
-                                <span className="kv-key">Reference</span>
-                                <span className="kv-value">{reference}</span>
-                              </div>
-                            </div>
-                            {message ? (
-                              <>
-                                <div className="mini-title mini-title-gap">Message</div>
-                                <p className="summary-note">{message}</p>
-                              </>
-                            ) : null}
-                            {queryInterpretations.length ? (
-                              <div className="query-interpretation-block">
-                                <div className="mini-title mini-title-pivot">
-                                  Interpretation
-                                </div>
-                                {queryInterpretations.map((item, interpIndex) => {
-                                  const observations = asTextList(item.key_observations);
-                                  const gaps = asTextList(item.remaining_gaps);
-                                  return (
-                                    <div
-                                      className="query-interpretation-card"
-                                      key={`${key}-interpretation-${interpIndex}`}
+                        }
+                        key={key}
+                        open={isOpen}
+                        title={status}
+                        titleClassName={hypothesisTitleClass(chipClass)}
+                        onToggle={() => toggleOpenKey(setOpenQueries, key)}
+                      >
+                        <DetailMiniTitle titleClass="mini-title-pivot">
+                          Query
+                        </DetailMiniTitle>
+                        <DetailPivotBlock>
+                          {queryText || "No query text recorded."}
+                        </DetailPivotBlock>
+                        <DetailMiniTitle titleClass="mini-title-support">
+                          Execution facts
+                        </DetailMiniTitle>
+                        <DetailKvGrid>
+                          <DetailKvRow
+                            label="Hypothesis"
+                            value={hypothesisIndexLabel(query.hypothesis_index)}
+                          />
+                          <DetailKvRow label="Result count" value={resultCount} />
+                          <DetailKvRow label="Reference" value={reference} />
+                        </DetailKvGrid>
+                        {message ? (
+                          <>
+                            <DetailMiniTitle titleClass="mini-title-gap">
+                              Message
+                            </DetailMiniTitle>
+                            <p className="text-sm leading-relaxed text-foreground/90">
+                              {message}
+                            </p>
+                          </>
+                        ) : null}
+                        {queryInterpretations.length ? (
+                          <div className="space-y-3">
+                            <DetailMiniTitle titleClass="mini-title-pivot">
+                              Interpretation
+                            </DetailMiniTitle>
+                            {queryInterpretations.map((item, interpIndex) => {
+                              const observations = asTextList(item.key_observations);
+                              const gaps = asTextList(item.remaining_gaps);
+                              return (
+                                <DetailCard
+                                  key={`${key}-interpretation-${interpIndex}`}
+                                >
+                                  <div className="mb-3 flex flex-wrap gap-2">
+                                    <InterpretationAssessmentBadge
+                                      assessment={item.assessment}
+                                    />
+                                    <InterpretationDeltaBadge
+                                      delta={item.confidence_delta}
+                                    />
+                                  </div>
+                                  <p className="text-sm leading-relaxed text-foreground/90">
+                                    {asText(item.rationale, "No rationale provided.")}
+                                  </p>
+                                  <DetailDriverGrid>
+                                    <DetailDriverCol
+                                      title="Key observations"
+                                      variant="benign"
                                     >
-                                      <div className="interp-inline-header">
-                                        <span
-                                          className={interpretationAssessmentPill(
-                                            item.assessment,
-                                          )}
-                                          title="Assessment"
-                                        >
-                                          {interpretationLabel(item.assessment)}
-                                        </span>
-                                        <span
-                                          className={interpretationDeltaPill(
-                                            item.confidence_delta,
-                                          )}
-                                          title="Confidence movement"
-                                        >
-                                          {interpretationLabel(item.confidence_delta)}
-                                        </span>
-                                      </div>
-                                      <p className="summary-note">
-                                        {asText(item.rationale, "No rationale provided.")}
-                                      </p>
-                                      <div className="driver-grid interp-driver-grid">
-                                        <div className="driver-col driver-benign">
-                                          <h4>Key observations</h4>
-                                          {observations.length ? (
-                                            <ul className="hyp-list">
-                                              {observations.map((entry, idx) => (
-                                                <li key={`${entry}-${idx}`}>{entry}</li>
-                                              ))}
-                                            </ul>
-                                          ) : (
-                                            <p className="muted">
-                                              No key observations listed.
-                                            </p>
-                                          )}
-                                        </div>
-                                        <div className="driver-col driver-malicious">
-                                          <h4>Remaining gaps</h4>
-                                          {gaps.length ? (
-                                            <ul className="hyp-list">
-                                              {gaps.map((entry, idx) => (
-                                                <li key={`${entry}-${idx}`}>{entry}</li>
-                                              ))}
-                                            </ul>
-                                          ) : (
-                                            <p className="muted">
-                                              No remaining gaps listed.
-                                            </p>
-                                          )}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            ) : null}
+                                      {observations.length ? (
+                                        <DetailBulletList items={observations} />
+                                      ) : (
+                                        <DetailMuted>
+                                          No key observations listed.
+                                        </DetailMuted>
+                                      )}
+                                    </DetailDriverCol>
+                                    <DetailDriverCol
+                                      title="Remaining gaps"
+                                      variant="malicious"
+                                    >
+                                      {gaps.length ? (
+                                        <DetailBulletList items={gaps} />
+                                      ) : (
+                                        <DetailMuted>
+                                          No remaining gaps listed.
+                                        </DetailMuted>
+                                      )}
+                                    </DetailDriverCol>
+                                  </DetailDriverGrid>
+                                </DetailCard>
+                              );
+                            })}
                           </div>
                         ) : null}
-                      </div>
+                      </CollapsibleDetailCard>
                     );
                   })}
-                </div>
+                </DetailStack>
               ) : (
-                <div className="card">
-                  <p className="muted">No query attempts recorded.</p>
-                </div>
+                <DetailCard>
+                  <DetailMuted>No query attempts recorded.</DetailMuted>
+                </DetailCard>
               )}
-            </>
-          ) : null}
+            </div>
+          </TabsContent>
 
-          {activeTab === "servicenow" ? (
-            <div className="card">
-              <div className="card-title">ServiceNow</div>
-              <pre className="code-block">
+          <TabsContent value="servicenow">
+            <DetailCard>
+              <DetailCardTitle>ServiceNow</DetailCardTitle>
+              <DetailCodeBlock>
                 {JSON.stringify(analysis.servicenow_section, null, 2)}
-              </pre>
-            </div>
-          ) : null}
+              </DetailCodeBlock>
+            </DetailCard>
+          </TabsContent>
 
-          {activeTab === "raw" ? (
-            <div className="card">
-              <div className="card-title">Raw Output</div>
-              <pre className="code-block">
+          <TabsContent value="raw">
+            <DetailCard>
+              <DetailCardTitle>Raw Output</DetailCardTitle>
+              <DetailCodeBlock>
                 {String(analysis.raw_response ?? "")}
-              </pre>
-            </div>
-          ) : null}
+              </DetailCodeBlock>
+            </DetailCard>
+          </TabsContent>
 
-          {activeTab === "metadata" ? (
-            <div className="card">
-              <div className="card-title">Case Metadata</div>
-              <dl className="meta-grid">
-                <dt>Case ID</dt>
-                <dd>{detail.case_id}</dd>
-                <dt>Notable name</dt>
-                <dd>{searchName}</dd>
-                <dt>Expires</dt>
-                <dd>{detail.metadata.expires_at ?? "-"}</dd>
-                <dt>Report markdown</dt>
-                <dd>{detail.report_md_path ?? "-"}</dd>
-              </dl>
-            </div>
-          ) : null}
+          <TabsContent value="metadata">
+            <DetailCard>
+              <DetailCardTitle>Case Metadata</DetailCardTitle>
+              <DetailMetaGrid>
+                <DetailMetaTerm>Case ID</DetailMetaTerm>
+                <DetailMetaValue>{detail.case_id}</DetailMetaValue>
+                <DetailMetaTerm>Notable name</DetailMetaTerm>
+                <DetailMetaValue>{searchName}</DetailMetaValue>
+                <DetailMetaTerm>Expires</DetailMetaTerm>
+                <DetailMetaValue>{detail.metadata.expires_at ?? "-"}</DetailMetaValue>
+                <DetailMetaTerm>Report markdown</DetailMetaTerm>
+                <DetailMetaValue>{detail.report_md_path ?? "-"}</DetailMetaValue>
+              </DetailMetaGrid>
+            </DetailCard>
+          </TabsContent>
 
+          </Tabs>
         </>
       ) : null}
     </section>

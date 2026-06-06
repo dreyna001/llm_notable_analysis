@@ -1,6 +1,5 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "./legacy-portal.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -86,27 +85,6 @@
   --sidebar-border: oklch(1 0 0 / 8%);
   --sidebar-accent: oklch(0.22 0 0);
   --sidebar-accent-foreground: oklch(0.93 0 0);
-
-  /* Legacy case detail aliases */
-  --bg: var(--background);
-  --text: var(--foreground);
-  --panel: var(--card);
-  --panel-soft: oklch(0.19 0 0);
-  --border-soft: oklch(1 0 0 / 6%);
-  --muted-strong: oklch(0.78 0 0);
-  --portal-accent: oklch(0.7 0.12 274);
-  --blue: oklch(0.75 0.12 254);
-  --blue-bg: oklch(0.25 0.05 254);
-  --blue-border: oklch(0.35 0.08 254);
-  --red: var(--destructive);
-  --red-bg: oklch(0.25 0.06 25);
-  --red-border: oklch(0.35 0.1 25);
-  --amber: oklch(0.78 0.14 75);
-  --amber-bg: oklch(0.25 0.05 75);
-  --amber-border: oklch(0.35 0.08 75);
-  --green: oklch(0.75 0.14 155);
-  --green-bg: oklch(0.22 0.04 155);
-  --green-border: oklch(0.32 0.08 155);
 }
 
 @layer base {

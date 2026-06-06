@@ -64,6 +64,7 @@ export type ChatSessionMessage = {
   role: string;
   content: string;
   created_at: string | null;
+  answer_status?: ChatResponse["answer_status"] | null;
 };
 
 export type ChatSessionMessagesResponse = {
@@ -71,4 +72,15 @@ export type ChatSessionMessagesResponse = {
   mode: ChatMode;
   selected_case_id: string | null;
   messages: ChatSessionMessage[];
+};
+
+export type PortalCapabilities = {
+  case_qa_enabled: boolean;
+  global_retrieval_enabled: boolean;
+  chat_history_enabled: boolean;
+  general_knowledge_enabled: boolean;
+  max_question_chars: number;
+  max_answer_tokens: number;
+  max_chat_sessions_per_user?: number;
+  case_retention_days?: number;
 };
