@@ -20,13 +20,14 @@ Recommended enablement:
 
 ```bash
 CAPABILITY_PROFILES=core,analyst_portal
-CASE_POSTGRES_DSN=postgresql://notable_analyzer@127.0.0.1:5432/notable_rag
+CASE_POSTGRES_DSN=postgresql://notable_portal@127.0.0.1:5432/notable_rag
 CASE_POSTGRES_SCHEMA=notable_cases
 CASE_RETENTION_DAYS=30
 CASE_QA_GLOBAL_RETRIEVAL_ENABLED=false
 PORTAL_BIND_HOST=127.0.0.1
 PORTAL_PORT=8080
 PORTAL_PAGE_SIZE=50
+PORTAL_CHAT_MAX_CONCURRENCY=4
 PORTAL_TRUSTED_USER_HEADER=X-Forwarded-User
 PORTAL_ALLOW_NON_LOOPBACK_BIND=false
 PORTAL_PROXY_SECRET=<generate-a-random-shared-secret>
@@ -61,6 +62,8 @@ Expected host shape:
 - Process: `python -m llm_notable_analysis_onprem_systemd.onprem_service.portal_app`
 - Default bind: `127.0.0.1:8080`
 - Restart behavior: `Restart=on-failure`
+- Graceful shutdown: `TimeoutStopSec=300` allows in-flight chat/LLM requests to
+  finish; the portal does not cancel active synthesis on SIGTERM.
 - Logs: `journalctl -u notable-portal.service`
 
 Example commands:
@@ -89,8 +92,11 @@ The example config is `deploy/nginx/notable-portal.conf`. It documents:
 - TLS certificate and key paths.
 - Basic auth with `auth_basic_user_file`.
 - `client_max_body_size 1m`.
+- React static assets served from
+  `/opt/notable-analyzer/frontend/analyst-portal/dist` with SPA fallback.
+- Rate limit on `POST /api/chat` via `limit_req` (see example zone in config).
 - Trusted user forwarding through `X-Forwarded-User`.
-- Proxying to `http://127.0.0.1:8080`.
+- Proxying `/api/`, `/health`, and `/ready` to `http://127.0.0.1:8080`.
 
 Create the htpasswd file with an approved enterprise process, then install the
 site:
@@ -122,6 +128,18 @@ proxy.
 `GET /health` is the liveness check. `GET /ready` is the Postgres-backed
 readiness check.
 
+Threat model for unauthenticated probes:
+
+- `/health` and `/ready` bypass the proxy-secret middleware by design so load
+  balancers and systemd can probe loopback without the nginx shared secret.
+- FastAPI binds to loopback by default (`PORTAL_BIND_HOST=127.0.0.1`), so these
+  endpoints are not analyst-reachable unless the host firewall or bind policy is
+  changed.
+- `/health` returns only `{"status":"ok"}`; operator metadata such as
+  `case_retention_days` is exposed on authenticated `GET /api/capabilities`.
+- `/ready` checks archive tables only. It does not call the embedding model or
+  LLM gateway.
+
 Liveness:
 
 ```bash
@@ -135,12 +153,37 @@ curl -fsS http://127.0.0.1:8080/ready
 ```
 
 `/health` returns `200` when the FastAPI process is running. `/ready` runs the
-bounded case list query and a bounded `case_chunks` read using the portal role.
-When `CASE_QA_ENABLED=true`, it also checks the chat embedding path and bounded
-lexical/vector retrieval queries. It returns `503` when the portal cannot serve
-case data or chat retrieval is misconfigured. `/ready` does not call the LLM for
-answer synthesis; validate that path with a sample authenticated `POST /api/chat`
-after deployment so load balancer probes do not generate model traffic.
+bounded case list query and a cheap bounded `case_chunks` existence read using
+the portal role. It returns `503` when the portal cannot serve case data.
+
+Chat retrieval readiness is intentionally separated from load balancer probes.
+Validate embedding, bounded lexical/vector retrieval, and LLM gateway reachability
+with an authenticated `GET /api/diagnostics/chat-readiness`, then validate synthesis
+with a sample authenticated `POST /api/chat` after deployment.
+
+## Portal API Surface (React SPA)
+
+The shipped analyst UI is a React SPA served by nginx. Authenticated JSON routes:
+
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/api/capabilities` | GET | Portal feature flags, limits, retention window |
+| `/api/cases` | GET | Paginated case list |
+| `/api/cases/{case_id}` | GET | Case detail |
+| `/api/chat` | POST | Case Q&A synthesis |
+| `/api/chat/sessions` | GET | List saved chat sessions when history enabled |
+| `/api/chat/sessions/{id}/messages` | GET | Load session transcript |
+| `/api/chat/sessions/{id}` | DELETE | Delete a saved session |
+| `/api/chat/sessions/{id}/turns/last` | DELETE | Remove last turn after Stop/cancel cleanup |
+| `/api/diagnostics/chat-readiness` | GET | Embedding, retrieval, and LLM readiness |
+
+Stop/cancel behavior: the UI aborts the in-flight `POST /api/chat` request and
+restores the composer text. When server chat history is enabled, the client may
+call `DELETE .../turns/last` to remove a partial turn that completed on the
+server after the browser cancelled.
+
+Markdown rendering uses `rehype-sanitize` with a strict schema plus link protocol
+guards. Treat assistant output as untrusted even on trusted on-prem networks.
 
 ## Database Setup And Maintenance
 
@@ -177,10 +220,10 @@ SELECT retrieval_status, COUNT(*) FROM notable_cases.cases GROUP BY 1;
 
 Use separate least-privilege roles for the analyzer and portal where possible.
 The analyzer role needs writes to `cases` and `case_chunks`; the portal role only
-needs reads for browsing and retrieval unless
-`CASE_QA_CHAT_HISTORY_ENABLED=true`, in which case the portal role also needs
-read/write on `chat_sessions` and `chat_messages`. Expired chat sessions are
-deleted by the existing retention loop using `CASE_QA_CHAT_HISTORY_RETENTION_DAYS`.
+needs reads for browsing and retrieval plus scoped writes/deletes on
+`chat_sessions` and `chat_messages` when `CASE_QA_CHAT_HISTORY_ENABLED=true`.
+Expired chat sessions are deleted by the existing retention loop using
+`CASE_QA_CHAT_HISTORY_RETENTION_DAYS`.
 
 Backups must include the `notable_cases` schema. Restore tests should include
 case list, case detail, readiness, and a sample chat request.

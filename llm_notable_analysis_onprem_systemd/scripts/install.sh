@@ -861,6 +861,14 @@ cp "$REPO_DIR/pyproject.toml" "$INSTALL_DIR/" \
     || err "Failed to copy pyproject.toml"
 cp "$REPO_DIR/requirements.txt" "$INSTALL_DIR/" \
     || err "Failed to copy requirements.txt"
+if [[ -d "$REPO_DIR/frontend/analyst-portal/dist" ]]; then
+    mkdir -p "$INSTALL_DIR/frontend/analyst-portal"
+    rm -rf "$INSTALL_DIR/frontend/analyst-portal/dist"
+    cp -a "$REPO_DIR/frontend/analyst-portal/dist" "$INSTALL_DIR/frontend/analyst-portal/" \
+        || err "Failed to copy analyst portal React dist"
+else
+    record_issue "React analyst portal dist not found; run npm --prefix frontend/analyst-portal run build before installing the nginx SPA"
+fi
 
 chown -R "$SVC_USER:$SVC_USER" "$INSTALL_DIR"
 info "Code installed at $INSTALL_DIR/src/llm_notable_analysis_onprem_systemd"

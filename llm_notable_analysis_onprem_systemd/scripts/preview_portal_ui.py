@@ -1,11 +1,20 @@
 """Run the analyst portal locally with in-memory fake data for UI preview.
 
-Local development only. Injects proxy auth headers on loopback so a normal
-browser can load pages without nginx. Do not use in production.
+Local development only. By default injects proxy auth headers on loopback so a
+normal browser can load pages without nginx. Do not use in production.
 
 Cases 1-5 are built through ``preview_synthetic_pipeline`` (real normalization,
 query enrichment, and ``build_case_archive_record``). Remaining cases are
 lightweight list-pagination fillers.
+
+Auth verification (no running server required)::
+
+    python scripts/preview_portal_ui.py --verify-auth
+
+To exercise the same header contract the Vite dev proxy uses, start the preview
+API without auto-injection and rely on ``vite.config.ts`` proxy headers::
+
+    python scripts/preview_portal_ui.py --no-inject-auth
 
 Optional OpenAI-backed chat synthesis for UI testing:
 
@@ -16,8 +25,11 @@ Optional OpenAI-backed chat synthesis for UI testing:
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
+import urllib.error
+import urllib.request
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -45,6 +57,8 @@ _PREVIEW_HOST = "127.0.0.1"
 _PREVIEW_PORT = 8765
 _PROXY_SECRET = "portal-secret"
 _TRUSTED_USER = "dev-preview@local"
+_TRUSTED_USER_HEADER = "X-Forwarded-User"
+_PROXY_SECRET_HEADER = "X-Notable-Portal-Proxy-Secret"
 _OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 _DEFAULT_OPENAI_MODEL = "gpt-4.1-mini"
 # UI requests limit=50; 55 cases yields two pages (has_more on first page).
@@ -411,7 +425,147 @@ def _preview_general_synthesizer(question: str) -> str:
     )
 
 
-def build_preview_app():
+def preview_auth_headers(
+    *,
+    user: str = _TRUSTED_USER,
+    proxy_secret: str = _PROXY_SECRET,
+) -> dict[str, str]:
+    """Headers that mimic nginx after basic auth and proxy secret injection."""
+    return {
+        _TRUSTED_USER_HEADER: user,
+        _PROXY_SECRET_HEADER: proxy_secret,
+    }
+
+
+def preview_inject_auth_enabled() -> bool:
+    """Return False when preview should enforce the production auth contract."""
+    raw = os.environ.get("PORTAL_PREVIEW_INJECT_AUTH", "true").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _preview_auth_check(
+    name: str,
+    *,
+    status_code: int,
+    expected: int,
+    detail: str = "",
+) -> tuple[str, bool, str]:
+    passed = status_code == expected
+    message = detail or f"expected HTTP {expected}, got {status_code}"
+    return name, passed, message
+
+
+def verify_preview_portal_auth() -> list[tuple[str, bool, str]]:
+    """Run the portal proxy-auth contract against preview config (no live server)."""
+    try:
+        from fastapi.testclient import TestClient  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError(
+            "fastapi is required for --verify-auth. Install project dependencies first."
+        ) from exc
+
+    app = build_preview_app(inject_loopback_auth=False)
+    client = TestClient(app)
+    user_only = {_TRUSTED_USER_HEADER: _TRUSTED_USER}
+    valid = preview_auth_headers()
+    wrong_secret = preview_auth_headers(proxy_secret="wrong-secret")
+
+    checks = [
+        _preview_auth_check(
+            "public /health without auth",
+            status_code=client.get("/health").status_code,
+            expected=200,
+        ),
+        _preview_auth_check(
+            "public /ready without auth",
+            status_code=client.get("/ready").status_code,
+            expected=200,
+        ),
+        _preview_auth_check(
+            "protected /api/cases without headers",
+            status_code=client.get("/api/cases").status_code,
+            expected=401,
+        ),
+        _preview_auth_check(
+            "protected /api/cases with user header only",
+            status_code=client.get("/api/cases", headers=user_only).status_code,
+            expected=401,
+        ),
+        _preview_auth_check(
+            "protected /api/cases with wrong proxy secret",
+            status_code=client.get("/api/cases", headers=wrong_secret).status_code,
+            expected=401,
+        ),
+        _preview_auth_check(
+            "protected /api/cases with trusted proxy headers",
+            status_code=client.get("/api/cases", headers=valid).status_code,
+            expected=200,
+        ),
+    ]
+    return checks
+
+
+def _http_status(url: str, headers: dict[str, str] | None = None) -> int:
+    request = urllib.request.Request(url, headers=headers or {}, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return int(response.status)
+    except urllib.error.HTTPError as exc:
+        return int(exc.code)
+
+
+def verify_preview_portal_auth_live(base_url: str) -> list[tuple[str, bool, str]]:
+    """Hit a running preview API. Use with --no-inject-auth for a faithful check."""
+    root = str(base_url or "").strip().rstrip("/")
+    if not root:
+        raise ValueError("base_url must be non-empty for live auth verification.")
+    user_only = {_TRUSTED_USER_HEADER: _TRUSTED_USER}
+    valid = preview_auth_headers()
+    wrong_secret = preview_auth_headers(proxy_secret="wrong-secret")
+
+    checks = [
+        _preview_auth_check(
+            "live /health without auth",
+            status_code=_http_status(f"{root}/health"),
+            expected=200,
+        ),
+        _preview_auth_check(
+            "live /api/cases without headers",
+            status_code=_http_status(f"{root}/api/cases"),
+            expected=401,
+        ),
+        _preview_auth_check(
+            "live /api/cases with user header only",
+            status_code=_http_status(f"{root}/api/cases", user_only),
+            expected=401,
+        ),
+        _preview_auth_check(
+            "live /api/cases with wrong proxy secret",
+            status_code=_http_status(f"{root}/api/cases", wrong_secret),
+            expected=401,
+        ),
+        _preview_auth_check(
+            "live /api/cases with trusted proxy headers",
+            status_code=_http_status(f"{root}/api/cases", valid),
+            expected=200,
+        ),
+    ]
+    return checks
+
+
+def _print_auth_checks(checks: list[tuple[str, bool, str]]) -> bool:
+    all_passed = True
+    for name, passed, detail in checks:
+        status = "PASS" if passed else "FAIL"
+        print(f"{status} {name}: {detail}")
+        if not passed:
+            all_passed = False
+    return all_passed
+
+
+def build_preview_app(*, inject_loopback_auth: bool | None = None):
+    if inject_loopback_auth is None:
+        inject_loopback_auth = preview_inject_auth_enabled()
     config = _preview_config()
     records = _build_preview_records(config)
     openai_llm = resolve_openai_preview_llm()
@@ -425,34 +579,95 @@ def build_preview_app():
         chat_general_synthesizer=general_synthesizer,
     )
 
-    @app.middleware("http")
-    async def inject_loopback_auth(request, call_next):
-        client = request.client
-        if client and client.host in ("127.0.0.1", "::1", "localhost"):
-            headers = list(request.scope.get("headers", []))
-            headers.append((b"x-forwarded-user", _TRUSTED_USER.encode("ascii")))
-            headers.append(
-                (b"x-notable-portal-proxy-secret", _PROXY_SECRET.encode("ascii"))
-            )
-            request.scope["headers"] = headers
-        return await call_next(request)
+    if inject_loopback_auth:
+
+        @app.middleware("http")
+        async def inject_loopback_auth(request, call_next):
+            client = request.client
+            if client and client.host in ("127.0.0.1", "::1", "localhost"):
+                headers = list(request.scope.get("headers", []))
+                headers.append((b"x-forwarded-user", _TRUSTED_USER.encode("ascii")))
+                headers.append(
+                    (b"x-notable-portal-proxy-secret", _PROXY_SECRET.encode("ascii"))
+                )
+                request.scope["headers"] = headers
+            return await call_next(request)
 
     return app
 
 
-def main() -> None:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Local analyst portal preview API (fake data, loopback only)."
+    )
+    parser.add_argument(
+        "--verify-auth",
+        action="store_true",
+        help="Run proxy-auth contract checks in-process and exit (no server start).",
+    )
+    parser.add_argument(
+        "--verify-auth-live",
+        metavar="URL",
+        help=(
+            "Run the same checks against a running preview API, e.g. "
+            "http://127.0.0.1:8765. Start the server with --no-inject-auth first."
+        ),
+    )
+    parser.add_argument(
+        "--no-inject-auth",
+        action="store_true",
+        help=(
+            "Do not auto-inject proxy auth on loopback. API calls must include "
+            f"{_TRUSTED_USER_HEADER!r} and {_PROXY_SECRET_HEADER!r} "
+            "(Vite dev proxy does this by default)."
+        ),
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = _parse_args(argv)
+    load_optional_preview_env()
+
+    if args.verify_auth:
+        print("Portal preview proxy-auth verification (in-process)")
+        print(f"Expected user header: {_TRUSTED_USER_HEADER}={_TRUSTED_USER!r}")
+        print(f"Expected proxy secret header: {_PROXY_SECRET_HEADER!r}")
+        passed = _print_auth_checks(verify_preview_portal_auth())
+        raise SystemExit(0 if passed else 1)
+
+    if args.verify_auth_live:
+        print(f"Portal preview proxy-auth verification (live: {args.verify_auth_live})")
+        if preview_inject_auth_enabled() and not args.no_inject_auth:
+            print(
+                "Warning: PORTAL_PREVIEW_INJECT_AUTH is enabled on this process. "
+                "Start the preview API with --no-inject-auth so unauthenticated "
+                "requests fail as expected."
+            )
+        passed = _print_auth_checks(
+            verify_preview_portal_auth_live(args.verify_auth_live)
+        )
+        raise SystemExit(0 if passed else 1)
+
     try:
         import uvicorn  # type: ignore
     except ImportError as exc:
         raise SystemExit("uvicorn is required. Install project dependencies first.") from exc
 
-    env_file = load_optional_preview_env()
+    inject_auth = not args.no_inject_auth
     url = f"http://{_PREVIEW_HOST}:{_PREVIEW_PORT}/"
     print("Alert Analysis Portal UI preview (fake data, loopback only)")
     print(f"Open in your browser: {url}")
     print(f"Chat synthesis: {preview_chat_mode_label()}")
-    if env_file is not None:
-        print(f"Loaded preview env: {env_file}")
+    print(f"Loopback auth injection: {'on' if inject_auth else 'off'}")
+    if not inject_auth:
+        print(
+            "API calls need proxy headers. Vite dev proxy sets them when using "
+            "scripts/dev_portal_ui.ps1."
+        )
+        print(
+            f"Quick check: python {Path(__file__).name} --verify-auth-live {url.rstrip('/')}"
+        )
     print(f"Preview cases: {_PREVIEW_CASE_COUNT} (paginated at limit 50)")
     print(
         f"Pipeline-backed full analysis: case-1 .. case-{preview_scenario_count()} "
@@ -460,7 +675,7 @@ def main() -> None:
     )
     print("Pages: /  /cases  /cases/case-1")
     uvicorn.run(
-        build_preview_app(),
+        build_preview_app(inject_loopback_auth=inject_auth),
         host=_PREVIEW_HOST,
         port=_PREVIEW_PORT,
         log_level="info",

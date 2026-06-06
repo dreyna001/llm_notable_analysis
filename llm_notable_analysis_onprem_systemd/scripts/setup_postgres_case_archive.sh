@@ -175,7 +175,7 @@ analyzer_dsn = config.get(
 )
 portal_dsn = portal.get(
     "CASE_POSTGRES_DSN",
-    "postgresql://notable_portal@127.0.0.1:5432/notable_cases",
+    "postgresql://notable_portal@127.0.0.1:5432/notable_rag",
 )
 
 database, analyzer_role, analyzer_password = parse_dsn(analyzer_dsn, "CASE_POSTGRES_DSN")
@@ -237,6 +237,8 @@ admin_statements.extend(
 grant_statements = [
     f"GRANT USAGE ON SCHEMA {schema_ident} TO {portal_ident};",
     f"GRANT SELECT ON ALL TABLES IN SCHEMA {schema_ident} TO {portal_ident};",
+    f"GRANT INSERT, UPDATE, DELETE ON {schema_ident}.chat_sessions TO {portal_ident};",
+    f"GRANT INSERT, DELETE ON {schema_ident}.chat_messages TO {portal_ident};",
     f"ALTER DEFAULT PRIVILEGES FOR ROLE {analyzer_ident} IN SCHEMA {schema_ident} "
     f"GRANT SELECT ON TABLES TO {portal_ident};",
 ]

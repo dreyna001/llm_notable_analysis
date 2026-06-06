@@ -632,6 +632,40 @@ These modes are both UX and backend behavior:
 | `selected_case` | Analyst asks about one case with Knowledge Base support | Search the selected case and configured Knowledge Base context |
 | `global_archive` | Analyst asks across retained cases with Knowledge Base support | Search retained case chunks and configured Knowledge Base context; no pinned case |
 
+### Chat Cancellation
+
+**v1 (current): client-side stop only**
+
+- React `Stop` aborts the browser `fetch` to `POST /api/chat` and clears the
+  in-flight turn from the thread, composer, local session store, and sidebar
+  (empty unused sessions are removed when other chats exist).
+- If the backend still finishes and returns a response after Stop, the UI
+  ignores it and runs best-effort cleanup:
+  - delete the server session when the cancelled turn was the first message in
+    the conversation, or
+  - delete the last persisted user/assistant pair via
+    `DELETE /api/chat/sessions/{session_id}/turns/last` for follow-up turns.
+- The portal API does **not** stop in-flight retrieval, synthesis, or upstream
+  LLM work when the client disconnects. The chat concurrency slot remains held
+  until the handler returns.
+
+**Deferred: cooperative backend cancellation**
+
+Add true cooperative cancellation in a later block when chat latency and
+concurrency pressure justify the complexity. Target behavior:
+
+- Detect client disconnect (`request.is_disconnected()` or equivalent) between
+  retrieval, synthesis, and history-persist steps.
+- Stop bounded work cooperatively: skip `_finalize_chat_response` / history
+  writes when the client is gone; release `chat_semaphore` promptly.
+- Propagate cancel to the upstream LLM HTTP call where the provider supports
+  abort/close (optional; depends on LiteLLM/vLLM behavior).
+- Define operator-visible logging/metrics for cancelled vs completed chat
+  requests.
+
+Out of scope for the deferred block unless explicitly reopened: streaming
+responses, WebSocket cancel tokens, or a separate cancel-by-request-id API.
+
 ### Default Limits
 
 Initial conservative defaults:
