@@ -215,3 +215,23 @@ def move_to_quarantine(
     else:
         logger.warning("Quarantined file to %s", dest)
     return dest
+
+
+def quarantine_after_failure(
+    file_path: Path,
+    config: Config,
+    reason: str,
+    *,
+    logger: logging.Logger | None = None,
+) -> None:
+    """Move a failed notable to quarantine and log filesystem failures."""
+    log = logger or logging.getLogger(__name__)
+    try:
+        move_to_quarantine(file_path, config, reason)
+    except OSError as exc:
+        log.error(
+            "Failed to quarantine notable %s after processing error: %s",
+            file_path.name,
+            exc,
+            exc_info=True,
+        )

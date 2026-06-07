@@ -13,6 +13,7 @@ import time
 import concurrent.futures
 from datetime import datetime, timezone
 from pathlib import Path
+from types import FrameType
 from typing import Any, List, Optional, Set
 
 from .config import load_config, Config
@@ -25,6 +26,7 @@ from .ingest import (
     get_notable_id,
     move_to_processed,
     move_to_quarantine,
+    quarantine_after_failure,
     read_notable_text,
     NotableReadError,
 )
@@ -51,7 +53,7 @@ _shutdown_requested = False
 _RECOVERABLE_LOOP_EXCEPTIONS = (OSError, ValueError, RuntimeError, TimeoutError)
 
 
-def signal_handler(signum, frame):
+def signal_handler(signum: int, frame: FrameType | None) -> None:
     """Handle SIGTERM/SIGINT for graceful shutdown.
 
     Args:
@@ -305,10 +307,7 @@ def process_notable(
 
     except Exception as e:
         logger.exception(f"Error processing notable {file_path.name}: {e}")
-        try:
-            move_to_quarantine(file_path, config, str(e))
-        except Exception:
-            pass
+        quarantine_after_failure(file_path, config, str(e), logger=logger)
         return False
 
 
@@ -340,7 +339,7 @@ def _format_alert_for_llm(
         return str(alert_payload)
 
 
-def ensure_directories(config: Config, logger: logging.Logger):
+def ensure_directories(config: Config, logger: logging.Logger) -> None:
     """Ensure all required directories exist.
 
     Args:
@@ -360,7 +359,9 @@ def ensure_directories(config: Config, logger: logging.Logger):
         logger.info(f"Ensured directory exists: {d}")
 
 
-def _run_sequential(config: Config, llm_client: LocalLLMClient, logger: logging.Logger):
+def _run_sequential(
+    config: Config, llm_client: LocalLLMClient, logger: logging.Logger
+) -> tuple[int, int]:
     """Run the main loop in sequential mode (one notable at a time).
 
     Args:
@@ -414,7 +415,9 @@ def _run_sequential(config: Config, llm_client: LocalLLMClient, logger: logging.
     return processed_count, error_count
 
 
-def _run_concurrent(config: Config, llm_client: LocalLLMClient, logger: logging.Logger):
+def _run_concurrent(
+    config: Config, llm_client: LocalLLMClient, logger: logging.Logger
+) -> tuple[int, int]:
     """Run the main loop with bounded concurrency via ThreadPoolExecutor.
 
     Implements backpressure: if in-flight jobs reach MAX_QUEUE_DEPTH, new files
@@ -438,7 +441,9 @@ def _run_concurrent(config: Config, llm_client: LocalLLMClient, logger: logging.
     in_flight: Set[Path] = set()
     futures: List[concurrent.futures.Future] = []
 
-    def job_done_callback(future: concurrent.futures.Future, file_path: Path):
+    def job_done_callback(
+        future: concurrent.futures.Future[bool], file_path: Path
+    ) -> None:
         """Handle job completion.
 
         Args:
@@ -527,7 +532,7 @@ def _run_concurrent(config: Config, llm_client: LocalLLMClient, logger: logging.
     return processed_count, error_count
 
 
-def run_service():
+def run_service() -> None:
     """Main service loop."""
     global _shutdown_requested
 
@@ -575,7 +580,7 @@ def run_service():
     )
 
 
-def main():
+def main() -> None:
     """CLI entry point."""
     run_service()
 

@@ -18,6 +18,7 @@ from .ingest import (
     get_notable_id,
     move_to_processed,
     move_to_quarantine,
+    quarantine_after_failure,
     read_notable_text,
     NotableReadError,
 )
@@ -138,10 +139,7 @@ def process_notable_freeform(
 
     except Exception as e:
         logger.exception(f"Error processing notable {file_path.name} (freeform): {e}")
-        try:
-            move_to_quarantine(file_path, config, str(e))
-        except Exception:
-            pass
+        quarantine_after_failure(file_path, config, str(e), logger=logger)
         return False
 
 

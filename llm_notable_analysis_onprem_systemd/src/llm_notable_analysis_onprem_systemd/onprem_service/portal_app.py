@@ -39,6 +39,7 @@ from .case_store import CaseArchiveRecord, quote_identifier
 from .case_db import (
     default_connect as _default_connect,
     fetchone as _fetchone,
+    postgres_operation_errors,
     set_statement_timeout as _set_statement_timeout,
 )
 from .config import Config, load_config
@@ -197,7 +198,7 @@ LIMIT 1
             _set_statement_timeout(conn, config.CASE_POSTGRES_STATEMENT_TIMEOUT_MS)
             _fetchone(conn.execute(sql))
         return True
-    except Exception:
+    except postgres_operation_errors():
         logger.exception("Case archive readiness check failed")
         return False
 

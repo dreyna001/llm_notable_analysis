@@ -5,11 +5,23 @@ from __future__ import annotations
 from typing import Any
 
 
+def postgres_operation_errors() -> tuple[type[BaseException], ...]:
+    """Exception types commonly raised by case-archive Postgres operations."""
+    errors: list[type[BaseException]] = [OSError, RuntimeError, ValueError]
+    try:
+        import psycopg  # type: ignore
+
+        errors.append(psycopg.Error)
+    except ImportError:
+        pass
+    return tuple(errors)
+
+
 def default_connect(dsn: str) -> Any:
     """Open a psycopg connection for case archive operations."""
     try:
         import psycopg  # type: ignore
-    except Exception as exc:  # pragma: no cover - import guard
+    except ImportError as exc:  # pragma: no cover - import guard
         raise RuntimeError("psycopg is unavailable in the runtime.") from exc
     return psycopg.connect(dsn, connect_timeout=5)
 
@@ -45,13 +57,14 @@ def row_get(row: Any, index: int, key: str) -> Any:
         return None
     if isinstance(row, dict):
         return row.get(key)
-    try:
-        mapping = row._mapping  # type: ignore[attr-defined]
-        if key in mapping:
-            return mapping[key]
-    except Exception:
-        pass
+    mapping = getattr(row, "_mapping", None)
+    if mapping is not None:
+        try:
+            if key in mapping:
+                return mapping[key]
+        except (KeyError, TypeError, AttributeError):
+            pass
     try:
         return row[index]
-    except Exception:
+    except (KeyError, IndexError, TypeError):
         return getattr(row, key, None)

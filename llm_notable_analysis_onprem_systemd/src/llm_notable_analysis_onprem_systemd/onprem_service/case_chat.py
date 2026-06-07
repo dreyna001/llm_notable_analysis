@@ -23,6 +23,7 @@ from .case_search import (
 from .case_db import (
     default_connect as _default_connect,
     fetchall as _fetchall,
+    postgres_operation_errors,
     row_get as _row_get,
     set_statement_timeout as _set_statement_timeout,
 )
@@ -30,9 +31,28 @@ from .case_chat_history import persist_chat_history, validate_chat_history_reque
 from .case_index import case_exists
 from .case_store import quote_identifier
 from .config import Config
-from .openai_transport_nonsdk import openai_chat_complete
+from .openai_transport_nonsdk import (
+    ClientRequestError,
+    RateLimitError,
+    RequestTimeoutError,
+    ResponseFormatError,
+    ServerError,
+    TransportError,
+    openai_chat_complete,
+)
 
 logger = logging.getLogger(__name__)
+
+_LLM_READINESS_ERRORS = (
+    requests.RequestException,
+    ClientRequestError,
+    RateLimitError,
+    RequestTimeoutError,
+    ResponseFormatError,
+    ServerError,
+    TransportError,
+    ValueError,
+)
 
 ConnectionFactory = Callable[[str], Any]
 SynthesizeFn = Callable[[str, list["RetrievedSource"]], str]
@@ -589,7 +609,7 @@ def _probe_llm_reachable(config: Config) -> bool:
                 read_timeout_sec=min(15, int(config.LLM_TIMEOUT)),
             )
         return True
-    except Exception:
+    except _LLM_READINESS_ERRORS:
         logger.exception("LLM readiness probe failed")
         return False
 
@@ -622,7 +642,7 @@ def check_case_chat_ready(
         if not _probe_llm_reachable(config):
             return False
         return True
-    except Exception:
+    except (*postgres_operation_errors(), *_LLM_READINESS_ERRORS):
         logger.exception("Case chat readiness check failed")
         return False
 
