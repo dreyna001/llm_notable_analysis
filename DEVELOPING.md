@@ -56,8 +56,10 @@ Do **not** copy `.venv` from Windows to a Linux VM (or vice versa). Sync the rep
 with git, then run `bootstrap_dev_venv.sh` on the VM so Node, npm, Playwright, and
 browser binaries match that OS.
 
-Production services on a host use `/opt/notable-analyzer/venv`; that is separate
-from this repo-root dev `.venv`.
+Production host paths (`/opt/notable-analyzer`, `/var/notables`, Postgres, nginx)
+are documented in the package
+[`Filesystem map`](llm_notable_analysis_onprem_systemd/README.md#filesystem-map).
+Local dev uses this repo-root `.venv` only — not `/opt/notable-analyzer/venv`.
 
 ## Daily workflow
 

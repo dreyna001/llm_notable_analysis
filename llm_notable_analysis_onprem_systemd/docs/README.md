@@ -43,6 +43,7 @@ Optional deep dives:
 | Analyst portal operations | [ANALYST_PORTAL_OPERATIONS.md](operations/ANALYST_PORTAL_OPERATIONS.md), [`notable-portal.service`](../deploy/systemd/notable-portal.service), [`notable-portal.conf`](../deploy/nginx/notable-portal.conf) |
 | Analyst portal React UI (dev spike) | [`frontend/analyst-portal/README.md`](../frontend/analyst-portal/README.md) |
 | Shared local dev venv (Python + Node) | [`DEVELOPING.md`](../../DEVELOPING.md) |
+| Host paths vs local checkout | [`README.md` § Filesystem map](../README.md#filesystem-map) |
 | Analyst portal technical spec | [analyst_portal_case_archive_technical_spec.md](technical_specs/analyst_portal_case_archive_technical_spec.md) |
 | Analyst portal case archive plan | [ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md](planning/ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md) |
 | Analyst portal networking plan | [ANALYST_PORTAL_NETWORKING_PLAN.md](planning/ANALYST_PORTAL_NETWORKING_PLAN.md) |

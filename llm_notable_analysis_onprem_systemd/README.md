@@ -34,6 +34,7 @@ operations, tuning, security, and integration guidance lives under
 | Runtime config values | [`config.env.example`](config.env.example) |
 | Tests and validation | [`docs/testing/TESTING.md`](docs/testing/TESTING.md) |
 | Local dev venv (Python + frontend) | [`../DEVELOPING.md`](../DEVELOPING.md) |
+| Host paths vs local checkout | [Filesystem map](#filesystem-map) (below) |
 | Security posture | [`docs/operations/SECURITY_OPERATIONS.md`](docs/operations/SECURITY_OPERATIONS.md) and [`docs/security/SECURITY_POSTURE.md`](docs/security/SECURITY_POSTURE.md) |
 | Deployment readiness | [`docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.md`](docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.md) |
 
@@ -65,14 +66,71 @@ SOAR/SFTP/operator file drop
   -> optional Splunk/ServiceNow outputs
 ```
 
-Default host paths and capability profiles are documented in
-[`config.env.example`](config.env.example). The app package lives under
-[`src/llm_notable_analysis_onprem_systemd/`](src/llm_notable_analysis_onprem_systemd/)
-so installed imports and service entrypoints stay stable.
+Capability profiles and tunable path overrides are in
+[`config.env.example`](config.env.example). Installed Python imports use
+[`src/llm_notable_analysis_onprem_systemd/`](src/llm_notable_analysis_onprem_systemd/).
 
-For SFTP file-drop deployments, the installer-created chroot contract is:
-Chroot: `/var/sftp/soar`; incoming symlink:
+## Filesystem map
+
+This checkout is **source only**. A full host install (`scripts/install.sh`)
+copies code and creates the production paths below. **Local dev does not use
+that layout** — it runs from the git tree with a repo-root `.venv` and optional
+in-memory portal preview; see [Local dev](#local-dev-repo-checkout-no-full-install).
+
+### Installed host (production)
+
+Set by `scripts/install.sh` unless overridden in env files. Writable runtime
+data stays outside `/opt/notable-analyzer`.
+
+| Path | Purpose |
+|------|---------|
+| `/opt/notable-analyzer` | Installed app: Python package, venv, built React at `frontend/analyst-portal/dist` |
+| `/etc/notable-analyzer/config.env` | Analyzer secrets, directories, capability profiles |
+| `/etc/notable-analyzer/portal.env` | Portal service: Postgres DSN, bind, proxy secret |
+| `/var/notables/incoming` | Notable file drop (often symlink to SFTP incoming) |
+| `/var/notables/processed` | Successfully handled inputs |
+| `/var/notables/quarantine` | Rejected or oversized inputs |
+| `/var/notables/reports` | Generated markdown/HTML reports |
+| `/var/notables/archive` | Archived notable payloads |
+| `/var/notables/cache` | HuggingFace / sentence-transformers model cache |
+| `/var/sftp/soar` | SFTP chroot for SOAR upload (`incoming` under chroot) |
+| `/opt/llm-notable-analysis/knowledge_base/` | RAG source docs and ingest indexes |
+| `/opt/models/` | Local LLM weights (default; override with `VLLM_MODEL_PATH`) |
+| `/opt/vllm`, `/opt/litellm` | Inference stack venvs |
+| `/etc/litellm/config.yaml` | LiteLLM routing config |
+| `/etc/nginx/conf.d/notable-portal.conf` | Portal TLS, basic auth, static `dist`, API proxy |
+
+**PostgreSQL** is a separate OS service (data files under the distro Postgres
+data directory, not under `/opt/notable-analyzer`). The app connects via DSN;
+defaults in `config.env.example`:
+
+- Database: `notable_rag` on `127.0.0.1:5432`
+- Case archive schema: `notable_cases` (`CASE_POSTGRES_SCHEMA`)
+- RAG chunks: schema `notable_rag` (and related tables)
+- Optional chat history: same Postgres instance when enabled
+
+Portal traffic: analysts hit nginx on `443`; nginx serves React static files and
+proxies `/api/`, `/health`, `/ready` to FastAPI on `127.0.0.1:8080`. See
+[`docs/operations/ANALYST_PORTAL_OPERATIONS.md`](docs/operations/ANALYST_PORTAL_OPERATIONS.md).
+
+SFTP file-drop contract: chroot `/var/sftp/soar`; typical symlink
 `/var/notables/incoming -> /var/sftp/soar/incoming`.
+
+### Local dev (repo checkout, no full install)
+
+| Path / endpoint | Purpose |
+|---------------|---------|
+| `<repo-root>/llm_notable_analysis_onprem_systemd/` | Package source (this tree) |
+| `<repo-root>/.venv` | Shared dev venv (Python + embedded Node/npm) |
+| `llm_notable_analysis_onprem_systemd/config.portal-preview.env` | Optional local OpenAI key for preview chat (gitignored) |
+| `llm_notable_analysis_onprem_systemd/frontend/analyst-portal/node_modules/`, `dist/` | Frontend deps and build output (gitignored) |
+| `http://127.0.0.1:8765` | Portal preview API (`scripts/preview_portal_ui.py`) with **in-memory fake data**, not Postgres |
+| `http://127.0.0.1:5173` | Vite dev server; proxies API routes to `8765` |
+
+Workflow: [`../DEVELOPING.md`](../DEVELOPING.md) and
+[`frontend/analyst-portal/README.md`](frontend/analyst-portal/README.md).
+Playwright E2E against a deployed VM is optional and uses the remote host paths
+above, not your local checkout layout.
 
 ## Optional Capabilities
 
