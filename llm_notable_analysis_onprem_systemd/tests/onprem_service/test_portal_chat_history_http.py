@@ -266,12 +266,19 @@ class TestPortalChatHistoryHttp(unittest.TestCase):
             selected_case_id="case-1",
         )
         connection.row_pages = [[_chunk_row()], []]
+        synthesize_calls = 0
+
+        def synthesize(_question, _sources):
+            nonlocal synthesize_calls
+            synthesize_calls += 1
+            return "Should not run."
+
         client = TestClient(
             build_portal_app(
                 _history_config(),
                 connect=lambda _dsn: connection,
                 chat_embedding_model=_FakeEmbeddingModel(),
-                chat_synthesizer=lambda _question, _sources: "Should not run.",
+                chat_synthesizer=synthesize,
             )
         )
         response = client.post(
@@ -285,6 +292,7 @@ class TestPortalChatHistoryHttp(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("scope", response.json()["detail"])
+        self.assertEqual(synthesize_calls, 0)
 
     def test_post_chat_rejects_expired_session(self) -> None:
         session_id = str(uuid.uuid4())
@@ -320,6 +328,41 @@ class TestPortalChatHistoryHttp(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("expired", response.json()["detail"])
+
+    def test_post_chat_rejects_full_session_before_synthesis(self) -> None:
+        session_id, connection = _session_bundle(
+            mode="global_archive",
+            message_pairs=2,
+        )
+        connection.row_pages = [[_chunk_row()], []]
+        synthesize_calls = 0
+
+        def synthesize(_question, _sources):
+            nonlocal synthesize_calls
+            synthesize_calls += 1
+            return "Should not run."
+
+        client = TestClient(
+            build_portal_app(
+                _history_config(CASE_QA_MAX_MESSAGES_PER_SESSION=4),
+                connect=lambda _dsn: connection,
+                chat_embedding_model=_FakeEmbeddingModel(),
+                chat_synthesizer=synthesize,
+            )
+        )
+        response = client.post(
+            "/api/chat",
+            json={
+                "mode": "global_archive",
+                "question": "Will this fit?",
+                "session_id": session_id,
+            },
+            headers=_AUTH_HEADERS,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("message limit", response.json()["detail"])
+        self.assertEqual(synthesize_calls, 0)
 
 
 if __name__ == "__main__":

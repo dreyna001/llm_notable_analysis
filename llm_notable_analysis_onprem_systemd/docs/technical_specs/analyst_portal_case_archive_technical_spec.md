@@ -712,8 +712,8 @@ return `200` with `answer_status="refused"`. Invalid mode, oversized question,
 or missing required `selected_case_id` return `400`. Unknown `selected_case_id`
 values return `404` with `detail="Case not found."` before retrieval runs.
 
-Initial UI should be server-rendered or minimal static HTML served by FastAPI.
-No separate frontend app in v1.
+The production UI is the React analyst portal served by nginx. FastAPI serves
+the portal API and health/readiness probes behind the reverse proxy.
 
 ## Networking Contract
 
@@ -932,12 +932,12 @@ Acceptance criteria:
 - Filters support date range, verdict, and search name.
 - Expired case delete cascades chunks.
 
-### Diff 4: FastAPI Portal Read-Only UI/API
+### Diff 4: FastAPI Portal API And React UI
 
 Objective:
 
 - Add `portal_app.py`.
-- Add minimal server-rendered or static UI.
+- Add React analyst portal served by nginx.
 - Add systemd service.
 
 Acceptance criteria:

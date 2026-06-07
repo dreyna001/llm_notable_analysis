@@ -13,6 +13,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
+from .case_db import (
+    default_connect as _default_connect,
+    fetchall as _fetchall,
+    fetchone as _fetchone,
+    row_get as _row_get,
+    set_statement_timeout as _set_statement_timeout,
+)
 from .case_store import quote_identifier
 from .config import Config
 
@@ -32,56 +39,6 @@ class ChatSessionRecord:
     mode: str
     selected_case_id: str | None
     expires_at: datetime
-
-
-def _default_connect(dsn: str) -> Any:
-    """Open a psycopg connection for chat history writes."""
-    try:
-        import psycopg  # type: ignore
-    except Exception as exc:  # pragma: no cover - import guard
-        raise RuntimeError("psycopg is unavailable in the runtime.") from exc
-    return psycopg.connect(dsn, connect_timeout=5)
-
-
-def _set_statement_timeout(conn: Any, timeout_ms: int) -> None:
-    """Set a transaction-local Postgres statement timeout."""
-    if int(timeout_ms) > 0:
-        conn.execute(
-            "SELECT set_config('statement_timeout', %s, true)",
-            (f"{int(timeout_ms)}ms",),
-        )
-
-
-def _fetchone(result: Any) -> Any:
-    """Read one row from a cursor-like result."""
-    fetchone = getattr(result, "fetchone", None)
-    if callable(fetchone):
-        return fetchone()
-    return None
-
-
-def _fetchall(result: Any) -> list[Any]:
-    """Read all rows from a cursor-like result."""
-    fetchall = getattr(result, "fetchall", None)
-    if callable(fetchall):
-        return list(fetchall())
-    return []
-
-
-def _row_get(row: Any, index: int, key: str) -> Any:
-    """Read one value from a row object or sequence."""
-    if row is None:
-        return None
-    try:
-        mapping = row._mapping  # type: ignore[attr-defined]
-        if key in mapping:
-            return mapping[key]
-    except Exception:
-        pass
-    try:
-        return row[index]
-    except Exception:
-        return getattr(row, key, None)
 
 
 def _normalize_user_id(user_id: str | None) -> str | None:
@@ -752,6 +709,55 @@ def persist_chat_history(
         connect=connect_fn,
     )
     return session_id
+
+
+def validate_chat_history_request(
+    *,
+    config: Config,
+    mode: str,
+    selected_case_id: str | None,
+    requested_session_id: str | None,
+    user_id: str | None,
+    connect: ConnectionFactory | None = None,
+) -> None:
+    """Validate chat-history ownership and capacity before expensive chat work."""
+    if not bool(config.CASE_QA_CHAT_HISTORY_ENABLED):
+        return
+
+    normalized_user = _normalize_user_id(user_id)
+    if normalized_user is None:
+        raise ValueError("authenticated user is required for chat history.")
+    if not requested_session_id:
+        return
+
+    session_id = _validate_session_id(requested_session_id)
+    connect_fn = connect or _default_connect
+    record = _load_chat_session(
+        config=config,
+        session_id=session_id,
+        connect=connect_fn,
+    )
+    if record is None:
+        raise ValueError("session_id was not found.")
+    now = datetime.now(timezone.utc)
+    if record.expires_at <= now:
+        raise ValueError("session_id has expired.")
+    stored_user = _normalize_user_id(record.user_id)
+    if stored_user != normalized_user:
+        raise ValueError("session_id does not belong to the authenticated user.")
+    if record.mode != mode or record.selected_case_id != selected_case_id:
+        raise ValueError("session_id scope does not match the chat request.")
+
+    current = _count_chat_messages(
+        config=config,
+        session_id=session_id,
+        connect=connect_fn,
+    )
+    max_messages = max(1, int(config.CASE_QA_MAX_MESSAGES_PER_SESSION))
+    if current + 2 > max_messages:
+        raise ValueError(
+            f"Chat session exceeded the configured message limit of {max_messages}."
+        )
 
 
 def delete_expired_chat_sessions(

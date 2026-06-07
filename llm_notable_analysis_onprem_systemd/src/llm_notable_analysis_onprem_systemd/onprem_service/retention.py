@@ -19,6 +19,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
+from .case_db import (
+    default_connect as _default_connect,
+    fetchall as _fetchall,
+    set_statement_timeout as _set_statement_timeout,
+)
 from .case_chat_history import delete_expired_chat_sessions
 from .case_store import quote_identifier
 from .config import Config
@@ -174,32 +179,6 @@ def delete_older_than_days(
             errors += 1
 
     return RetentionStats(moved=moved, deleted=deleted, errors=errors)
-
-
-def _default_connect(dsn: str) -> Any:
-    """Open a psycopg connection for case retention cleanup."""
-    try:
-        import psycopg  # type: ignore
-    except Exception as exc:  # pragma: no cover - import guard
-        raise RuntimeError("psycopg is unavailable in the runtime.") from exc
-    return psycopg.connect(dsn, connect_timeout=5)
-
-
-def _set_statement_timeout(conn: Any, timeout_ms: int) -> None:
-    """Set a transaction-local Postgres statement timeout."""
-    if int(timeout_ms) > 0:
-        conn.execute(
-            "SELECT set_config('statement_timeout', %s, true)",
-            (f"{int(timeout_ms)}ms",),
-        )
-
-
-def _fetchall(result: Any) -> list[Any]:
-    """Read rows from a cursor-like result."""
-    fetchall = getattr(result, "fetchall", None)
-    if callable(fetchall):
-        return list(fetchall())
-    return []
 
 
 def build_delete_expired_cases_sql(schema: str) -> str:

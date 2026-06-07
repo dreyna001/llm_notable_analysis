@@ -15,6 +15,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from .case_db import (
+    default_connect as _default_connect,
+    fetchone as _fetchone,
+    set_statement_timeout as _set_statement_timeout,
+)
 from .config import Config
 from .verdicts import normalize_verdict
 
@@ -69,15 +74,6 @@ class CaseArchiveRecord:
     retrieval_status: str
     backfill_status: str
     source_completeness: str
-
-
-def _default_connect(dsn: str) -> Any:
-    """Open a psycopg connection for case archive writes."""
-    try:
-        import psycopg  # type: ignore
-    except Exception as exc:  # pragma: no cover - import guard
-        raise RuntimeError("psycopg is unavailable in the runtime.") from exc
-    return psycopg.connect(dsn, connect_timeout=5)
 
 
 def quote_identifier(value: str, field_name: str) -> str:
@@ -364,23 +360,6 @@ def _record_params(record: CaseArchiveRecord) -> tuple[Any, ...]:
         record.backfill_status,
         record.source_completeness,
     )
-
-
-def _set_statement_timeout(conn: Any, timeout_ms: int) -> None:
-    """Set a transaction-local Postgres statement timeout."""
-    if int(timeout_ms) > 0:
-        conn.execute(
-            "SELECT set_config('statement_timeout', %s, true)",
-            (f"{int(timeout_ms)}ms",),
-        )
-
-
-def _fetchone(result: Any) -> Any:
-    """Read one row from a psycopg cursor-like result."""
-    fetchone = getattr(result, "fetchone", None)
-    if callable(fetchone):
-        return fetchone()
-    return None
 
 
 def _is_retryable(exc: BaseException) -> bool:

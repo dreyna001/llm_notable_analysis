@@ -20,7 +20,13 @@ from .case_search import (
     _vector_literal,
     _vectors_to_lists,
 )
-from .case_chat_history import persist_chat_history
+from .case_db import (
+    default_connect as _default_connect,
+    fetchall as _fetchall,
+    row_get as _row_get,
+    set_statement_timeout as _set_statement_timeout,
+)
+from .case_chat_history import persist_chat_history, validate_chat_history_request
 from .case_index import case_exists
 from .case_store import quote_identifier
 from .config import Config
@@ -173,44 +179,11 @@ class _Candidate:
     fusion_score: float = 0.0
 
 
-def _default_connect(dsn: str) -> Any:
-    """Open a psycopg connection for case chat retrieval."""
-    try:
-        import psycopg  # type: ignore
-    except Exception as exc:  # pragma: no cover - import guard
-        raise RuntimeError("psycopg is unavailable in the runtime.") from exc
-    return psycopg.connect(dsn, connect_timeout=5)
-
-
-def _set_statement_timeout(conn: Any, timeout_ms: int) -> None:
-    """Set a transaction-local Postgres statement timeout."""
-    if int(timeout_ms) > 0:
-        conn.execute(
-            "SELECT set_config('statement_timeout', %s, true)",
-            (f"{int(timeout_ms)}ms",),
-        )
-
-
-def _fetchall(result: Any) -> list[Any]:
-    """Read rows from a cursor-like result."""
-    fetchall = getattr(result, "fetchall", None)
-    if callable(fetchall):
-        return list(fetchall())
-    return []
-
-
 def _json_from_db(value: Any) -> Any:
     """Normalize JSONB values returned by psycopg or test fakes."""
     if isinstance(value, str):
         return json.loads(value)
     return value
-
-
-def _row_get(row: Any, index: int, key: str) -> Any:
-    """Read row value from a tuple or mapping."""
-    if isinstance(row, dict):
-        return row[key]
-    return row[index]
 
 
 def _chunk_table(schema: str) -> str:
@@ -1092,6 +1065,14 @@ def answer_case_chat(
             config=config,
             connect=connect,
         )
+    validate_chat_history_request(
+        config=config,
+        mode=request.mode,
+        selected_case_id=request.selected_case_id,
+        requested_session_id=request.session_id,
+        user_id=user_id,
+        connect=connect,
+    )
     if is_action_request(request.question):
         return _finalize_chat_response(
             config=config,

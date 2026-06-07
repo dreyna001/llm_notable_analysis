@@ -3,3 +3,6 @@ dist/
 .vite/
 *.local
 .DS_Store
+test-results/
+playwright-report/
+.last-run.json

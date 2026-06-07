@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
-import html
 import ipaddress
 import logging
 import secrets
 import threading
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 from .case_chat import (
     CaseNotFoundError,
@@ -36,8 +36,12 @@ from .case_chat_history import (
     list_chat_sessions,
 )
 from .case_store import CaseArchiveRecord, quote_identifier
+from .case_db import (
+    default_connect as _default_connect,
+    fetchone as _fetchone,
+    set_statement_timeout as _set_statement_timeout,
+)
 from .config import Config, load_config
-from .verdicts import verdict_label
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +50,7 @@ _MAX_LIST_OFFSET = 10_000
 _MAX_CASE_ID_LENGTH = 128
 _MAX_TRUSTED_USER_LENGTH = 256
 _PUBLIC_PATHS = frozenset({"/health", "/ready"})
+_MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _TRUSTED_USER_CTX: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "portal_trusted_user",
     default=None,
@@ -55,33 +60,10 @@ _TRUSTED_USER_CTX: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 def _lazy_import_fastapi():
     try:
         from fastapi import FastAPI, HTTPException, Request  # type: ignore
-        from fastapi.responses import HTMLResponse, JSONResponse  # type: ignore
+        from fastapi.responses import JSONResponse  # type: ignore
     except Exception as exc:  # pragma: no cover - import guard
         raise RuntimeError("fastapi is unavailable in the runtime.") from exc
-    return FastAPI, HTTPException, Request, HTMLResponse, JSONResponse
-
-
-def _default_connect(dsn: str) -> Any:
-    try:
-        import psycopg  # type: ignore
-    except Exception as exc:  # pragma: no cover - import guard
-        raise RuntimeError("psycopg is unavailable in the runtime.") from exc
-    return psycopg.connect(dsn, connect_timeout=5)
-
-
-def _set_statement_timeout(conn: Any, timeout_ms: int) -> None:
-    if int(timeout_ms) > 0:
-        conn.execute(
-            "SELECT set_config('statement_timeout', %s, true)",
-            (f"{int(timeout_ms)}ms",),
-        )
-
-
-def _fetchone(result: Any) -> Any:
-    fetchone = getattr(result, "fetchone", None)
-    if callable(fetchone):
-        return fetchone()
-    return None
+    return FastAPI, HTTPException, Request, JSONResponse
 
 
 def _is_loopback_bind_host(host: str) -> bool:
@@ -145,6 +127,27 @@ def _proxy_secret_matches(request: Any, config: Config) -> bool:
     if supplied is None:
         return False
     return secrets.compare_digest(str(supplied).strip(), expected)
+
+
+def _same_origin_request(request: Any) -> bool:
+    """Reject browser cross-site writes while allowing non-browser clients."""
+    fetch_site = str(request.headers.get("sec-fetch-site") or "").strip().lower()
+    if fetch_site and fetch_site not in {"same-origin", "none"}:
+        return False
+
+    origin = str(request.headers.get("origin") or "").strip()
+    if not origin:
+        return True
+    parsed = urlparse(origin)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return False
+    host = str(request.headers.get("host") or "").strip().lower()
+    if parsed.netloc.lower() != host:
+        return False
+    forwarded_proto = str(request.headers.get("x-forwarded-proto") or "").strip().lower()
+    if forwarded_proto and parsed.scheme != forwarded_proto:
+        return False
+    return True
 
 
 def parse_iso8601_timestamp(value: str, field_name: str) -> datetime:
@@ -303,7 +306,7 @@ def build_portal_app(
     chat_knowledge_base_provider: Any = None,
 ) -> Any:
     """Build the read-only analyst portal FastAPI application."""
-    FastAPI, HTTPException, Request, HTMLResponse, JSONResponse = _lazy_import_fastapi()
+    FastAPI, HTTPException, Request, JSONResponse = _lazy_import_fastapi()
     _validate_portal_security_config(config)
     connect_fn = connect or _default_connect
     trusted_header = _portal_header_name(
@@ -356,6 +359,13 @@ def build_portal_app(
         path = request.url.path
         if path in _PUBLIC_PATHS:
             return await call_next(request)
+        if request.method.upper() in _MUTATING_METHODS and not _same_origin_request(
+            request
+        ):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Cross-site portal write requests are not allowed."},
+            )
         if not _proxy_secret_matches(request, config):
             return JSONResponse(
                 status_code=401,
@@ -603,139 +613,6 @@ def build_portal_app(
             raise HTTPException(status_code=503, detail="Case chat unavailable.") from exc
         finally:
             chat_semaphore.release()
-
-    @app.get("/", response_class=HTMLResponse)
-    def portal_home() -> str:
-        return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Notable Analyst Portal</title>
-</head>
-<body>
-  <h1>Notable Analyst Portal</h1>
-  <p>Read-only access to archived cases.</p>
-  <ul>
-    <li><a href="/cases">Browse cases</a></li>
-    <li><a href="/api/cases">Cases API</a></li>
-    <li><a href="/health">Health</a></li>
-    <li><a href="/ready">Ready</a></li>
-  </ul>
-</body>
-</html>"""
-
-    @app.get("/cases", response_class=HTMLResponse)
-    def portal_cases(
-        limit: str | None = None,
-        offset: str | None = None,
-        start: str | None = None,
-        end: str | None = None,
-        verdict: str | None = None,
-        search_name: str | None = None,
-    ) -> str:
-        try:
-            filters = _parse_list_filters(
-                limit=limit,
-                offset=offset,
-                start=start,
-                end=end,
-                verdict=verdict,
-                search_name=search_name,
-            )
-            page_size = _bounded_page_size(config, filters.limit)
-            items = list_cases(
-                config=config,
-                filters=filters,
-                connect=connect_fn,
-                fetch_extra=True,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except Exception as exc:
-            logger.exception("Failed to render case list")
-            raise HTTPException(status_code=503, detail="Case archive unavailable.") from exc
-
-        rows = []
-        response_items = items[:page_size]
-        for item in response_items:
-            rows.append(
-                "<tr>"
-                f"<td><a href=\"/cases/{html.escape(item.case_id)}\">"
-                f"{html.escape(item.case_id)}</a></td>"
-                f"<td>{html.escape(_format_utc_timestamp(item.processed_at))}</td>"
-                f"<td>{html.escape(verdict_label(item.verdict))}</td>"
-                f"<td>{html.escape(item.search_name or '')}</td>"
-                f"<td>{html.escape(item.retrieval_status)}</td>"
-                "</tr>"
-            )
-        body_rows = (
-            "\n".join(rows)
-            if rows
-            else '<tr><td colspan="5">No cases found.</td></tr>'
-        )
-        previous_link = ""
-        if filters.offset > 0:
-            previous_offset = max(0, filters.offset - page_size)
-            previous_link = (
-                f'<a href="/cases?limit={page_size}&offset={previous_offset}">'
-                "Previous page</a>"
-            )
-        next_link = ""
-        if len(items) > page_size:
-            next_offset = filters.offset + page_size
-            next_link = (
-                f'<a href="/cases?limit={page_size}&offset={next_offset}">'
-                "Next page</a>"
-            )
-        separator = " | " if previous_link and next_link else ""
-        pagination = previous_link + separator + next_link
-        pagination_block = f"<p>{pagination}</p>" if pagination else ""
-        return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Archived Cases</title>
-</head>
-<body>
-  <h1>Archived Cases</h1>
-  <p><a href="/">Home</a></p>
-  {pagination_block}
-  <table border="1" cellpadding="4" cellspacing="0">
-    <thead>
-      <tr>
-        <th>Case ID</th>
-        <th>Processed</th>
-        <th>Verdict</th>
-        <th>Search Name</th>
-        <th>Retrieval</th>
-      </tr>
-    </thead>
-    <tbody>
-      {body_rows}
-    </tbody>
-  </table>
-</body>
-</html>"""
-
-    @app.get("/cases/{case_id}", response_class=HTMLResponse)
-    def portal_case_detail(case_id: str) -> str:
-        normalized, record = fetch_case_detail(case_id)
-        return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Case {html.escape(normalized)}</title>
-</head>
-<body>
-  <h1>Case {html.escape(normalized)}</h1>
-  <p><a href="/cases">Back to cases</a></p>
-  <p>Processed: {html.escape(_format_utc_timestamp(record.processed_at))}</p>
-  <p>Verdict: {html.escape(verdict_label(record.verdict))}</p>
-  <p>Alert name: {html.escape(record.search_name or '')}</p>
-  <p>Retrieval status: {html.escape(record.retrieval_status)}</p>
-  <p>Source completeness: {html.escape(record.source_completeness)}</p>
-</body>
-</html>"""
 
     return app
 

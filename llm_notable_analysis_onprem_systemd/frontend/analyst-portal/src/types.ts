@@ -3,7 +3,7 @@ export type CaseSummary = {
   processed_at: string | null;
   expires_at: string | null;
   verdict: string | null;
-  confidence: string | null;
+  confidence: number | null;
   search_name: string | null;
   retrieval_status: string;
   source_completeness: string;
@@ -25,7 +25,7 @@ export type CaseDetail = {
     source_completeness: string;
   };
   alert_payload: Record<string, unknown>;
-  analysis: Record<string, unknown>;
+  analysis: Record<string, unknown> | null;
   report_md_path: string | null;
   report_html_path: string | null;
 };

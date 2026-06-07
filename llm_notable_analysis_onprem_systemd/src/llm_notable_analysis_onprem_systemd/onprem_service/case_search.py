@@ -16,6 +16,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Iterable, Sequence
 
+from .case_db import (
+    default_connect as _default_connect,
+    fetchall as _fetchall,
+    row_get as _row_get,
+    set_statement_timeout as _set_statement_timeout,
+)
 from .case_store import CaseArchiveRecord, quote_identifier
 from .config import Config
 
@@ -122,15 +128,6 @@ class CaseChunkRecord:
 
 class CaseChunkWriteError(RuntimeError):
     """Case chunk persistence failed."""
-
-
-def _default_connect(dsn: str) -> Any:
-    """Open a psycopg connection for case chunk writes."""
-    try:
-        import psycopg  # type: ignore
-    except Exception as exc:  # pragma: no cover - import guard
-        raise RuntimeError("psycopg is unavailable in the runtime.") from exc
-    return psycopg.connect(dsn, connect_timeout=5)
 
 
 def _lazy_import_sentence_transformer() -> Any:
@@ -541,15 +538,6 @@ def _execute_many(conn: Any, sql: str, rows: Sequence[tuple[Any, ...]]) -> None:
         cursor.executemany(sql, rows)
 
 
-def _set_statement_timeout(conn: Any, timeout_ms: int) -> None:
-    """Set a transaction-local Postgres statement timeout."""
-    if int(timeout_ms) > 0:
-        conn.execute(
-            "SELECT set_config('statement_timeout', %s, true)",
-            (f"{int(timeout_ms)}ms",),
-        )
-
-
 def _chunk_rows(
     *,
     chunks: Sequence[CaseChunkRecord],
@@ -733,13 +721,6 @@ def _json_from_db(value: Any) -> Any:
     return value
 
 
-def _row_get(row: Any, index: int, key: str) -> Any:
-    """Read a row value from a tuple or mapping."""
-    if isinstance(row, dict):
-        return row[key]
-    return row[index]
-
-
 def _record_from_row(row: Any) -> CaseArchiveRecord:
     """Build a CaseArchiveRecord from a selected database row."""
     return CaseArchiveRecord(
@@ -765,14 +746,6 @@ def _record_from_row(row: Any) -> CaseArchiveRecord:
         backfill_status=_row_get(row, 19, "backfill_status"),
         source_completeness=_row_get(row, 20, "source_completeness"),
     )
-
-
-def _fetchall(result: Any) -> list[Any]:
-    """Read rows from a cursor-like result."""
-    fetchall = getattr(result, "fetchall", None)
-    if callable(fetchall):
-        return list(fetchall())
-    return []
 
 
 def fetch_case_records(

@@ -215,7 +215,7 @@ class TestPortalApp(unittest.TestCase):
         self.assertEqual(ready.json(), {"status": "ready"})
         self.assertEqual(not_ready.status_code, 503)
 
-    def test_portal_home_renders_html(self) -> None:
+    def test_fastapi_portal_does_not_serve_html_ui_routes(self) -> None:
         client = TestClient(
             build_portal_app(
                 self._config(),
@@ -225,9 +225,7 @@ class TestPortalApp(unittest.TestCase):
 
         response = client.get("/", headers=_AUTH_HEADERS)
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("Notable Analyst Portal", response.text)
-        self.assertIn('href="/cases"', response.text)
+        self.assertEqual(response.status_code, 404)
 
     def test_ready_does_not_run_expensive_chat_retrieval_check(self) -> None:
         config = Config(
@@ -369,7 +367,7 @@ class TestPortalApp(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
 
-    def test_portal_case_detail_maps_database_failures_to_unavailable(self) -> None:
+    def test_api_case_detail_maps_database_failures_to_unavailable(self) -> None:
         client = TestClient(
             build_portal_app(
                 self._config(),
@@ -377,7 +375,7 @@ class TestPortalApp(unittest.TestCase):
             )
         )
 
-        response = client.get("/cases/case-1", headers=_AUTH_HEADERS)
+        response = client.get("/api/cases/case-1", headers=_AUTH_HEADERS)
 
         self.assertEqual(response.status_code, 503)
 
@@ -398,6 +396,27 @@ class TestPortalApp(unittest.TestCase):
         self.assertEqual(payload["metadata"]["retrieval_status"], "pending")
         self.assertEqual(payload["alert_payload"]["notable_id"], "abc-123")
 
+    def test_api_case_detail_returns_null_analysis_for_missing_structured_output(self) -> None:
+        record = _record(self._config())
+        row = list(_detail_row(record))
+        row[9] = json.dumps(None)
+        row[18] = "not_indexed"
+        row[20] = "missing_analysis"
+        client = TestClient(
+            build_portal_app(
+                self._config(),
+                connect=lambda _dsn: _FakeConnection(row=tuple(row)),
+            )
+        )
+
+        response = client.get("/api/cases/case-1", headers=_AUTH_HEADERS)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIsNone(payload["analysis"])
+        self.assertEqual(payload["metadata"]["retrieval_status"], "not_indexed")
+        self.assertEqual(payload["metadata"]["source_completeness"], "missing_analysis")
+
     def test_trusted_user_header_required_on_loopback(self) -> None:
         client = TestClient(
             build_portal_app(
@@ -413,6 +432,61 @@ class TestPortalApp(unittest.TestCase):
         self.assertEqual(missing.status_code, 401)
         self.assertEqual(forged_user.status_code, 401)
         self.assertEqual(allowed.status_code, 200)
+
+    def test_mutating_routes_reject_cross_site_browser_requests(self) -> None:
+        client = TestClient(
+            build_portal_app(
+                Config(
+                    PORTAL_ENABLED=True,
+                    CASE_ARCHIVE_ENABLED=True,
+                    CASE_QA_ENABLED=True,
+                    PORTAL_PROXY_SECRET="portal-secret",
+                ),
+                connect=lambda _dsn: _FakeConnection(rows=[]),
+            )
+        )
+
+        response = client.post(
+            "/api/chat",
+            json={"mode": "global_archive", "question": "What happened?"},
+            headers={
+                **_AUTH_HEADERS,
+                "Origin": "https://attacker.example",
+                "Sec-Fetch-Site": "cross-site",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_mutating_routes_allow_same_origin_browser_requests(self) -> None:
+        client = TestClient(
+            build_portal_app(
+                Config(
+                    PORTAL_ENABLED=True,
+                    CASE_ARCHIVE_ENABLED=True,
+                    CASE_QA_ENABLED=True,
+                    CASE_QA_GLOBAL_RETRIEVAL_ENABLED=True,
+                    PORTAL_PROXY_SECRET="portal-secret",
+                ),
+                connect=lambda _dsn: _FakeConnection(rows=[]),
+            )
+        )
+
+        response = client.post(
+            "/api/chat",
+            json={
+                "mode": "global_archive",
+                "question": "Run a Splunk search and create a ticket",
+            },
+            headers={
+                **_AUTH_HEADERS,
+                "Origin": "http://testserver",
+                "Sec-Fetch-Site": "same-origin",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["answer_status"], "refused")
 
     def test_non_loopback_bind_requires_explicit_allow(self) -> None:
         config = Config(

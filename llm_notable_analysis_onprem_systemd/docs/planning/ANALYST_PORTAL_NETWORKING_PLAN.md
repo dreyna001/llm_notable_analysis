@@ -122,7 +122,7 @@ server {
 
 FastAPI owns:
 
-- Portal routes and server-rendered/minimal static UI.
+- Portal API routes and health/readiness probes.
 - Case list/detail API.
 - Chat request validation and responses.
 - Postgres reads from `notable_cases`.

@@ -12,6 +12,15 @@ import { portalEnv } from "./portal-env";
 const env = portalEnv();
 let fixture: PortalFixture;
 
+function caseRow(page: import("@playwright/test").Page) {
+  return page.getByRole("row").filter({
+    has: page.getByRole("link", {
+      name: fixture.caseSummary.case_id,
+      exact: true,
+    }),
+  });
+}
+
 async function gotoHomeWithCase(
   page: import("@playwright/test").Page,
   caseId: string,
@@ -68,7 +77,7 @@ test.describe("Analyst portal E2E", () => {
     await page.goto("/cases");
     await expect(page.getByText("Loading cases...")).toBeHidden();
 
-    const row = page.getByRole("row").filter({ hasText: fixture.caseSummary.case_id });
+    const row = caseRow(page);
     await expect(row).toBeVisible();
     await expect(row.getByRole("link", { name: fixture.caseSummary.case_id })).toBeVisible();
 
@@ -93,25 +102,19 @@ test.describe("Analyst portal E2E", () => {
 
     await page.getByLabel("Alert name").fill(searchTerm.slice(0, Math.max(4, searchTerm.length - 2)));
     await page.waitForTimeout(350);
-    await expect(
-      page.getByRole("row").filter({ hasText: fixture.caseSummary.case_id }),
-    ).toBeVisible();
+    await expect(caseRow(page)).toBeVisible();
 
     if (verdictFilter) {
       await page.getByRole("combobox", { name: "Verdict" }).click();
       await page.getByRole("option", { name: verdictFilter }).click();
       await page.getByRole("button", { name: "Apply filters" }).click();
       await expect(page.getByText("Loading cases...")).toBeHidden();
-      await expect(
-        page.getByRole("row").filter({ hasText: fixture.caseSummary.case_id }),
-      ).toBeVisible();
+      await expect(caseRow(page)).toBeVisible();
     }
 
     await page.getByRole("button", { name: "Clear" }).click();
     await expect(page.getByLabel("Alert name")).toHaveValue("");
-    await expect(
-      page.getByRole("row").filter({ hasText: fixture.caseSummary.case_id }),
-    ).toBeVisible();
+    await expect(caseRow(page)).toBeVisible();
   });
 
   test("shows case detail metrics and every available analysis tab", async ({ page }) => {
@@ -203,6 +206,11 @@ test.describe("Analyst portal E2E", () => {
     test.skip(!env.runChat, "PORTAL_E2E_CHAT=false");
     test.skip(!fixture.capabilities.case_qa_enabled, "case_qa_enabled is off");
 
+    // This test issues up to two LLM round-trips, each allowed up to
+    // chatTimeoutMs. Give it a budget that covers both plus UI overhead so the
+    // global default per-test timeout does not cut a slow turn short.
+    test.setTimeout(env.chatTimeoutMs * 2 + 60_000);
+
     const question =
       "What is the verdict for this case? Answer in one sentence using only case evidence.";
 
@@ -210,7 +218,7 @@ test.describe("Analyst portal E2E", () => {
     await expectSelectedCaseAttached(page, env.caseId);
     await expect(page.getByText("Loading case details...")).toBeHidden();
 
-    const composer = page.getByPlaceholder(/Ask about this case/i);
+    const composer = page.getByPlaceholder(/Ask about/i);
     await expect(composer).toBeEnabled();
     await composer.fill(question);
     await page.getByRole("button", { name: "Send" }).click();

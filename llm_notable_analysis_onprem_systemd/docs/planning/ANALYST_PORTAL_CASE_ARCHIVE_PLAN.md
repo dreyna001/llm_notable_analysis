@@ -506,7 +506,7 @@ chat tables.
 ### Frontend Delivery Sequence
 
 Finalize the React analyst portal (`frontend/analyst-portal/`) as the primary UI
-before wiring production deployment through FastAPI static serving and nginx.
+before wiring production deployment through nginx.
 
 Current sequence:
 
@@ -517,13 +517,13 @@ Current sequence:
      dashboard. Home-page chat with a pinned selected case is sufficient for v1.
 2. **Production wiring second** — after the React UI is stable, add:
    - `npm run build` artifact packaging in install/deploy docs,
-   - FastAPI static mount (or nginx `root`/`try_files` for the SPA),
+   - nginx `root`/`try_files` for the SPA,
    - nginx proxy rules for `/api`, `/health`, and `/ready`.
-3. **Cutover** — retire or demote the minimal server-rendered HTML fallback in
-   `portal_app.py` once the React build is the documented operator path.
+3. **Cutover** — the React build is the documented operator path; FastAPI
+   remains the API/probe service behind nginx.
 
-The minimal server-rendered pages in `portal_app.py` remain a temporary fallback
-during frontend development. They are not the long-term analyst UI.
+The earlier temporary server-rendered pages in `portal_app.py` have been retired.
+They are not part of the production analyst UI.
 
 ### Network Serving Decision
 
@@ -556,9 +556,7 @@ Nginx owns:
 
 FastAPI / Uvicorn owns:
 
-- application routes,
 - portal API responses,
-- eventual static serving of the React build after frontend cutover,
 - chatbot request validation,
 - Postgres reads and optional bounded chat-history writes.
 
@@ -582,7 +580,7 @@ services and nginx configuration.
 When implementation starts, target these concrete files/components unless the
 technical spec changes them:
 
-- `portal_app.py`: FastAPI app, routes, server-rendered views.
+- `portal_app.py`: FastAPI app, API routes, auth/proxy boundary, health probes.
 - `case_store.py`: analyzer-side Postgres writes into `notable_cases.cases`.
 - `case_index.py`: read-only case list/detail queries.
 - `case_search.py`: pgvector chunk creation and retrieval.

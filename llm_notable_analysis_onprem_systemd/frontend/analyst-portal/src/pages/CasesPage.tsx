@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { ApiError, fetchCase, fetchCases } from "../api/client";
 import type { CaseSummary } from "../types";
 import { caseDetailToSummary } from "../utils/caseSummary";
+import { normalizeVerdict, verdictLabel } from "../utils/verdict";
 
 type CaseFilters = {
   start: string;
@@ -36,26 +37,6 @@ const EMPTY_FILTERS: CaseFilters = {
   verdict: "",
   search_name: "",
 };
-
-function normalizeVerdict(verdict: string | null | undefined): string {
-  const text = String(verdict ?? "").toLowerCase().replace(/[\s-]+/g, "_");
-  if (text.includes("malicious") || text.includes("true_positive")) {
-    return "likely_malicious";
-  }
-  if (text.includes("benign") || text.includes("false_positive")) {
-    return "likely_benign";
-  }
-  return "unknown";
-}
-
-function verdictLabel(verdict: string | null): string {
-  const labels: Record<string, string> = {
-    likely_malicious: "Likely malicious",
-    likely_benign: "Likely benign",
-    unknown: "Unknown",
-  };
-  return labels[normalizeVerdict(verdict)];
-}
 
 function verdictBadgeVariant(
   verdict: string | null,

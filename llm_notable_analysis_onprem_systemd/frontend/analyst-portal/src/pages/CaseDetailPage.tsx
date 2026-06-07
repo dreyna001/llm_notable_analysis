@@ -47,6 +47,7 @@ import {
   resolveCaseDetailTab,
   type CaseDetailTab,
 } from "../utils/caseDetailTabs";
+import { verdictLabel, verdictTone, type VerdictTone } from "../utils/verdict";
 
 type AlertReconciliation = {
   verdict?: unknown;
@@ -56,46 +57,13 @@ type AlertReconciliation = {
   recommended_actions?: unknown;
 };
 
-type ThreatLevel = "malicious" | "benign" | "unknown";
-
 // Deterministic verdict -> threat color. Red is most malicious, green is least
 // malicious; unknown verdicts stay amber.
-const THREAT_COLOR: Record<ThreatLevel, string> = {
+const THREAT_COLOR: Record<VerdictTone, string> = {
   malicious: "#f87171",
   benign: "#4ade80",
   unknown: "#fbbf24",
 };
-
-function normalizeVerdict(verdict: unknown): string {
-  const text = String(verdict ?? "").toLowerCase().replace(/[\s-]+/g, "_");
-  if (text.includes("malicious") || text.includes("true_positive")) {
-    return "likely_malicious";
-  }
-  if (text.includes("benign") || text.includes("false_positive")) {
-    return "likely_benign";
-  }
-  return "unknown";
-}
-
-function verdictThreatLevel(verdict: unknown): ThreatLevel {
-  switch (normalizeVerdict(verdict)) {
-    case "likely_malicious":
-      return "malicious";
-    case "likely_benign":
-      return "benign";
-    default:
-      return "unknown";
-  }
-}
-
-function verdictLabel(verdict: unknown): string {
-  const labels: Record<string, string> = {
-    likely_malicious: "Likely malicious",
-    likely_benign: "Likely benign",
-    unknown: "Unknown",
-  };
-  return labels[normalizeVerdict(verdict)];
-}
 
 function asText(value: unknown, fallback = "-"): string {
   if (typeof value === "string" && value.trim()) return value;
@@ -138,7 +106,7 @@ function toggleOpenKey(
 }
 
 function getAlertReconciliation(detail: CaseDetail | null): AlertReconciliation {
-  const value = detail?.analysis.alert_reconciliation;
+  const value = detail?.analysis?.alert_reconciliation;
   if (value && typeof value === "object") {
     return value as AlertReconciliation;
   }
@@ -607,7 +575,7 @@ export function CaseDetailPage() {
   const reconciliation = getAlertReconciliation(detail);
   const verdict = verdictLabel(reconciliation.verdict);
   const confidence = confidenceStats(reconciliation.confidence);
-  const threatColor = THREAT_COLOR[verdictThreatLevel(reconciliation.verdict)];
+  const threatColor = THREAT_COLOR[verdictTone(reconciliation.verdict)];
   const summary = asText(reconciliation.one_sentence_summary, "");
   const searchName = detail ? recordField(detail.alert_payload, "search_name") : "-";
   const sourceId = detail ? recordField(detail.alert_payload, "notable_id") : "-";
