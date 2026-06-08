@@ -89,6 +89,10 @@ describe("HomeChatWorkspace attached case", () => {
     window.localStorage.clear();
     vi.clearAllMocks();
     resetApiMocks();
+    vi.mocked(fetchCapabilities).mockResolvedValue({
+      ...capabilities,
+      chat_history_enabled: true,
+    });
   });
 
   it("removes a stale selected-case session from the active view when the URL case is cleared", async () => {
@@ -126,6 +130,10 @@ describe("HomeChatWorkspace new chat", () => {
     window.localStorage.clear();
     vi.clearAllMocks();
     resetApiMocks();
+    vi.mocked(fetchCapabilities).mockResolvedValue({
+      ...capabilities,
+      chat_history_enabled: true,
+    });
   });
 
   it("does not create a global-mode session when cross-case chat is disabled", async () => {
@@ -234,7 +242,63 @@ describe("HomeChatWorkspace server chat sessions", () => {
     resetApiMocks();
   });
 
+  it("clears durable browser storage when server chat history is disabled", async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        activeLocalId: "local-old",
+        sessions: [
+          {
+            localId: "local-old",
+            serverSessionId: null,
+            title: "Stale chat",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+            mode: "selected_case",
+            selectedCaseId: "portal-test-1780770539",
+            turns: [
+              {
+                id: "turn-1",
+                question: "What happened?",
+                response: {
+                  answer: "Sensitive case detail.",
+                  answer_status: "answered",
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    render(
+      <MemoryRouter>
+        <HomeChatWorkspace
+          sidebarMeta={<div>Case window</div>}
+          selectedCaseId="portal-test-1780770539"
+          selectedCaseName="Portal E2E Test"
+        />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByText("Start investigating this case"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Stale chat")).not.toBeInTheDocument();
+    expect(screen.queryByText("What happened?")).not.toBeInTheDocument();
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
+
+    fireEvent.click(screen.getAllByRole("button", { name: /^new chat$/i })[0]);
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
+    });
+  });
+
   it("shows a banner when the initial server session list cannot be loaded", async () => {
+    vi.mocked(fetchCapabilities).mockResolvedValue({
+      ...capabilities,
+      chat_history_enabled: true,
+    });
     vi.mocked(fetchChatSessions).mockRejectedValueOnce(
       new ApiError(503, "unavailable"),
     );

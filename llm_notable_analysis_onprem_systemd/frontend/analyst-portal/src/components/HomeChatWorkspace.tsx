@@ -41,6 +41,7 @@ import { sanitizeChatAnswer } from "../utils/sanitizeChatAnswer";
 import {
   capChatSessionStore,
   capChatSessionStoreWithMeta,
+  clearChatSessionStore,
   createEmptySession,
   DEFAULT_MAX_CHAT_SESSIONS,
   ensureChatSessionStore,
@@ -186,6 +187,14 @@ function mergeServerSessions(
   });
 }
 
+function createInitialStore(): ChatSessionStore {
+  const session = createEmptySession();
+  return {
+    activeLocalId: session.localId,
+    sessions: [session],
+  };
+}
+
 export function HomeChatWorkspace({
   sidebarMeta,
   selectedCaseId,
@@ -199,7 +208,7 @@ export function HomeChatWorkspace({
   onCapabilitiesLoaded,
 }: HomeChatWorkspaceProps) {
   const [store, setStore] = useState<ChatSessionStore>(() =>
-    ensureChatSessionStore(loadChatSessionStore()),
+    createInitialStore(),
   );
   const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
   const [capabilities, setCapabilities] = useState<PortalCapabilities | null>(null);
@@ -211,6 +220,7 @@ export function HomeChatWorkspace({
   const [sessionCapNotice, setSessionCapNotice] = useState<string | null>(null);
   const maxChatSessions =
     capabilities?.max_chat_sessions_per_user ?? DEFAULT_MAX_CHAT_SESSIONS;
+  const serverHistoryEnabled = capabilities?.chat_history_enabled === true;
   const [attachedCasePreview, setAttachedCasePreview] = useState<CaseSummary | null>(
     null,
   );
@@ -224,6 +234,18 @@ export function HomeChatWorkspace({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [orphanCleanupError, setOrphanCleanupError] = useState<string | null>(null);
   const sessionHistoryAbortRef = useRef<AbortController | null>(null);
+  const loadedPersistentStoreRef = useRef(false);
+
+  const persistChatSessionStore = useCallback(
+    (nextStore: ChatSessionStore) => {
+      if (serverHistoryEnabled) {
+        saveChatSessionStore(nextStore, maxChatSessions);
+        return;
+      }
+      clearChatSessionStore();
+    },
+    [maxChatSessions, serverHistoryEnabled],
+  );
 
   const sortedSessions = useMemo(
     () =>
@@ -384,16 +406,52 @@ export function HomeChatWorkspace({
   useEffect(() => {
     const normalized = normalizePersistedStore(store);
     if (
-      normalized.activeLocalId === store.activeLocalId &&
-      normalized.sessions === store.sessions
+      normalized.activeLocalId !== store.activeLocalId ||
+      normalized.sessions !== store.sessions
     ) {
+      setStore(normalized);
       return;
     }
-    setStore(normalized);
-    saveChatSessionStore(normalized, maxChatSessions);
-  }, [maxChatSessions, normalizePersistedStore, store]);
+    persistChatSessionStore(store);
+  }, [normalizePersistedStore, persistChatSessionStore, store]);
 
   useEffect(() => {
+    if (!capabilitiesLoaded) {
+      return;
+    }
+    if (!serverHistoryEnabled) {
+      loadedPersistentStoreRef.current = false;
+      clearChatSessionStore();
+      return;
+    }
+    if (loadedPersistentStoreRef.current) {
+      return;
+    }
+    loadedPersistentStoreRef.current = true;
+    setStore(() => {
+      const loaded = loadChatSessionStore(maxChatSessions);
+      const contextualized = selectedCaseId
+        ? switchToChatContext(loaded, "selected_case", selectedCaseId)
+        : loaded;
+      return ensureChatSessionStore(
+        capChatSessionStore(contextualized, maxChatSessions),
+      );
+    });
+  }, [
+    capabilitiesLoaded,
+    maxChatSessions,
+    selectedCaseId,
+    serverHistoryEnabled,
+  ]);
+
+  useEffect(() => {
+    if (!capabilitiesLoaded) {
+      return;
+    }
+    if (!serverHistoryEnabled) {
+      setHistoryLoadError(null);
+      return;
+    }
     let cancelled = false;
     fetchChatSessions()
       .then((payload) => {
@@ -410,7 +468,6 @@ export function HomeChatWorkspace({
             maxChatSessions,
             noteSessionEviction,
           );
-          saveChatSessionStore(merged, maxChatSessions);
           return merged;
         });
       })
@@ -425,7 +482,12 @@ export function HomeChatWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [maxChatSessions, noteSessionEviction]);
+  }, [
+    capabilitiesLoaded,
+    maxChatSessions,
+    noteSessionEviction,
+    serverHistoryEnabled,
+  ]);
 
   useEffect(() => {
     const caseId = effectiveSelectedCaseId;
@@ -478,7 +540,6 @@ export function HomeChatWorkspace({
         switchToChatContext(current, "selected_case", selectedCaseId),
         maxChatSessions,
       );
-      saveChatSessionStore(next, maxChatSessions);
       return next;
     });
   }, [maxChatSessions, selectedCaseId]);
@@ -547,7 +608,6 @@ export function HomeChatWorkspace({
         const capped = ensureChatSessionStore(
           capChatSessionStore(next, maxChatSessions),
         );
-        saveChatSessionStore(capped, maxChatSessions);
         return capped;
       }
 
@@ -561,7 +621,6 @@ export function HomeChatWorkspace({
         const capped = ensureChatSessionStore(
           capChatSessionStore(next, maxChatSessions),
         );
-        saveChatSessionStore(capped, maxChatSessions);
         return capped;
       }
 
@@ -573,7 +632,6 @@ export function HomeChatWorkspace({
       const capped = ensureChatSessionStore(
         capChatSessionStore(next, maxChatSessions),
       );
-      saveChatSessionStore(capped, maxChatSessions);
       return capped;
     });
   }, [
@@ -600,7 +658,6 @@ export function HomeChatWorkspace({
         );
         const next = { ...current, activeLocalId: localId };
         const capped = capChatSessionStore(next, maxChatSessions);
-        saveChatSessionStore(capped, maxChatSessions);
         return capped;
       });
 
@@ -652,7 +709,6 @@ export function HomeChatWorkspace({
             ),
           };
           const capped = capChatSessionStore(next, maxChatSessions);
-          saveChatSessionStore(capped, maxChatSessions);
           return capped;
         });
 
@@ -696,7 +752,6 @@ export function HomeChatWorkspace({
             : undefined,
         );
         const capped = capChatSessionStore(next, maxChatSessions);
-        saveChatSessionStore(capped, maxChatSessions);
         return capped;
       });
     },
@@ -711,7 +766,6 @@ export function HomeChatWorkspace({
           switchToChatContext(current, "selected_case", caseSummary.case_id),
           maxChatSessions,
         );
-        saveChatSessionStore(next, maxChatSessions);
         return next;
       });
       onAttachCase?.(caseSummary.case_id);
@@ -734,7 +788,6 @@ export function HomeChatWorkspace({
           switchToChatContext(detached, context.mode, context.selectedCaseId),
           maxChatSessions,
         );
-        saveChatSessionStore(next, maxChatSessions);
         return next;
       });
     });
@@ -817,7 +870,6 @@ export function HomeChatWorkspace({
         const capped = ensureChatSessionStore(
           capChatSessionStore(next, maxChatSessions),
         );
-        saveChatSessionStore(capped, maxChatSessions);
         return capped;
       });
       setPendingDeleteSession(null);
@@ -863,7 +915,6 @@ export function HomeChatWorkspace({
               sessions: remaining,
             };
             const capped = capChatSessionStore(next, maxChatSessions);
-            saveChatSessionStore(capped, maxChatSessions);
             return capped;
           }
         }
@@ -899,7 +950,6 @@ export function HomeChatWorkspace({
           ),
         };
         const capped = capChatSessionStore(next, maxChatSessions);
-        saveChatSessionStore(capped, maxChatSessions);
         return capped;
       });
     },
@@ -950,7 +1000,6 @@ export function HomeChatWorkspace({
                 ),
               };
               const capped = capChatSessionStore(next, maxChatSessions);
-              saveChatSessionStore(capped, maxChatSessions);
               return capped;
             });
             setOrphanCleanupError(null);
@@ -994,7 +1043,7 @@ export function HomeChatWorkspace({
           capabilitiesLoadError={capabilitiesLoadError}
           attachError={attachError}
           historyLoadError={
-            capabilities?.chat_history_enabled ? null : historyLoadError
+            capabilities?.chat_history_enabled ? historyLoadError : null
           }
           sessionCapNotice={sessionCapNotice}
           chatDisabledReason={chatDisabledReason}

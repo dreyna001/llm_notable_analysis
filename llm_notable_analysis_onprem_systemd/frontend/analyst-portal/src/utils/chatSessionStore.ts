@@ -391,3 +391,14 @@ export function saveChatSessionStore(
     // Storage can be unavailable or full; chat still works without local persistence.
   }
 }
+
+export function clearChatSessionStore(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Storage can be unavailable; clearing is best-effort.
+  }
+}

@@ -61,7 +61,7 @@ function buildNotices(
 
   if (capabilities && !capabilities.chat_history_enabled) {
     notices.push(
-      "Chat history is not saved on the server. Conversations stay in this browser only.",
+      "Chat history is not saved on the server or in this browser. Conversations are kept only for this page session.",
     );
   }
 
