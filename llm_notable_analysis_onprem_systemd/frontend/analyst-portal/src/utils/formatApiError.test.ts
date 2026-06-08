@@ -8,6 +8,7 @@ import {
   CHAT_INVALID_RESPONSE_MESSAGE,
   CHAT_LLM_RATE_LIMIT_MESSAGE,
   CHAT_SESSION_SCOPE_MISMATCH_MESSAGE,
+  CHAT_STALE_SERVER_SESSION_MESSAGE,
   CHAT_TIMEOUT_MESSAGE,
   CHAT_UNAVAILABLE_MESSAGE,
   formatApiError,
@@ -78,6 +79,14 @@ describe("formatChatApiError", () => {
     expect(formatChatApiError(new ApiError(404, "Case not found."))).toBe(
       CHAT_CASE_NOT_FOUND_MESSAGE,
     );
+
+    expect(
+      formatChatApiError(new ApiError(404, "session_id was not found.")),
+    ).toBe(CHAT_STALE_SERVER_SESSION_MESSAGE);
+
+    expect(
+      formatChatApiError(new ApiError(410, "session_id has expired.")),
+    ).toBe(CHAT_STALE_SERVER_SESSION_MESSAGE);
 
     expect(
       formatChatApiError(new ApiError(503, "Case chat unavailable.")),

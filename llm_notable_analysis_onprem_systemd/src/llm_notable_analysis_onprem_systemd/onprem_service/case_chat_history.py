@@ -42,6 +42,14 @@ class ChatSessionRecord:
     expires_at: datetime
 
 
+class ChatSessionNotFoundError(LookupError):
+    """Raised when a requested chat session id is missing."""
+
+
+class ChatSessionExpiredError(LookupError):
+    """Raised when a requested chat session id is past retention expiry."""
+
+
 def _normalize_user_id(user_id: str | None) -> str | None:
     text = str(user_id or "").strip()
     return text or None
@@ -291,10 +299,10 @@ def get_chat_session_messages(
         connect=connect or _default_connect,
     )
     if record is None:
-        raise ValueError("session_id was not found.")
+        raise ChatSessionNotFoundError("session_id was not found.")
     now = datetime.now(timezone.utc)
     if record.expires_at <= now:
-        raise ValueError("session_id has expired.")
+        raise ChatSessionExpiredError("session_id has expired.")
 
     normalized_user = _normalize_user_id(user_id)
     stored_user = _normalize_user_id(record.user_id)
@@ -593,7 +601,7 @@ def _persist_chat_turn_messages(
         _set_statement_timeout(conn, config.CASE_POSTGRES_STATEMENT_TIMEOUT_MS)
         locked = _fetchone(conn.execute(lock_sql, (session_id,)))
         if locked is None:
-            raise ValueError("session_id was not found.")
+            raise ChatSessionNotFoundError("session_id was not found.")
         count_row = _fetchone(conn.execute(count_sql, (session_id,)))
         current = int(_row_get(count_row, 0, "count") or 0)
         if current + 2 > max_messages:
@@ -646,10 +654,10 @@ def _resolve_session_id(
             connect=connect,
         )
         if record is None:
-            raise ValueError("session_id was not found.")
+            raise ChatSessionNotFoundError("session_id was not found.")
         now = datetime.now(timezone.utc)
         if record.expires_at <= now:
-            raise ValueError("session_id has expired.")
+            raise ChatSessionExpiredError("session_id has expired.")
         stored_user = _normalize_user_id(record.user_id)
         if stored_user != normalized_user:
             raise ValueError("session_id does not belong to the authenticated user.")
@@ -762,10 +770,10 @@ def validate_chat_history_request(
         connect=connect_fn,
     )
     if record is None:
-        raise ValueError("session_id was not found.")
+        raise ChatSessionNotFoundError("session_id was not found.")
     now = datetime.now(timezone.utc)
     if record.expires_at <= now:
-        raise ValueError("session_id has expired.")
+        raise ChatSessionExpiredError("session_id has expired.")
     stored_user = _normalize_user_id(record.user_id)
     if stored_user != normalized_user:
         raise ValueError("session_id does not belong to the authenticated user.")

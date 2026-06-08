@@ -32,6 +32,8 @@ from .case_index import (
     list_cases,
 )
 from .case_chat_history import (
+    ChatSessionExpiredError,
+    ChatSessionNotFoundError,
     delete_chat_session,
     delete_last_chat_turn,
     get_chat_session_messages,
@@ -118,6 +120,21 @@ def _raise_portal_llm_error(exc: BaseException) -> None:
             status_code=503,
             detail="LLM service unavailable.",
         ) from exc
+    raise exc
+
+
+def _raise_portal_chat_session_error(exc: BaseException) -> None:
+    """Map chat session validation failures to typed HTTP responses."""
+    _, HTTPException, _, _ = _lazy_import_fastapi()
+    if isinstance(exc, ChatSessionNotFoundError):
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if isinstance(exc, ChatSessionExpiredError):
+        raise HTTPException(status_code=410, detail=str(exc)) from exc
+    if isinstance(exc, ValueError):
+        message = str(exc)
+        if "does not belong to the authenticated user" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
     raise exc
 
 
@@ -636,11 +653,10 @@ def build_portal_app(
                 user_id=_TRUSTED_USER_CTX.get(),
                 connect=connect_fn,
             )
+        except (ChatSessionNotFoundError, ChatSessionExpiredError) as exc:
+            _raise_portal_chat_session_error(exc)
         except ValueError as exc:
-            message = str(exc)
-            if "not found" in message or "expired" in message or "does not belong" in message:
-                raise HTTPException(status_code=404, detail=message) from exc
-            raise HTTPException(status_code=400, detail=message) from exc
+            _raise_portal_chat_session_error(exc)
         except RuntimeError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Exception as exc:
@@ -734,8 +750,10 @@ def build_portal_app(
             return await asyncio.to_thread(_answer_portal_chat, payload)
         except CaseNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Case not found.") from exc
+        except (ChatSessionNotFoundError, ChatSessionExpiredError) as exc:
+            _raise_portal_chat_session_error(exc)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            _raise_portal_chat_session_error(exc)
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except (

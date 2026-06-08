@@ -13,7 +13,7 @@ import { postChat } from "../api/client";
 import type { ChatMode, ChatResponse } from "../types";
 import {
   formatChatApiError,
-  isChatSessionScopeMismatch,
+  isChatRecoverableServerSession,
 } from "../utils/formatApiError";
 import { answerStatusLabel, shouldShowAnswerStatus } from "../utils/answerStatus";
 import { resolveChatEmptyState } from "../utils/chatEmptyState";
@@ -229,15 +229,34 @@ export function ChatPanel({
     ]);
 
     try {
-      const response = await postChat(
-        {
-          mode,
-          question: trimmed,
-          selected_case_id: mode === "selected_case" ? selectedCaseId : undefined,
-          session_id: sessionId,
-        },
-        { signal: abortController.signal },
-      );
+      const requestChat = (activeSessionId: string | null) =>
+        postChat(
+          {
+            mode,
+            question: trimmed,
+            selected_case_id:
+              mode === "selected_case" ? selectedCaseId : undefined,
+            session_id: activeSessionId,
+          },
+          { signal: abortController.signal },
+        );
+
+      let response;
+      try {
+        response = await requestChat(sessionId);
+      } catch (err: unknown) {
+        if (
+          sessionId &&
+          isChatRecoverableServerSession(err) &&
+          !abortController.signal.aborted &&
+          requestGen === chatRequestGenRef.current
+        ) {
+          setSessionId(null);
+          response = await requestChat(null);
+        } else {
+          throw err;
+        }
+      }
       if (
         abortController.signal.aborted ||
         requestGen !== chatRequestGenRef.current
@@ -278,7 +297,7 @@ export function ChatPanel({
       }
       setTurns((value) => value.filter((turn) => turn.id !== turnId));
       setQuestion(trimmed);
-      if (isChatSessionScopeMismatch(err)) {
+      if (isChatRecoverableServerSession(err)) {
         setSessionId(null);
       }
       setError(formatChatApiError(err, "Unknown error"));

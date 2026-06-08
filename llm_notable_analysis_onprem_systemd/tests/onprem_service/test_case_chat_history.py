@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 
 from llm_notable_analysis_onprem_systemd.onprem_service.case_chat import answer_case_chat
 from llm_notable_analysis_onprem_systemd.onprem_service.case_chat_history import (
+    ChatSessionExpiredError,
+    ChatSessionNotFoundError,
     build_count_active_user_chat_sessions_query,
     build_delete_chat_session_query,
     build_delete_expired_chat_sessions_sql,
@@ -662,7 +664,7 @@ class TestCaseChatHistory(unittest.TestCase):
             )
 
     def test_persist_chat_history_rejects_unknown_session(self) -> None:
-        with self.assertRaisesRegex(ValueError, "session_id was not found"):
+        with self.assertRaises(ChatSessionNotFoundError):
             persist_chat_history(
                 config=_config(),
                 mode="global_archive",
@@ -688,7 +690,7 @@ class TestCaseChatHistory(unittest.TestCase):
                 )
             }
         )
-        with self.assertRaisesRegex(ValueError, "session_id has expired"):
+        with self.assertRaises(ChatSessionExpiredError):
             persist_chat_history(
                 config=_config(),
                 mode="global_archive",

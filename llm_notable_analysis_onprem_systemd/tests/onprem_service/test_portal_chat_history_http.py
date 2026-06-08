@@ -302,6 +302,13 @@ class TestPortalChatHistoryHttp(unittest.TestCase):
     def test_post_chat_rejects_expired_session(self) -> None:
         session_id = str(uuid.uuid4())
         expired_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        synthesize_calls = 0
+
+        def synthesize(_question, _sources):
+            nonlocal synthesize_calls
+            synthesize_calls += 1
+            return "Should not run."
+
         connection = _HistoryFakeConnection(
             row_pages=[[_chunk_row()], []],
             sessions={
@@ -319,7 +326,7 @@ class TestPortalChatHistoryHttp(unittest.TestCase):
                 _history_config(),
                 connect=lambda _dsn: connection,
                 chat_embedding_model=_FakeEmbeddingModel(),
-                chat_synthesizer=lambda _question, _sources: "Should not run.",
+                chat_synthesizer=synthesize,
             )
         )
         response = client.post(
@@ -331,8 +338,39 @@ class TestPortalChatHistoryHttp(unittest.TestCase):
             },
             headers=_AUTH_HEADERS,
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 410)
         self.assertIn("expired", response.json()["detail"])
+        self.assertEqual(synthesize_calls, 0)
+
+    def test_post_chat_returns_404_for_missing_session(self) -> None:
+        connection = _HistoryFakeConnection(row_pages=[[_chunk_row()], []])
+        synthesize_calls = 0
+
+        def synthesize(_question, _sources):
+            nonlocal synthesize_calls
+            synthesize_calls += 1
+            return "Should not run."
+
+        client = TestClient(
+            build_portal_app(
+                _history_config(),
+                connect=lambda _dsn: connection,
+                chat_embedding_model=_FakeEmbeddingModel(),
+                chat_synthesizer=synthesize,
+            )
+        )
+        response = client.post(
+            "/api/chat",
+            json={
+                "mode": "global_archive",
+                "question": "Follow-up on missing session?",
+                "session_id": "00000000-0000-0000-0000-000000000001",
+            },
+            headers=_AUTH_HEADERS,
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("not found", response.json()["detail"])
+        self.assertEqual(synthesize_calls, 0)
 
     def test_post_chat_rejects_full_session_before_synthesis(self) -> None:
         session_id, connection = _session_bundle(

@@ -1,6 +1,11 @@
 import { ApiError, INVALID_RESPONSE_STATUS } from "../api/client";
 
 const CHAT_SESSION_SCOPE_MISMATCH_SNIPPET = "session_id scope does not match";
+const CHAT_SESSION_NOT_FOUND_SNIPPET = "session_id was not found";
+const CHAT_SESSION_EXPIRED_SNIPPET = "session_id has expired";
+const CHAT_SESSION_USER_MISMATCH_SNIPPET =
+  "does not belong to the authenticated user";
+const CHAT_CASE_NOT_FOUND_SNIPPET = "Case not found";
 const CHAT_SELECTED_CASE_REQUIRED_SNIPPET = "selected_case_id is required";
 
 export const CHAT_LLM_RATE_LIMIT_MESSAGE =
@@ -11,6 +16,9 @@ export const CHAT_CONCURRENCY_LIMIT_MESSAGE =
 
 export const CHAT_SESSION_SCOPE_MISMATCH_MESSAGE =
   "This chat no longer matches the selected case or mode. Your next message will start a fresh server session.";
+
+export const CHAT_STALE_SERVER_SESSION_MESSAGE =
+  "This server chat session is no longer available. Retrying with a new session.";
 
 export const CHAT_TIMEOUT_MESSAGE =
   "The chat request timed out. Wait a moment and try again, or ask a shorter question.";
@@ -52,6 +60,39 @@ export function isChatSessionScopeMismatch(err: unknown): boolean {
   );
 }
 
+export function isChatSessionNotFound(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    err.status === 404 &&
+    err.message.includes(CHAT_SESSION_NOT_FOUND_SNIPPET)
+  );
+}
+
+export function isChatSessionExpired(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    err.status === 410 &&
+    err.message.includes(CHAT_SESSION_EXPIRED_SNIPPET)
+  );
+}
+
+export function isChatSessionUserMismatch(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    err.status === 404 &&
+    err.message.includes(CHAT_SESSION_USER_MISMATCH_SNIPPET)
+  );
+}
+
+export function isChatRecoverableServerSession(err: unknown): boolean {
+  return (
+    isChatSessionScopeMismatch(err) ||
+    isChatSessionNotFound(err) ||
+    isChatSessionExpired(err) ||
+    isChatSessionUserMismatch(err)
+  );
+}
+
 export function isChatGatewayTimeout(err: unknown): boolean {
   return err instanceof ApiError && err.status === 504;
 }
@@ -68,7 +109,11 @@ export function isChatCancelled(err: unknown): boolean {
 }
 
 export function isChatCaseNotFound(err: unknown): boolean {
-  return err instanceof ApiError && err.status === 404;
+  return (
+    err instanceof ApiError &&
+    err.status === 404 &&
+    err.message.includes(CHAT_CASE_NOT_FOUND_SNIPPET)
+  );
 }
 
 export function isChatUnavailable(err: unknown): boolean {
@@ -120,6 +165,9 @@ export function formatChatApiError(err: unknown, fallback = "Unknown error"): st
   }
   if (isChatSessionScopeMismatch(err)) {
     return CHAT_SESSION_SCOPE_MISMATCH_MESSAGE;
+  }
+  if (isChatRecoverableServerSession(err)) {
+    return CHAT_STALE_SERVER_SESSION_MESSAGE;
   }
   if (isChatCaseNotFound(err)) {
     return CHAT_CASE_NOT_FOUND_MESSAGE;

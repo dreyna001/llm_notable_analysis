@@ -22,7 +22,7 @@ describe("ChatPanel session scope recovery", () => {
     postChat.mockReset();
   });
 
-  it("shows recovery guidance when the server rejects a stale session id", async () => {
+  it("clears stale server session ids and retries as a new session", async () => {
     postChat
       .mockRejectedValueOnce(
         new ApiError(400, "session_id scope does not match the chat request."),
@@ -47,25 +47,46 @@ describe("ChatPanel session scope recovery", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /send/i }));
 
+    expect(await screen.findByText("Recovered.")).toBeInTheDocument();
     expect(
-      await screen.findByText(
-        /This chat no longer matches the selected case or mode/,
-      ),
-    ).toBeInTheDocument();
+      screen.queryByText(/This server chat session is no longer available/),
+    ).not.toBeInTheDocument();
 
     expect(postChat.mock.calls[0]?.[0]).toMatchObject({
       session_id: "stale-server-id",
     });
+    expect(postChat.mock.calls[1]?.[0]).toMatchObject({
+      session_id: null,
+    });
+  });
 
+  it("retries after an expired server session response", async () => {
+    postChat
+      .mockRejectedValueOnce(
+        new ApiError(410, "session_id has expired."),
+      )
+      .mockResolvedValueOnce({
+        answer: "Fresh session answer.",
+        answer_status: "answered",
+        session_id: "fresh-session",
+      });
+
+    render(
+      <ChatPanel
+        mode="global_archive"
+        initialSessionId="expired-server-id"
+      />,
+    );
+
+    const composer = screen.getByRole("textbox");
     fireEvent.change(composer, {
       target: { value: "Try again" },
     });
     fireEvent.click(screen.getByRole("button", { name: /send/i }));
 
-    await waitFor(() => {
-      expect(postChat.mock.calls[1]?.[0]).toMatchObject({
-        session_id: null,
-      });
+    expect(await screen.findByText("Fresh session answer.")).toBeInTheDocument();
+    expect(postChat.mock.calls[1]?.[0]).toMatchObject({
+      session_id: null,
     });
   });
 });
@@ -126,6 +147,34 @@ describe("ChatPanel error guidance", () => {
     expect(
       await screen.findByText(/The chat request timed out/i),
     ).toBeInTheDocument();
+  });
+
+  it("shows stale-session guidance when retry also fails", async () => {
+    postChat
+      .mockRejectedValueOnce(new ApiError(404, "session_id was not found."))
+      .mockRejectedValueOnce(new ApiError(503, "LLM service unavailable."));
+
+    render(
+      <ChatPanel
+        mode="global_archive"
+        initialSessionId="missing-server-id"
+      />,
+    );
+
+    const composer = screen.getByRole("textbox");
+    fireEvent.change(composer, {
+      target: { value: "What happened?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    expect(
+      await screen.findByText(/Chat is temporarily unavailable/i),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(postChat.mock.calls[1]?.[0]).toMatchObject({
+        session_id: null,
+      });
+    });
   });
 });
 
