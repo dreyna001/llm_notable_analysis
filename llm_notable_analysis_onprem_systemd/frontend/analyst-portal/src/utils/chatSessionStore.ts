@@ -258,7 +258,7 @@ function applyContextToSession(
   };
 }
 
-/** Drop the attached case from the active chat without starting a new conversation. */
+/** Drop the attached case from the active chat and clear case-specific history. */
 export function detachActiveCase(store: ChatSessionStore): ChatSessionStore {
   const active =
     store.sessions.find((session) => session.localId === store.activeLocalId) ??
@@ -278,6 +278,7 @@ export function detachActiveCase(store: ChatSessionStore): ChatSessionStore {
             mode: "global_archive",
             selectedCaseId: undefined,
             serverSessionId: null,
+            turns: [],
             updatedAt: new Date().toISOString(),
           }
         : session,

@@ -30,6 +30,7 @@ vi.mock("../api/client", () => ({
   deleteLastChatTurn: vi.fn(),
   fetchCapabilities: vi.fn(async () => capabilities),
   fetchCase: vi.fn(),
+  fetchCases: vi.fn(async () => ({ items: [], total: 0 })),
   fetchChatSessionMessages: vi.fn(),
   fetchChatSessions: vi.fn(async () => ({ history_enabled: false, items: [] })),
 }));

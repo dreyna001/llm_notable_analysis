@@ -21,7 +21,7 @@ function makeStore(count: number): ChatSessionStore {
 }
 
 describe("detachActiveCase", () => {
-  it("clears the attached case from the active session and resets server linkage", () => {
+  it("clears the attached case, server linkage, and prior turns from the active session", () => {
     const active = createEmptySession("selected_case", "portal-test-123");
     active.serverSessionId = "server-session-1";
     active.turns = [
@@ -43,7 +43,7 @@ describe("detachActiveCase", () => {
     expect(updated?.mode).toBe("global_archive");
     expect(updated?.selectedCaseId).toBeUndefined();
     expect(updated?.serverSessionId).toBeNull();
-    expect(updated?.turns).toHaveLength(1);
+    expect(updated?.turns).toHaveLength(0);
     expect(next.sessions.find((session) => session.localId === other.localId)?.selectedCaseId).toBe(
       "other-case",
     );
