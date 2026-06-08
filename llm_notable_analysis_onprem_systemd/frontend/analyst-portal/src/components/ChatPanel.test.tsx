@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
 import { ChatPanel } from "./ChatPanel";
 
@@ -11,6 +11,10 @@ vi.mock("../api/client", async (importOriginal) => {
     ...actual,
     postChat: (...args: unknown[]) => postChat(...args),
   };
+});
+
+afterEach(() => {
+  cleanup();
 });
 
 describe("ChatPanel session scope recovery", () => {
@@ -45,7 +49,7 @@ describe("ChatPanel session scope recovery", () => {
 
     expect(
       await screen.findByText(
-        "This chat no longer matches the selected case or mode. Your next message will start a fresh server session.",
+        /This chat no longer matches the selected case or mode/,
       ),
     ).toBeInTheDocument();
 
@@ -98,6 +102,53 @@ describe("ChatPanel session instance key", () => {
 
     expect(screen.queryByText("First question")).not.toBeInTheDocument();
     expect(screen.getByText("How can I help?")).toBeInTheDocument();
+  });
+});
+
+describe("ChatPanel error guidance", () => {
+  beforeEach(() => {
+    postChat.mockReset();
+  });
+
+  it("shows recovery guidance for chat timeouts", async () => {
+    postChat.mockRejectedValueOnce(
+      new ApiError(0, "Request timed out.", "timeout"),
+    );
+
+    render(<ChatPanel mode="global_archive" />);
+
+    const composer = screen.getByRole("textbox");
+    fireEvent.change(composer, {
+      target: { value: "What happened?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    expect(
+      await screen.findByText(/The chat request timed out/i),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("ChatPanel answer status labels", () => {
+  it("shows analyst-readable labels for non-answered responses", () => {
+    render(
+      <ChatPanel
+        mode="global_archive"
+        initialTurns={[
+          {
+            id: "turn-refused",
+            question: "Delete this case",
+            response: {
+              answer: "I cannot help with that.",
+              answer_status: "refused",
+            },
+            awaitingResponse: false,
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Refused")).toBeInTheDocument();
   });
 });
 

@@ -49,6 +49,7 @@ import {
   resolveCaseDetailTab,
   type CaseDetailTab,
 } from "../utils/caseDetailTabs";
+import { queryStatusLabel } from "../utils/queryStatus";
 import { retrievalStatusLabel } from "../utils/retrievalStatus";
 import { sourceCompletenessLabel } from "../utils/sourceCompleteness";
 import { verdictLabel, verdictTone, type VerdictTone } from "../utils/verdict";
@@ -993,6 +994,7 @@ export function CaseDetailPage() {
                     const key = `query-${index}`;
                     const isOpen = openQueries.has(key);
                     const status = asText(query.status, "unknown");
+                    const statusLabel = queryStatusLabel(status);
                     const chipClass = queryStatusChipClass(status);
                     const queryText = asText(query.query, "");
                     const reference = asText(
@@ -1014,7 +1016,7 @@ export function CaseDetailPage() {
                         }
                         key={key}
                         open={isOpen}
-                        title={status}
+                        title={statusLabel}
                         titleClassName={hypothesisTitleClass(chipClass)}
                         onToggle={() => toggleOpenKey(setOpenQueries, key)}
                       >
@@ -1137,6 +1139,14 @@ export function CaseDetailPage() {
                 <DetailMetaValue>{detail.case_id}</DetailMetaValue>
                 <DetailMetaTerm>Notable name</DetailMetaTerm>
                 <DetailMetaValue>{searchName}</DetailMetaValue>
+                <DetailMetaTerm>Chatbot readiness</DetailMetaTerm>
+                <DetailMetaValue>
+                  {retrievalStatusLabel(detail.metadata.retrieval_status)}
+                </DetailMetaValue>
+                <DetailMetaTerm>Analysis availability</DetailMetaTerm>
+                <DetailMetaValue>
+                  {sourceCompletenessLabel(detail.metadata.source_completeness)}
+                </DetailMetaValue>
                 <DetailMetaTerm>Expires</DetailMetaTerm>
                 <DetailMetaValue>{detail.metadata.expires_at ?? "-"}</DetailMetaValue>
                 <DetailMetaTerm>Report markdown</DetailMetaTerm>

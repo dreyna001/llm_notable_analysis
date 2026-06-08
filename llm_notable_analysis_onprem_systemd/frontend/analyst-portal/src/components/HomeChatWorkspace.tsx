@@ -36,7 +36,7 @@ import { PortalCapabilityBanner } from "./PortalCapabilityBanner";
 import { PortalLoadFailure } from "./PortalLoadFailure";
 import { PortalSidebar } from "./PortalSidebar";
 import { caseDetailToSummary } from "../utils/caseSummary";
-import { formatApiError } from "../utils/formatApiError";
+import { formatApiError, formatChatApiError } from "../utils/formatApiError";
 import { sanitizeChatAnswer } from "../utils/sanitizeChatAnswer";
 import {
   capChatSessionStore,
@@ -125,7 +125,14 @@ function messagesToStoredTurns(messages: ChatSessionMessage[]): StoredChatTurn[]
   return turns;
 }
 
-function formatWorkspaceError(err: unknown, fallback: string): string {
+function formatWorkspaceError(
+  err: unknown,
+  fallback: string,
+  options?: { chatContext?: boolean },
+): string {
+  if (options?.chatContext) {
+    return formatChatApiError(err, fallback);
+  }
   return formatApiError(err, fallback);
 }
 
@@ -663,7 +670,7 @@ export function HomeChatWorkspace({
           return;
         }
         setHistoryLoadError(
-          `Could not load chat history. ${formatWorkspaceError(err, "Unknown error")}`,
+          `Could not load chat history. ${formatWorkspaceError(err, "Unknown error", { chatContext: true })}`,
         );
       } finally {
         setLoadingSessionId((current) => (current === localId ? null : current));

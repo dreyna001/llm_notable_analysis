@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { ApiError } from "../api/client";
+import { ApiError, INVALID_RESPONSE_STATUS } from "../api/client";
 import {
+  CHAT_CANCELLED_MESSAGE,
+  CHAT_CASE_NOT_FOUND_MESSAGE,
+  CHAT_CASE_REQUIRED_MESSAGE,
   CHAT_CONCURRENCY_LIMIT_MESSAGE,
+  CHAT_INVALID_RESPONSE_MESSAGE,
+  CHAT_SESSION_SCOPE_MISMATCH_MESSAGE,
+  CHAT_TIMEOUT_MESSAGE,
+  CHAT_UNAVAILABLE_MESSAGE,
   formatApiError,
   formatChatApiError,
   isChatConcurrencyLimit,
@@ -28,6 +35,63 @@ describe("formatApiError", () => {
   });
 });
 
+describe("formatChatApiError", () => {
+  it("formats concurrency, session, and transport guidance", () => {
+    expect(
+      formatChatApiError(
+        new ApiError(
+          429,
+          "Too many chat requests are already running. Try again shortly.",
+        ),
+      ),
+    ).toBe(CHAT_CONCURRENCY_LIMIT_MESSAGE);
+
+    expect(
+      formatChatApiError(
+        new ApiError(400, "session_id scope does not match the chat request."),
+      ),
+    ).toBe(CHAT_SESSION_SCOPE_MISMATCH_MESSAGE);
+
+    expect(
+      formatChatApiError(new ApiError(0, "Request timed out.", "timeout")),
+    ).toBe(CHAT_TIMEOUT_MESSAGE);
+
+    expect(
+      formatChatApiError(new ApiError(0, "Request cancelled.", "cancelled")),
+    ).toBe(CHAT_CANCELLED_MESSAGE);
+  });
+
+  it("formats case, availability, and validation guidance", () => {
+    expect(formatChatApiError(new ApiError(404, "Case not found."))).toBe(
+      CHAT_CASE_NOT_FOUND_MESSAGE,
+    );
+
+    expect(
+      formatChatApiError(new ApiError(503, "Case chat unavailable.")),
+    ).toBe(CHAT_UNAVAILABLE_MESSAGE);
+
+    expect(
+      formatChatApiError(
+        new ApiError(
+          INVALID_RESPONSE_STATUS,
+          "Portal API returned an unexpected response.",
+          "invalid_response",
+        ),
+      ),
+    ).toBe(CHAT_INVALID_RESPONSE_MESSAGE);
+
+    expect(
+      formatChatApiError(
+        new ApiError(400, "selected_case_id is required for this mode."),
+      ),
+    ).toBe(CHAT_CASE_REQUIRED_MESSAGE);
+
+    expect(formatChatApiError(new ApiError(500, "Internal server error."))).toBe(
+      CHAT_UNAVAILABLE_MESSAGE,
+    );
+  });
+});
+
 describe("chat concurrency limit", () => {
   const busy = new ApiError(
     429,
@@ -36,10 +100,6 @@ describe("chat concurrency limit", () => {
 
   it("detects portal chat concurrency errors", () => {
     expect(isChatConcurrencyLimit(busy)).toBe(true);
-  });
-
-  it("formats retry guidance instead of a raw 429 prefix", () => {
-    expect(formatChatApiError(busy)).toBe(CHAT_CONCURRENCY_LIMIT_MESSAGE);
   });
 
   it("keeps generic formatting for non-chat callers", () => {
@@ -57,11 +117,5 @@ describe("chat session scope mismatch", () => {
 
   it("detects stale server session errors", () => {
     expect(isChatSessionScopeMismatch(mismatch)).toBe(true);
-  });
-
-  it("formats recovery guidance for chat POST failures", () => {
-    expect(formatChatApiError(mismatch)).toBe(
-      "This chat no longer matches the selected case or mode. Your next message will start a fresh server session.",
-    );
   });
 });

@@ -15,6 +15,7 @@ import {
   formatChatApiError,
   isChatSessionScopeMismatch,
 } from "../utils/formatApiError";
+import { answerStatusLabel, shouldShowAnswerStatus } from "../utils/answerStatus";
 import { resolveChatEmptyState } from "../utils/chatEmptyState";
 import { sanitizeChatAnswer } from "../utils/sanitizeChatAnswer";
 import { ChatConversationSkeleton } from "./LoadingSkeletons";
@@ -337,12 +338,24 @@ export function ChatPanel({
                 <ChatTypingIndicator elapsedSeconds={waitingElapsedSec} />
               ) : null}
               {turn.response ? (
-                <MarkdownMessage
-                  className={cn(
-                    assistantStatusClass(turn.response.answer_status),
-                  )}
-                  text={sanitizeChatAnswer(turn.response.answer)}
-                />
+                <div className="space-y-1">
+                  <MarkdownMessage
+                    className={cn(
+                      assistantStatusClass(turn.response.answer_status),
+                    )}
+                    text={sanitizeChatAnswer(turn.response.answer)}
+                  />
+                  {shouldShowAnswerStatus(turn.response.answer_status) ? (
+                    <p
+                      className={cn(
+                        "text-xs",
+                        assistantStatusClass(turn.response.answer_status),
+                      )}
+                    >
+                      {answerStatusLabel(turn.response.answer_status)}
+                    </p>
+                  ) : null}
+                </div>
               ) : null}
             </div>
           ))}

@@ -3,6 +3,10 @@ import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import {
+  interpretationAssessmentLabel,
+  interpretationDeltaLabel,
+} from "../../utils/interpretationStatus";
 
 export function DetailMuted({ children }: { children: ReactNode }) {
   return <p className="text-sm text-muted-foreground">{children}</p>;
@@ -364,8 +368,7 @@ export function InterpretationAssessmentBadge({
         : value === "inconclusive"
           ? "warning"
           : "muted";
-  const label = value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-  return <Badge variant={variant}>{label}</Badge>;
+  return <Badge variant={variant}>{interpretationAssessmentLabel(value)}</Badge>;
 }
 
 export function InterpretationDeltaBadge({ delta }: { delta: unknown }) {
@@ -378,8 +381,7 @@ export function InterpretationDeltaBadge({ delta }: { delta: unknown }) {
         : value === "unchanged"
           ? "muted"
           : "warning";
-  const label = value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-  return <Badge variant={variant}>{label}</Badge>;
+  return <Badge variant={variant}>{interpretationDeltaLabel(value)}</Badge>;
 }
 
 export function DetailHeroMeta({
