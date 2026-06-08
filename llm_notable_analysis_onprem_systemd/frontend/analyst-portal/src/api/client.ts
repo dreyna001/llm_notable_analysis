@@ -40,6 +40,16 @@ export class ApiError extends Error {
   }
 }
 
+export function isCancelledRequest(
+  error: unknown,
+  signal?: AbortSignal,
+): boolean {
+  if (signal?.aborted) {
+    return true;
+  }
+  return error instanceof ApiError && error.kind === "cancelled";
+}
+
 type ResponseParser<T> = (value: unknown) => T | null;
 
 async function readValidatedJson<T>(
@@ -166,14 +176,17 @@ export async function fetchCapabilities(): Promise<PortalCapabilities> {
   );
 }
 
-export async function fetchCases(params?: {
-  limit?: number;
-  cursor?: CaseListCursor | null;
-  start_date?: string;
-  end_date?: string;
-  verdict?: string;
-  search_name?: string;
-}): Promise<CaseListResponse> {
+export async function fetchCases(
+  params?: {
+    limit?: number;
+    cursor?: CaseListCursor | null;
+    start_date?: string;
+    end_date?: string;
+    verdict?: string;
+    search_name?: string;
+  },
+  options?: { signal?: AbortSignal },
+): Promise<CaseListResponse> {
   const query = new URLSearchParams();
   if (params?.limit != null) query.set("limit", String(params.limit));
   if (params?.cursor) {
@@ -186,14 +199,19 @@ export async function fetchCases(params?: {
   if (params?.search_name) query.set("search_name", params.search_name);
   const suffix = query.size ? `?${query}` : "";
   return readValidatedJson(
-    await apiFetch(`/api/cases${suffix}`),
+    await apiFetch(`/api/cases${suffix}`, { signal: options?.signal }),
     parseCaseListResponse,
   );
 }
 
-export async function fetchCase(caseId: string): Promise<CaseDetail> {
+export async function fetchCase(
+  caseId: string,
+  options?: { signal?: AbortSignal },
+): Promise<CaseDetail> {
   return readValidatedJson(
-    await apiFetch(`/api/cases/${encodeURIComponent(caseId)}`),
+    await apiFetch(`/api/cases/${encodeURIComponent(caseId)}`, {
+      signal: options?.signal,
+    }),
     parseCaseDetail,
   );
 }

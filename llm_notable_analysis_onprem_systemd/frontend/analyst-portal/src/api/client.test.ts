@@ -3,6 +3,7 @@ import {
   ApiError,
   INVALID_RESPONSE_STATUS,
   fetchCase,
+  fetchCases,
 } from "./client";
 import { INVALID_RESPONSE_MESSAGE } from "./responseSchemas";
 
@@ -84,6 +85,74 @@ describe("fetchCase response validation", () => {
         INVALID_RESPONSE_MESSAGE,
         "invalid_response",
       ),
+    );
+  });
+
+  it("aborts in-flight fetchCase requests when the signal is cancelled", async () => {
+    const controller = new AbortController();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_input, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("Aborted", "AbortError"));
+          });
+        }),
+      ),
+    );
+
+    const pending = fetchCase("case-1", { signal: controller.signal });
+    controller.abort();
+
+    await expect(pending).rejects.toEqual(
+      new ApiError(0, "Request cancelled.", "cancelled"),
+    );
+  });
+});
+
+describe("fetchCases request cancellation", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("passes AbortSignal through to fetch", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({
+        items: [],
+        limit: 50,
+        has_more: false,
+        next_cursor: null,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchCases({ limit: 50 }, { signal: controller.signal });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cases?limit=50",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("aborts in-flight fetchCases requests when the signal is cancelled", async () => {
+    const controller = new AbortController();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_input, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("Aborted", "AbortError"));
+          });
+        }),
+      ),
+    );
+
+    const pending = fetchCases({ limit: 50 }, { signal: controller.signal });
+    controller.abort();
+
+    await expect(pending).rejects.toEqual(
+      new ApiError(0, "Request cancelled.", "cancelled"),
     );
   });
 });

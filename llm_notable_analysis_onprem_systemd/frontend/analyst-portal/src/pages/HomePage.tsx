@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { fetchCase } from "../api/client";
+import { fetchCase, isCancelledRequest } from "../api/client";
 import { HomeChatWorkspace } from "../components/HomeChatWorkspace";
 import type { CaseDetail, PortalCapabilities } from "../types";
 
@@ -68,28 +68,31 @@ export function HomePage() {
       setAttachError(null);
       return;
     }
-    let cancelled = false;
+    const controller = new AbortController();
+    const { signal } = controller;
     setSelectedCaseLoading(true);
     setAttachError(null);
-    fetchCase(selectedCaseId)
+    fetchCase(selectedCaseId, { signal })
       .then((payload) => {
-        if (!cancelled) {
-          setSelectedCase(payload);
+        if (signal.aborted) {
+          return;
         }
+        setSelectedCase(payload);
       })
-      .catch(() => {
-        if (!cancelled) {
-          setSelectedCase(null);
-          setAttachError("Case not found or unavailable.");
+      .catch((err: unknown) => {
+        if (isCancelledRequest(err, signal)) {
+          return;
         }
+        setSelectedCase(null);
+        setAttachError("Case not found or unavailable.");
       })
       .finally(() => {
-        if (!cancelled) {
+        if (!signal.aborted) {
           setSelectedCaseLoading(false);
         }
       });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [selectedCaseId]);
 

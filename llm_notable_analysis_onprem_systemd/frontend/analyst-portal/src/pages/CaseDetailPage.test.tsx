@@ -47,6 +47,8 @@ const { fetchCase, MockApiError, nullAnalysisCase } = vi.hoisted(() => {
 vi.mock("../api/client", () => ({
   ApiError: MockApiError,
   fetchCase: (...args: unknown[]) => fetchCase(...args),
+  fetchCaseRawSection: vi.fn(),
+  isCancelledRequest: () => false,
 }));
 
 function renderCaseDetail() {

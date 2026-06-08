@@ -86,6 +86,7 @@ vi.mock("../api/client", () => ({
   ApiError: MockApiError,
   fetchCase: (...args: unknown[]) => fetchCase(...args),
   fetchCases: (...args: unknown[]) => fetchCases(...args),
+  isCancelledRequest: () => false,
 }));
 
 function renderCasesPage() {
@@ -131,6 +132,7 @@ describe("CasesPage", () => {
     await waitFor(() =>
       expect(fetchCases).toHaveBeenLastCalledWith(
         expect.objectContaining({ search_name: "case-123" }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       ),
     );
     expect(fetchCase).not.toHaveBeenCalled();
@@ -161,7 +163,12 @@ describe("CasesPage", () => {
     });
     await flushSearchDebounce();
 
-    await waitFor(() => expect(fetchCase).toHaveBeenCalledWith("case-123"));
+    await waitFor(() =>
+      expect(fetchCase).toHaveBeenCalledWith(
+        "case-123",
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
+    );
     expect(fetchCases).toHaveBeenCalledTimes(1);
     expect(
       await screen.findByRole("link", { name: matchingCaseSummary.case_id }),

@@ -42,7 +42,7 @@ import {
 } from "../components/case-detail/CaseDetailUi";
 import { CaseArchiveNoticeBanner } from "../components/CaseArchiveNoticeBanner";
 import { CaseDetailMetricsSkeleton } from "../components/LoadingSkeletons";
-import { ApiError, fetchCase, fetchCaseRawSection } from "../api/client";
+import { ApiError, fetchCase, fetchCaseRawSection, isCancelledRequest } from "../api/client";
 import type { CaseDetail } from "../types";
 import {
   caseDetailTabNeedsUrlCleanup,
@@ -538,32 +538,37 @@ export function CaseDetailPage() {
       setLoading(false);
       return;
     }
-    let cancelled = false;
+    const controller = new AbortController();
+    const { signal } = controller;
     setLoading(true);
-    fetchCase(caseId)
+    fetchCase(caseId, { signal })
       .then((payload) => {
-        if (!cancelled) {
-          setDetail(payload);
-          setError(null);
+        if (signal.aborted) {
+          return;
         }
+        setDetail(payload);
+        setError(null);
       })
       .catch((err: unknown) => {
-        if (!cancelled) {
-          const message =
-            err instanceof ApiError
-              ? `${err.status}: ${err.message}`
-              : err instanceof Error
-                ? err.message
-                : "Unknown error";
-          setDetail(null);
-          setError(message);
+        if (isCancelledRequest(err, signal)) {
+          return;
         }
+        const message =
+          err instanceof ApiError
+            ? `${err.status}: ${err.message}`
+            : err instanceof Error
+              ? err.message
+              : "Unknown error";
+        setDetail(null);
+        setError(message);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!signal.aborted) {
+          setLoading(false);
+        }
       });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [caseId]);
 

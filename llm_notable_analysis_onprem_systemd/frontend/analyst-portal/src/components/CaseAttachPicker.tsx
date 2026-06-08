@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { CaseAttachListSkeleton } from "./LoadingSkeletons";
 import { EmptyState } from "./EmptyState";
-import { ApiError, fetchCase, fetchCases } from "../api/client";
+import { ApiError, fetchCase, fetchCases, isCancelledRequest } from "../api/client";
 import { resolveCaseAttachEmptyState } from "../utils/caseAttachEmptyState";
 import type { CaseListCursor, CaseSummary } from "../types";
 import { caseDetailToSummary } from "../utils/caseSummary";
@@ -40,16 +40,23 @@ function matchesQuery(item: CaseSummary, query: string): boolean {
 async function loadCaseOptions(
   searchTerm: string,
   cursor: CaseListCursor | null,
+  signal?: AbortSignal,
 ): Promise<CaseOptionsPage> {
   const trimmed = searchTerm.trim();
   const [listResult, exactDetail] = await Promise.all([
-    fetchCases({
-      limit: PAGE_SIZE,
-      cursor,
-      search_name: trimmed || undefined,
-    }),
+    fetchCases(
+      {
+        limit: PAGE_SIZE,
+        cursor,
+        search_name: trimmed || undefined,
+      },
+      { signal },
+    ),
     cursor === null && trimmed
-      ? fetchCase(trimmed).catch((error: unknown) => {
+      ? fetchCase(trimmed, { signal }).catch((error: unknown) => {
+          if (isCancelledRequest(error, signal)) {
+            throw error;
+          }
           if (error instanceof ApiError && error.status === 404) {
             return null;
           }
@@ -119,40 +126,43 @@ export function CaseAttachPicker({
   }, [query]);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    const { signal } = controller;
     setLoading(true);
     setError(null);
     setNextCursor(null);
 
-    loadCaseOptions(debouncedQuery, null)
+    loadCaseOptions(debouncedQuery, null, signal)
       .then((page) => {
-        if (!cancelled) {
-          setItems(page.items);
-          setHasMore(page.hasMore);
-          setNextCursor(page.nextCursor);
+        if (signal.aborted) {
+          return;
         }
+        setItems(page.items);
+        setHasMore(page.hasMore);
+        setNextCursor(page.nextCursor);
       })
       .catch((err: unknown) => {
-        if (!cancelled) {
-          const message =
-            err instanceof ApiError
-              ? `${err.status}: ${err.message}`
-              : err instanceof Error
-                ? err.message
-                : "Unknown error";
-          setError(message);
-          setItems([]);
-          setHasMore(false);
+        if (isCancelledRequest(err, signal)) {
+          return;
         }
+        const message =
+          err instanceof ApiError
+            ? `${err.status}: ${err.message}`
+            : err instanceof Error
+              ? err.message
+              : "Unknown error";
+        setError(message);
+        setItems([]);
+        setHasMore(false);
       })
       .finally(() => {
-        if (!cancelled) {
+        if (!signal.aborted) {
           setLoading(false);
         }
       });
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [debouncedQuery]);
 

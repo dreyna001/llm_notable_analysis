@@ -15,6 +15,7 @@ import {
   fetchCase,
   fetchChatSessionMessages,
   fetchChatSessions,
+  isCancelledRequest,
 } from "../api/client";
 import type {
   CaseSummary,
@@ -506,29 +507,34 @@ export function HomeChatWorkspace({
       return;
     }
 
-    let cancelled = false;
+    const controller = new AbortController();
+    const { signal } = controller;
     setResolvingCaseId(caseId);
-    fetchCase(caseId)
+    fetchCase(caseId, { signal })
       .then((detail) => {
-        if (!cancelled) {
-          const summary = caseDetailToSummary(detail);
-          setResolvedCaseById((current) => ({
-            ...current,
-            [caseId]: summary,
-          }));
+        if (signal.aborted) {
+          return;
         }
+        const summary = caseDetailToSummary(detail);
+        setResolvedCaseById((current) => ({
+          ...current,
+          [caseId]: summary,
+        }));
       })
-      .catch(() => {
+      .catch((err: unknown) => {
+        if (isCancelledRequest(err, signal)) {
+          return;
+        }
         // Keep the case id visible when metadata cannot be loaded.
       })
       .finally(() => {
-        if (!cancelled) {
+        if (!signal.aborted) {
           setResolvingCaseId((current) => (current === caseId ? null : current));
         }
       });
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [
     attachedCasePreview?.case_id,

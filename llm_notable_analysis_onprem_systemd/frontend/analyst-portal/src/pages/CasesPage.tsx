@@ -21,7 +21,7 @@ import {
 import { cn } from "@/lib/utils";
 import { EmptyState } from "../components/EmptyState";
 import { CasesTableSkeleton } from "../components/LoadingSkeletons";
-import { ApiError, fetchCase, fetchCases } from "../api/client";
+import { ApiError, fetchCase, fetchCases, isCancelledRequest } from "../api/client";
 import type { CaseListCursor, CaseSummary } from "../types";
 import { caseDetailToSummary } from "../utils/caseSummary";
 import { retrievalStatusLabel } from "../utils/retrievalStatus";
@@ -188,74 +188,40 @@ export function CasesPage() {
   ]);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
     const caseId = filters.case_id.trim();
     const searchTerm = filters.search_name.trim();
+    const { signal } = controller;
 
     if (caseId) {
-      fetchCase(caseId)
+      fetchCase(caseId, { signal })
         .then(caseDetailToSummary)
         .catch((err: unknown) => {
+          if (isCancelledRequest(err, signal)) {
+            return null;
+          }
           if (err instanceof ApiError && err.status === 404) {
             return null;
           }
           throw err;
         })
         .then((exactCase) => {
-          if (!cancelled) {
-            const filteredExactCase =
-              exactCase && exactCaseMatchesFilters(exactCase, filters)
-                ? exactCase
-                : null;
-            setItems(filteredExactCase ? [filteredExactCase] : []);
-            setHasMore(false);
-            setError(null);
+          if (signal.aborted) {
+            return;
           }
+          const filteredExactCase =
+            exactCase && exactCaseMatchesFilters(exactCase, filters)
+              ? exactCase
+              : null;
+          setItems(filteredExactCase ? [filteredExactCase] : []);
+          setHasMore(false);
+          setError(null);
         })
         .catch((err: unknown) => {
-          if (!cancelled) {
-            const message =
-              err instanceof ApiError
-                ? `${err.status}: ${err.message}`
-                : err instanceof Error
-                  ? err.message
-                  : "Unknown error";
-            setError(message);
+          if (isCancelledRequest(err, signal)) {
+            return;
           }
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    fetchCases({
-      limit,
-      cursor: activeCursor,
-      start_date: filters.start_date || undefined,
-      end_date: filters.end_date || undefined,
-      verdict: filters.verdict || undefined,
-      search_name: searchTerm || undefined,
-    })
-      .then((payload) => {
-        if (!cancelled) {
-          setItems(payload.items);
-          setHasMore(payload.has_more);
-          if (payload.next_cursor) {
-            setPageCursors((current) => {
-              const next = current.slice(0, pageIndex + 1);
-              next[pageIndex + 1] = payload.next_cursor;
-              return next;
-            });
-          }
-          setError(null);
-        }
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) {
           const message =
             err instanceof ApiError
               ? `${err.status}: ${err.message}`
@@ -263,13 +229,62 @@ export function CasesPage() {
                 ? err.message
                 : "Unknown error";
           setError(message);
+        })
+        .finally(() => {
+          if (!signal.aborted) {
+            setLoading(false);
+          }
+        });
+      return () => {
+        controller.abort();
+      };
+    }
+
+    fetchCases(
+      {
+        limit,
+        cursor: activeCursor,
+        start_date: filters.start_date || undefined,
+        end_date: filters.end_date || undefined,
+        verdict: filters.verdict || undefined,
+        search_name: searchTerm || undefined,
+      },
+      { signal },
+    )
+      .then((payload) => {
+        if (signal.aborted) {
+          return;
         }
+        setItems(payload.items);
+        setHasMore(payload.has_more);
+        if (payload.next_cursor) {
+          setPageCursors((current) => {
+            const next = current.slice(0, pageIndex + 1);
+            next[pageIndex + 1] = payload.next_cursor;
+            return next;
+          });
+        }
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (isCancelledRequest(err, signal)) {
+          return;
+        }
+        const message =
+          err instanceof ApiError
+            ? `${err.status}: ${err.message}`
+            : err instanceof Error
+              ? err.message
+              : "Unknown error";
+        setError(message);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!signal.aborted) {
+          setLoading(false);
+        }
       });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [activeCursor, filters, limit, pageIndex]);
 
