@@ -46,6 +46,14 @@ from .case_db import (
     set_statement_timeout as _set_statement_timeout,
 )
 from .config import Config, load_config
+from .openai_transport_nonsdk import (
+    ClientRequestError as LlmClientRequestError,
+    RateLimitError as LlmRateLimitError,
+    RequestTimeoutError as LlmRequestTimeoutError,
+    ResponseFormatError as LlmResponseFormatError,
+    ServerError as LlmServerError,
+    TransportError as LlmTransportError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +90,35 @@ def _raise_portal_db_error(
     if is_transient_postgres_error(exc):
         raise HTTPException(status_code=503, detail=detail_unavailable) from exc
     raise HTTPException(status_code=500, detail="Internal server error.") from exc
+
+
+def _raise_portal_llm_error(exc: BaseException) -> None:
+    """Map LLM transport failures to typed HTTP responses for portal chat."""
+    _, HTTPException, _, _ = _lazy_import_fastapi()
+    if isinstance(exc, LlmRateLimitError):
+        raise HTTPException(
+            status_code=429,
+            detail="LLM rate limit reached. Try again shortly.",
+        ) from exc
+    if isinstance(exc, LlmRequestTimeoutError):
+        raise HTTPException(
+            status_code=504,
+            detail="LLM request timed out. Try again or ask a shorter question.",
+        ) from exc
+    if isinstance(
+        exc,
+        (
+            LlmServerError,
+            LlmTransportError,
+            LlmClientRequestError,
+            LlmResponseFormatError,
+        ),
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="LLM service unavailable.",
+        ) from exc
+    raise exc
 
 
 def _is_loopback_bind_host(host: str) -> bool:
@@ -701,6 +738,15 @@ def build_portal_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except (
+            LlmRateLimitError,
+            LlmRequestTimeoutError,
+            LlmServerError,
+            LlmTransportError,
+            LlmClientRequestError,
+            LlmResponseFormatError,
+        ) as exc:
+            _raise_portal_llm_error(exc)
         except Exception as exc:
             _raise_portal_db_error(
                 exc,

@@ -14,6 +14,12 @@ from llm_notable_analysis_onprem_systemd.onprem_service.case_store import (
     build_case_archive_record,
 )
 from llm_notable_analysis_onprem_systemd.onprem_service.config import Config
+from llm_notable_analysis_onprem_systemd.onprem_service.openai_transport_nonsdk import (
+    RateLimitError,
+    RequestTimeoutError,
+    ServerError,
+    TransportError,
+)
 from llm_notable_analysis_onprem_systemd.onprem_service.portal_app import (
     _parse_list_filters,
     build_portal_app,
@@ -934,6 +940,83 @@ class TestPortalApp(unittest.TestCase):
         self.assertEqual(payload["answer_status"], "answered")
         self.assertNotIn("citations", payload)
         self.assertNotIn("retrieved_case_ids", payload)
+
+    def _chat_client_with_synthesizer(self, synthesizer):
+        record = _record(self._config())
+        return TestClient(
+            build_portal_app(
+                Config(
+                    PORTAL_ENABLED=True,
+                    CASE_ARCHIVE_ENABLED=True,
+                    CASE_QA_ENABLED=True,
+                    PORTAL_PROXY_SECRET="portal-secret",
+                ),
+                connect=lambda _dsn: _FakeConnection(
+                    row=_detail_row(record),
+                    row_pages=[[_chunk_row(record)], []],
+                ),
+                chat_embedding_model=_FakeEmbeddingModel(),
+                chat_synthesizer=synthesizer,
+            )
+        )
+
+    def _post_chat(self, client: TestClient) -> object:
+        return client.post(
+            "/api/chat",
+            json={
+                "mode": "selected_case",
+                "question": "What evidence supports this?",
+                "selected_case_id": "case-1",
+            },
+            headers=_AUTH_HEADERS,
+        )
+
+    def test_api_chat_maps_llm_rate_limit_to_429(self) -> None:
+        def _raise_rate_limit(_question, _sources):
+            raise RateLimitError("LLM API rate limited (429)")
+
+        response = self._post_chat(
+            self._chat_client_with_synthesizer(_raise_rate_limit),
+        )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(
+            response.json()["detail"],
+            "LLM rate limit reached. Try again shortly.",
+        )
+
+    def test_api_chat_maps_llm_timeout_to_504(self) -> None:
+        def _raise_timeout(_question, _sources):
+            raise RequestTimeoutError("LLM request timed out")
+
+        response = self._post_chat(
+            self._chat_client_with_synthesizer(_raise_timeout),
+        )
+
+        self.assertEqual(response.status_code, 504)
+        self.assertIn("timed out", response.json()["detail"])
+
+    def test_api_chat_maps_llm_server_error_to_503(self) -> None:
+        def _raise_server_error(_question, _sources):
+            raise ServerError("LLM server error: HTTP 502")
+
+        response = self._post_chat(
+            self._chat_client_with_synthesizer(_raise_server_error),
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "LLM service unavailable.")
+
+    def test_api_chat_maps_llm_transport_error_to_503(self) -> None:
+        def _raise_transport_error(_question, _sources):
+            raise TransportError("LLM transport error: connection reset")
+
+        response = self._post_chat(
+            self._chat_client_with_synthesizer(_raise_transport_error),
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "LLM service unavailable.")
 
 
 if __name__ == "__main__":

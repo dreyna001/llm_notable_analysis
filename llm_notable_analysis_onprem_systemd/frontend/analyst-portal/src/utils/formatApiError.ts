@@ -3,6 +3,9 @@ import { ApiError, INVALID_RESPONSE_STATUS } from "../api/client";
 const CHAT_SESSION_SCOPE_MISMATCH_SNIPPET = "session_id scope does not match";
 const CHAT_SELECTED_CASE_REQUIRED_SNIPPET = "selected_case_id is required";
 
+export const CHAT_LLM_RATE_LIMIT_MESSAGE =
+  "The LLM service is rate limited. Wait a moment and try again.";
+
 export const CHAT_CONCURRENCY_LIMIT_MESSAGE =
   "The portal is busy handling other chat requests. Wait a moment and try again.";
 
@@ -27,8 +30,18 @@ export const CHAT_INVALID_RESPONSE_MESSAGE =
 export const CHAT_CASE_REQUIRED_MESSAGE =
   "Attach a case before asking in selected-case mode.";
 
+const CHAT_LLM_RATE_LIMIT_SNIPPET = "LLM rate limit";
+
+export function isChatLlmRateLimit(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    err.status === 429 &&
+    err.message.includes(CHAT_LLM_RATE_LIMIT_SNIPPET)
+  );
+}
+
 export function isChatConcurrencyLimit(err: unknown): boolean {
-  return err instanceof ApiError && err.status === 429;
+  return err instanceof ApiError && err.status === 429 && !isChatLlmRateLimit(err);
 }
 
 export function isChatSessionScopeMismatch(err: unknown): boolean {
@@ -39,8 +52,15 @@ export function isChatSessionScopeMismatch(err: unknown): boolean {
   );
 }
 
+export function isChatGatewayTimeout(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 504;
+}
+
 export function isChatTimeout(err: unknown): boolean {
-  return err instanceof ApiError && err.kind === "timeout";
+  return (
+    (err instanceof ApiError && err.kind === "timeout") ||
+    isChatGatewayTimeout(err)
+  );
 }
 
 export function isChatCancelled(err: unknown): boolean {
@@ -91,6 +111,9 @@ export function formatChatApiError(err: unknown, fallback = "Unknown error"): st
   }
   if (isChatTimeout(err)) {
     return CHAT_TIMEOUT_MESSAGE;
+  }
+  if (isChatLlmRateLimit(err)) {
+    return CHAT_LLM_RATE_LIMIT_MESSAGE;
   }
   if (isChatConcurrencyLimit(err)) {
     return CHAT_CONCURRENCY_LIMIT_MESSAGE;

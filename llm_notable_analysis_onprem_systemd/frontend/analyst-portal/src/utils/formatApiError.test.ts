@@ -6,6 +6,7 @@ import {
   CHAT_CASE_REQUIRED_MESSAGE,
   CHAT_CONCURRENCY_LIMIT_MESSAGE,
   CHAT_INVALID_RESPONSE_MESSAGE,
+  CHAT_LLM_RATE_LIMIT_MESSAGE,
   CHAT_SESSION_SCOPE_MISMATCH_MESSAGE,
   CHAT_TIMEOUT_MESSAGE,
   CHAT_UNAVAILABLE_MESSAGE,
@@ -55,6 +56,18 @@ describe("formatChatApiError", () => {
     expect(
       formatChatApiError(new ApiError(0, "Request timed out.", "timeout")),
     ).toBe(CHAT_TIMEOUT_MESSAGE);
+
+    expect(
+      formatChatApiError(
+        new ApiError(504, "LLM request timed out. Try again or ask a shorter question."),
+      ),
+    ).toBe(CHAT_TIMEOUT_MESSAGE);
+
+    expect(
+      formatChatApiError(
+        new ApiError(429, "LLM rate limit reached. Try again shortly."),
+      ),
+    ).toBe(CHAT_LLM_RATE_LIMIT_MESSAGE);
 
     expect(
       formatChatApiError(new ApiError(0, "Request cancelled.", "cancelled")),
