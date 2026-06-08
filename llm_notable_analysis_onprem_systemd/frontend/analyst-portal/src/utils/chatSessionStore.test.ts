@@ -3,6 +3,7 @@ import {
   capChatSessionStoreWithMeta,
   createEmptySession,
   detachActiveCase,
+  resolveNewChatContext,
   resolveSyncedServerSessionId,
   switchToChatContext,
   type ChatSessionStore,
@@ -19,6 +20,36 @@ function makeStore(count: number): ChatSessionStore {
   });
   return { activeLocalId: sessions[0].localId, sessions };
 }
+
+describe("resolveNewChatContext", () => {
+  it("waits for capabilities before choosing a mode", () => {
+    expect(
+      resolveNewChatContext([], false, undefined),
+    ).toBeNull();
+  });
+
+  it("uses selected-case mode when global retrieval is disabled", () => {
+    expect(
+      resolveNewChatContext([], true, undefined),
+    ).toEqual({ mode: "selected_case" });
+  });
+
+  it("uses global mode only when the portal allows it", () => {
+    expect(
+      resolveNewChatContext(["global_archive"], true, undefined),
+    ).toEqual({ mode: "global_archive" });
+  });
+
+  it("prefers the attached case when one is selected", () => {
+    expect(
+      resolveNewChatContext(
+        ["selected_case", "global_archive"],
+        true,
+        "case-123",
+      ),
+    ).toEqual({ mode: "selected_case", selectedCaseId: "case-123" });
+  });
+});
 
 describe("detachActiveCase", () => {
   it("clears the attached case, server linkage, and prior turns from the active session", () => {

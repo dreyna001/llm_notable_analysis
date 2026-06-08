@@ -217,6 +217,23 @@ export function findUnusedSession(
   return sessions.find(isUnusedSession);
 }
 
+export function resolveNewChatContext(
+  availableModes: ChatMode[],
+  capabilitiesReady: boolean,
+  selectedCaseId?: string,
+): { mode: ChatMode; selectedCaseId?: string } | null {
+  if (selectedCaseId && availableModes.includes("selected_case")) {
+    return { mode: "selected_case", selectedCaseId };
+  }
+  if (availableModes.includes("global_archive")) {
+    return { mode: "global_archive" };
+  }
+  if (!capabilitiesReady) {
+    return null;
+  }
+  return { mode: "selected_case" };
+}
+
 export function sessionMatchesContext(
   session: StoredChatSession,
   mode: ChatMode,

@@ -45,8 +45,10 @@ import {
   findUnusedSession,
   isUnusedSession,
   loadChatSessionStore,
+  resolveNewChatContext,
   resolveSyncedServerSessionId,
   saveChatSessionStore,
+  sessionMatchesContext,
   sessionTitleFromQuestion,
   detachActiveCase,
   switchToChatContext,
@@ -258,7 +260,7 @@ export function HomeChatWorkspace({
     if (selectedCaseId && availableModes.includes("selected_case")) {
       return "selected_case";
     }
-    return availableModes[0] ?? "global_archive";
+    return availableModes[0] ?? "selected_case";
   }, [activeSession?.mode, availableModes, selectedCaseId]);
 
   const chatDisabledReason = useMemo(() => {
@@ -506,17 +508,28 @@ export function HomeChatWorkspace({
   }, []);
 
   const handleNewChat = useCallback(() => {
+    const context = resolveNewChatContext(
+      availableModes,
+      capabilitiesReady,
+      selectedCaseId,
+    );
+    if (!context) {
+      return;
+    }
+
     setStore((current) => {
       const active = current.sessions.find(
         (item) => item.localId === current.activeLocalId,
       );
       if (active && isUnusedSession(active)) {
-        return current;
-      }
-
-      const existingUnused = findUnusedSession(current.sessions);
-      if (existingUnused) {
-        const next = { ...current, activeLocalId: existingUnused.localId };
+        if (sessionMatchesContext(active, context.mode, context.selectedCaseId)) {
+          return current;
+        }
+        const next = switchToChatContext(
+          current,
+          context.mode,
+          context.selectedCaseId,
+        );
         const capped = ensureChatSessionStore(
           capChatSessionStore(next, maxChatSessions),
         );
@@ -524,10 +537,21 @@ export function HomeChatWorkspace({
         return capped;
       }
 
-      const session = createEmptySession(
-        selectedCaseId ? "selected_case" : "global_archive",
-        selectedCaseId,
-      );
+      const existingUnused = findUnusedSession(current.sessions);
+      if (existingUnused) {
+        const next = switchToChatContext(
+          { ...current, activeLocalId: existingUnused.localId },
+          context.mode,
+          context.selectedCaseId,
+        );
+        const capped = ensureChatSessionStore(
+          capChatSessionStore(next, maxChatSessions),
+        );
+        saveChatSessionStore(capped, maxChatSessions);
+        return capped;
+      }
+
+      const session = createEmptySession(context.mode, context.selectedCaseId);
       const next = {
         activeLocalId: session.localId,
         sessions: [session, ...current.sessions],
@@ -538,7 +562,12 @@ export function HomeChatWorkspace({
       saveChatSessionStore(capped, maxChatSessions);
       return capped;
     });
-  }, [maxChatSessions, selectedCaseId]);
+  }, [
+    availableModes,
+    capabilitiesReady,
+    maxChatSessions,
+    selectedCaseId,
+  ]);
 
   const handleSelectSession = useCallback(
     async (localId: string) => {
@@ -680,8 +709,15 @@ export function HomeChatWorkspace({
     setAttachedCasePreview(null);
     flushSync(() => {
       setStore((current) => {
+        const detached = detachActiveCase(current);
+        const context =
+          resolveNewChatContext(
+            availableModes,
+            capabilitiesReady,
+            undefined,
+          ) ?? { mode: "selected_case" as const };
         const next = capChatSessionStore(
-          detachActiveCase(current),
+          switchToChatContext(detached, context.mode, context.selectedCaseId),
           maxChatSessions,
         );
         saveChatSessionStore(next, maxChatSessions);
@@ -689,7 +725,12 @@ export function HomeChatWorkspace({
       });
     });
     onClearSelectedCase?.();
-  }, [maxChatSessions, onClearSelectedCase]);
+  }, [
+    availableModes,
+    capabilitiesReady,
+    maxChatSessions,
+    onClearSelectedCase,
+  ]);
 
   const requestDeleteSession = useCallback(
     (localId: string) => {
@@ -736,9 +777,15 @@ export function HomeChatWorkspace({
         const remaining = current.sessions.filter((item) => item.localId !== localId);
         let next: ChatSessionStore;
         if (!remaining.length) {
+          const context =
+            resolveNewChatContext(
+              availableModes,
+              capabilitiesReady,
+              selectedCaseId,
+            ) ?? { mode: "selected_case" as const };
           const replacement = createEmptySession(
-            selectedCaseId ? "selected_case" : "global_archive",
-            selectedCaseId,
+            context.mode,
+            context.selectedCaseId,
           );
           next = {
             activeLocalId: replacement.localId,
@@ -767,6 +814,8 @@ export function HomeChatWorkspace({
       setDeleteBusy(false);
     }
   }, [
+    availableModes,
+    capabilitiesReady,
     deleteBusy,
     maxChatSessions,
     pendingDeleteSession,

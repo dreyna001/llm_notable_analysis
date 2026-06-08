@@ -101,10 +101,67 @@ describe("HomeChatWorkspace attached case", () => {
 
     const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}");
     expect(stored.sessions[0]).toMatchObject({
-      mode: "global_archive",
+      mode: "selected_case",
       serverSessionId: null,
     });
     expect(stored.sessions[0]).not.toHaveProperty("selectedCaseId");
+  });
+});
+
+describe("HomeChatWorkspace new chat", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.clearAllMocks();
+  });
+
+  it("does not create a global-mode session when cross-case chat is disabled", async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        activeLocalId: "local-old",
+        sessions: [
+          {
+            localId: "local-old",
+            serverSessionId: null,
+            title: "Old chat",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+            mode: "global_archive",
+            turns: [
+              {
+                id: "turn-1",
+                question: "What happened?",
+                response: {
+                  answer: "Unknown.",
+                  answer_status: "answered",
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    render(
+      <MemoryRouter>
+        <HomeChatWorkspace sidebarMeta={<div>Case window</div>} />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByText(
+        "Select a case to chat. Cross-case archive chat is disabled for this portal.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("All cases + knowledge base")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: /^new chat$/i })[0]);
+
+    const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}");
+    const active = stored.sessions.find(
+      (session: { localId: string }) => session.localId === stored.activeLocalId,
+    );
+    expect(active?.mode).toBe("selected_case");
+    expect(active).not.toHaveProperty("selectedCaseId");
   });
 });
 
