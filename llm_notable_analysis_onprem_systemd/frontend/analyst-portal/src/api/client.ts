@@ -1,3 +1,15 @@
+import {
+  INVALID_RESPONSE_MESSAGE,
+  parseCaseDetail,
+  parseCaseListResponse,
+  parseChatResponse,
+  parseChatSessionMessagesResponse,
+  parseChatSessionsResponse,
+  parseDeleteChatSessionResponse,
+  parseDeleteLastChatTurnResponse,
+  parseHealthResponse,
+  parsePortalCapabilities,
+} from "./responseSchemas";
 import type {
   CaseDetail,
   CaseListResponse,
@@ -8,7 +20,9 @@ import type {
   PortalCapabilities,
 } from "../types";
 
-export type ApiErrorKind = "cancelled" | "timeout" | "http";
+export type ApiErrorKind = "cancelled" | "timeout" | "http" | "invalid_response";
+
+export const INVALID_RESPONSE_STATUS = 502;
 
 export class ApiError extends Error {
   status: number;
@@ -22,7 +36,12 @@ export class ApiError extends Error {
   }
 }
 
-async function readJson<T>(response: Response): Promise<T> {
+type ResponseParser<T> = (value: unknown) => T | null;
+
+async function readValidatedJson<T>(
+  response: Response,
+  parse: ResponseParser<T>,
+): Promise<T> {
   if (!response.ok) {
     let detail = response.statusText;
     try {
@@ -37,7 +56,27 @@ async function readJson<T>(response: Response): Promise<T> {
     }
     throw new ApiError(response.status, detail);
   }
-  return (await response.json()) as T;
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new ApiError(
+      INVALID_RESPONSE_STATUS,
+      INVALID_RESPONSE_MESSAGE,
+      "invalid_response",
+    );
+  }
+
+  const parsed = parse(body);
+  if (parsed === null) {
+    throw new ApiError(
+      INVALID_RESPONSE_STATUS,
+      INVALID_RESPONSE_MESSAGE,
+      "invalid_response",
+    );
+  }
+  return parsed;
 }
 
 type ApiFetchOptions = RequestInit & {
@@ -113,11 +152,14 @@ export async function fetchHealth(): Promise<{
   status: string;
   case_retention_days?: number;
 }> {
-  return readJson(await apiFetch("/health"));
+  return readValidatedJson(await apiFetch("/health"), parseHealthResponse);
 }
 
 export async function fetchCapabilities(): Promise<PortalCapabilities> {
-  return readJson(await apiFetch("/api/capabilities"));
+  return readValidatedJson(
+    await apiFetch("/api/capabilities"),
+    parsePortalCapabilities,
+  );
 }
 
 export async function fetchCases(params?: {
@@ -136,18 +178,24 @@ export async function fetchCases(params?: {
   if (params?.verdict) query.set("verdict", params.verdict);
   if (params?.search_name) query.set("search_name", params.search_name);
   const suffix = query.size ? `?${query}` : "";
-  return readJson(await apiFetch(`/api/cases${suffix}`));
+  return readValidatedJson(
+    await apiFetch(`/api/cases${suffix}`),
+    parseCaseListResponse,
+  );
 }
 
 export async function fetchCase(caseId: string): Promise<CaseDetail> {
-  return readJson(await apiFetch(`/api/cases/${encodeURIComponent(caseId)}`));
+  return readValidatedJson(
+    await apiFetch(`/api/cases/${encodeURIComponent(caseId)}`),
+    parseCaseDetail,
+  );
 }
 
 export async function postChat(
   payload: ChatRequest,
   options?: { signal?: AbortSignal },
 ): Promise<ChatResponse> {
-  return readJson(
+  return readValidatedJson(
     await apiFetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -155,33 +203,39 @@ export async function postChat(
       timeoutMs: CHAT_TIMEOUT_MS,
       signal: options?.signal,
     }),
+    parseChatResponse,
   );
 }
 
 export async function fetchChatSessions(limit = 50): Promise<ChatSessionsResponse> {
   const query = new URLSearchParams();
   query.set("limit", String(limit));
-  return readJson(await apiFetch(`/api/chat/sessions?${query}`));
+  return readValidatedJson(
+    await apiFetch(`/api/chat/sessions?${query}`),
+    parseChatSessionsResponse,
+  );
 }
 
 export async function fetchChatSessionMessages(
   sessionId: string,
   options?: { signal?: AbortSignal },
 ): Promise<ChatSessionMessagesResponse> {
-  return readJson(
+  return readValidatedJson(
     await apiFetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/messages`, {
       signal: options?.signal,
     }),
+    parseChatSessionMessagesResponse,
   );
 }
 
 export async function deleteChatSession(
   sessionId: string,
 ): Promise<{ deleted: boolean; session_id: string }> {
-  return readJson(
+  return readValidatedJson(
     await apiFetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}`, {
       method: "DELETE",
     }),
+    parseDeleteChatSessionResponse,
   );
 }
 
@@ -194,12 +248,13 @@ export async function deleteLastChatTurn(
     query.set("expected_message_count", String(options.expectedMessageCount));
   }
   const suffix = query.size ? `?${query}` : "";
-  return readJson(
+  return readValidatedJson(
     await apiFetch(
       `/api/chat/sessions/${encodeURIComponent(sessionId)}/turns/last${suffix}`,
       {
         method: "DELETE",
       },
     ),
+    parseDeleteLastChatTurnResponse,
   );
 }

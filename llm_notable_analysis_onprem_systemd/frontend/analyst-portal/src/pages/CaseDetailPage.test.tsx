@@ -1,40 +1,44 @@
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { CaseDetail } from "../types";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CaseDetailPage } from "./CaseDetailPage";
 
-const nullAnalysisCase: CaseDetail = {
-  case_id: "case-1",
-  metadata: {
-    processed_at: "2026-06-04T00:00:00Z",
-    expires_at: "2026-07-04T00:00:00Z",
-    retrieval_status: "not_indexed",
-    source_completeness: "missing_analysis",
-    archive_notices: [
-      "Structured analysis was not stored in the case archive. Chat can use the alert payload only.",
-    ],
-  },
-  alert_payload: {
-    notable_id: "abc-123",
-    search_name: "Suspicious PowerShell",
-  },
-  analysis: null,
-  report_md_path: "/reports/case-1.md",
-  report_html_path: null,
-};
-
-const fetchCase = vi.fn(async () => nullAnalysisCase);
-
-vi.mock("../api/client", () => ({
-  ApiError: class ApiError extends Error {
+const { fetchCase, MockApiError, nullAnalysisCase } = vi.hoisted(() => {
+  class MockApiError extends Error {
     status: number;
 
     constructor(status: number, message: string) {
       super(message);
       this.status = status;
     }
-  },
+  }
+
+  const nullAnalysisCase = {
+    case_id: "case-1",
+    metadata: {
+      processed_at: "2026-06-04T00:00:00Z",
+      expires_at: "2026-07-04T00:00:00Z",
+      retrieval_status: "not_indexed",
+      source_completeness: "missing_analysis",
+      archive_notices: [
+        "Structured analysis was not stored in the case archive. Chat can use the alert payload only.",
+      ],
+    },
+    alert_payload: {
+      notable_id: "abc-123",
+      search_name: "Suspicious PowerShell",
+    },
+    analysis: null,
+    report_md_path: "/reports/case-1.md",
+    report_html_path: null,
+  };
+
+  const fetchCase = vi.fn(async () => nullAnalysisCase);
+  return { fetchCase, MockApiError, nullAnalysisCase };
+});
+
+vi.mock("../api/client", () => ({
+  ApiError: MockApiError,
   fetchCase: (...args: unknown[]) => fetchCase(...args),
 }));
 
@@ -49,8 +53,25 @@ function renderCaseDetail() {
 }
 
 describe("CaseDetailPage", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   beforeEach(() => {
-    fetchCase.mockClear();
+    fetchCase.mockReset();
+    fetchCase.mockImplementation(async () => nullAnalysisCase);
+  });
+
+  it("shows a controlled error when the case payload is invalid", async () => {
+    fetchCase.mockRejectedValueOnce(
+      new MockApiError(502, "Portal API returned an unexpected response."),
+    );
+
+    renderCaseDetail();
+
+    expect(
+      await screen.findByText("502: Portal API returned an unexpected response."),
+    ).toBeInTheDocument();
   });
 
   it("renders cases without structured analysis", async () => {
