@@ -46,6 +46,13 @@ const HTTPValidationError = z
   .object({ detail: z.array(ValidationError) })
   .partial()
   .passthrough();
+const CaseDetailContentBoundsResponse = z.object({
+  alert_payload_total_keys: z.number().int(),
+  alert_payload_truncated: z.boolean(),
+  analysis_total_keys: z.number().int(),
+  analysis_truncated: z.boolean(),
+  raw_sections: z.array(z.string()),
+});
 const CaseDetailMetadataResponse = z.object({
   archive_notices: z.union([z.array(z.string()), z.null()]).optional(),
   expires_at: z.string(),
@@ -57,9 +64,19 @@ const CaseDetailResponse = z.object({
   alert_payload: z.object({}).partial().passthrough(),
   analysis: z.union([z.object({}).partial().passthrough(), z.null()]),
   case_id: z.string(),
+  content_bounds: CaseDetailContentBoundsResponse,
   metadata: CaseDetailMetadataResponse,
   report_html_path: z.union([z.string(), z.null()]),
   report_md_path: z.union([z.string(), z.null()]),
+});
+const CaseRawSectionResponse = z.object({
+  case_id: z.string(),
+  has_more: z.boolean(),
+  items: z.object({}).partial().passthrough(),
+  limit: z.number().int(),
+  offset: z.number().int(),
+  section: z.enum(["alert_payload", "analysis"]),
+  total_keys: z.number().int(),
 });
 const ChatResponseModel = z.object({
   answer: z.string(),
@@ -109,8 +126,10 @@ export const schemas = {
   CaseListResponse,
   ValidationError,
   HTTPValidationError,
+  CaseDetailContentBoundsResponse,
   CaseDetailMetadataResponse,
   CaseDetailResponse,
+  CaseRawSectionResponse,
   ChatResponseModel,
   ChatSessionSummaryResponse,
   ChatSessionsResponse,
@@ -204,6 +223,47 @@ const endpoints = makeApi([
       },
     ],
     response: CaseDetailResponse,
+    errors: [
+      {
+        status: 422,
+        description: `Validation Error`,
+        schema: HTTPValidationError,
+      },
+    ],
+  },
+  {
+    method: "get",
+    path: "/api/cases/:case_id/raw/:section",
+    alias: "api_get_case_raw_section_api_cases__case_id__raw__section__get",
+    requestFormat: "json",
+    parameters: [
+      {
+        name: "case_id",
+        type: "Path",
+        schema: z.string(),
+      },
+      {
+        name: "section",
+        type: "Path",
+        schema: z.string(),
+      },
+      {
+        name: "offset",
+        type: "Query",
+        schema: limit,
+      },
+      {
+        name: "limit",
+        type: "Query",
+        schema: limit,
+      },
+      {
+        name: "key",
+        type: "Query",
+        schema: limit,
+      },
+    ],
+    response: CaseRawSectionResponse,
     errors: [
       {
         status: 422,

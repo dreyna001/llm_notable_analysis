@@ -56,6 +56,13 @@ const {
       },
       report_md_path: "/reports/case-123.md",
       report_html_path: null,
+      content_bounds: {
+        alert_payload_truncated: false,
+        analysis_truncated: false,
+        alert_payload_total_keys: 1,
+        analysis_total_keys: 2,
+        raw_sections: ["alert_payload", "analysis"],
+      },
     };
 
     const fetchCases = vi.fn(async () => ({

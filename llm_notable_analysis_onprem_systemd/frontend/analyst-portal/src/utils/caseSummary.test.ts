@@ -16,6 +16,13 @@ const baseDetail: CaseDetail = {
   analysis: null,
   report_md_path: null,
   report_html_path: null,
+  content_bounds: {
+    alert_payload_truncated: false,
+    analysis_truncated: false,
+    alert_payload_total_keys: 1,
+    analysis_total_keys: 0,
+    raw_sections: ["alert_payload", "analysis"],
+  },
 };
 
 describe("caseDetailToSummary", () => {

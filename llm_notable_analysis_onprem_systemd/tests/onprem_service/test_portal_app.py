@@ -578,6 +578,54 @@ class TestPortalApp(unittest.TestCase):
         self.assertEqual(payload["case_id"], "case-1")
         self.assertEqual(payload["metadata"]["retrieval_status"], "pending")
         self.assertEqual(payload["alert_payload"]["notable_id"], "abc-123")
+        self.assertIn("content_bounds", payload)
+        self.assertFalse(payload["content_bounds"]["alert_payload_truncated"])
+
+    def test_api_case_raw_section_returns_paginated_analysis_keys(self) -> None:
+        analysis = _analysis()
+        analysis["raw_response"] = "full raw text"
+        record = build_case_archive_record(
+            config=self._config(),
+            case_id="case-1",
+            finding_id="case-1",
+            source_filename="case-1.json",
+            alert_payload={"notable_id": "abc-123", "search_name": "Suspicious PowerShell"},
+            analysis=analysis,
+            report_md_path="/reports/case-1.md",
+            report_html_path=None,
+            processed_at=datetime(2026, 6, 4, tzinfo=timezone.utc),
+        )
+        client = TestClient(
+            build_portal_app(
+                self._config(),
+                connect=lambda _dsn: _FakeConnection(row=_detail_row(record)),
+            )
+        )
+
+        response = client.get(
+            "/api/cases/case-1/raw/analysis",
+            params={"key": "raw_response"},
+            headers=_AUTH_HEADERS,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["case_id"], "case-1")
+        self.assertEqual(payload["section"], "analysis")
+        self.assertEqual(payload["items"]["raw_response"], "full raw text")
+
+    def test_api_case_raw_section_rejects_invalid_section(self) -> None:
+        record = _record(self._config())
+        client = TestClient(
+            build_portal_app(
+                self._config(),
+                connect=lambda _dsn: _FakeConnection(row=_detail_row(record)),
+            )
+        )
+
+        response = client.get("/api/cases/case-1/raw/unknown", headers=_AUTH_HEADERS)
+
+        self.assertEqual(response.status_code, 400)
 
     def test_api_case_detail_returns_null_analysis_for_missing_structured_output(self) -> None:
         record = _record(self._config())

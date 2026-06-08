@@ -18,6 +18,12 @@ export type CaseDetail = {
   };
   alert_payload: Record<string, unknown>;
   analysis: Record<string, unknown>;
+  content_bounds?: {
+    alert_payload_truncated: boolean;
+    analysis_truncated: boolean;
+    raw_sections: string[];
+    analysis_total_keys: number;
+  };
 };
 
 export type PortalCapabilities = {
@@ -101,7 +107,15 @@ function expectedTabLabels(detail: CaseDetail): string[] {
   const querySection = asRecord(analysis.query_result_section);
   const hasQueries = Object.keys(querySection).length > 0;
   const hasServiceNow = Object.keys(asRecord(analysis.servicenow_section)).length > 0;
-  const hasRaw = Boolean(analysis.poc_unstructured_output || analysis.raw_response);
+  const bounds = detail.content_bounds;
+  const hasRaw =
+    Boolean(analysis.poc_unstructured_output || analysis.raw_response) ||
+    Boolean(
+      bounds?.raw_sections.includes("analysis") &&
+        (bounds.analysis_total_keys ?? 0) > 0 &&
+        (bounds.analysis_truncated ||
+          (bounds.analysis_total_keys ?? 0) > Object.keys(analysis).length),
+    );
 
   const tabs = ["Verdict"];
   if (hypotheses.length) tabs.push("Hypotheses");

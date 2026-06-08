@@ -1,6 +1,7 @@
 import type {
   CaseDetail,
   CaseListResponse,
+  CaseRawSectionResponse,
   CaseSummary,
   ChatResponse,
   ChatSessionMessage,
@@ -76,6 +77,25 @@ export function parseCaseDetail(value: unknown): CaseDetail | null {
     analysis: parsed.analysis,
     report_md_path: parsed.report_md_path,
     report_html_path: parsed.report_html_path,
+    content_bounds: parsed.content_bounds,
+  };
+}
+
+export function parseCaseRawSectionResponse(
+  value: unknown,
+): CaseRawSectionResponse | null {
+  const parsed = parseWithSchema(schemas.CaseRawSectionResponse, value);
+  if (!parsed) {
+    return null;
+  }
+  return {
+    case_id: parsed.case_id,
+    section: parsed.section,
+    offset: parsed.offset,
+    limit: parsed.limit,
+    has_more: parsed.has_more,
+    total_keys: parsed.total_keys,
+    items: parsed.items ?? {},
   };
 }
 

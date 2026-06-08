@@ -59,6 +59,7 @@ from .openai_transport_nonsdk import (
 from .portal_api_models import (
     CaseDetailResponse,
     CaseListResponse,
+    CaseRawSectionResponse,
     ChatResponseModel,
     ChatSessionMessagesResponse,
     ChatSessionsResponse,
@@ -67,6 +68,11 @@ from .portal_api_models import (
     HealthResponse,
     PortalCapabilitiesResponse,
     portal_response,
+)
+from .portal_case_detail_view import (
+    build_case_detail_view,
+    build_case_raw_section_page,
+    default_raw_page_limit,
 )
 
 logger = logging.getLogger(__name__)
@@ -345,13 +351,13 @@ def _detail_payload(record: CaseArchiveRecord) -> dict[str, Any]:
     }
     if archive_notices:
         metadata["archive_notices"] = archive_notices
+    view = build_case_detail_view(record)
     return {
         "case_id": record.case_id,
         "metadata": metadata,
-        "alert_payload": record.alert_payload,
-        "analysis": record.analysis,
         "report_md_path": record.report_md_path,
         "report_html_path": record.report_html_path,
+        **view,
     }
 
 
@@ -694,6 +700,43 @@ def build_portal_app(
     def api_get_case(case_id: str) -> CaseDetailResponse:
         _normalized, record = fetch_case_detail(case_id)
         return portal_response(CaseDetailResponse, _detail_payload(record))
+
+    @app.get(
+        "/api/cases/{case_id}/raw/{section}",
+        response_model=CaseRawSectionResponse,
+        response_model_exclude_unset=True,
+    )
+    def api_get_case_raw_section(
+        case_id: str,
+        section: str,
+        offset: str | None = None,
+        limit: str | None = None,
+        key: str | None = None,
+    ) -> CaseRawSectionResponse:
+        _normalized, record = fetch_case_detail(case_id)
+        parsed_offset = 0
+        if offset is not None:
+            if not str(offset).strip().isdigit():
+                raise HTTPException(status_code=400, detail="offset must be a non-negative integer.")
+            parsed_offset = int(offset)
+        parsed_limit = default_raw_page_limit()
+        if limit is not None:
+            if not str(limit).strip().isdigit():
+                raise HTTPException(status_code=400, detail="limit must be a positive integer.")
+            parsed_limit = int(limit)
+        try:
+            payload = build_case_raw_section_page(
+                record,
+                section=section,
+                offset=parsed_offset,
+                limit=parsed_limit,
+                key=key,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return portal_response(CaseRawSectionResponse, payload)
 
     @app.get("/api/chat/sessions", response_model=ChatSessionsResponse)
     def api_list_chat_sessions(limit: str | None = None) -> ChatSessionsResponse:

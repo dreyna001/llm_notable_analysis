@@ -7,6 +7,13 @@ import {
 } from "./responseSchemas";
 
 describe("parseCaseDetail", () => {
+  const contentBounds = {
+    alert_payload_truncated: false,
+    analysis_truncated: false,
+    alert_payload_total_keys: 1,
+    analysis_total_keys: 1,
+    raw_sections: ["alert_payload", "analysis"],
+  };
   const validCase = {
     case_id: "case-1",
     metadata: {
@@ -22,6 +29,7 @@ describe("parseCaseDetail", () => {
     },
     report_md_path: "/reports/case-1.md",
     report_html_path: null,
+    content_bounds: contentBounds,
   };
 
   it("accepts a well-formed case detail payload", () => {

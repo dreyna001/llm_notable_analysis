@@ -72,6 +72,16 @@ class CaseDetailMetadataResponse(BaseModel):
     archive_notices: list[str] | None = None
 
 
+class CaseDetailContentBoundsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    alert_payload_truncated: bool
+    analysis_truncated: bool
+    alert_payload_total_keys: int
+    analysis_total_keys: int
+    raw_sections: list[str]
+
+
 class CaseDetailResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -81,6 +91,19 @@ class CaseDetailResponse(BaseModel):
     analysis: dict[str, Any] | None
     report_md_path: str | None
     report_html_path: str | None
+    content_bounds: CaseDetailContentBoundsResponse
+
+
+class CaseRawSectionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    case_id: str
+    section: Literal["alert_payload", "analysis"]
+    offset: int
+    limit: int
+    has_more: bool
+    total_keys: int
+    items: dict[str, Any]
 
 
 class ChatResponseModel(BaseModel):

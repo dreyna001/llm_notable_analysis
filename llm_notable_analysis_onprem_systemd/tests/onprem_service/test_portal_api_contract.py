@@ -16,6 +16,7 @@ from llm_notable_analysis_onprem_systemd.onprem_service.config import Config
 from llm_notable_analysis_onprem_systemd.onprem_service.portal_api_models import (
     CaseDetailResponse,
     CaseListResponse,
+    CaseRawSectionResponse,
     PortalCapabilitiesResponse,
     portal_response,
 )
@@ -117,6 +118,39 @@ class TestPortalApiContract(unittest.TestCase):
         response = client.get("/api/cases/case-1", headers=_AUTH_HEADERS)
         self.assertEqual(response.status_code, 200)
         validated = portal_response(CaseDetailResponse, response.json())
+        self.assertEqual(
+            validated.model_dump(mode="json", exclude_unset=True),
+            response.json(),
+        )
+
+    def test_case_raw_section_json_validates_against_response_model(self) -> None:
+        record = build_case_archive_record(
+            config=_portal_config(),
+            case_id="case-1",
+            finding_id="case-1",
+            source_filename="case-1.json",
+            alert_payload={"notable_id": "abc-123"},
+            analysis={
+                "alert_reconciliation": {"verdict": "likely_malicious"},
+                "raw_response": "archived raw output",
+            },
+            report_md_path="/reports/case-1.md",
+            report_html_path=None,
+            processed_at=datetime(2026, 6, 4, tzinfo=timezone.utc),
+        )
+        client = TestClient(
+            build_portal_app(
+                _portal_config(),
+                connect=lambda _dsn: _FakeConnection(row=_detail_row(record)),
+            )
+        )
+        response = client.get(
+            "/api/cases/case-1/raw/analysis",
+            params={"key": "raw_response"},
+            headers=_AUTH_HEADERS,
+        )
+        self.assertEqual(response.status_code, 200)
+        validated = portal_response(CaseRawSectionResponse, response.json())
         self.assertEqual(
             validated.model_dump(mode="json", exclude_unset=True),
             response.json(),

@@ -1,6 +1,43 @@
 {
   "components": {
     "schemas": {
+      "CaseDetailContentBoundsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "alert_payload_total_keys": {
+            "title": "Alert Payload Total Keys",
+            "type": "integer"
+          },
+          "alert_payload_truncated": {
+            "title": "Alert Payload Truncated",
+            "type": "boolean"
+          },
+          "analysis_total_keys": {
+            "title": "Analysis Total Keys",
+            "type": "integer"
+          },
+          "analysis_truncated": {
+            "title": "Analysis Truncated",
+            "type": "boolean"
+          },
+          "raw_sections": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Raw Sections",
+            "type": "array"
+          }
+        },
+        "required": [
+          "alert_payload_truncated",
+          "analysis_truncated",
+          "alert_payload_total_keys",
+          "analysis_total_keys",
+          "raw_sections"
+        ],
+        "title": "CaseDetailContentBoundsResponse",
+        "type": "object"
+      },
       "CaseDetailMetadataResponse": {
         "additionalProperties": false,
         "properties": {
@@ -68,6 +105,9 @@
             "title": "Case Id",
             "type": "string"
           },
+          "content_bounds": {
+            "$ref": "#/components/schemas/CaseDetailContentBoundsResponse"
+          },
           "metadata": {
             "$ref": "#/components/schemas/CaseDetailMetadataResponse"
           },
@@ -100,7 +140,8 @@
           "alert_payload",
           "analysis",
           "report_md_path",
-          "report_html_path"
+          "report_html_path",
+          "content_bounds"
         ],
         "title": "CaseDetailResponse",
         "type": "object"
@@ -159,6 +200,55 @@
           "has_more"
         ],
         "title": "CaseListResponse",
+        "type": "object"
+      },
+      "CaseRawSectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "additionalProperties": true,
+            "title": "Items",
+            "type": "object"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "section": {
+            "enum": [
+              "alert_payload",
+              "analysis"
+            ],
+            "title": "Section",
+            "type": "string"
+          },
+          "total_keys": {
+            "title": "Total Keys",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "case_id",
+          "section",
+          "offset",
+          "limit",
+          "has_more",
+          "total_keys",
+          "items"
+        ],
+        "title": "CaseRawSectionResponse",
         "type": "object"
       },
       "CaseSummaryResponse": {
@@ -840,6 +930,102 @@
           }
         },
         "summary": "Api Get Case"
+      }
+    },
+    "/api/cases/{case_id}/raw/{section}": {
+      "get": {
+        "operationId": "api_get_case_raw_section_api_cases__case_id__raw__section__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "section",
+            "required": true,
+            "schema": {
+              "title": "Section",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Offset"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaseRawSectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Get Case Raw Section"
       }
     },
     "/api/chat": {

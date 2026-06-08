@@ -196,7 +196,20 @@ The shipped analyst UI is a React SPA served by nginx. Authenticated JSON routes
 | --- | --- | --- |
 | `/api/capabilities` | GET | Portal feature flags, limits, retention window, and live `chat_ready` status |
 | `/api/cases` | GET | Paginated case list |
-| `/api/cases/{case_id}` | GET | Case detail |
+| `/api/cases/{case_id}` | GET | Bounded case detail view |
+| `/api/cases/{case_id}/raw/{section}` | GET | Paginated raw `alert_payload` or `analysis` JSON |
+
+`GET /api/cases/{case_id}` returns a stable, size-bounded view of archived case
+content. Large strings, deep nesting, and non-UI analysis keys such as
+`raw_response` are omitted or truncated. The response includes `content_bounds`
+with truncation flags, total key counts, and `raw_sections` that can be fetched
+from the raw endpoint.
+
+`GET /api/cases/{case_id}/raw/{section}` query parameters:
+
+- `section` — path segment: `alert_payload` or `analysis`
+- `offset`, `limit` — paginate top-level keys (default limit 50, max 100)
+- `key` — optional single-key lookup (for example `raw_response`)
 
 `GET /api/cases` optional query parameters:
 

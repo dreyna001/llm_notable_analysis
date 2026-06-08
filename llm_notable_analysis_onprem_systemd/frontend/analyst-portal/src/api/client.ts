@@ -2,6 +2,7 @@ import {
   INVALID_RESPONSE_MESSAGE,
   parseCaseDetail,
   parseCaseListResponse,
+  parseCaseRawSectionResponse,
   parseChatResponse,
   parseChatSessionMessagesResponse,
   parseChatSessionsResponse,
@@ -14,6 +15,8 @@ import type {
   CaseDetail,
   CaseListCursor,
   CaseListResponse,
+  CaseRawSection,
+  CaseRawSectionResponse,
   ChatRequest,
   ChatResponse,
   ChatSessionMessagesResponse,
@@ -192,6 +195,24 @@ export async function fetchCase(caseId: string): Promise<CaseDetail> {
   return readValidatedJson(
     await apiFetch(`/api/cases/${encodeURIComponent(caseId)}`),
     parseCaseDetail,
+  );
+}
+
+export async function fetchCaseRawSection(
+  caseId: string,
+  section: CaseRawSection,
+  params?: { offset?: number; limit?: number; key?: string },
+): Promise<CaseRawSectionResponse> {
+  const query = new URLSearchParams();
+  if (params?.offset != null) query.set("offset", String(params.offset));
+  if (params?.limit != null) query.set("limit", String(params.limit));
+  if (params?.key) query.set("key", params.key);
+  const suffix = query.size ? `?${query}` : "";
+  return readValidatedJson(
+    await apiFetch(
+      `/api/cases/${encodeURIComponent(caseId)}/raw/${encodeURIComponent(section)}${suffix}`,
+    ),
+    parseCaseRawSectionResponse,
   );
 }
 

@@ -42,7 +42,7 @@ import {
 } from "../components/case-detail/CaseDetailUi";
 import { CaseArchiveNoticeBanner } from "../components/CaseArchiveNoticeBanner";
 import { CaseDetailMetricsSkeleton } from "../components/LoadingSkeletons";
-import { ApiError, fetchCase } from "../api/client";
+import { ApiError, fetchCase, fetchCaseRawSection } from "../api/client";
 import type { CaseDetail } from "../types";
 import {
   caseDetailTabNeedsUrlCleanup,
@@ -507,11 +507,14 @@ export function CaseDetailPage() {
   );
   const [openTtps, setOpenTtps] = useState<Set<string>>(() => new Set(["ttp-0"]));
   const [openQueries, setOpenQueries] = useState<Set<string>>(() => new Set(["query-0"]));
+  const [rawOutput, setRawOutput] = useState<string | null>(null);
+  const [rawOutputLoading, setRawOutputLoading] = useState(false);
 
   useEffect(() => {
     setOpenHypotheses(new Set(["hypothesis-0"]));
     setOpenTtps(new Set(["ttp-0"]));
     setOpenQueries(new Set(["query-0"]));
+    setRawOutput(null);
   }, [caseId]);
 
   function selectTab(tab: CaseDetailTab) {
@@ -621,7 +624,14 @@ export function CaseDetailPage() {
     .filter((item) => Object.keys(item).length > 0);
   const hasQueryResults = Object.keys(querySection).length > 0;
   const hasServiceNow = Object.keys(asRecord(analysis.servicenow_section)).length > 0;
-  const hasRawOutput = Boolean(analysis.poc_unstructured_output || analysis.raw_response);
+  const hasRawOutput =
+    Boolean(analysis.poc_unstructured_output || analysis.raw_response) ||
+    Boolean(
+      detail?.content_bounds.raw_sections.includes("analysis") &&
+        detail.content_bounds.analysis_total_keys > 0 &&
+        (detail.content_bounds.analysis_truncated ||
+          detail.content_bounds.analysis_total_keys > Object.keys(analysis).length),
+    );
   const tabs: Array<[CaseDetailTab, string]> = [
     ["overview", "Verdict"],
     ...(hypotheses.length ? [["hypotheses", "Hypotheses"] as [CaseDetailTab, string]] : []),
@@ -637,6 +647,51 @@ export function CaseDetailPage() {
   const availableTabIds = tabs.map(([tab]) => tab);
   const availableTabsKey = availableTabIds.join(",");
   const activeTab = resolveCaseDetailTab(searchParams.get("tab"), availableTabIds);
+
+  useEffect(() => {
+    if (activeTab !== "raw" || !detail) {
+      return;
+    }
+    let cancelled = false;
+    setRawOutputLoading(true);
+    void (async () => {
+      const chunks: string[] = [];
+      if (typeof analysis.poc_unstructured_output === "string" && analysis.poc_unstructured_output) {
+        chunks.push(analysis.poc_unstructured_output);
+      }
+      if (typeof analysis.raw_response === "string" && analysis.raw_response) {
+        chunks.push(analysis.raw_response);
+      }
+      if (
+        !chunks.length &&
+        detail.content_bounds.raw_sections.includes("analysis")
+      ) {
+        for (const key of ["poc_unstructured_output", "raw_response"]) {
+          try {
+            const page = await fetchCaseRawSection(detail.case_id, "analysis", { key });
+            const value = page.items[key];
+            if (typeof value === "string" && value.trim()) {
+              chunks.push(value);
+            }
+          } catch {
+            // Ignore missing archived keys.
+          }
+        }
+      }
+      if (!cancelled) {
+        setRawOutput(chunks.join("\n\n") || "No raw output archived.");
+        setRawOutputLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeTab,
+    analysis.poc_unstructured_output,
+    analysis.raw_response,
+    detail,
+  ]);
 
   useEffect(() => {
     if (!detail) return;
@@ -677,6 +732,17 @@ export function CaseDetailPage() {
 
       {detail?.metadata.archive_notices?.length ? (
         <CaseArchiveNoticeBanner notices={detail.metadata.archive_notices} />
+      ) : null}
+
+      {detail &&
+      (detail.content_bounds.alert_payload_truncated ||
+        detail.content_bounds.analysis_truncated) ? (
+        <DetailCard>
+          <DetailMuted>
+            Part of this case was omitted from the initial view. Use Raw Output or
+            the raw JSON API for full archived fields.
+          </DetailMuted>
+        </DetailCard>
       ) : null}
 
       {detail ? (
@@ -1126,7 +1192,9 @@ export function CaseDetailPage() {
             <DetailCard>
               <DetailCardTitle>Raw Output</DetailCardTitle>
               <DetailCodeBlock>
-                {String(analysis.raw_response ?? "")}
+                {rawOutputLoading
+                  ? "Loading archived raw output…"
+                  : (rawOutput ?? String(analysis.raw_response ?? ""))}
               </DetailCodeBlock>
             </DetailCard>
           </TabsContent>

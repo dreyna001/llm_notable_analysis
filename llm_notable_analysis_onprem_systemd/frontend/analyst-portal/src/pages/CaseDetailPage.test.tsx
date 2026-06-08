@@ -31,6 +31,13 @@ const { fetchCase, MockApiError, nullAnalysisCase } = vi.hoisted(() => {
     analysis: null,
     report_md_path: "/reports/case-1.md",
     report_html_path: null,
+    content_bounds: {
+      alert_payload_truncated: false,
+      analysis_truncated: false,
+      alert_payload_total_keys: 2,
+      analysis_total_keys: 0,
+      raw_sections: ["alert_payload", "analysis"],
+    },
   };
 
   const fetchCase = vi.fn(async () => nullAnalysisCase);

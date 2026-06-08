@@ -22,6 +22,14 @@ export type CaseListResponse = {
   next_cursor: CaseListCursor | null;
 };
 
+export type CaseDetailContentBounds = {
+  alert_payload_truncated: boolean;
+  analysis_truncated: boolean;
+  alert_payload_total_keys: number;
+  analysis_total_keys: number;
+  raw_sections: Array<"alert_payload" | "analysis">;
+};
+
 export type CaseDetail = {
   case_id: string;
   metadata: {
@@ -35,6 +43,19 @@ export type CaseDetail = {
   analysis: Record<string, unknown> | null;
   report_md_path: string | null;
   report_html_path: string | null;
+  content_bounds: CaseDetailContentBounds;
+};
+
+export type CaseRawSection = "alert_payload" | "analysis";
+
+export type CaseRawSectionResponse = {
+  case_id: string;
+  section: CaseRawSection;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+  total_keys: number;
+  items: Record<string, unknown>;
 };
 
 export type ChatMode =
