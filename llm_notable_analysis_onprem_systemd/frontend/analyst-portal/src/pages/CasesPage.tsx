@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { ApiError, fetchCase, fetchCases } from "../api/client";
 import type { CaseSummary } from "../types";
 import { caseDetailToSummary } from "../utils/caseSummary";
+import { retrievalStatusLabel } from "../utils/retrievalStatus";
 import { normalizeVerdict, verdictLabel } from "../utils/verdict";
 
 type CaseFilters = {
@@ -433,7 +434,7 @@ export function CasesPage() {
                         <Badge
                           variant={retrievalBadgeVariant(item.retrieval_status)}
                         >
-                          {item.retrieval_status}
+                          {retrievalStatusLabel(item.retrieval_status)}
                         </Badge>
                       </td>
                     </tr>

@@ -134,15 +134,7 @@ export function verdictUiLabel(verdict: string | null | undefined): string {
   return labels[normalizeVerdict(verdict)] ?? "Unknown";
 }
 
-export function retrievalUiLabel(status: string | null | undefined): string {
-  const labels: Record<string, string> = {
-    ready: "Indexed",
-    pending: "Indexing pending",
-    failed: "Indexing failed",
-    not_indexed: "Not indexed",
-  };
-  return labels[status ?? ""] ?? String(status ?? "").replace(/_/g, " ");
-}
+export { retrievalStatusLabel as retrievalUiLabel } from "../src/utils/retrievalStatus";
 
 export async function loadPortalFixture(
   request: APIRequestContext,

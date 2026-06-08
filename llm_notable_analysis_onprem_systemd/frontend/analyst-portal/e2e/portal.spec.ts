@@ -85,7 +85,9 @@ test.describe("Analyst portal E2E", () => {
       await expect(row.getByText(fixture.caseSummary.search_name)).toBeVisible();
     }
     await expect(row.getByText(verdictUiLabel(fixture.caseSummary.verdict))).toBeVisible();
-    await expect(row.getByText(fixture.caseSummary.retrieval_status, { exact: true })).toBeVisible();
+    await expect(
+      row.getByText(retrievalUiLabel(fixture.caseSummary.retrieval_status)),
+    ).toBeVisible();
     await expect(row.getByText(fixture.caseSummary.source_completeness)).toBeVisible();
   });
 

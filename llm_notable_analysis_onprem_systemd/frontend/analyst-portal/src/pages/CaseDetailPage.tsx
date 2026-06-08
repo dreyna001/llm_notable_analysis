@@ -48,6 +48,7 @@ import {
   resolveCaseDetailTab,
   type CaseDetailTab,
 } from "../utils/caseDetailTabs";
+import { retrievalStatusLabel } from "../utils/retrievalStatus";
 import { verdictLabel, verdictTone, type VerdictTone } from "../utils/verdict";
 
 type AlertReconciliation = {
@@ -422,18 +423,6 @@ const IOC_FIELDS: Array<[string, string]> = [
   ["event_ids", "Event IDs"],
   ["urls", "URLs"],
 ];
-
-// Maps the stored retrieval_status into an analyst-readable label.
-function retrievalStatusLabel(status: string | null | undefined): string {
-  if (!status) return "Loading";
-  const labels: Record<string, string> = {
-    ready: "Indexed",
-    pending: "Indexing pending",
-    failed: "Indexing failed",
-    not_indexed: "Not indexed",
-  };
-  return labels[status] ?? status.replace(/_/g, " ");
-}
 
 // Deterministic status colors shared by the metric cards: green = ready/complete,
 // amber = pending/partial, red = failed, muted gray = not applicable or unknown.
