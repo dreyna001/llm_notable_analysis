@@ -7,6 +7,7 @@ export type CaseSummary = {
   search_name: string | null;
   retrieval_status: string;
   source_completeness: string;
+  archive_notices?: string[];
 };
 
 export type CaseListResponse = {
@@ -23,6 +24,7 @@ export type CaseDetail = {
     expires_at: string | null;
     retrieval_status: string;
     source_completeness: string;
+    archive_notices?: string[];
   };
   alert_payload: Record<string, unknown>;
   analysis: Record<string, unknown> | null;

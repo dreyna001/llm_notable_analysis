@@ -408,9 +408,15 @@ export function CasesPage() {
                         >
                           {item.case_id}
                         </Link>
-                        <div className="mt-0.5 text-xs text-muted-foreground">
-                          {item.source_completeness}
-                        </div>
+                        {item.archive_notices?.length ? (
+                          <div className="mt-0.5 text-xs text-amber-700 dark:text-amber-200">
+                            Archive issue: open case for details
+                          </div>
+                        ) : (
+                          <div className="mt-0.5 text-xs text-muted-foreground">
+                            {item.source_completeness}
+                          </div>
+                        )}
                       </td>
                       <td className="py-3 pr-4 text-muted-foreground">
                         {item.processed_at ?? "-"}

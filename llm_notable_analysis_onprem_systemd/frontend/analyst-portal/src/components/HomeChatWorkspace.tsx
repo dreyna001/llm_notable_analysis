@@ -30,6 +30,7 @@ import {
   type ChatTurn,
   type OrphanedChatResponse,
 } from "./ChatPanel";
+import { CaseArchiveNoticeBanner } from "./CaseArchiveNoticeBanner";
 import { PortalCapabilityBanner } from "./PortalCapabilityBanner";
 import { PortalSidebar } from "./PortalSidebar";
 import { caseDetailToSummary } from "../utils/caseSummary";
@@ -61,6 +62,7 @@ type HomeChatWorkspaceProps = {
   selectedCaseProcessedAt?: string;
   selectedCaseLoading?: boolean;
   attachError?: string | null;
+  archiveNotices?: string[];
   onAttachCase?: (caseId: string) => void;
   onClearSelectedCase?: () => void;
 };
@@ -179,6 +181,7 @@ export function HomeChatWorkspace({
   selectedCaseProcessedAt,
   selectedCaseLoading,
   attachError,
+  archiveNotices,
   onAttachCase,
   onClearSelectedCase,
 }: HomeChatWorkspaceProps) {
@@ -315,6 +318,19 @@ export function HomeChatWorkspace({
     effectiveSelectedCaseId === selectedCaseId
       ? selectedCaseLoading
       : resolvingCaseId === effectiveSelectedCaseId;
+
+  const effectiveArchiveNotices = useMemo(() => {
+    if (archiveNotices?.length) {
+      return archiveNotices;
+    }
+    if (resolvedCaseSummary?.archive_notices?.length) {
+      return resolvedCaseSummary.archive_notices;
+    }
+    if (attachedCasePreview?.archive_notices?.length) {
+      return attachedCasePreview.archive_notices;
+    }
+    return [];
+  }, [archiveNotices, attachedCasePreview?.archive_notices, resolvedCaseSummary?.archive_notices]);
 
   const initialPanelTurns = useMemo(
     () => storedTurnsToPanelTurns(activeSession?.turns ?? []),
@@ -930,6 +946,12 @@ export function HomeChatWorkspace({
           sessionCapNotice={sessionCapNotice}
           chatDisabledReason={chatDisabledReason}
         />
+        {effectiveSelectedCaseId && effectiveArchiveNotices.length ? (
+          <CaseArchiveNoticeBanner
+            notices={effectiveArchiveNotices}
+            title="Attached case archive notice"
+          />
+        ) : null}
         <ChatPanel
           key={activeSession.localId}
           initialSessionId={activeSession.serverSessionId}

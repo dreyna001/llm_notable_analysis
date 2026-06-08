@@ -57,5 +57,6 @@ export function caseDetailToSummary(detail: CaseDetail): CaseSummary {
     search_name: alertNameFromCaseDetail(detail),
     retrieval_status: detail.metadata.retrieval_status,
     source_completeness: detail.metadata.source_completeness,
+    archive_notices: detail.metadata.archive_notices,
   };
 }

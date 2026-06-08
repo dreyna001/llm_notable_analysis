@@ -11,6 +11,9 @@ const nullAnalysisCase: CaseDetail = {
     expires_at: "2026-07-04T00:00:00Z",
     retrieval_status: "not_indexed",
     source_completeness: "missing_analysis",
+    archive_notices: [
+      "Structured analysis was not stored in the case archive. Chat can use the alert payload only.",
+    ],
   },
   alert_payload: {
     notable_id: "abc-123",
@@ -58,5 +61,11 @@ describe("CaseDetailPage", () => {
     expect(screen.getByText("Not indexed")).toBeInTheDocument();
     expect(screen.getByText("missing_analysis")).toBeInTheDocument();
     expect(screen.getByText("No hypothesis summary available.")).toBeInTheDocument();
+    expect(screen.getByText("Case archive notice")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Structured analysis was not stored in the case archive. Chat can use the alert payload only.",
+      ),
+    ).toBeInTheDocument();
   });
 });

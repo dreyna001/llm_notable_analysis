@@ -416,6 +416,28 @@ class TestPortalApp(unittest.TestCase):
         self.assertIsNone(payload["analysis"])
         self.assertEqual(payload["metadata"]["retrieval_status"], "not_indexed")
         self.assertEqual(payload["metadata"]["source_completeness"], "missing_analysis")
+        self.assertIn("archive_notices", payload["metadata"])
+        self.assertGreaterEqual(len(payload["metadata"]["archive_notices"]), 2)
+
+    def test_api_case_detail_includes_archive_notices_for_failed_indexing(self) -> None:
+        record = _record(self._config())
+        row = list(_detail_row(record))
+        row[18] = "failed"
+        row[20] = "complete"
+        client = TestClient(
+            build_portal_app(
+                self._config(),
+                connect=lambda _dsn: _FakeConnection(row=tuple(row)),
+            )
+        )
+
+        response = client.get("/api/cases/case-1", headers=_AUTH_HEADERS)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        notices = payload["metadata"]["archive_notices"]
+        self.assertEqual(len(notices), 1)
+        self.assertIn("chat indexing failed", notices[0])
 
     def test_trusted_user_header_required_on_loopback(self) -> None:
         client = TestClient(

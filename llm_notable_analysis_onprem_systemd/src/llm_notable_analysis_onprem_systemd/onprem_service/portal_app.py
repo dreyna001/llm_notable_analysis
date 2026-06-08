@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
+from .case_archive_notices import build_case_archive_notices
 from .case_chat import (
     CaseNotFoundError,
     GeneralSynthesizeFn,
@@ -204,7 +205,11 @@ LIMIT 1
 
 
 def _summary_item(summary: CaseSummary) -> dict[str, Any]:
-    return {
+    archive_notices = build_case_archive_notices(
+        retrieval_status=summary.retrieval_status,
+        source_completeness=summary.source_completeness,
+    )
+    payload = {
         "case_id": summary.case_id,
         "processed_at": _format_utc_timestamp(summary.processed_at),
         "expires_at": _format_utc_timestamp(summary.expires_at),
@@ -214,17 +219,28 @@ def _summary_item(summary: CaseSummary) -> dict[str, Any]:
         "retrieval_status": summary.retrieval_status,
         "source_completeness": summary.source_completeness,
     }
+    if archive_notices:
+        payload["archive_notices"] = archive_notices
+    return payload
 
 
 def _detail_payload(record: CaseArchiveRecord) -> dict[str, Any]:
+    archive_notices = build_case_archive_notices(
+        retrieval_status=record.retrieval_status,
+        source_completeness=record.source_completeness,
+        archive_metadata=record.archive_metadata,
+    )
+    metadata = {
+        "processed_at": _format_utc_timestamp(record.processed_at),
+        "expires_at": _format_utc_timestamp(record.expires_at),
+        "retrieval_status": record.retrieval_status,
+        "source_completeness": record.source_completeness,
+    }
+    if archive_notices:
+        metadata["archive_notices"] = archive_notices
     return {
         "case_id": record.case_id,
-        "metadata": {
-            "processed_at": _format_utc_timestamp(record.processed_at),
-            "expires_at": _format_utc_timestamp(record.expires_at),
-            "retrieval_status": record.retrieval_status,
-            "source_completeness": record.source_completeness,
-        },
+        "metadata": metadata,
         "alert_payload": record.alert_payload,
         "analysis": record.analysis,
         "report_md_path": record.report_md_path,

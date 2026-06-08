@@ -40,6 +40,7 @@ import {
   InterpretationDeltaBadge,
   ttpScoreBadgeVariant,
 } from "../components/case-detail/CaseDetailUi";
+import { CaseArchiveNoticeBanner } from "../components/CaseArchiveNoticeBanner";
 import { ApiError, fetchCase } from "../api/client";
 import type { CaseDetail } from "../types";
 import {
@@ -681,6 +682,10 @@ export function CaseDetailPage() {
 
       {loading ? <DetailMuted>Loading case...</DetailMuted> : null}
       {error ? <DetailError>{error}</DetailError> : null}
+
+      {detail?.metadata.archive_notices?.length ? (
+        <CaseArchiveNoticeBanner notices={detail.metadata.archive_notices} />
+      ) : null}
 
       {detail ? (
         <>

@@ -123,6 +123,7 @@ export function HomePage() {
         selectedCaseProcessedAt={selectedCase?.metadata.processed_at ?? undefined}
         selectedCaseLoading={selectedCaseLoading}
         attachError={attachError}
+        archiveNotices={selectedCase?.metadata.archive_notices}
         onAttachCase={handleAttachCase}
         onClearSelectedCase={handleClearSelectedCase}
       />
