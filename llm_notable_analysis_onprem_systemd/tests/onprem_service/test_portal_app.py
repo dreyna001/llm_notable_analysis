@@ -1,6 +1,7 @@
 from datetime import date, datetime, timezone
 import inspect
 import json
+import logging
 import threading
 import unittest
 import uuid
@@ -683,8 +684,33 @@ class TestPortalApp(unittest.TestCase):
         allowed = client.get("/api/cases", headers=_AUTH_HEADERS)
 
         self.assertEqual(missing.status_code, 401)
+        self.assertEqual(missing.json()["detail"], "Authentication required.")
+        self.assertNotIn("X-Notable-Portal-Proxy-Secret", missing.json()["detail"])
         self.assertEqual(forged_user.status_code, 401)
+        self.assertEqual(forged_user.json()["detail"], "Authentication required.")
+        self.assertNotIn("X-Forwarded-User", forged_user.json()["detail"])
         self.assertEqual(allowed.status_code, 200)
+
+    def test_auth_failures_log_header_details_without_exposing_them_to_clients(
+        self,
+    ) -> None:
+        client = TestClient(
+            build_portal_app(
+                self._config(),
+                connect=lambda _dsn: _FakeConnection(rows=[]),
+            )
+        )
+        with self.assertLogs(
+            "llm_notable_analysis_onprem_systemd.onprem_service.portal_app",
+            level=logging.WARNING,
+        ) as captured:
+            response = client.get("/api/cases", headers=_USER_HEADERS)
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"], "Authentication required.")
+        combined_logs = "\n".join(captured.output)
+        self.assertIn("X-Notable-Portal-Proxy-Secret", combined_logs)
+        self.assertIn("Portal auth rejected request", combined_logs)
 
     def test_mutating_routes_reject_cross_site_browser_requests(self) -> None:
         client = TestClient(

@@ -415,8 +415,10 @@ Auth or trusted-header issues:
 - Confirm nginx forwards `X-Forwarded-User`.
 - Confirm nginx forwards `X-Notable-Portal-Proxy-Secret` from the protected
   include file.
-- Direct local requests to non-public routes should return `401` without both
-  the trusted user header and the proxy secret.
+- Direct local requests to non-public routes should return `401` with a generic
+  `Authentication required.` message without both the trusted user header and
+  the proxy secret. Check `notable-portal.service` logs for the missing header
+  name and path.
 - Keep `PORTAL_BIND_HOST=127.0.0.1` unless the reverse proxy design is reviewed.
 - For reviewed non-loopback binds, confirm nginx forwards
   `X-Notable-Portal-Proxy-Secret` and the host firewall only allows the proxy.

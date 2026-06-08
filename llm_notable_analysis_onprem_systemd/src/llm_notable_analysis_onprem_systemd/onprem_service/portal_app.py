@@ -77,6 +77,7 @@ from .portal_case_detail_view import (
 
 logger = logging.getLogger(__name__)
 
+_PORTAL_AUTH_UNAUTHORIZED_DETAIL = "Authentication required."
 _MAX_PAGE_SIZE = 100
 _MAX_CASE_ID_LENGTH = 128
 _MAX_TRUSTED_USER_LENGTH = 256
@@ -220,6 +221,21 @@ def _proxy_secret_matches(request: Any, config: Config) -> bool:
     if supplied is None:
         return False
     return secrets.compare_digest(str(supplied).strip(), expected)
+
+
+def _portal_unauthorized_response(request: Any, *, log_message: str) -> Any:
+    """Return a generic 401 while logging operator-facing auth details."""
+    _, _, _, JSONResponse = _lazy_import_fastapi()
+    logger.warning(
+        "Portal auth rejected request path=%s method=%s: %s",
+        request.url.path,
+        request.method,
+        log_message,
+    )
+    return JSONResponse(
+        status_code=401,
+        content={"detail": _PORTAL_AUTH_UNAUTHORIZED_DETAIL},
+    )
 
 
 def _same_origin_request(request: Any) -> bool:
@@ -557,32 +573,23 @@ def build_portal_app(
                 content={"detail": "Cross-site portal write requests are not allowed."},
             )
         if not _proxy_secret_matches(request, config):
-            return JSONResponse(
-                status_code=401,
-                content={
-                    "detail": (
-                        f"Missing or invalid proxy secret header {proxy_secret_header!r}. "
-                        "Requests must come through the trusted reverse proxy."
-                    )
-                },
-            )
+            supplied = request.headers.get(proxy_secret_header)
+            if supplied is None:
+                log_message = f"Missing proxy secret header {proxy_secret_header!r}."
+            else:
+                log_message = f"Invalid proxy secret header {proxy_secret_header!r}."
+            return _portal_unauthorized_response(request, log_message=log_message)
         trusted_user = _trusted_user_from_request(request, config)
         if trusted_user is None:
             raw_user = request.headers.get(trusted_header)
             if raw_user is not None and str(raw_user).strip():
-                detail = (
+                log_message = (
                     f"Trusted user header {trusted_header!r} exceeds "
                     f"{_MAX_TRUSTED_USER_LENGTH} characters."
                 )
             else:
-                detail = (
-                    f"Missing trusted user header {trusted_header!r}. "
-                    "Requests must come through nginx with proxy auth."
-                )
-            return JSONResponse(
-                status_code=401,
-                content={"detail": detail},
-            )
+                log_message = f"Missing trusted user header {trusted_header!r}."
+            return _portal_unauthorized_response(request, log_message=log_message)
         token = _TRUSTED_USER_CTX.set(trusted_user)
         try:
             return await call_next(request)
