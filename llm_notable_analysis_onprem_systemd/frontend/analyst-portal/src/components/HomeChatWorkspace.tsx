@@ -346,40 +346,25 @@ export function HomeChatWorkspace({
     loadingSessionId === activeSession?.localId ? "loading" : "ready",
   ].join(":");
 
-  const persistStore = useCallback(
-    (next: ChatSessionStore) => {
-      const capped = ensureChatSessionStore(
-        applySessionCap(next, maxChatSessions, noteSessionEviction),
-      );
-      setStore(capped);
-      saveChatSessionStore(capped, maxChatSessions);
-    },
+  const normalizePersistedStore = useCallback(
+    (current: ChatSessionStore): ChatSessionStore =>
+      ensureChatSessionStore(
+        applySessionCap(current, maxChatSessions, noteSessionEviction),
+      ),
     [maxChatSessions, noteSessionEviction],
   );
 
   useEffect(() => {
+    const normalized = normalizePersistedStore(store);
     if (
-      safeStore.activeLocalId === store.activeLocalId &&
-      safeStore.sessions === store.sessions
+      normalized.activeLocalId === store.activeLocalId &&
+      normalized.sessions === store.sessions
     ) {
       return;
     }
-    persistStore(safeStore);
-  }, [persistStore, safeStore, store.activeLocalId, store.sessions]);
-
-  useEffect(() => {
-    setStore((current) => {
-      const capped = applySessionCap(current, maxChatSessions, noteSessionEviction);
-      if (
-        capped.sessions.length === current.sessions.length &&
-        capped.activeLocalId === current.activeLocalId
-      ) {
-        return current;
-      }
-      saveChatSessionStore(capped, maxChatSessions);
-      return capped;
-    });
-  }, [maxChatSessions, noteSessionEviction]);
+    setStore(normalized);
+    saveChatSessionStore(normalized, maxChatSessions);
+  }, [maxChatSessions, normalizePersistedStore, store]);
 
   useEffect(() => {
     let cancelled = false;
