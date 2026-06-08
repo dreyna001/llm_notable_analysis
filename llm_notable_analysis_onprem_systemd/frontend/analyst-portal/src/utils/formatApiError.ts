@@ -2,6 +2,13 @@ import { ApiError } from "../api/client";
 
 const CHAT_SESSION_SCOPE_MISMATCH_SNIPPET = "session_id scope does not match";
 
+export const CHAT_CONCURRENCY_LIMIT_MESSAGE =
+  "The portal is busy handling other chat requests. Wait a moment and try again.";
+
+export function isChatConcurrencyLimit(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 429;
+}
+
 export function isChatSessionScopeMismatch(err: unknown): boolean {
   return (
     err instanceof ApiError &&
@@ -26,6 +33,9 @@ export function formatApiError(err: unknown, fallback = "Unknown error"): string
 
 /** Format chat POST errors, including recovery guidance for stale server sessions. */
 export function formatChatApiError(err: unknown, fallback = "Unknown error"): string {
+  if (isChatConcurrencyLimit(err)) {
+    return CHAT_CONCURRENCY_LIMIT_MESSAGE;
+  }
   if (isChatSessionScopeMismatch(err)) {
     return "This chat no longer matches the selected case or mode. Your next message will start a fresh server session.";
   }
