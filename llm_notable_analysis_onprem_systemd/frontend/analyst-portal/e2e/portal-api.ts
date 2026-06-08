@@ -135,6 +135,7 @@ export function verdictUiLabel(verdict: string | null | undefined): string {
 }
 
 export { retrievalStatusLabel as retrievalUiLabel } from "../src/utils/retrievalStatus";
+export { sourceCompletenessLabel as completenessUiLabel } from "../src/utils/sourceCompleteness";
 
 export async function loadPortalFixture(
   request: APIRequestContext,

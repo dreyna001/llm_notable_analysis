@@ -80,7 +80,7 @@ describe("CaseDetailPage", () => {
     expect(await screen.findByText("case-1")).toBeInTheDocument();
     expect(screen.getByText("Suspicious PowerShell")).toBeInTheDocument();
     expect(screen.getByText("Not indexed")).toBeInTheDocument();
-    expect(screen.getByText("missing_analysis")).toBeInTheDocument();
+    expect(screen.getByText("Structured analysis missing")).toBeInTheDocument();
     expect(screen.getByText("No hypothesis summary available.")).toBeInTheDocument();
     expect(screen.getByText("Case archive notice")).toBeInTheDocument();
     expect(

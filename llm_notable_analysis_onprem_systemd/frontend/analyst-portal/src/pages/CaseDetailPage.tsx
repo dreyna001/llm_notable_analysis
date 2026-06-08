@@ -49,6 +49,7 @@ import {
   type CaseDetailTab,
 } from "../utils/caseDetailTabs";
 import { retrievalStatusLabel } from "../utils/retrievalStatus";
+import { sourceCompletenessLabel } from "../utils/sourceCompleteness";
 import { verdictLabel, verdictTone, type VerdictTone } from "../utils/verdict";
 
 type AlertReconciliation = {
@@ -696,7 +697,7 @@ export function CaseDetailPage() {
             <DetailMetric
               label="Analysis availability"
               sub="Structured analysis status"
-              value={detail.metadata.source_completeness}
+              value={sourceCompletenessLabel(detail.metadata.source_completeness)}
               valueStyle={{
                 color: completenessColor(detail.metadata.source_completeness),
               }}

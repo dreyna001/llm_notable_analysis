@@ -23,6 +23,7 @@ import { ApiError, fetchCase, fetchCases } from "../api/client";
 import type { CaseSummary } from "../types";
 import { caseDetailToSummary } from "../utils/caseSummary";
 import { retrievalStatusLabel } from "../utils/retrievalStatus";
+import { sourceCompletenessLabel } from "../utils/sourceCompleteness";
 import {
   normalizeUtcFilterDate,
   processedAtMatchesUtcDateRange,
@@ -33,6 +34,7 @@ type CaseFilters = {
   start_date: string;
   end_date: string;
   verdict: string;
+  case_id: string;
   search_name: string;
 };
 
@@ -40,6 +42,7 @@ const EMPTY_FILTERS: CaseFilters = {
   start_date: "",
   end_date: "",
   verdict: "",
+  case_id: "",
   search_name: "",
 };
 
@@ -71,21 +74,15 @@ function retrievalBadgeVariant(
   }
 }
 
-function prependCaseIfMissing(
-  items: CaseSummary[],
-  exactCase: CaseSummary | null,
-): CaseSummary[] {
-  if (!exactCase || items.some((item) => item.case_id === exactCase.case_id)) {
-    return items;
-  }
-  return [exactCase, ...items];
-}
-
 function exactCaseMatchesFilters(
   item: CaseSummary,
   filters: CaseFilters,
 ): boolean {
   if (filters.verdict && normalizeVerdict(item.verdict) !== filters.verdict) {
+    return false;
+  }
+  const searchTerm = filters.search_name.trim().toLowerCase();
+  if (searchTerm && !item.search_name?.toLowerCase().includes(searchTerm)) {
     return false;
   }
   return processedAtMatchesUtcDateRange(
@@ -157,52 +154,80 @@ export function CasesPage() {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const nextSearch = draftFilters.search_name.trim();
+      const nextCaseId = draftFilters.case_id.trim();
       setFilters((previous) => {
-        if (previous.search_name === nextSearch) {
+        if (
+          previous.search_name === nextSearch &&
+          previous.case_id === nextCaseId
+        ) {
           return previous;
         }
-        return { ...previous, search_name: nextSearch };
+        return { ...previous, case_id: nextCaseId, search_name: nextSearch };
       });
     }, SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [draftFilters.search_name]);
+  }, [draftFilters.case_id, draftFilters.search_name]);
 
   useEffect(() => {
     setOffset(0);
-  }, [filters.search_name]);
+  }, [filters.case_id, filters.search_name]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    const caseId = filters.case_id.trim();
     const searchTerm = filters.search_name.trim();
 
-    Promise.all([
-      fetchCases({
-        limit,
-        offset,
-        start_date: filters.start_date || undefined,
-        end_date: filters.end_date || undefined,
-        verdict: filters.verdict || undefined,
-        search_name: searchTerm || undefined,
-      }),
-      offset === 0 && searchTerm
-        ? fetchCase(searchTerm)
-            .then(caseDetailToSummary)
-            .catch((err: unknown) => {
-              if (err instanceof ApiError && err.status === 404) {
-                return null;
-              }
-              throw err;
-            })
-        : Promise.resolve(null),
-    ])
-      .then(([payload, exactCase]) => {
+    if (caseId) {
+      fetchCase(caseId)
+        .then(caseDetailToSummary)
+        .catch((err: unknown) => {
+          if (err instanceof ApiError && err.status === 404) {
+            return null;
+          }
+          throw err;
+        })
+        .then((exactCase) => {
+          if (!cancelled) {
+            const filteredExactCase =
+              exactCase && exactCaseMatchesFilters(exactCase, filters)
+                ? exactCase
+                : null;
+            setItems(filteredExactCase ? [filteredExactCase] : []);
+            setHasMore(false);
+            setError(null);
+          }
+        })
+        .catch((err: unknown) => {
+          if (!cancelled) {
+            const message =
+              err instanceof ApiError
+                ? `${err.status}: ${err.message}`
+                : err instanceof Error
+                  ? err.message
+                  : "Unknown error";
+            setError(message);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    fetchCases({
+      limit,
+      offset,
+      start_date: filters.start_date || undefined,
+      end_date: filters.end_date || undefined,
+      verdict: filters.verdict || undefined,
+      search_name: searchTerm || undefined,
+    })
+      .then((payload) => {
         if (!cancelled) {
-          const filteredExactCase =
-            exactCase && exactCaseMatchesFilters(exactCase, filters)
-              ? exactCase
-              : null;
-          setItems(prependCaseIfMissing(payload.items, filteredExactCase));
+          setItems(payload.items);
           setHasMore(payload.has_more);
           setError(null);
         }
@@ -229,12 +254,13 @@ export function CasesPage() {
   function applyFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setOffset(0);
-    setFilters((previous) => ({
+    setFilters({
       start_date: normalizeUtcFilterDate(draftFilters.start_date),
       end_date: normalizeUtcFilterDate(draftFilters.end_date),
       verdict: draftFilters.verdict.trim(),
-      search_name: previous.search_name,
-    }));
+      case_id: draftFilters.case_id.trim(),
+      search_name: draftFilters.search_name.trim(),
+    });
   }
 
   function clearFilters() {
@@ -316,6 +342,24 @@ export function CasesPage() {
                 </Select>
               </div>
               <div className="min-w-[12rem] flex-1">
+                <Label className="mb-1.5 block" htmlFor="filter-case-id">
+                  Case ID
+                </Label>
+                <Input
+                  className="h-10 bg-background"
+                  id="filter-case-id"
+                  placeholder="Exact case ID"
+                  type="search"
+                  value={draftFilters.case_id}
+                  onChange={(event) =>
+                    setDraftFilters((value) => ({
+                      ...value,
+                      case_id: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="min-w-[12rem] flex-1">
                 <Label className="mb-1.5 block" htmlFor="filter-search">
                   Alert name
                 </Label>
@@ -388,7 +432,7 @@ export function CasesPage() {
                           </div>
                         ) : (
                           <div className="mt-0.5 text-xs text-muted-foreground">
-                            {item.source_completeness}
+                            {sourceCompletenessLabel(item.source_completeness)}
                           </div>
                         )}
                       </td>

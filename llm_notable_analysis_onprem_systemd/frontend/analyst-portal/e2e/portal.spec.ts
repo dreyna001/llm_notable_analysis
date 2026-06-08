@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import {
   alertName,
+  completenessUiLabel,
   loadPortalFixture,
   reconciliationSummary,
   retrievalUiLabel,
@@ -88,7 +89,9 @@ test.describe("Analyst portal E2E", () => {
     await expect(
       row.getByText(retrievalUiLabel(fixture.caseSummary.retrieval_status)),
     ).toBeVisible();
-    await expect(row.getByText(fixture.caseSummary.source_completeness)).toBeVisible();
+    await expect(
+      row.getByText(completenessUiLabel(fixture.caseSummary.source_completeness)),
+    ).toBeVisible();
   });
 
   test("filters cases by alert name, verdict, and clear", async ({ page }) => {
@@ -135,7 +138,11 @@ test.describe("Analyst portal E2E", () => {
     await expect(
       page.getByText(retrievalUiLabel(fixture.caseDetail.metadata.retrieval_status)),
     ).toBeVisible();
-    await expect(page.getByText(fixture.caseDetail.metadata.source_completeness)).toBeVisible();
+    await expect(
+      page.getByText(
+        completenessUiLabel(fixture.caseDetail.metadata.source_completeness),
+      ),
+    ).toBeVisible();
 
     for (const label of fixture.expectedTabLabels) {
       await page.getByRole("tab", { name: label }).click();
