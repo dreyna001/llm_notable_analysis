@@ -12,6 +12,7 @@ from llm_notable_analysis_onprem_systemd.onprem_service.case_chat import (
     build_lexical_chunk_query,
     build_vector_chunk_query,
     check_case_chat_ready,
+    evaluate_case_chat_readiness,
     ensure_selected_case_exists,
     is_action_request,
     retrieve_case_sources,
@@ -35,10 +36,11 @@ class _FakeResult:
 
 
 class _FakeConnection:
-    def __init__(self, row_pages=None, case_exists=True):
+    def __init__(self, row_pages=None, case_exists=True, fail=False):
         self.executed = []
         self.row_pages = list(row_pages or [])
         self.case_exists = case_exists
+        self.fail = fail
 
     def __enter__(self):
         return self
@@ -47,6 +49,8 @@ class _FakeConnection:
         return False
 
     def execute(self, sql, params=None):
+        if self.fail:
+            raise RuntimeError("simulated archive retrieval failure")
         self.executed.append((sql, params))
         if "case_chunks" in sql:
             rows = self.row_pages.pop(0) if self.row_pages else []
@@ -562,7 +566,7 @@ class TestCaseChat(unittest.TestCase):
         self.assertTrue(ready)
         self.assertEqual(len(connection.executed), 3)
         self.assertFalse(not_ready)
-        _mock_llm_probe.assert_called_once()
+        self.assertEqual(_mock_llm_probe.call_count, 2)
 
     def test_check_case_chat_ready_false_when_qa_disabled(self) -> None:
         ready = check_case_chat_ready(
@@ -572,6 +576,67 @@ class TestCaseChat(unittest.TestCase):
         )
 
         self.assertFalse(ready)
+
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat._probe_llm_reachable",
+        return_value=False,
+    )
+    def test_evaluate_case_chat_readiness_reports_llm_unavailable(
+        self,
+        _mock_llm_probe,
+    ) -> None:
+        readiness = evaluate_case_chat_readiness(
+            config=_config(),
+            connect=lambda _dsn: _FakeConnection(row_pages=[[], []]),
+            embedding_model=_FakeEmbeddingModel(),
+        )
+
+        self.assertFalse(readiness.ready)
+        self.assertEqual(
+            readiness.degraded_reason,
+            "Case chat is unavailable: LLM gateway is down.",
+        )
+
+    def test_evaluate_case_chat_readiness_reports_embedding_unavailable(self) -> None:
+        with patch(
+            "llm_notable_analysis_onprem_systemd.onprem_service.case_chat._probe_llm_reachable",
+            return_value=True,
+        ):
+            readiness = evaluate_case_chat_readiness(
+                config=_config(),
+                connect=lambda _dsn: _FakeConnection(row_pages=[[], []]),
+                embedding_model=_BadEmbeddingModel(),
+            )
+
+        self.assertFalse(readiness.ready)
+        self.assertFalse(readiness.embeddings_ready)
+        self.assertEqual(
+            readiness.degraded_reason,
+            "Case chat is unavailable: Embeddings is down.",
+        )
+
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat._probe_llm_reachable",
+        return_value=False,
+    )
+    def test_evaluate_case_chat_readiness_lists_all_unavailable_dependencies(
+        self,
+        _mock_llm_probe,
+    ) -> None:
+        readiness = evaluate_case_chat_readiness(
+            config=_config(),
+            connect=lambda _dsn: _FakeConnection(fail=True),
+            embedding_model=_BadEmbeddingModel(),
+        )
+
+        self.assertFalse(readiness.ready)
+        self.assertFalse(readiness.embeddings_ready)
+        self.assertFalse(readiness.archive_retrieval_ready)
+        self.assertFalse(readiness.llm_gateway_ready)
+        self.assertEqual(
+            readiness.degraded_reason,
+            "Case chat is unavailable: Embeddings, Archive retrieval, LLM gateway are down.",
+        )
 
 
 if __name__ == "__main__":

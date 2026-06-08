@@ -102,6 +102,12 @@ export type ChatSessionMessagesResponse = {
   messages: ChatSessionMessage[];
 };
 
+export type ChatDependencyStatus = {
+  embeddings: "ready" | "unavailable";
+  archive_retrieval: "ready" | "unavailable";
+  llm_gateway: "ready" | "unavailable";
+};
+
 export type PortalCapabilities = {
   case_qa_enabled: boolean;
   global_retrieval_enabled: boolean;
@@ -112,5 +118,6 @@ export type PortalCapabilities = {
   max_chat_sessions_per_user?: number;
   case_retention_days?: number;
   chat_ready: boolean;
+  chat_dependency_status?: ChatDependencyStatus | null;
   chat_degraded_reason?: string | null;
 };

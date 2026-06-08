@@ -17,6 +17,14 @@ class HealthResponse(BaseModel):
     status: str
 
 
+class ChatDependencyStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    embeddings: Literal["ready", "unavailable"]
+    archive_retrieval: Literal["ready", "unavailable"]
+    llm_gateway: Literal["ready", "unavailable"]
+
+
 class PortalCapabilitiesResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -29,6 +37,7 @@ class PortalCapabilitiesResponse(BaseModel):
     max_chat_sessions_per_user: int
     case_retention_days: int
     chat_ready: bool
+    chat_dependency_status: ChatDependencyStatusResponse | None = None
     chat_degraded_reason: str | None = None
 
 

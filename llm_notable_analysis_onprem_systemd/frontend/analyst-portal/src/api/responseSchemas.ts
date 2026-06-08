@@ -112,6 +112,9 @@ export function parsePortalCapabilities(value: unknown): PortalCapabilities | nu
     max_question_chars: parsed.max_question_chars,
     max_answer_tokens: parsed.max_answer_tokens,
     chat_ready: parsed.chat_ready,
+    ...(parsed.chat_dependency_status
+      ? { chat_dependency_status: parsed.chat_dependency_status }
+      : {}),
     ...(parsed.max_chat_sessions_per_user !== undefined
       ? { max_chat_sessions_per_user: parsed.max_chat_sessions_per_user }
       : {}),

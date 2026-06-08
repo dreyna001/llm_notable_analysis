@@ -335,6 +335,42 @@
         "title": "CaseSummaryResponse",
         "type": "object"
       },
+      "ChatDependencyStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "archive_retrieval": {
+            "enum": [
+              "ready",
+              "unavailable"
+            ],
+            "title": "Archive Retrieval",
+            "type": "string"
+          },
+          "embeddings": {
+            "enum": [
+              "ready",
+              "unavailable"
+            ],
+            "title": "Embeddings",
+            "type": "string"
+          },
+          "llm_gateway": {
+            "enum": [
+              "ready",
+              "unavailable"
+            ],
+            "title": "Llm Gateway",
+            "type": "string"
+          }
+        },
+        "required": [
+          "embeddings",
+          "archive_retrieval",
+          "llm_gateway"
+        ],
+        "title": "ChatDependencyStatusResponse",
+        "type": "object"
+      },
       "ChatResponseModel": {
         "additionalProperties": false,
         "properties": {
@@ -615,6 +651,16 @@
               }
             ],
             "title": "Chat Degraded Reason"
+          },
+          "chat_dependency_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatDependencyStatusResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "chat_history_enabled": {
             "title": "Chat History Enabled",

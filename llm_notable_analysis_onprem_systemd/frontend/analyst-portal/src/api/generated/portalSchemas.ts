@@ -1,10 +1,18 @@
 import { makeApi, Zodios, type ZodiosOptions } from "@zodios/core";
 import { z } from "zod";
 
+const ChatDependencyStatusResponse = z.object({
+  archive_retrieval: z.enum(["ready", "unavailable"]),
+  embeddings: z.enum(["ready", "unavailable"]),
+  llm_gateway: z.enum(["ready", "unavailable"]),
+});
 const PortalCapabilitiesResponse = z.object({
   case_qa_enabled: z.boolean(),
   case_retention_days: z.number().int(),
   chat_degraded_reason: z.union([z.string(), z.null()]).optional(),
+  chat_dependency_status: z
+    .union([ChatDependencyStatusResponse, z.null()])
+    .optional(),
   chat_history_enabled: z.boolean(),
   chat_ready: z.boolean(),
   general_knowledge_enabled: z.boolean(),
@@ -119,6 +127,7 @@ const DeleteLastChatTurnResponse = z.object({
 const HealthResponse = z.object({ status: z.string() });
 
 export const schemas = {
+  ChatDependencyStatusResponse,
   PortalCapabilitiesResponse,
   limit,
   CaseSummaryResponse,

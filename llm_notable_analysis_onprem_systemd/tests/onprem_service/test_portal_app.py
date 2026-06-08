@@ -404,6 +404,11 @@ class TestPortalApp(unittest.TestCase):
                 "max_chat_sessions_per_user": 10,
                 "case_retention_days": 30,
                 "chat_ready": True,
+                "chat_dependency_status": {
+                    "embeddings": "ready",
+                    "archive_retrieval": "ready",
+                    "llm_gateway": "ready",
+                },
             },
         )
 
@@ -433,7 +438,18 @@ class TestPortalApp(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertFalse(payload["chat_ready"])
-        self.assertIn("chat_degraded_reason", payload)
+        self.assertEqual(
+            payload["chat_degraded_reason"],
+            "Case chat is unavailable: Embeddings is down.",
+        )
+        self.assertEqual(
+            payload["chat_dependency_status"],
+            {
+                "embeddings": "unavailable",
+                "archive_retrieval": "ready",
+                "llm_gateway": "ready",
+            },
+        )
 
     def test_api_cases_returns_paginated_items(self) -> None:
         record = _record(self._config())

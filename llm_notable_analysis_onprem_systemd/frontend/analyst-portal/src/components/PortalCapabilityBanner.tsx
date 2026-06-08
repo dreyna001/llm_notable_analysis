@@ -1,4 +1,5 @@
 import type { PortalCapabilities } from "../types";
+import { resolveChatUnavailableReason } from "../utils/chatDependencyStatus";
 
 type PortalCapabilityBannerProps = {
   capabilities: PortalCapabilities | null;
@@ -49,10 +50,7 @@ function buildNotices(
     capabilities?.case_qa_enabled &&
     !capabilities.chat_ready
   ) {
-    notices.push(
-      capabilities.chat_degraded_reason ??
-        "Case chat is temporarily unavailable. Embeddings, archive retrieval, or the LLM may be down.",
-    );
+    notices.push(resolveChatUnavailableReason(capabilities));
   } else if (chatDisabledReason) {
     notices.push(chatDisabledReason);
   }

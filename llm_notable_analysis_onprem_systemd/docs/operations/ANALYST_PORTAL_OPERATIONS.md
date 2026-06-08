@@ -164,6 +164,8 @@ Threat model for unauthenticated probes:
   changed.
 - `/health` returns only `{"status":"ok"}`; operator metadata such as
   `case_retention_days`, `chat_ready`, and optional `chat_degraded_reason` are exposed on authenticated `GET /api/capabilities`.
+  When `chat_ready` is false, `chat_dependency_status` reports each dependency (`embeddings`, `archive_retrieval`, `llm_gateway`) as `ready` or `unavailable`, and `chat_degraded_reason` summarizes all unavailable dependencies.
+  Operators can also call `GET /api/diagnostics/chat-readiness` for the same reason in the `503` JSON body.
 - `/ready` checks archive tables only. It does not call the embedding model or
   LLM gateway.
 

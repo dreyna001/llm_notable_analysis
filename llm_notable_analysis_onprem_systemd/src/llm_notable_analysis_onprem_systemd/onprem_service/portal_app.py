@@ -22,7 +22,7 @@ from .case_chat import (
     GeneralSynthesizeFn,
     SynthesizeFn,
     answer_case_chat,
-    check_case_chat_ready,
+    evaluate_case_chat_readiness,
 )
 from .case_index import (
     CaseListFilters,
@@ -81,10 +81,6 @@ _PORTAL_AUTH_UNAUTHORIZED_DETAIL = "Authentication required."
 _MAX_PAGE_SIZE = 100
 _MAX_CASE_ID_LENGTH = 128
 _MAX_TRUSTED_USER_LENGTH = 256
-_CHAT_DEGRADED_REASON = (
-    "Case chat is temporarily unavailable. "
-    "Embeddings, archive retrieval, or the LLM may be down."
-)
 _PUBLIC_PATHS = frozenset({"/health", "/ready"})
 _MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _TRUSTED_USER_CTX: contextvars.ContextVar[str | None] = contextvars.ContextVar(
@@ -478,6 +474,16 @@ def _bounded_page_size(config: Config, limit: int | None) -> int:
     return max(1, min(_MAX_PAGE_SIZE, int(limit)))
 
 
+def _chat_dependency_status_payload(readiness: Any) -> dict[str, str]:
+    return {
+        "embeddings": "ready" if readiness.embeddings_ready else "unavailable",
+        "archive_retrieval": (
+            "ready" if readiness.archive_retrieval_ready else "unavailable"
+        ),
+        "llm_gateway": "ready" if readiness.llm_gateway_ready else "unavailable",
+    }
+
+
 def _portal_capabilities_payload(
     config: Config,
     *,
@@ -486,12 +492,17 @@ def _portal_capabilities_payload(
 ) -> dict[str, Any]:
     case_qa_enabled = bool(config.CASE_QA_ENABLED)
     chat_ready = False
+    chat_degraded_reason: str | None = None
+    chat_dependency_status: dict[str, str] | None = None
     if case_qa_enabled:
-        chat_ready = check_case_chat_ready(
+        chat_readiness = evaluate_case_chat_readiness(
             config=config,
             connect=connect,
             embedding_model=chat_embedding_model,
         )
+        chat_ready = chat_readiness.ready
+        chat_degraded_reason = chat_readiness.degraded_reason
+        chat_dependency_status = _chat_dependency_status_payload(chat_readiness)
     payload: dict[str, Any] = {
         "case_qa_enabled": case_qa_enabled,
         "global_retrieval_enabled": bool(config.CASE_QA_GLOBAL_RETRIEVAL_ENABLED),
@@ -503,8 +514,10 @@ def _portal_capabilities_payload(
         "case_retention_days": int(config.CASE_RETENTION_DAYS),
         "chat_ready": chat_ready,
     }
-    if case_qa_enabled and not chat_ready:
-        payload["chat_degraded_reason"] = _CHAT_DEGRADED_REASON
+    if chat_dependency_status is not None:
+        payload["chat_dependency_status"] = chat_dependency_status
+    if case_qa_enabled and not chat_ready and chat_degraded_reason:
+        payload["chat_degraded_reason"] = chat_degraded_reason
     return payload
 
 
@@ -632,14 +645,20 @@ def build_portal_app(
 
     @app.get("/api/diagnostics/chat-readiness")
     def api_chat_readiness() -> Any:
-        chat_ready = check_case_chat_ready(
+        chat_readiness = evaluate_case_chat_readiness(
             config=config,
             connect=connect_fn,
             embedding_model=chat_embedding_model,
         )
-        if chat_ready:
+        if chat_readiness.ready:
             return {"status": "ready"}
-        return JSONResponse(status_code=503, content={"status": "not_ready"})
+        content: dict[str, Any] = {
+            "status": "not_ready",
+            "dependencies": _chat_dependency_status_payload(chat_readiness),
+        }
+        if chat_readiness.degraded_reason:
+            content["reason"] = chat_readiness.degraded_reason
+        return JSONResponse(status_code=503, content=content)
 
     @app.get(
         "/api/cases",

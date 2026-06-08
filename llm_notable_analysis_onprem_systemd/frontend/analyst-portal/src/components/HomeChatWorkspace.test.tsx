@@ -215,8 +215,11 @@ describe("HomeChatWorkspace startup failures", () => {
     vi.mocked(fetchCapabilities).mockResolvedValue({
       ...capabilities,
       chat_ready: false,
-      chat_degraded_reason:
-        "Case chat is temporarily unavailable. Embeddings, archive retrieval, or the LLM may be down.",
+      chat_dependency_status: {
+        embeddings: "ready",
+        archive_retrieval: "ready",
+        llm_gateway: "unavailable",
+      },
     });
 
     render(
@@ -226,9 +229,7 @@ describe("HomeChatWorkspace startup failures", () => {
     );
 
     expect(
-      await screen.findByText(
-        "Case chat is temporarily unavailable. Embeddings, archive retrieval, or the LLM may be down.",
-      ),
+      await screen.findByText("Case chat is unavailable: LLM gateway is down."),
     ).toBeInTheDocument();
     expect(screen.queryByPlaceholderText(/ask/i)).not.toBeInTheDocument();
   });

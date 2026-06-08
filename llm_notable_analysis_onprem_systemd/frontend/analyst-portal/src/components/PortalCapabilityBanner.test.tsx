@@ -43,17 +43,18 @@ describe("PortalCapabilityBanner", () => {
         capabilities={{
           ...enabledCapabilities,
           chat_ready: false,
-          chat_degraded_reason:
-            "Case chat is temporarily unavailable. Embeddings, archive retrieval, or the LLM may be down.",
+          chat_dependency_status: {
+            embeddings: "ready",
+            archive_retrieval: "ready",
+            llm_gateway: "unavailable",
+          },
         }}
         capabilitiesLoaded={true}
         capabilitiesLoadError={null}
       />,
     );
     expect(
-      screen.getByText(
-        "Case chat is temporarily unavailable. Embeddings, archive retrieval, or the LLM may be down.",
-      ),
+      screen.getByText("Case chat is unavailable: LLM gateway is down."),
     ).toBeInTheDocument();
   });
 

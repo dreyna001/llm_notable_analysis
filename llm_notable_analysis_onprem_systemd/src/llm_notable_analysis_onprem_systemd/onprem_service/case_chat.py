@@ -159,6 +159,33 @@ _GLOBAL_RETRIEVAL_MODES = {"global_archive"}
 _MAX_CASE_ID_LENGTH = 128
 _READINESS_CASE_ID = "__portal_chat_readiness__"
 _READINESS_QUESTION = "portal chat readiness"
+_CHAT_QA_DISABLED_REASON = "Case Q&A is disabled in portal configuration."
+
+
+def _readiness_fallback_vector(config: Config) -> str:
+    """Fallback pgvector literal when embedding readiness fails."""
+    return _vector_literal([0.0] * int(config.CASE_QA_VECTOR_DIMENSIONS))
+
+
+def format_chat_degraded_reason(
+    *,
+    embeddings_ready: bool,
+    archive_retrieval_ready: bool,
+    llm_gateway_ready: bool,
+) -> str | None:
+    """Build a user-facing summary from per-dependency readiness checks."""
+    if embeddings_ready and archive_retrieval_ready and llm_gateway_ready:
+        return None
+    down_labels: list[str] = []
+    if not embeddings_ready:
+        down_labels.append("Embeddings")
+    if not archive_retrieval_ready:
+        down_labels.append("Archive retrieval")
+    if not llm_gateway_ready:
+        down_labels.append("LLM gateway")
+    if len(down_labels) == 1:
+        return f"Case chat is unavailable: {down_labels[0]} is down."
+    return f"Case chat is unavailable: {', '.join(down_labels)} are down."
 
 
 @dataclass(frozen=True)
@@ -617,21 +644,66 @@ def _probe_llm_reachable(config: Config) -> bool:
         return False
 
 
-def check_case_chat_ready(
+@dataclass(frozen=True)
+class CaseChatReadiness:
+    ready: bool
+    embeddings_ready: bool = True
+    archive_retrieval_ready: bool = True
+    llm_gateway_ready: bool = True
+    degraded_reason: str | None = None
+
+    @classmethod
+    def from_dependency_checks(
+        cls,
+        *,
+        embeddings_ready: bool,
+        archive_retrieval_ready: bool,
+        llm_gateway_ready: bool,
+    ) -> CaseChatReadiness:
+        ready = embeddings_ready and archive_retrieval_ready and llm_gateway_ready
+        return cls(
+            ready=ready,
+            embeddings_ready=embeddings_ready,
+            archive_retrieval_ready=archive_retrieval_ready,
+            llm_gateway_ready=llm_gateway_ready,
+            degraded_reason=format_chat_degraded_reason(
+                embeddings_ready=embeddings_ready,
+                archive_retrieval_ready=archive_retrieval_ready,
+                llm_gateway_ready=llm_gateway_ready,
+            ),
+        )
+
+
+def evaluate_case_chat_readiness(
     *,
     config: Config,
     connect: ConnectionFactory | None = None,
     embedding_model: Any = None,
-) -> bool:
-    """Return True when enabled chat retrieval and synthesis dependencies are usable."""
+) -> CaseChatReadiness:
+    """Return chat readiness after checking each dependency independently."""
     if not bool(config.CASE_QA_ENABLED):
-        return False
+        return CaseChatReadiness(
+            ready=False,
+            embeddings_ready=False,
+            archive_retrieval_ready=False,
+            llm_gateway_ready=False,
+            degraded_reason=_CHAT_QA_DISABLED_REASON,
+        )
+
+    embeddings_ready = True
+    query_vector = _readiness_fallback_vector(config)
     try:
         query_vector = _encode_query_vector(
             _READINESS_QUESTION,
             config,
             embedding_model=embedding_model,
         )
+    except Exception:
+        logger.exception("Case chat embedding readiness check failed")
+        embeddings_ready = False
+
+    archive_retrieval_ready = True
+    try:
         connect_fn = connect or _default_connect
         with connect_fn(config.CASE_POSTGRES_DSN) as conn:
             _set_statement_timeout(conn, config.CASE_POSTGRES_STATEMENT_TIMEOUT_MS)
@@ -642,12 +714,33 @@ def check_case_chat_ready(
                 query_vector=query_vector,
                 selected_case_id=_READINESS_CASE_ID,
             )
-        if not _probe_llm_reachable(config):
-            return False
-        return True
-    except (*postgres_operation_errors(), *_LLM_READINESS_ERRORS):
-        logger.exception("Case chat readiness check failed")
-        return False
+    except postgres_operation_errors():
+        logger.exception("Case chat archive retrieval readiness check failed")
+        archive_retrieval_ready = False
+    except Exception:
+        logger.exception("Case chat archive retrieval readiness check failed")
+        archive_retrieval_ready = False
+
+    llm_gateway_ready = _probe_llm_reachable(config)
+    return CaseChatReadiness.from_dependency_checks(
+        embeddings_ready=embeddings_ready,
+        archive_retrieval_ready=archive_retrieval_ready,
+        llm_gateway_ready=llm_gateway_ready,
+    )
+
+
+def check_case_chat_ready(
+    *,
+    config: Config,
+    connect: ConnectionFactory | None = None,
+    embedding_model: Any = None,
+) -> bool:
+    """Return True when enabled chat retrieval and synthesis dependencies are usable."""
+    return evaluate_case_chat_readiness(
+        config=config,
+        connect=connect,
+        embedding_model=embedding_model,
+    ).ready
 
 
 def _default_knowledge_base_provider(config: Config) -> KnowledgeBaseProvider | None:

@@ -23,6 +23,7 @@ import type {
   ChatSessionMessage,
   PortalCapabilities,
 } from "../types";
+import { resolveChatUnavailableReason } from "../utils/chatDependencyStatus";
 import { ChatAssistantControls } from "./ChatAssistantControls";
 import { ConfirmDialog } from "./ConfirmDialog";
 import {
@@ -324,10 +325,7 @@ export function HomeChatWorkspace({
       return "Case Q&A is disabled on this portal. Chat is unavailable.";
     }
     if (capabilities?.case_qa_enabled && !capabilities.chat_ready) {
-      return (
-        capabilities.chat_degraded_reason ??
-        "Case chat is temporarily unavailable. Embeddings, archive retrieval, or the LLM may be down."
-      );
+      return resolveChatUnavailableReason(capabilities);
     }
     if (!availableModes.length) {
       return "Select a case to chat. Cross-case archive chat is disabled for this portal.";
