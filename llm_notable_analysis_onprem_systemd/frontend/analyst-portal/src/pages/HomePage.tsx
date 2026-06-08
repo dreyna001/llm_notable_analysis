@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { fetchCapabilities, fetchCase } from "../api/client";
+import { fetchCase } from "../api/client";
 import { HomeChatWorkspace } from "../components/HomeChatWorkspace";
-import type { CaseDetail } from "../types";
+import type { CaseDetail, PortalCapabilities } from "../types";
 
 function asText(value: unknown): string {
   return typeof value === "string" && value.trim() ? value : "";
@@ -52,24 +52,13 @@ export function HomePage() {
     );
   }, [setSearchParams]);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetchCapabilities()
-      .then((payload) => {
-        if (
-          !cancelled &&
-          typeof payload.case_retention_days === "number" &&
-          payload.case_retention_days > 0
-        ) {
-          setCaseRetentionDays(payload.case_retention_days);
-        }
-      })
-      .catch(() => {
-        // Keep the default case window when capabilities are unavailable.
-      });
-    return () => {
-      cancelled = true;
-    };
+  const handleCapabilitiesLoaded = useCallback((payload: PortalCapabilities) => {
+    if (
+      typeof payload.case_retention_days === "number" &&
+      payload.case_retention_days > 0
+    ) {
+      setCaseRetentionDays(payload.case_retention_days);
+    }
   }, []);
 
   useEffect(() => {
@@ -126,6 +115,7 @@ export function HomePage() {
         archiveNotices={selectedCase?.metadata.archive_notices}
         onAttachCase={handleAttachCase}
         onClearSelectedCase={handleClearSelectedCase}
+        onCapabilitiesLoaded={handleCapabilitiesLoaded}
       />
     </div>
   );

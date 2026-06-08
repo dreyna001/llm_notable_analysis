@@ -32,6 +32,7 @@ import {
 } from "./ChatPanel";
 import { CaseArchiveNoticeBanner } from "./CaseArchiveNoticeBanner";
 import { PortalCapabilityBanner } from "./PortalCapabilityBanner";
+import { PortalLoadFailure } from "./PortalLoadFailure";
 import { PortalSidebar } from "./PortalSidebar";
 import { caseDetailToSummary } from "../utils/caseSummary";
 import { formatApiError } from "../utils/formatApiError";
@@ -67,6 +68,7 @@ type HomeChatWorkspaceProps = {
   archiveNotices?: string[];
   onAttachCase?: (caseId: string) => void;
   onClearSelectedCase?: () => void;
+  onCapabilitiesLoaded?: (capabilities: PortalCapabilities) => void;
 };
 
 function storedTurnsToPanelTurns(turns: StoredChatTurn[]): ChatTurn[] {
@@ -186,6 +188,7 @@ export function HomeChatWorkspace({
   archiveNotices,
   onAttachCase,
   onClearSelectedCase,
+  onCapabilitiesLoaded,
 }: HomeChatWorkspaceProps) {
   const [store, setStore] = useState<ChatSessionStore>(() =>
     ensureChatSessionStore(loadChatSessionStore()),
@@ -193,7 +196,9 @@ export function HomeChatWorkspace({
   const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
   const [capabilities, setCapabilities] = useState<PortalCapabilities | null>(null);
   const [capabilitiesLoaded, setCapabilitiesLoaded] = useState(false);
-  const [capabilitiesError, setCapabilitiesError] = useState(false);
+  const [capabilitiesLoadError, setCapabilitiesLoadError] = useState<string | null>(
+    null,
+  );
   const [historyLoadError, setHistoryLoadError] = useState<string | null>(null);
   const [sessionCapNotice, setSessionCapNotice] = useState<string | null>(null);
   const maxChatSessions =
@@ -233,7 +238,21 @@ export function HomeChatWorkspace({
   const hasCaseContext = Boolean(selectedCaseId);
 
   const capabilitiesReady =
-    capabilitiesLoaded && !capabilitiesError && capabilities !== null;
+    capabilitiesLoaded && !capabilitiesLoadError && capabilities !== null;
+
+  const blockingLoadError = useMemo(() => {
+    if (capabilitiesLoadError) {
+      return capabilitiesLoadError;
+    }
+    if (capabilities?.chat_history_enabled && historyLoadError) {
+      return historyLoadError;
+    }
+    return null;
+  }, [
+    capabilities?.chat_history_enabled,
+    capabilitiesLoadError,
+    historyLoadError,
+  ]);
 
   const availableModes = useMemo<ChatMode[]>(
     () => {
@@ -267,8 +286,8 @@ export function HomeChatWorkspace({
     if (!capabilitiesLoaded) {
       return "Checking portal capabilities…";
     }
-    if (capabilitiesError) {
-      return "Could not load portal capabilities.";
+    if (capabilitiesLoadError) {
+      return capabilitiesLoadError;
     }
     if (capabilities && !capabilities.case_qa_enabled) {
       return "Case Q&A is disabled on this portal. Chat is unavailable.";
@@ -280,7 +299,7 @@ export function HomeChatWorkspace({
   }, [
     availableModes.length,
     capabilities,
-    capabilitiesError,
+    capabilitiesLoadError,
     capabilitiesLoaded,
   ]);
 
@@ -472,13 +491,16 @@ export function HomeChatWorkspace({
       .then((payload) => {
         if (!cancelled) {
           setCapabilities(payload);
-          setCapabilitiesError(false);
+          setCapabilitiesLoadError(null);
+          onCapabilitiesLoaded?.(payload);
         }
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (!cancelled) {
           setCapabilities(null);
-          setCapabilitiesError(true);
+          setCapabilitiesLoadError(
+            formatWorkspaceError(err, "Could not load portal capabilities."),
+          );
         }
       })
       .finally(() => {
@@ -489,7 +511,7 @@ export function HomeChatWorkspace({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [onCapabilitiesLoaded]);
 
   const handleNewChat = useCallback(() => {
     const context = resolveNewChatContext(
@@ -952,39 +974,22 @@ export function HomeChatWorkspace({
     [capabilities?.chat_history_enabled, maxChatSessions],
   );
 
-  return (
-    <div className="flex h-full min-h-0 w-full">
-      <PortalSidebar
-        activeLocalId={store.activeLocalId}
-        assistantControls={
-          <ChatAssistantControls
-            mode={activeMode}
-            modes={availableModes.length ? availableModes : [activeMode]}
-            selectedCaseId={effectiveSelectedCaseId}
-            selectedCaseLoading={effectiveSelectedCaseLoading}
-            selectedCaseName={effectiveSelectedCaseName}
-            selectedCaseProcessedAt={effectiveSelectedCaseProcessedAt}
-            caseAttachEnabled={capabilitiesReady && capabilities.case_qa_enabled}
-            onAttachCase={handleAttachCase}
-            onClearSelectedCase={handleClearSelectedCase}
-            onModeChange={handleModeChange}
-          />
-        }
-        meta={sidebarMeta}
-        sessions={sortedSessions}
-        onNewChat={handleNewChat}
-        onDeleteSession={requestDeleteSession}
-        onSelectSession={(localId) => {
-          void handleSelectSession(localId);
-        }}
-      />
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+  const mainContent = !capabilitiesLoaded ? (
+    <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-sm text-muted-foreground">
+      Checking portal capabilities...
+    </div>
+  ) : blockingLoadError ? (
+    <PortalLoadFailure message={blockingLoadError} />
+  ) : (
+      <>
         <PortalCapabilityBanner
           capabilities={capabilities}
           capabilitiesLoaded={capabilitiesLoaded}
-          capabilitiesError={capabilitiesError}
+          capabilitiesLoadError={capabilitiesLoadError}
           attachError={attachError}
-          historyLoadError={historyLoadError}
+          historyLoadError={
+            capabilities?.chat_history_enabled ? null : historyLoadError
+          }
           sessionCapNotice={sessionCapNotice}
           chatDisabledReason={chatDisabledReason}
         />
@@ -1003,13 +1008,44 @@ export function HomeChatWorkspace({
           mode={activeMode}
           selectedCaseId={effectiveSelectedCaseId}
           disabledReason={chatDisabledReason}
-          composerDisabled={!capabilitiesLoaded || capabilitiesError}
+          composerDisabled={!capabilitiesLoaded || Boolean(capabilitiesLoadError)}
           serverSyncError={orphanCleanupError}
           onStateChange={handlePanelStateChange}
           onChatCancelled={handleChatCancelled}
           onOrphanedChatResponse={handleOrphanedChatResponse}
         />
-      </div>
+      </>
+    );
+
+  return (
+    <div className="flex h-full min-h-0 w-full">
+      <PortalSidebar
+        activeLocalId={store.activeLocalId}
+        assistantControls={
+          <ChatAssistantControls
+            mode={activeMode}
+            modes={availableModes.length ? availableModes : [activeMode]}
+            selectedCaseId={effectiveSelectedCaseId}
+            selectedCaseLoading={effectiveSelectedCaseLoading}
+            selectedCaseName={effectiveSelectedCaseName}
+            selectedCaseProcessedAt={effectiveSelectedCaseProcessedAt}
+            caseAttachEnabled={
+              !blockingLoadError && capabilitiesReady && capabilities.case_qa_enabled
+            }
+            onAttachCase={handleAttachCase}
+            onClearSelectedCase={handleClearSelectedCase}
+            onModeChange={handleModeChange}
+          />
+        }
+        meta={sidebarMeta}
+        sessions={sortedSessions}
+        onNewChat={handleNewChat}
+        onDeleteSession={requestDeleteSession}
+        onSelectSession={(localId) => {
+          void handleSelectSession(localId);
+        }}
+      />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">{mainContent}</div>
       <ConfirmDialog
         cancelLabel="Cancel"
         confirmLabel="Delete chat"

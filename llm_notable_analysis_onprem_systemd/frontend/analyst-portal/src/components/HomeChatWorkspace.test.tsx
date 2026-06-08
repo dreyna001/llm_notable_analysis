@@ -1,8 +1,8 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, fetchChatSessions } from "../api/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError, fetchCapabilities, fetchChatSessions } from "../api/client";
 import type { PortalCapabilities } from "../types";
 import { HomeChatWorkspace } from "./HomeChatWorkspace";
 
@@ -34,6 +34,18 @@ vi.mock("../api/client", () => ({
   fetchChatSessionMessages: vi.fn(),
   fetchChatSessions: vi.fn(async () => ({ history_enabled: false, items: [] })),
 }));
+
+afterEach(() => {
+  cleanup();
+});
+
+function resetApiMocks() {
+  vi.mocked(fetchCapabilities).mockResolvedValue(capabilities);
+  vi.mocked(fetchChatSessions).mockResolvedValue({
+    history_enabled: false,
+    items: [],
+  });
+}
 
 function seedSelectedCaseSession() {
   window.localStorage.setItem(
@@ -76,6 +88,7 @@ describe("HomeChatWorkspace attached case", () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.clearAllMocks();
+    resetApiMocks();
   });
 
   it("removes a stale selected-case session from the active view when the URL case is cleared", async () => {
@@ -112,6 +125,7 @@ describe("HomeChatWorkspace new chat", () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.clearAllMocks();
+    resetApiMocks();
   });
 
   it("does not create a global-mode session when cross-case chat is disabled", async () => {
@@ -165,10 +179,59 @@ describe("HomeChatWorkspace new chat", () => {
   });
 });
 
+describe("HomeChatWorkspace startup failures", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.clearAllMocks();
+    resetApiMocks();
+  });
+
+  it("blocks chat when portal capabilities cannot be loaded", async () => {
+    vi.mocked(fetchCapabilities).mockRejectedValue(
+      new ApiError(503, "Portal API unavailable."),
+    );
+
+    render(
+      <MemoryRouter>
+        <HomeChatWorkspace sidebarMeta={<div>Case window</div>} />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Portal chat unavailable")).toBeInTheDocument();
+    expect(screen.getByText("503: Portal API unavailable.")).toBeInTheDocument();
+    expect(screen.queryByText("How can I help?")).not.toBeInTheDocument();
+  });
+
+  it("blocks chat when server sessions cannot be loaded and history is enabled", async () => {
+    vi.mocked(fetchCapabilities).mockResolvedValue({
+      ...capabilities,
+      chat_history_enabled: true,
+    });
+    vi.mocked(fetchChatSessions).mockRejectedValue(
+      new ApiError(503, "unavailable"),
+    );
+
+    render(
+      <MemoryRouter>
+        <HomeChatWorkspace sidebarMeta={<div>Case window</div>} />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Portal chat unavailable")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Could not load server chat sessions. 503: unavailable. Showing local chats only.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("How can I help?")).not.toBeInTheDocument();
+  });
+});
+
 describe("HomeChatWorkspace server chat sessions", () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.clearAllMocks();
+    resetApiMocks();
   });
 
   it("shows a banner when the initial server session list cannot be loaded", async () => {

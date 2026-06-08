@@ -17,7 +17,7 @@ describe("PortalCapabilityBanner", () => {
       <PortalCapabilityBanner
         capabilities={null}
         capabilitiesLoaded={false}
-        capabilitiesError={false}
+        capabilitiesLoadError={null}
       />,
     );
     expect(screen.getByText("Checking portal capabilities…")).toBeInTheDocument();
@@ -28,11 +28,11 @@ describe("PortalCapabilityBanner", () => {
       <PortalCapabilityBanner
         capabilities={null}
         capabilitiesLoaded={true}
-        capabilitiesError={true}
+        capabilitiesLoadError="503: Portal API unavailable."
       />,
     );
     expect(
-      screen.getByText("Could not load portal capabilities."),
+      screen.getByText("503: Portal API unavailable."),
     ).toBeInTheDocument();
   });
 
@@ -41,7 +41,7 @@ describe("PortalCapabilityBanner", () => {
       <PortalCapabilityBanner
         capabilities={enabledCapabilities}
         capabilitiesLoaded={true}
-        capabilitiesError={false}
+        capabilitiesLoadError={null}
         attachError="Case not found or unavailable."
         historyLoadError="Could not load chat history. 503: unavailable"
       />,

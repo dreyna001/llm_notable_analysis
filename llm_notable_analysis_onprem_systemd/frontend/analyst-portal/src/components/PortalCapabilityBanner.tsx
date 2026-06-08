@@ -3,7 +3,7 @@ import type { PortalCapabilities } from "../types";
 type PortalCapabilityBannerProps = {
   capabilities: PortalCapabilities | null;
   capabilitiesLoaded: boolean;
-  capabilitiesError: boolean;
+  capabilitiesLoadError?: string | null;
   attachError?: string | null;
   historyLoadError?: string | null;
   sessionCapNotice?: string | null;
@@ -13,7 +13,7 @@ type PortalCapabilityBannerProps = {
 function buildNotices(
   capabilities: PortalCapabilities | null,
   capabilitiesLoaded: boolean,
-  capabilitiesError: boolean,
+  capabilitiesLoadError: string | null | undefined,
   attachError: string | null | undefined,
   historyLoadError: string | null | undefined,
   sessionCapNotice: string | null | undefined,
@@ -21,13 +21,13 @@ function buildNotices(
 ): string[] {
   const notices: string[] = [];
 
-  if (!capabilitiesLoaded && !capabilitiesError) {
+  if (!capabilitiesLoaded && !capabilitiesLoadError) {
     notices.push("Checking portal capabilities…");
     return notices;
   }
 
-  if (capabilitiesError) {
-    notices.push("Could not load portal capabilities.");
+  if (capabilitiesLoadError) {
+    notices.push(capabilitiesLoadError);
     return notices;
   }
 
@@ -77,7 +77,7 @@ function buildNotices(
 export function PortalCapabilityBanner({
   capabilities,
   capabilitiesLoaded,
-  capabilitiesError,
+  capabilitiesLoadError = null,
   attachError,
   historyLoadError,
   sessionCapNotice,
@@ -86,7 +86,7 @@ export function PortalCapabilityBanner({
   const notices = buildNotices(
     capabilities,
     capabilitiesLoaded,
-    capabilitiesError,
+    capabilitiesLoadError,
     attachError,
     historyLoadError,
     sessionCapNotice,
@@ -97,7 +97,7 @@ export function PortalCapabilityBanner({
   }
 
   const isBlocking = Boolean(
-    capabilitiesError ||
+    capabilitiesLoadError ||
       !capabilitiesLoaded ||
       (capabilities && !capabilities.case_qa_enabled) ||
       chatDisabledReason,
