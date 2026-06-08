@@ -4,6 +4,23 @@ from __future__ import annotations
 
 from typing import Any
 
+_RETRYABLE_EXCEPTION_NAMES = frozenset(
+    {
+        "ConnectionTimeout",
+        "InterfaceError",
+        "OperationalError",
+        "QueryCanceled",
+        "Timeout",
+    }
+)
+
+
+def is_transient_postgres_error(exc: BaseException) -> bool:
+    """Return True when exc likely reflects a transient Postgres/connectivity failure."""
+    if isinstance(exc, (ConnectionError, TimeoutError, OSError)):
+        return True
+    return exc.__class__.__name__ in _RETRYABLE_EXCEPTION_NAMES
+
 
 def postgres_operation_errors() -> tuple[type[BaseException], ...]:
     """Exception types commonly raised by case-archive Postgres operations."""

@@ -43,6 +43,18 @@ class _FakeResult:
         return self.row
 
 
+class _ProgrammingErrorConnection:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def execute(self, sql, params=None):
+        del sql, params
+        raise AttributeError("simulated row-mapping bug")
+
+
 class _FakeConnection:
     def __init__(self, *, rows=None, row=None, row_pages=None, ready=True, fail=False):
         self.executed = []
@@ -456,6 +468,46 @@ class TestPortalApp(unittest.TestCase):
         response = client.get("/api/cases/case-1", headers=_AUTH_HEADERS)
 
         self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "Case archive unavailable.")
+
+    def test_api_case_detail_maps_programming_errors_to_internal_error(self) -> None:
+        client = TestClient(
+            build_portal_app(
+                self._config(),
+                connect=lambda _dsn: _ProgrammingErrorConnection(),
+            )
+        )
+
+        response = client.get("/api/cases/case-1", headers=_AUTH_HEADERS)
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()["detail"], "Internal server error.")
+
+    def test_api_cases_maps_transient_database_failures_to_unavailable(self) -> None:
+        client = TestClient(
+            build_portal_app(
+                self._config(),
+                connect=lambda _dsn: _FakeConnection(fail=True),
+            )
+        )
+
+        response = client.get("/api/cases", headers=_AUTH_HEADERS)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "Case archive unavailable.")
+
+    def test_api_cases_maps_programming_errors_to_internal_error(self) -> None:
+        client = TestClient(
+            build_portal_app(
+                self._config(),
+                connect=lambda _dsn: _ProgrammingErrorConnection(),
+            )
+        )
+
+        response = client.get("/api/cases", headers=_AUTH_HEADERS)
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()["detail"], "Internal server error.")
 
     def test_api_case_detail_returns_canonical_payload(self) -> None:
         record = _record(self._config())

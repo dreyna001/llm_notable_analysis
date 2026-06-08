@@ -41,6 +41,7 @@ from .case_store import CaseArchiveRecord, quote_identifier
 from .case_db import (
     default_connect as _default_connect,
     fetchone as _fetchone,
+    is_transient_postgres_error,
     postgres_operation_errors,
     set_statement_timeout as _set_statement_timeout,
 )
@@ -67,6 +68,20 @@ def _lazy_import_fastapi():
     except Exception as exc:  # pragma: no cover - import guard
         raise RuntimeError("fastapi is unavailable in the runtime.") from exc
     return FastAPI, HTTPException, Request, JSONResponse
+
+
+def _raise_portal_db_error(
+    exc: BaseException,
+    *,
+    detail_unavailable: str,
+    log_message: str,
+) -> None:
+    """Map transient archive DB failures to 503; surface programming errors as 500."""
+    logger.exception(log_message)
+    _, HTTPException, _, _ = _lazy_import_fastapi()
+    if is_transient_postgres_error(exc):
+        raise HTTPException(status_code=503, detail=detail_unavailable) from exc
+    raise HTTPException(status_code=500, detail="Internal server error.") from exc
 
 
 def _is_loopback_bind_host(host: str) -> bool:
@@ -404,11 +419,11 @@ def build_portal_app(
                 connect=connect_fn,
             )
         except Exception as exc:
-            logger.exception("Failed to fetch case %s", normalized)
-            raise HTTPException(
-                status_code=503,
-                detail="Case archive unavailable.",
-            ) from exc
+            _raise_portal_db_error(
+                exc,
+                detail_unavailable="Case archive unavailable.",
+                log_message=f"Failed to fetch case {normalized}",
+            )
         if record is None:
             raise HTTPException(status_code=404, detail="Case not found.")
         return normalized, record
@@ -529,8 +544,11 @@ def build_portal_app(
                 fetch_extra=True,
             )
         except Exception as exc:
-            logger.exception("Failed to list cases")
-            raise HTTPException(status_code=503, detail="Case archive unavailable.") from exc
+            _raise_portal_db_error(
+                exc,
+                detail_unavailable="Case archive unavailable.",
+                log_message="Failed to list cases",
+            )
         response_items = items[:page_size]
 
         return {
@@ -563,8 +581,11 @@ def build_portal_app(
                 limit=page_size,
             )
         except Exception as exc:
-            logger.exception("Failed to list portal chat sessions")
-            raise HTTPException(status_code=503, detail="Chat history unavailable.") from exc
+            _raise_portal_db_error(
+                exc,
+                detail_unavailable="Chat history unavailable.",
+                log_message="Failed to list portal chat sessions",
+            )
         return {"history_enabled": True, "items": items}
 
     @app.get("/api/chat/sessions/{session_id}/messages")
@@ -586,8 +607,11 @@ def build_portal_app(
         except RuntimeError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Exception as exc:
-            logger.exception("Failed to load portal chat session messages")
-            raise HTTPException(status_code=503, detail="Chat history unavailable.") from exc
+            _raise_portal_db_error(
+                exc,
+                detail_unavailable="Chat history unavailable.",
+                log_message="Failed to load portal chat session messages",
+            )
 
     @app.delete("/api/chat/sessions/{session_id}")
     def api_delete_chat_session(session_id: str) -> dict[str, Any]:
@@ -605,8 +629,11 @@ def build_portal_app(
         except RuntimeError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Exception as exc:
-            logger.exception("Failed to delete portal chat session")
-            raise HTTPException(status_code=503, detail="Chat history unavailable.") from exc
+            _raise_portal_db_error(
+                exc,
+                detail_unavailable="Chat history unavailable.",
+                log_message="Failed to delete portal chat session",
+            )
         if not deleted:
             raise HTTPException(status_code=404, detail="session_id was not found.")
         return {"deleted": True, "session_id": session_id}
@@ -634,8 +661,11 @@ def build_portal_app(
         except RuntimeError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Exception as exc:
-            logger.exception("Failed to delete last portal chat turn")
-            raise HTTPException(status_code=503, detail="Chat history unavailable.") from exc
+            _raise_portal_db_error(
+                exc,
+                detail_unavailable="Chat history unavailable.",
+                log_message="Failed to delete last portal chat turn",
+            )
         if deleted_count <= 0:
             raise HTTPException(status_code=404, detail="No chat turn was found to delete.")
         return {
@@ -672,8 +702,11 @@ def build_portal_app(
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except Exception as exc:
-            logger.exception("Failed to answer portal chat request")
-            raise HTTPException(status_code=503, detail="Case chat unavailable.") from exc
+            _raise_portal_db_error(
+                exc,
+                detail_unavailable="Case chat unavailable.",
+                log_message="Failed to answer portal chat request",
+            )
         finally:
             chat_semaphore.release()
 

@@ -23,6 +23,7 @@ from .case_search import (
 from .case_db import (
     default_connect as _default_connect,
     fetchall as _fetchall,
+    is_transient_postgres_error,
     postgres_operation_errors,
     row_get as _row_get,
     set_statement_timeout as _set_statement_timeout,
@@ -494,7 +495,9 @@ def ensure_selected_case_exists(
         )
     except Exception as exc:
         logger.exception("Failed to look up case %s for portal chat", normalized)
-        raise RuntimeError("Case archive unavailable.") from exc
+        if is_transient_postgres_error(exc):
+            raise RuntimeError("Case archive unavailable.") from exc
+        raise
     if not exists:
         raise CaseNotFoundError(normalized)
     return normalized
