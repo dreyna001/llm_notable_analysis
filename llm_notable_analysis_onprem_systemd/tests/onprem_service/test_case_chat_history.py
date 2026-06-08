@@ -22,6 +22,7 @@ from llm_notable_analysis_onprem_systemd.onprem_service.case_chat_history import
     delete_last_chat_turn,
     get_chat_session_messages,
     list_chat_sessions,
+    normalize_stored_answer_status,
     persist_chat_history,
     truncate_stored_message,
 )
@@ -178,7 +179,12 @@ class _HistoryFakeConnection:
             ]
             created_at = datetime.now(timezone.utc)
             rows = [
-                (message[2], message[3], created_at)
+                (
+                    message[2],
+                    message[3],
+                    created_at,
+                    message[5] if len(message) > 5 else None,
+                )
                 for message in session_messages
             ]
             return _FakeResult(rows=rows)
@@ -249,6 +255,12 @@ class TestCaseChatHistory(unittest.TestCase):
     def test_truncate_stored_message_limits_utf8_bytes(self) -> None:
         truncated = truncate_stored_message("abcdé", 5)
         self.assertLessEqual(len(truncated.encode("utf-8")), 5)
+
+    def test_normalize_stored_answer_status_accepts_known_values(self) -> None:
+        self.assertEqual(normalize_stored_answer_status("answered"), "answered")
+        self.assertEqual(normalize_stored_answer_status(" refused "), "refused")
+        self.assertIsNone(normalize_stored_answer_status("ok"))
+        self.assertIsNone(normalize_stored_answer_status(""))
 
     def test_build_delete_expired_chat_sessions_sql_targets_sessions(self) -> None:
         sql = build_delete_expired_chat_sessions_sql("notable_cases")
@@ -482,6 +494,7 @@ class TestCaseChatHistory(unittest.TestCase):
     def test_build_list_chat_messages_query_orders_messages(self) -> None:
         sql = build_list_chat_messages_query("notable_cases")
         self.assertIn('FROM "notable_cases".chat_messages', sql)
+        self.assertIn("answer_status", sql)
         self.assertIn("ORDER BY created_at ASC", sql)
 
     def test_delete_last_chat_turn_rejects_short_expected_message_count(self) -> None:
@@ -575,6 +588,7 @@ class TestCaseChatHistory(unittest.TestCase):
         self.assertEqual(connection.messages[0][2], "user")
         self.assertEqual(connection.messages[1][2], "assistant")
         self.assertEqual(connection.messages[1][4], "[]")
+        self.assertEqual(connection.messages[1][5], "answered")
 
     def test_persist_chat_history_requires_authenticated_user(self) -> None:
         with self.assertRaisesRegex(ValueError, "authenticated user"):
@@ -733,6 +747,34 @@ class TestCaseChatHistory(unittest.TestCase):
                 user_id="analyst@example.com",
                 connect=lambda _dsn: connection,
             )
+
+    def test_get_chat_session_messages_returns_answer_status(self) -> None:
+        session_id = str(uuid.uuid4())
+        expires_at = datetime.now(timezone.utc) + timedelta(days=1)
+        connection = _HistoryFakeConnection(
+            sessions={
+                session_id: (
+                    session_id,
+                    "analyst@example.com",
+                    "global_archive",
+                    None,
+                    expires_at,
+                )
+            },
+            messages=[
+                ("m1", session_id, "user", "What happened?", "[]", None),
+                ("m2", session_id, "assistant", "Grounded answer.", "[]", "answered"),
+            ],
+        )
+        payload = get_chat_session_messages(
+            config=_config(),
+            session_id=session_id,
+            user_id="analyst@example.com",
+            connect=lambda _dsn: connection,
+        )
+        self.assertEqual(len(payload["messages"]), 2)
+        self.assertNotIn("answer_status", payload["messages"][0])
+        self.assertEqual(payload["messages"][1]["answer_status"], "answered")
 
     def test_persist_chat_history_enforces_message_limit(self) -> None:
         session_id = str(uuid.uuid4())

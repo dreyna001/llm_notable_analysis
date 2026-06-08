@@ -72,7 +72,7 @@ def _session_bundle(
             (f"u{index}", session_id, "user", f"question-{index}", "[]")
         )
         messages.append(
-            (f"a{index}", session_id, "assistant", f"answer-{index}", "[]")
+            (f"a{index}", session_id, "assistant", f"answer-{index}", "[]", "answered")
         )
     connection = _HistoryFakeConnection(
         sessions={
@@ -131,6 +131,11 @@ class TestPortalChatHistoryHttp(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["session_id"], session_id)
         self.assertEqual(len(payload["messages"]), 4)
+        assistant_messages = [
+            message for message in payload["messages"] if message["role"] == "assistant"
+        ]
+        self.assertEqual(len(assistant_messages), 2)
+        self.assertEqual(assistant_messages[0]["answer_status"], "answered")
 
     def test_get_chat_session_messages_user_isolation(self) -> None:
         session_id, connection = _session_bundle()

@@ -121,11 +121,30 @@ CREATE TABLE IF NOT EXISTS notable_cases.chat_messages (
     role text NOT NULL,
     content text NOT NULL,
     cited_sources jsonb NOT NULL DEFAULT '[]'::jsonb,
+    answer_status text,
     created_at timestamptz NOT NULL DEFAULT now(),
 
     CONSTRAINT chat_messages_role_check
-        CHECK (role IN ('user', 'assistant', 'system'))
+        CHECK (role IN ('user', 'assistant', 'system')),
+    CONSTRAINT chat_messages_answer_status_check
+        CHECK (
+            answer_status IS NULL
+            OR answer_status IN ('answered', 'unknown', 'refused')
+        )
 );
+
+ALTER TABLE notable_cases.chat_messages
+    ADD COLUMN IF NOT EXISTS answer_status text;
+
+ALTER TABLE notable_cases.chat_messages
+    DROP CONSTRAINT IF EXISTS chat_messages_answer_status_check;
+
+ALTER TABLE notable_cases.chat_messages
+    ADD CONSTRAINT chat_messages_answer_status_check
+        CHECK (
+            answer_status IS NULL
+            OR answer_status IN ('answered', 'unknown', 'refused')
+        );
 
 CREATE INDEX IF NOT EXISTS chat_messages_session_id_idx
     ON notable_cases.chat_messages (session_id, created_at);

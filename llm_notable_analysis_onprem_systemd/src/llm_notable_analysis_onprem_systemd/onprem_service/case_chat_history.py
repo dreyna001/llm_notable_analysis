@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 ConnectionFactory = Callable[[str], Any]
 
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._-]{8,128}$")
+_VALID_ANSWER_STATUSES = frozenset({"answered", "unknown", "refused"})
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,14 @@ def truncate_stored_message(text: str, max_bytes: int) -> str:
         except UnicodeDecodeError:
             clipped = clipped[:-1]
     return ""
+
+
+def normalize_stored_answer_status(value: Any) -> str | None:
+    """Return a bounded answer_status value for persisted assistant messages."""
+    text = str(value or "").strip()
+    if text in _VALID_ANSWER_STATUSES:
+        return text
+    return None
 
 
 def build_get_chat_session_query(schema: str) -> str:
@@ -170,8 +179,9 @@ INSERT INTO {table} (
     session_id,
     role,
     content,
-    cited_sources
-) VALUES (%s, %s, %s, %s, %s::jsonb)
+    cited_sources,
+    answer_status
+) VALUES (%s, %s, %s, %s, %s::jsonb, %s)
 """.strip()
 
 
@@ -208,7 +218,8 @@ def build_list_chat_messages_query(schema: str) -> str:
 SELECT
     role,
     content,
-    created_at
+    created_at,
+    answer_status
 FROM {table}
 WHERE session_id = %s
 ORDER BY created_at ASC, message_id ASC
@@ -301,13 +312,19 @@ def get_chat_session_messages(
         created_at = _row_get(row, 2, "created_at")
         if isinstance(created_at, datetime) and created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=timezone.utc)
-        messages.append(
-            {
-                "role": str(_row_get(row, 0, "role")),
-                "content": str(_row_get(row, 1, "content")),
-                "created_at": created_at.isoformat() if isinstance(created_at, datetime) else None,
-            }
-        )
+        role = str(_row_get(row, 0, "role"))
+        message: dict[str, Any] = {
+            "role": role,
+            "content": str(_row_get(row, 1, "content")),
+            "created_at": created_at.isoformat() if isinstance(created_at, datetime) else None,
+        }
+        if role == "assistant":
+            answer_status = normalize_stored_answer_status(
+                _row_get(row, 3, "answer_status"),
+            )
+            if answer_status is not None:
+                message["answer_status"] = answer_status
+        messages.append(message)
 
     return {
         "session_id": record.session_id,
@@ -563,6 +580,7 @@ def _persist_chat_turn_messages(
     session_id: str,
     user_content: str,
     assistant_content: str,
+    assistant_answer_status: str | None,
     connect: ConnectionFactory,
 ) -> None:
     """Insert one user/assistant turn after an atomic capacity check."""
@@ -590,6 +608,7 @@ def _persist_chat_turn_messages(
                 "user",
                 user_content,
                 "[]",
+                None,
             ),
         )
         conn.execute(
@@ -600,6 +619,7 @@ def _persist_chat_turn_messages(
                 "assistant",
                 assistant_content,
                 "[]",
+                assistant_answer_status,
             ),
         )
 
@@ -700,12 +720,16 @@ def persist_chat_history(
         str(response.get("answer") or ""),
         max_bytes,
     )
+    assistant_answer_status = normalize_stored_answer_status(
+        response.get("answer_status"),
+    )
 
     _persist_chat_turn_messages(
         config=config,
         session_id=session_id,
         user_content=user_content,
         assistant_content=assistant_content,
+        assistant_answer_status=assistant_answer_status,
         connect=connect_fn,
     )
     return session_id
