@@ -377,6 +377,18 @@ def _detail_payload(record: CaseArchiveRecord) -> dict[str, Any]:
     }
 
 
+def _parse_positive_page_limit_param(limit: str | None) -> int | None:
+    """Parse an optional positive page-size query parameter."""
+    if limit is None:
+        return None
+    if not str(limit).strip().isdigit():
+        raise ValueError("limit must be a positive integer.")
+    parsed_limit = int(limit)
+    if parsed_limit < 1 or parsed_limit > _MAX_PAGE_SIZE:
+        raise ValueError(f"limit must be between 1 and {_MAX_PAGE_SIZE}.")
+    return parsed_limit
+
+
 def _parse_list_filters(
     *,
     limit: str | None,
@@ -389,13 +401,7 @@ def _parse_list_filters(
     verdict: str | None,
     search_name: str | None,
 ) -> CaseListFilters:
-    parsed_limit: int | None = None
-    if limit is not None:
-        if not str(limit).strip().isdigit():
-            raise ValueError("limit must be a positive integer.")
-        parsed_limit = int(limit)
-        if parsed_limit < 1 or parsed_limit > _MAX_PAGE_SIZE:
-            raise ValueError(f"limit must be between 1 and {_MAX_PAGE_SIZE}.")
+    parsed_limit = _parse_positive_page_limit_param(limit)
 
     parsed_cursor_processed_at: datetime | None = None
     parsed_cursor_case_id: str | None = None
@@ -747,12 +753,11 @@ def build_portal_app(
 
     @app.get("/api/chat/sessions", response_model=ChatSessionsResponse)
     def api_list_chat_sessions(limit: str | None = None) -> ChatSessionsResponse:
-        page_size = 50
-        if limit is not None:
-            try:
-                page_size = max(1, min(int(limit), _MAX_PAGE_SIZE))
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail="limit must be an integer.") from exc
+        try:
+            parsed_limit = _parse_positive_page_limit_param(limit)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        page_size = parsed_limit if parsed_limit is not None else 50
         if not bool(config.CASE_QA_CHAT_HISTORY_ENABLED):
             return portal_response(
                 ChatSessionsResponse,

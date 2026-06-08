@@ -858,6 +858,23 @@ class TestPortalApp(unittest.TestCase):
         self.assertFalse(payload["history_enabled"])
         self.assertEqual(payload["items"], [])
 
+    def test_api_list_chat_sessions_rejects_invalid_limit(self) -> None:
+        client = TestClient(
+            build_portal_app(
+                self._config(),
+                connect=lambda _dsn: _FakeConnection(rows=[]),
+            )
+        )
+
+        for invalid_limit in ("-5", "0", "abc"):
+            with self.subTest(limit=invalid_limit):
+                response = client.get(
+                    "/api/chat/sessions",
+                    params={"limit": invalid_limit},
+                    headers=_AUTH_HEADERS,
+                )
+                self.assertEqual(response.status_code, 400)
+
     def test_api_delete_chat_session_when_history_disabled(self) -> None:
         client = TestClient(
             build_portal_app(
