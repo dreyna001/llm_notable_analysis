@@ -1,4 +1,5 @@
 CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE SCHEMA IF NOT EXISTS notable_cases;
 
@@ -54,6 +55,9 @@ CREATE INDEX IF NOT EXISTS cases_verdict_idx
 
 CREATE INDEX IF NOT EXISTS cases_search_name_idx
     ON notable_cases.cases (search_name);
+
+CREATE INDEX IF NOT EXISTS cases_search_name_trgm_idx
+    ON notable_cases.cases USING gin (search_name gin_trgm_ops);
 
 CREATE OR REPLACE FUNCTION notable_cases.set_updated_at()
 RETURNS trigger AS $$

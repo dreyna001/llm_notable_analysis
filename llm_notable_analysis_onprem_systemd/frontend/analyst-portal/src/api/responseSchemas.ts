@@ -2,7 +2,6 @@ import type {
   CaseDetail,
   CaseListResponse,
   CaseSummary,
-  ChatMode,
   ChatResponse,
   ChatSessionMessage,
   ChatSessionMessagesResponse,
@@ -10,328 +9,144 @@ import type {
   ChatSessionSummary,
   PortalCapabilities,
 } from "../types";
+import { schemas } from "./generated/portalSchemas";
 
 export const INVALID_RESPONSE_MESSAGE =
   "Portal API returned an unexpected response.";
 
-const CHAT_MODES = new Set<ChatMode>(["selected_case", "global_archive"]);
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+function parseWithSchema<T>(
+  schema: { safeParse: (value: unknown) => { success: boolean; data?: T } },
+  value: unknown,
+): T | null {
+  const result = schema.safeParse(value);
+  if (!result.success) {
+    return null;
+  }
+  return result.data ?? null;
 }
 
-function isString(value: unknown): value is string {
-  return typeof value === "string";
-}
-
-function isNullableString(value: unknown): value is string | null {
-  return value === null || typeof value === "string";
-}
-
-function isNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-function isBoolean(value: unknown): value is boolean {
-  return typeof value === "boolean";
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
-}
-
-function parseChatMode(value: unknown): ChatMode | null {
-  if (typeof value === "string" && CHAT_MODES.has(value as ChatMode)) {
-    return value as ChatMode;
-  }
-  return null;
-}
-
-function parseNullableRecord(value: unknown): Record<string, unknown> | null {
-  if (value === null) {
-    return null;
-  }
-  return isObject(value) ? value : null;
-}
-
-function parseCaseSummary(value: unknown): CaseSummary | null {
-  if (!isObject(value)) {
-    return null;
-  }
-  if (!isString(value.case_id)) {
-    return null;
-  }
-  if (!isNullableString(value.processed_at)) {
-    return null;
-  }
-  if (!isNullableString(value.expires_at)) {
-    return null;
-  }
-  if (value.verdict !== null && !isString(value.verdict)) {
-    return null;
-  }
-  if (value.confidence !== null && !isNumber(value.confidence)) {
-    return null;
-  }
-  if (value.search_name !== null && !isString(value.search_name)) {
-    return null;
-  }
-  if (!isString(value.retrieval_status)) {
-    return null;
-  }
-  if (!isString(value.source_completeness)) {
-    return null;
-  }
-  if (value.archive_notices !== undefined && !isStringArray(value.archive_notices)) {
-    return null;
-  }
-  return {
-    case_id: value.case_id,
-    processed_at: value.processed_at,
-    expires_at: value.expires_at,
-    verdict: value.verdict ?? null,
-    confidence: value.confidence ?? null,
-    search_name: value.search_name ?? null,
-    retrieval_status: value.retrieval_status,
-    source_completeness: value.source_completeness,
-    ...(value.archive_notices ? { archive_notices: value.archive_notices } : {}),
-  };
+function omitUndefinedFields<T extends Record<string, unknown>>(value: T): T {
+  const entries = Object.entries(value).filter(([, fieldValue]) => fieldValue !== undefined);
+  return Object.fromEntries(entries) as T;
 }
 
 export function parseCaseListResponse(value: unknown): CaseListResponse | null {
-  if (!isObject(value) || !Array.isArray(value.items)) {
+  const parsed = parseWithSchema(schemas.CaseListResponse, value);
+  if (!parsed) {
     return null;
   }
-  if (!isNumber(value.limit) || !isNumber(value.offset) || !isBoolean(value.has_more)) {
-    return null;
-  }
-  const items: CaseSummary[] = [];
-  for (const item of value.items) {
-    const parsed = parseCaseSummary(item);
-    if (!parsed) {
-      return null;
-    }
-    items.push(parsed);
-  }
+  const items: CaseSummary[] = parsed.items.map((item) =>
+    omitUndefinedFields({
+      case_id: item.case_id,
+      processed_at: item.processed_at,
+      expires_at: item.expires_at,
+      verdict: item.verdict,
+      confidence: item.confidence,
+      search_name: item.search_name,
+      retrieval_status: item.retrieval_status,
+      source_completeness: item.source_completeness,
+      ...(item.archive_notices ? { archive_notices: item.archive_notices } : {}),
+    }),
+  );
   return {
     items,
-    limit: value.limit,
-    offset: value.offset,
-    has_more: value.has_more,
-  };
-}
-
-function parseCaseDetailMetadata(
-  value: unknown,
-): CaseDetail["metadata"] | null {
-  if (!isObject(value)) {
-    return null;
-  }
-  if (!isNullableString(value.processed_at)) {
-    return null;
-  }
-  if (!isNullableString(value.expires_at)) {
-    return null;
-  }
-  if (!isString(value.retrieval_status)) {
-    return null;
-  }
-  if (!isString(value.source_completeness)) {
-    return null;
-  }
-  if (value.archive_notices !== undefined && !isStringArray(value.archive_notices)) {
-    return null;
-  }
-  return {
-    processed_at: value.processed_at,
-    expires_at: value.expires_at,
-    retrieval_status: value.retrieval_status,
-    source_completeness: value.source_completeness,
-    ...(value.archive_notices ? { archive_notices: value.archive_notices } : {}),
+    limit: parsed.limit,
+    offset: parsed.offset,
+    has_more: parsed.has_more,
   };
 }
 
 export function parseCaseDetail(value: unknown): CaseDetail | null {
-  if (!isObject(value) || !isString(value.case_id)) {
-    return null;
-  }
-  const metadata = parseCaseDetailMetadata(value.metadata);
-  if (!metadata) {
-    return null;
-  }
-  const alertPayload = parseNullableRecord(value.alert_payload);
-  if (alertPayload === null && value.alert_payload !== null) {
-    return null;
-  }
-  const analysis = parseNullableRecord(value.analysis);
-  if (analysis === null && value.analysis !== null) {
-    return null;
-  }
-  if (!isNullableString(value.report_md_path)) {
-    return null;
-  }
-  if (!isNullableString(value.report_html_path)) {
+  const parsed = parseWithSchema(schemas.CaseDetailResponse, value);
+  if (!parsed) {
     return null;
   }
   return {
-    case_id: value.case_id,
-    metadata,
-    alert_payload: alertPayload ?? {},
-    analysis,
-    report_md_path: value.report_md_path,
-    report_html_path: value.report_html_path,
+    case_id: parsed.case_id,
+    metadata: omitUndefinedFields({
+      processed_at: parsed.metadata.processed_at,
+      expires_at: parsed.metadata.expires_at,
+      retrieval_status: parsed.metadata.retrieval_status,
+      source_completeness: parsed.metadata.source_completeness,
+      ...(parsed.metadata.archive_notices
+        ? { archive_notices: parsed.metadata.archive_notices }
+        : {}),
+    }),
+    alert_payload: parsed.alert_payload ?? {},
+    analysis: parsed.analysis,
+    report_md_path: parsed.report_md_path,
+    report_html_path: parsed.report_html_path,
   };
 }
 
 export function parsePortalCapabilities(value: unknown): PortalCapabilities | null {
-  if (!isObject(value)) {
-    return null;
-  }
-  if (
-    !isBoolean(value.case_qa_enabled) ||
-    !isBoolean(value.global_retrieval_enabled) ||
-    !isBoolean(value.chat_history_enabled) ||
-    !isBoolean(value.general_knowledge_enabled) ||
-    !isNumber(value.max_question_chars) ||
-    !isNumber(value.max_answer_tokens)
-  ) {
-    return null;
-  }
-  if (
-    value.max_chat_sessions_per_user !== undefined &&
-    !isNumber(value.max_chat_sessions_per_user)
-  ) {
-    return null;
-  }
-  if (value.case_retention_days !== undefined && !isNumber(value.case_retention_days)) {
+  const parsed = parseWithSchema(schemas.PortalCapabilitiesResponse, value);
+  if (!parsed) {
     return null;
   }
   return {
-    case_qa_enabled: value.case_qa_enabled,
-    global_retrieval_enabled: value.global_retrieval_enabled,
-    chat_history_enabled: value.chat_history_enabled,
-    general_knowledge_enabled: value.general_knowledge_enabled,
-    max_question_chars: value.max_question_chars,
-    max_answer_tokens: value.max_answer_tokens,
-    ...(value.max_chat_sessions_per_user !== undefined
-      ? { max_chat_sessions_per_user: value.max_chat_sessions_per_user }
-      : {}),
-    ...(value.case_retention_days !== undefined
-      ? { case_retention_days: value.case_retention_days }
-      : {}),
+    case_qa_enabled: parsed.case_qa_enabled,
+    global_retrieval_enabled: parsed.global_retrieval_enabled,
+    chat_history_enabled: parsed.chat_history_enabled,
+    general_knowledge_enabled: parsed.general_knowledge_enabled,
+    max_question_chars: parsed.max_question_chars,
+    max_answer_tokens: parsed.max_answer_tokens,
+    max_chat_sessions_per_user: parsed.max_chat_sessions_per_user,
+    case_retention_days: parsed.case_retention_days,
   };
 }
 
 export function parseChatResponse(value: unknown): ChatResponse | null {
-  if (!isObject(value)) {
-    return null;
-  }
-  if (!isString(value.answer) || !isString(value.answer_status)) {
-    return null;
-  }
-  if (value.session_id !== null && !isString(value.session_id)) {
+  const parsed = parseWithSchema(schemas.ChatResponseModel, value);
+  if (!parsed) {
     return null;
   }
   return {
-    answer: value.answer,
-    answer_status: value.answer_status,
-    session_id: value.session_id ?? null,
-  };
-}
-
-function parseChatSessionSummary(value: unknown): ChatSessionSummary | null {
-  if (!isObject(value)) {
-    return null;
-  }
-  const mode = parseChatMode(value.mode);
-  if (!mode || !isString(value.session_id) || !isString(value.title)) {
-    return null;
-  }
-  if (!isNullableString(value.updated_at)) {
-    return null;
-  }
-  if (value.selected_case_id !== null && !isString(value.selected_case_id)) {
-    return null;
-  }
-  return {
-    session_id: value.session_id,
-    title: value.title,
-    updated_at: value.updated_at,
-    mode,
-    selected_case_id: value.selected_case_id ?? null,
+    answer: parsed.answer,
+    answer_status: parsed.answer_status,
+    session_id: parsed.session_id ?? null,
   };
 }
 
 export function parseChatSessionsResponse(
   value: unknown,
 ): ChatSessionsResponse | null {
-  if (!isObject(value) || !isBoolean(value.history_enabled) || !Array.isArray(value.items)) {
+  const parsed = parseWithSchema(schemas.ChatSessionsResponse, value);
+  if (!parsed) {
     return null;
   }
-  const items: ChatSessionSummary[] = [];
-  for (const item of value.items) {
-    const parsed = parseChatSessionSummary(item);
-    if (!parsed) {
-      return null;
-    }
-    items.push(parsed);
-  }
+  const items: ChatSessionSummary[] = parsed.items.map((item) => ({
+    session_id: item.session_id,
+    title: item.title,
+    updated_at: item.updated_at,
+    mode: item.mode,
+    selected_case_id: item.selected_case_id,
+  }));
   return {
-    history_enabled: value.history_enabled,
+    history_enabled: parsed.history_enabled,
     items,
-  };
-}
-
-function parseChatSessionMessage(value: unknown): ChatSessionMessage | null {
-  if (!isObject(value)) {
-    return null;
-  }
-  if (!isString(value.role) || !isString(value.content)) {
-    return null;
-  }
-  if (!isNullableString(value.created_at)) {
-    return null;
-  }
-  if (
-    value.answer_status !== undefined &&
-    value.answer_status !== null &&
-    !isString(value.answer_status)
-  ) {
-    return null;
-  }
-  return {
-    role: value.role,
-    content: value.content,
-    created_at: value.created_at,
-    ...(value.answer_status !== undefined ? { answer_status: value.answer_status } : {}),
   };
 }
 
 export function parseChatSessionMessagesResponse(
   value: unknown,
 ): ChatSessionMessagesResponse | null {
-  if (!isObject(value) || !isString(value.session_id) || !Array.isArray(value.messages)) {
+  const parsed = parseWithSchema(schemas.ChatSessionMessagesResponse, value);
+  if (!parsed) {
     return null;
   }
-  const mode = parseChatMode(value.mode);
-  if (!mode) {
-    return null;
-  }
-  if (value.selected_case_id !== null && !isString(value.selected_case_id)) {
-    return null;
-  }
-  const messages: ChatSessionMessage[] = [];
-  for (const item of value.messages) {
-    const parsed = parseChatSessionMessage(item);
-    if (!parsed) {
-      return null;
-    }
-    messages.push(parsed);
-  }
+  const messages: ChatSessionMessage[] = parsed.messages.map((item) =>
+    omitUndefinedFields({
+      role: item.role,
+      content: item.content,
+      created_at: item.created_at,
+      ...(item.answer_status !== undefined ? { answer_status: item.answer_status } : {}),
+    }),
+  );
   return {
-    session_id: value.session_id,
-    mode,
-    selected_case_id: value.selected_case_id ?? null,
+    session_id: parsed.session_id,
+    mode: parsed.mode,
+    selected_case_id: parsed.selected_case_id,
     messages,
   };
 }
@@ -339,46 +154,32 @@ export function parseChatSessionMessagesResponse(
 export function parseDeleteChatSessionResponse(
   value: unknown,
 ): { deleted: boolean; session_id: string } | null {
-  if (!isObject(value) || !isBoolean(value.deleted) || !isString(value.session_id)) {
-    return null;
-  }
-  return {
-    deleted: value.deleted,
-    session_id: value.session_id,
-  };
+  return parseWithSchema(schemas.DeleteChatSessionResponse, value);
 }
 
 export function parseDeleteLastChatTurnResponse(
   value: unknown,
 ): { deleted: boolean; session_id: string; deleted_messages: number } | null {
-  if (
-    !isObject(value) ||
-    !isBoolean(value.deleted) ||
-    !isString(value.session_id) ||
-    !isNumber(value.deleted_messages)
-  ) {
-    return null;
-  }
-  return {
-    deleted: value.deleted,
-    session_id: value.session_id,
-    deleted_messages: value.deleted_messages,
-  };
+  return parseWithSchema(schemas.DeleteLastChatTurnResponse, value);
 }
 
 export function parseHealthResponse(
   value: unknown,
 ): { status: string; case_retention_days?: number } | null {
-  if (!isObject(value) || !isString(value.status)) {
+  const parsed = parseWithSchema(schemas.HealthResponse, value);
+  if (!parsed) {
     return null;
   }
-  if (value.case_retention_days !== undefined && !isNumber(value.case_retention_days)) {
-    return null;
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "case_retention_days" in value &&
+    typeof (value as { case_retention_days?: unknown }).case_retention_days === "number"
+  ) {
+    return {
+      status: parsed.status,
+      case_retention_days: (value as { case_retention_days: number }).case_retention_days,
+    };
   }
-  return {
-    status: value.status,
-    ...(value.case_retention_days !== undefined
-      ? { case_retention_days: value.case_retention_days }
-      : {}),
-  };
+  return { status: parsed.status };
 }

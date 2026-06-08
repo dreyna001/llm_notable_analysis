@@ -56,6 +56,18 @@ from .openai_transport_nonsdk import (
     ServerError as LlmServerError,
     TransportError as LlmTransportError,
 )
+from .portal_api_models import (
+    CaseDetailResponse,
+    CaseListResponse,
+    ChatResponseModel,
+    ChatSessionMessagesResponse,
+    ChatSessionsResponse,
+    DeleteChatSessionResponse,
+    DeleteLastChatTurnResponse,
+    HealthResponse,
+    PortalCapabilitiesResponse,
+    portal_response,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -527,10 +539,10 @@ def build_portal_app(
         finally:
             _TRUSTED_USER_CTX.reset(token)
 
-    @app.get("/health")
-    async def health() -> dict[str, Any]:
+    @app.get("/health", response_model=HealthResponse)
+    async def health() -> HealthResponse:
         """Liveness probe for load balancers; intentionally minimal and unauthenticated."""
-        return {"status": "ok"}
+        return portal_response(HealthResponse, {"status": "ok"})
 
     @app.get("/ready")
     def ready() -> Any:
@@ -540,18 +552,21 @@ def build_portal_app(
             return {"status": "ready"}
         return JSONResponse(status_code=503, content={"status": "not_ready"})
 
-    @app.get("/api/capabilities")
-    def api_capabilities() -> dict[str, Any]:
-        return {
-            "case_qa_enabled": bool(config.CASE_QA_ENABLED),
-            "global_retrieval_enabled": bool(config.CASE_QA_GLOBAL_RETRIEVAL_ENABLED),
-            "chat_history_enabled": bool(config.CASE_QA_CHAT_HISTORY_ENABLED),
-            "general_knowledge_enabled": bool(config.CASE_QA_GENERAL_KNOWLEDGE_ENABLED),
-            "max_question_chars": int(config.CASE_QA_MAX_QUESTION_CHARS),
-            "max_answer_tokens": int(config.CASE_QA_MAX_ANSWER_TOKENS),
-            "max_chat_sessions_per_user": int(config.CASE_QA_MAX_SESSIONS_PER_USER),
-            "case_retention_days": int(config.CASE_RETENTION_DAYS),
-        }
+    @app.get("/api/capabilities", response_model=PortalCapabilitiesResponse)
+    def api_capabilities() -> PortalCapabilitiesResponse:
+        return portal_response(
+            PortalCapabilitiesResponse,
+            {
+                "case_qa_enabled": bool(config.CASE_QA_ENABLED),
+                "global_retrieval_enabled": bool(config.CASE_QA_GLOBAL_RETRIEVAL_ENABLED),
+                "chat_history_enabled": bool(config.CASE_QA_CHAT_HISTORY_ENABLED),
+                "general_knowledge_enabled": bool(config.CASE_QA_GENERAL_KNOWLEDGE_ENABLED),
+                "max_question_chars": int(config.CASE_QA_MAX_QUESTION_CHARS),
+                "max_answer_tokens": int(config.CASE_QA_MAX_ANSWER_TOKENS),
+                "max_chat_sessions_per_user": int(config.CASE_QA_MAX_SESSIONS_PER_USER),
+                "case_retention_days": int(config.CASE_RETENTION_DAYS),
+            },
+        )
 
     @app.get("/api/diagnostics/chat-readiness")
     def api_chat_readiness() -> Any:
@@ -564,7 +579,11 @@ def build_portal_app(
             return {"status": "ready"}
         return JSONResponse(status_code=503, content={"status": "not_ready"})
 
-    @app.get("/api/cases")
+    @app.get(
+        "/api/cases",
+        response_model=CaseListResponse,
+        response_model_exclude_unset=True,
+    )
     def api_list_cases(
         limit: str | None = None,
         offset: str | None = None,
@@ -574,7 +593,7 @@ def build_portal_app(
         end_date: str | None = None,
         verdict: str | None = None,
         search_name: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> CaseListResponse:
         try:
             filters = _parse_list_filters(
                 limit=limit,
@@ -605,20 +624,27 @@ def build_portal_app(
             )
         response_items = items[:page_size]
 
-        return {
-            "items": [_summary_item(item) for item in response_items],
-            "limit": page_size,
-            "offset": filters.offset,
-            "has_more": len(items) > page_size,
-        }
+        return portal_response(
+            CaseListResponse,
+            {
+                "items": [_summary_item(item) for item in response_items],
+                "limit": page_size,
+                "offset": filters.offset,
+                "has_more": len(items) > page_size,
+            },
+        )
 
-    @app.get("/api/cases/{case_id}")
-    def api_get_case(case_id: str) -> dict[str, Any]:
+    @app.get(
+        "/api/cases/{case_id}",
+        response_model=CaseDetailResponse,
+        response_model_exclude_unset=True,
+    )
+    def api_get_case(case_id: str) -> CaseDetailResponse:
         _normalized, record = fetch_case_detail(case_id)
-        return _detail_payload(record)
+        return portal_response(CaseDetailResponse, _detail_payload(record))
 
-    @app.get("/api/chat/sessions")
-    def api_list_chat_sessions(limit: str | None = None) -> dict[str, Any]:
+    @app.get("/api/chat/sessions", response_model=ChatSessionsResponse)
+    def api_list_chat_sessions(limit: str | None = None) -> ChatSessionsResponse:
         page_size = 50
         if limit is not None:
             try:
@@ -626,7 +652,10 @@ def build_portal_app(
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail="limit must be an integer.") from exc
         if not bool(config.CASE_QA_CHAT_HISTORY_ENABLED):
-            return {"history_enabled": False, "items": []}
+            return portal_response(
+                ChatSessionsResponse,
+                {"history_enabled": False, "items": []},
+            )
         try:
             items = list_chat_sessions(
                 config=config,
@@ -640,19 +669,27 @@ def build_portal_app(
                 detail_unavailable="Chat history unavailable.",
                 log_message="Failed to list portal chat sessions",
             )
-        return {"history_enabled": True, "items": items}
+        return portal_response(
+            ChatSessionsResponse,
+            {"history_enabled": True, "items": items},
+        )
 
-    @app.get("/api/chat/sessions/{session_id}/messages")
-    def api_get_chat_session_messages(session_id: str) -> dict[str, Any]:
+    @app.get(
+        "/api/chat/sessions/{session_id}/messages",
+        response_model=ChatSessionMessagesResponse,
+        response_model_exclude_unset=True,
+    )
+    def api_get_chat_session_messages(session_id: str) -> ChatSessionMessagesResponse:
         if not bool(config.CASE_QA_CHAT_HISTORY_ENABLED):
             raise HTTPException(status_code=404, detail="Chat history is disabled.")
         try:
-            return get_chat_session_messages(
+            payload = get_chat_session_messages(
                 config=config,
                 session_id=session_id,
                 user_id=_TRUSTED_USER_CTX.get(),
                 connect=connect_fn,
             )
+            return portal_response(ChatSessionMessagesResponse, payload)
         except (ChatSessionNotFoundError, ChatSessionExpiredError) as exc:
             _raise_portal_chat_session_error(exc)
         except ValueError as exc:
@@ -666,8 +703,11 @@ def build_portal_app(
                 log_message="Failed to load portal chat session messages",
             )
 
-    @app.delete("/api/chat/sessions/{session_id}")
-    def api_delete_chat_session(session_id: str) -> dict[str, Any]:
+    @app.delete(
+        "/api/chat/sessions/{session_id}",
+        response_model=DeleteChatSessionResponse,
+    )
+    def api_delete_chat_session(session_id: str) -> DeleteChatSessionResponse:
         if not bool(config.CASE_QA_CHAT_HISTORY_ENABLED):
             raise HTTPException(status_code=404, detail="Chat history is disabled.")
         try:
@@ -689,13 +729,19 @@ def build_portal_app(
             )
         if not deleted:
             raise HTTPException(status_code=404, detail="session_id was not found.")
-        return {"deleted": True, "session_id": session_id}
+        return portal_response(
+            DeleteChatSessionResponse,
+            {"deleted": True, "session_id": session_id},
+        )
 
-    @app.delete("/api/chat/sessions/{session_id}/turns/last")
+    @app.delete(
+        "/api/chat/sessions/{session_id}/turns/last",
+        response_model=DeleteLastChatTurnResponse,
+    )
     def api_delete_last_chat_turn(
         session_id: str,
         expected_message_count: int | None = None,
-    ) -> dict[str, Any]:
+    ) -> DeleteLastChatTurnResponse:
         if not bool(config.CASE_QA_CHAT_HISTORY_ENABLED):
             raise HTTPException(status_code=404, detail="Chat history is disabled.")
         try:
@@ -721,11 +767,14 @@ def build_portal_app(
             )
         if deleted_count <= 0:
             raise HTTPException(status_code=404, detail="No chat turn was found to delete.")
-        return {
-            "deleted": True,
-            "session_id": session_id,
-            "deleted_messages": deleted_count,
-        }
+        return portal_response(
+            DeleteLastChatTurnResponse,
+            {
+                "deleted": True,
+                "session_id": session_id,
+                "deleted_messages": deleted_count,
+            },
+        )
 
     def _answer_portal_chat(payload: dict[str, Any]) -> dict[str, Any]:
         return answer_case_chat(
@@ -739,15 +788,16 @@ def build_portal_app(
             user_id=_TRUSTED_USER_CTX.get(),
         )
 
-    @app.post("/api/chat")
-    async def api_chat(payload: dict[str, Any]) -> dict[str, Any]:
+    @app.post("/api/chat", response_model=ChatResponseModel)
+    async def api_chat(payload: dict[str, Any]) -> ChatResponseModel:
         if not chat_semaphore.acquire(blocking=False):
             raise HTTPException(
                 status_code=429,
                 detail="Too many chat requests are already running. Try again shortly.",
             )
         try:
-            return await asyncio.to_thread(_answer_portal_chat, payload)
+            response = await asyncio.to_thread(_answer_portal_chat, payload)
+            return portal_response(ChatResponseModel, response)
         except CaseNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Case not found.") from exc
         except (ChatSessionNotFoundError, ChatSessionExpiredError) as exc:

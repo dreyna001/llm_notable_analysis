@@ -207,6 +207,9 @@ CREATE INDEX IF NOT EXISTS cases_verdict_idx
 
 CREATE INDEX IF NOT EXISTS cases_search_name_idx
     ON notable_cases.cases (search_name);
+
+CREATE INDEX IF NOT EXISTS cases_search_name_trgm_idx
+    ON notable_cases.cases USING gin (search_name gin_trgm_ops);
 ```
 
 `updated_at` must be maintained either by application code on every update or by

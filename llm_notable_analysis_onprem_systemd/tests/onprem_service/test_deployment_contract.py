@@ -387,6 +387,7 @@ class TestDeploymentContract(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("CREATE EXTENSION IF NOT EXISTS vector", schema_text)
+        self.assertIn("CREATE EXTENSION IF NOT EXISTS pg_trgm", schema_text)
         self.assertIn("CREATE SCHEMA IF NOT EXISTS notable_cases", schema_text)
         self.assertIn("CREATE TABLE IF NOT EXISTS notable_cases.cases", schema_text)
         self.assertIn("CREATE TABLE IF NOT EXISTS notable_cases.case_chunks", schema_text)
@@ -399,6 +400,8 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("case_chunks_search_vector_gin_idx", schema_text)
         self.assertIn("case_chunks_embedding_hnsw_idx", schema_text)
         self.assertIn("cases_processed_at_case_id_idx", schema_text)
+        self.assertIn("cases_search_name_trgm_idx", schema_text)
+        self.assertIn("gin_trgm_ops", schema_text)
 
     def test_postgres_rag_smoke_uses_disposable_pgvector_container(self) -> None:
         """Live RAG smoke should validate pgvector without host psql."""

@@ -51,8 +51,8 @@ describe("parseCaseListResponse", () => {
         items: [
           {
             case_id: "case-1",
-            processed_at: null,
-            expires_at: null,
+            processed_at: "2026-06-04T00:00:00Z",
+            expires_at: "2026-07-04T00:00:00Z",
             verdict: null,
             confidence: null,
             search_name: null,
