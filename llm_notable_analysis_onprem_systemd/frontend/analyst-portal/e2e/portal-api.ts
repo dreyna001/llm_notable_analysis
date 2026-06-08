@@ -26,6 +26,8 @@ export type PortalCapabilities = {
   chat_history_enabled: boolean;
   general_knowledge_enabled: boolean;
   case_retention_days?: number;
+  chat_ready: boolean;
+  chat_degraded_reason?: string | null;
 };
 
 export type PortalFixture = {

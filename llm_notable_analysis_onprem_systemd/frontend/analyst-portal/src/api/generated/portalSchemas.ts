@@ -4,7 +4,9 @@ import { z } from "zod";
 const PortalCapabilitiesResponse = z.object({
   case_qa_enabled: z.boolean(),
   case_retention_days: z.number().int(),
+  chat_degraded_reason: z.union([z.string(), z.null()]).optional(),
   chat_history_enabled: z.boolean(),
+  chat_ready: z.boolean(),
   general_knowledge_enabled: z.boolean(),
   global_retrieval_enabled: z.boolean(),
   max_answer_tokens: z.number().int(),

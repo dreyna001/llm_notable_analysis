@@ -28,6 +28,8 @@ class PortalCapabilitiesResponse(BaseModel):
     max_answer_tokens: int
     max_chat_sessions_per_user: int
     case_retention_days: int
+    chat_ready: bool
+    chat_degraded_reason: str | None = None
 
 
 class CaseSummaryResponse(BaseModel):

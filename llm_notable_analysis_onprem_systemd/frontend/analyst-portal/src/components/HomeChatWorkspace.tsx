@@ -322,6 +322,12 @@ export function HomeChatWorkspace({
     if (capabilities && !capabilities.case_qa_enabled) {
       return "Case Q&A is disabled on this portal. Chat is unavailable.";
     }
+    if (capabilities?.case_qa_enabled && !capabilities.chat_ready) {
+      return (
+        capabilities.chat_degraded_reason ??
+        "Case chat is temporarily unavailable. Embeddings, archive retrieval, or the LLM may be down."
+      );
+    }
     if (!availableModes.length) {
       return "Select a case to chat. Cross-case archive chat is disabled for this portal.";
     }
@@ -1063,7 +1069,11 @@ export function HomeChatWorkspace({
           mode={activeMode}
           selectedCaseId={effectiveSelectedCaseId}
           disabledReason={chatDisabledReason}
-          composerDisabled={!capabilitiesLoaded || Boolean(capabilitiesLoadError)}
+          composerDisabled={
+            !capabilitiesLoaded ||
+            Boolean(capabilitiesLoadError) ||
+            Boolean(chatDisabledReason)
+          }
           serverSyncError={orphanCleanupError}
           onStateChange={handlePanelStateChange}
           onChatCancelled={handleChatCancelled}
@@ -1085,7 +1095,10 @@ export function HomeChatWorkspace({
             selectedCaseName={effectiveSelectedCaseName}
             selectedCaseProcessedAt={effectiveSelectedCaseProcessedAt}
             caseAttachEnabled={
-              !blockingLoadError && capabilitiesReady && capabilities.case_qa_enabled
+              !blockingLoadError &&
+              capabilitiesReady &&
+              capabilities.case_qa_enabled &&
+              capabilities.chat_ready
             }
             onAttachCase={handleAttachCase}
             onClearSelectedCase={handleClearSelectedCase}

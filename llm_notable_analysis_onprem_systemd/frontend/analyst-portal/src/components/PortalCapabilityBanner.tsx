@@ -45,6 +45,14 @@ function buildNotices(
 
   if (capabilities && !capabilities.case_qa_enabled) {
     notices.push("Case Q&A is disabled on this portal. Chat is unavailable.");
+  } else if (
+    capabilities?.case_qa_enabled &&
+    !capabilities.chat_ready
+  ) {
+    notices.push(
+      capabilities.chat_degraded_reason ??
+        "Case chat is temporarily unavailable. Embeddings, archive retrieval, or the LLM may be down.",
+    );
   } else if (chatDisabledReason) {
     notices.push(chatDisabledReason);
   }
@@ -100,6 +108,7 @@ export function PortalCapabilityBanner({
     capabilitiesLoadError ||
       !capabilitiesLoaded ||
       (capabilities && !capabilities.case_qa_enabled) ||
+      (capabilities?.case_qa_enabled && !capabilities.chat_ready) ||
       chatDisabledReason,
   );
 

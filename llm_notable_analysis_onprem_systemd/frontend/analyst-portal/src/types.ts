@@ -90,4 +90,6 @@ export type PortalCapabilities = {
   max_answer_tokens: number;
   max_chat_sessions_per_user?: number;
   case_retention_days?: number;
+  chat_ready: boolean;
+  chat_degraded_reason?: string | null;
 };

@@ -15,6 +15,7 @@ const capabilities: PortalCapabilities = {
   general_knowledge_enabled: true,
   max_question_chars: 2000,
   max_answer_tokens: 800,
+  chat_ready: true,
 };
 
 vi.mock("../api/client", () => ({
@@ -208,6 +209,28 @@ describe("HomeChatWorkspace startup failures", () => {
     expect(await screen.findByText("Portal chat unavailable")).toBeInTheDocument();
     expect(screen.getByText("503: Portal API unavailable.")).toBeInTheDocument();
     expect(screen.queryByText("How can I help?")).not.toBeInTheDocument();
+  });
+
+  it("blocks chat when case chat dependencies are not ready", async () => {
+    vi.mocked(fetchCapabilities).mockResolvedValue({
+      ...capabilities,
+      chat_ready: false,
+      chat_degraded_reason:
+        "Case chat is temporarily unavailable. Embeddings, archive retrieval, or the LLM may be down.",
+    });
+
+    render(
+      <MemoryRouter>
+        <HomeChatWorkspace sidebarMeta={<div>Case window</div>} />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByText(
+        "Case chat is temporarily unavailable. Embeddings, archive retrieval, or the LLM may be down.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/ask/i)).not.toBeInTheDocument();
   });
 
   it("blocks chat when server sessions cannot be loaded and history is enabled", async () => {

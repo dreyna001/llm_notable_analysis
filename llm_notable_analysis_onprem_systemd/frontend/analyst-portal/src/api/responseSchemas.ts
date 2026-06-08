@@ -91,8 +91,16 @@ export function parsePortalCapabilities(value: unknown): PortalCapabilities | nu
     general_knowledge_enabled: parsed.general_knowledge_enabled,
     max_question_chars: parsed.max_question_chars,
     max_answer_tokens: parsed.max_answer_tokens,
-    max_chat_sessions_per_user: parsed.max_chat_sessions_per_user,
-    case_retention_days: parsed.case_retention_days,
+    chat_ready: parsed.chat_ready,
+    ...(parsed.max_chat_sessions_per_user !== undefined
+      ? { max_chat_sessions_per_user: parsed.max_chat_sessions_per_user }
+      : {}),
+    ...(parsed.case_retention_days !== undefined
+      ? { case_retention_days: parsed.case_retention_days }
+      : {}),
+    ...(parsed.chat_degraded_reason !== undefined
+      ? { chat_degraded_reason: parsed.chat_degraded_reason }
+      : {}),
   };
 }
 

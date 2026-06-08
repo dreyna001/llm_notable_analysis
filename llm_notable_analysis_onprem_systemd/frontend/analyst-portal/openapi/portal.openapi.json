@@ -515,8 +515,23 @@
             "title": "Case Retention Days",
             "type": "integer"
           },
+          "chat_degraded_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chat Degraded Reason"
+          },
           "chat_history_enabled": {
             "title": "Chat History Enabled",
+            "type": "boolean"
+          },
+          "chat_ready": {
+            "title": "Chat Ready",
             "type": "boolean"
           },
           "general_knowledge_enabled": {
@@ -548,7 +563,8 @@
           "max_question_chars",
           "max_answer_tokens",
           "max_chat_sessions_per_user",
-          "case_retention_days"
+          "case_retention_days",
+          "chat_ready"
         ],
         "title": "PortalCapabilitiesResponse",
         "type": "object"

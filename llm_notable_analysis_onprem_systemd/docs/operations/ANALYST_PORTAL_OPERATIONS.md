@@ -163,7 +163,7 @@ Threat model for unauthenticated probes:
   endpoints are not analyst-reachable unless the host firewall or bind policy is
   changed.
 - `/health` returns only `{"status":"ok"}`; operator metadata such as
-  `case_retention_days` is exposed on authenticated `GET /api/capabilities`.
+  `case_retention_days`, `chat_ready`, and optional `chat_degraded_reason` are exposed on authenticated `GET /api/capabilities`.
 - `/ready` checks archive tables only. It does not call the embedding model or
   LLM gateway.
 
@@ -194,7 +194,7 @@ The shipped analyst UI is a React SPA served by nginx. Authenticated JSON routes
 
 | Route | Method | Purpose |
 | --- | --- | --- |
-| `/api/capabilities` | GET | Portal feature flags, limits, retention window |
+| `/api/capabilities` | GET | Portal feature flags, limits, retention window, and live `chat_ready` status |
 | `/api/cases` | GET | Paginated case list |
 | `/api/cases/{case_id}` | GET | Case detail |
 

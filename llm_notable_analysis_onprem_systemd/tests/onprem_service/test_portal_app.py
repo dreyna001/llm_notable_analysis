@@ -4,6 +4,7 @@ import json
 import threading
 import unittest
 import uuid
+from unittest.mock import patch
 
 # Tests run with PYTHONPATH pointing at the src layout.
 # pylint: disable=import-error,no-name-in-module
@@ -361,7 +362,14 @@ class TestPortalApp(unittest.TestCase):
 
         self.assertEqual(response.status_code, 503)
 
-    def test_api_capabilities_returns_chat_runtime_contract(self) -> None:
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat._probe_llm_reachable",
+        return_value=True,
+    )
+    def test_api_capabilities_returns_chat_runtime_contract(
+        self,
+        _mock_llm_probe,
+    ) -> None:
         client = TestClient(
             build_portal_app(
                 Config(
@@ -375,7 +383,8 @@ class TestPortalApp(unittest.TestCase):
                     CASE_QA_MAX_SESSIONS_PER_USER=10,
                     PORTAL_PROXY_SECRET="portal-secret",
                 ),
-                connect=lambda _dsn: _FakeConnection(rows=[]),
+                connect=lambda _dsn: _FakeConnection(row_pages=[[], []]),
+                chat_embedding_model=_FakeEmbeddingModel(),
             )
         )
 
@@ -393,8 +402,37 @@ class TestPortalApp(unittest.TestCase):
                 "max_answer_tokens": 567,
                 "max_chat_sessions_per_user": 10,
                 "case_retention_days": 30,
+                "chat_ready": True,
             },
         )
+
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat._probe_llm_reachable",
+        return_value=True,
+    )
+    def test_api_capabilities_reports_chat_not_ready_when_dependencies_fail(
+        self,
+        _mock_llm_probe,
+    ) -> None:
+        client = TestClient(
+            build_portal_app(
+                Config(
+                    PORTAL_ENABLED=True,
+                    CASE_ARCHIVE_ENABLED=True,
+                    CASE_QA_ENABLED=True,
+                    PORTAL_PROXY_SECRET="portal-secret",
+                ),
+                connect=lambda _dsn: _FakeConnection(row_pages=[[], []]),
+                chat_embedding_model=_BadEmbeddingModel(),
+            )
+        )
+
+        response = client.get("/api/capabilities", headers=_AUTH_HEADERS)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["chat_ready"])
+        self.assertIn("chat_degraded_reason", payload)
 
     def test_api_cases_returns_paginated_items(self) -> None:
         record = _record(self._config())

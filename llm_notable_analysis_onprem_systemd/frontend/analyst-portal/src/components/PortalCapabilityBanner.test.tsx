@@ -9,6 +9,7 @@ const enabledCapabilities = {
   general_knowledge_enabled: true,
   max_question_chars: 2000,
   max_answer_tokens: 800,
+  chat_ready: true,
 };
 
 describe("PortalCapabilityBanner", () => {
@@ -33,6 +34,26 @@ describe("PortalCapabilityBanner", () => {
     );
     expect(
       screen.getByText("503: Portal API unavailable."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows chat degradation when runtime dependencies are unavailable", () => {
+    render(
+      <PortalCapabilityBanner
+        capabilities={{
+          ...enabledCapabilities,
+          chat_ready: false,
+          chat_degraded_reason:
+            "Case chat is temporarily unavailable. Embeddings, archive retrieval, or the LLM may be down.",
+        }}
+        capabilitiesLoaded={true}
+        capabilitiesLoadError={null}
+      />,
+    );
+    expect(
+      screen.getByText(
+        "Case chat is temporarily unavailable. Embeddings, archive retrieval, or the LLM may be down.",
+      ),
     ).toBeInTheDocument();
   });
 

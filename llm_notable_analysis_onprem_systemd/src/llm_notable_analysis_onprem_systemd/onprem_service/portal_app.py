@@ -74,6 +74,10 @@ logger = logging.getLogger(__name__)
 _MAX_PAGE_SIZE = 100
 _MAX_CASE_ID_LENGTH = 128
 _MAX_TRUSTED_USER_LENGTH = 256
+_CHAT_DEGRADED_REASON = (
+    "Case chat is temporarily unavailable. "
+    "Embeddings, archive retrieval, or the LLM may be down."
+)
 _PUBLIC_PATHS = frozenset({"/health", "/ready"})
 _MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _TRUSTED_USER_CTX: contextvars.ContextVar[str | None] = contextvars.ContextVar(
@@ -446,6 +450,36 @@ def _bounded_page_size(config: Config, limit: int | None) -> int:
     return max(1, min(_MAX_PAGE_SIZE, int(limit)))
 
 
+def _portal_capabilities_payload(
+    config: Config,
+    *,
+    connect: ConnectionFactory,
+    chat_embedding_model: Any,
+) -> dict[str, Any]:
+    case_qa_enabled = bool(config.CASE_QA_ENABLED)
+    chat_ready = False
+    if case_qa_enabled:
+        chat_ready = check_case_chat_ready(
+            config=config,
+            connect=connect,
+            embedding_model=chat_embedding_model,
+        )
+    payload: dict[str, Any] = {
+        "case_qa_enabled": case_qa_enabled,
+        "global_retrieval_enabled": bool(config.CASE_QA_GLOBAL_RETRIEVAL_ENABLED),
+        "chat_history_enabled": bool(config.CASE_QA_CHAT_HISTORY_ENABLED),
+        "general_knowledge_enabled": bool(config.CASE_QA_GENERAL_KNOWLEDGE_ENABLED),
+        "max_question_chars": int(config.CASE_QA_MAX_QUESTION_CHARS),
+        "max_answer_tokens": int(config.CASE_QA_MAX_ANSWER_TOKENS),
+        "max_chat_sessions_per_user": int(config.CASE_QA_MAX_SESSIONS_PER_USER),
+        "case_retention_days": int(config.CASE_RETENTION_DAYS),
+        "chat_ready": chat_ready,
+    }
+    if case_qa_enabled and not chat_ready:
+        payload["chat_degraded_reason"] = _CHAT_DEGRADED_REASON
+    return payload
+
+
 def build_portal_app(
     config: Config,
     *,
@@ -562,20 +596,19 @@ def build_portal_app(
             return {"status": "ready"}
         return JSONResponse(status_code=503, content={"status": "not_ready"})
 
-    @app.get("/api/capabilities", response_model=PortalCapabilitiesResponse)
+    @app.get(
+        "/api/capabilities",
+        response_model=PortalCapabilitiesResponse,
+        response_model_exclude_unset=True,
+    )
     def api_capabilities() -> PortalCapabilitiesResponse:
         return portal_response(
             PortalCapabilitiesResponse,
-            {
-                "case_qa_enabled": bool(config.CASE_QA_ENABLED),
-                "global_retrieval_enabled": bool(config.CASE_QA_GLOBAL_RETRIEVAL_ENABLED),
-                "chat_history_enabled": bool(config.CASE_QA_CHAT_HISTORY_ENABLED),
-                "general_knowledge_enabled": bool(config.CASE_QA_GENERAL_KNOWLEDGE_ENABLED),
-                "max_question_chars": int(config.CASE_QA_MAX_QUESTION_CHARS),
-                "max_answer_tokens": int(config.CASE_QA_MAX_ANSWER_TOKENS),
-                "max_chat_sessions_per_user": int(config.CASE_QA_MAX_SESSIONS_PER_USER),
-                "case_retention_days": int(config.CASE_RETENTION_DAYS),
-            },
+            _portal_capabilities_payload(
+                config,
+                connect=connect_fn,
+                chat_embedding_model=chat_embedding_model,
+            ),
         )
 
     @app.get("/api/diagnostics/chat-readiness")
