@@ -200,7 +200,8 @@ The shipped analyst UI is a React SPA served by nginx. Authenticated JSON routes
 
 `GET /api/cases` optional query parameters:
 
-- `limit`, `offset` — pagination
+- `limit` — pagination page size
+- `cursor_processed_at`, `cursor_case_id` — cursor pagination (both required together)
 - `start_date`, `end_date` — inclusive UTC calendar days (`YYYY-MM-DD`) applied to `processed_at`
 - `start`, `end` — legacy inclusive ISO-8601 UTC instants (prefer `start_date` / `end_date`)
 - `verdict`, `search_name` — summary filters

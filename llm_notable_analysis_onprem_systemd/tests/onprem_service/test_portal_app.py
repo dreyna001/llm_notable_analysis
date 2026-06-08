@@ -209,7 +209,8 @@ class TestPortalApp(unittest.TestCase):
     def test_parse_list_filters_maps_utc_calendar_dates_to_day_bounds(self) -> None:
         filters = _parse_list_filters(
             limit=None,
-            offset=None,
+            cursor_processed_at=None,
+            cursor_case_id=None,
             start=None,
             end=None,
             start_date="2026-06-01",
@@ -230,7 +231,8 @@ class TestPortalApp(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "start_date"):
             _parse_list_filters(
                 limit=None,
-                offset=None,
+                cursor_processed_at=None,
+                cursor_case_id=None,
                 start="2026-06-01T00:00:00Z",
                 end=None,
                 start_date="2026-06-01",
@@ -408,8 +410,8 @@ class TestPortalApp(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["limit"], 50)
-        self.assertEqual(payload["offset"], 0)
         self.assertFalse(payload["has_more"])
+        self.assertIsNone(payload["next_cursor"])
         self.assertEqual(payload["items"][0]["case_id"], "case-1")
 
     def test_api_cases_uses_extra_row_for_has_more(self) -> None:
@@ -434,6 +436,13 @@ class TestPortalApp(unittest.TestCase):
         self.assertFalse(full_page["has_more"])
         self.assertEqual(len(extra_row["items"]), 50)
         self.assertTrue(extra_row["has_more"])
+        self.assertEqual(
+            extra_row["next_cursor"],
+            {
+                "processed_at": extra_row["items"][-1]["processed_at"],
+                "case_id": extra_row["items"][-1]["case_id"],
+            },
+        )
 
     def test_api_cases_rejects_invalid_filters(self) -> None:
         client = TestClient(

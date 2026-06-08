@@ -61,14 +61,14 @@ describe("parseCaseListResponse", () => {
           },
         ],
         limit: 50,
-        offset: 0,
         has_more: false,
+        next_cursor: null,
       }),
     ).not.toBeNull();
   });
 
   it("rejects payloads missing pagination fields", () => {
-    expect(parseCaseListResponse({ items: [] })).toBeNull();
+    expect(parseCaseListResponse({ items: [], limit: 50 })).toBeNull();
   });
 });
 

@@ -44,13 +44,20 @@ class CaseSummaryResponse(BaseModel):
     archive_notices: list[str] | None = None
 
 
+class CaseListCursorResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    processed_at: str
+    case_id: str
+
+
 class CaseListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[CaseSummaryResponse]
     limit: int
-    offset: int
     has_more: bool
+    next_cursor: CaseListCursorResponse | None = None
 
 
 class CaseDetailMetadataResponse(BaseModel):

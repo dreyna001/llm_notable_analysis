@@ -51,8 +51,8 @@ export function parseCaseListResponse(value: unknown): CaseListResponse | null {
   return {
     items,
     limit: parsed.limit,
-    offset: parsed.offset,
     has_more: parsed.has_more,
+    next_cursor: parsed.next_cursor ?? null,
   };
 }
 

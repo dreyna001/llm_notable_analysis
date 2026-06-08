@@ -34,8 +34,9 @@ class CaseListFilters:
     verdict: str | None = None
     search_name: str | None = None
     search_name_prefix: str | None = None
+    cursor_processed_at: datetime | None = None
+    cursor_case_id: str | None = None
     limit: int | None = None
-    offset: int = 0
 
 
 @dataclass(frozen=True)
@@ -118,9 +119,20 @@ def build_list_cases_query(
     elif filters.search_name_prefix:
         clauses.append("search_name ILIKE %s ESCAPE '\\'")
         params.append(_escape_like_prefix(filters.search_name_prefix))
+    if filters.cursor_processed_at is not None:
+        clauses.append(
+            "(processed_at < %s OR (processed_at = %s AND case_id > %s))"
+        )
+        params.extend(
+            (
+                filters.cursor_processed_at,
+                filters.cursor_processed_at,
+                filters.cursor_case_id,
+            )
+        )
 
     where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    params.extend((page_size, max(0, int(filters.offset))))
+    params.append(page_size)
     return (
         f"""
 SELECT
@@ -140,7 +152,7 @@ SELECT
 FROM {table}
 {where_clause}
 ORDER BY processed_at DESC, case_id ASC
-LIMIT %s OFFSET %s
+LIMIT %s
 """.strip(),
         tuple(params),
     )

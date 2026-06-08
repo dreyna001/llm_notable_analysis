@@ -23,11 +23,15 @@ const CaseSummaryResponse = z.object({
   source_completeness: z.string(),
   verdict: z.union([z.string(), z.null()]),
 });
+const CaseListCursorResponse = z.object({
+  case_id: z.string(),
+  processed_at: z.string(),
+});
 const CaseListResponse = z.object({
   has_more: z.boolean(),
   items: z.array(CaseSummaryResponse),
   limit: z.number().int(),
-  offset: z.number().int(),
+  next_cursor: z.union([CaseListCursorResponse, z.null()]).optional(),
 });
 const ValidationError = z
   .object({
@@ -99,6 +103,7 @@ export const schemas = {
   PortalCapabilitiesResponse,
   limit,
   CaseSummaryResponse,
+  CaseListCursorResponse,
   CaseListResponse,
   ValidationError,
   HTTPValidationError,
@@ -135,7 +140,12 @@ const endpoints = makeApi([
         schema: limit,
       },
       {
-        name: "offset",
+        name: "cursor_processed_at",
+        type: "Query",
+        schema: limit,
+      },
+      {
+        name: "cursor_case_id",
         type: "Query",
         schema: limit,
       },

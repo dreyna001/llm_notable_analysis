@@ -10,11 +10,16 @@ export type CaseSummary = {
   archive_notices?: string[];
 };
 
+export type CaseListCursor = {
+  processed_at: string;
+  case_id: string;
+};
+
 export type CaseListResponse = {
   items: CaseSummary[];
   limit: number;
-  offset: number;
   has_more: boolean;
+  next_cursor: CaseListCursor | null;
 };
 
 export type CaseDetail = {

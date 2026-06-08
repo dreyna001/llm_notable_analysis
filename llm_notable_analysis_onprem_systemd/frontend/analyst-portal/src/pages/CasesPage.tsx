@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
 import { EmptyState } from "../components/EmptyState";
 import { CasesTableSkeleton } from "../components/LoadingSkeletons";
 import { ApiError, fetchCase, fetchCases } from "../api/client";
-import type { CaseSummary } from "../types";
+import type { CaseListCursor, CaseSummary } from "../types";
 import { caseDetailToSummary } from "../utils/caseSummary";
 import { retrievalStatusLabel } from "../utils/retrievalStatus";
 import { sourceCompletenessLabel } from "../utils/sourceCompleteness";
@@ -148,11 +148,13 @@ export function CasesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
-  const [offset, setOffset] = useState(0);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [pageCursors, setPageCursors] = useState<(CaseListCursor | null)[]>([null]);
   const [draftFilters, setDraftFilters] = useState<CaseFilters>(EMPTY_FILTERS);
   const [filters, setFilters] = useState<CaseFilters>(EMPTY_FILTERS);
   const limit = 50;
-  const currentPage = Math.floor(offset / limit) + 1;
+  const currentPage = pageIndex + 1;
+  const activeCursor = pageCursors[pageIndex] ?? null;
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -172,8 +174,18 @@ export function CasesPage() {
   }, [draftFilters.case_id, draftFilters.search_name]);
 
   useEffect(() => {
-    setOffset(0);
+    setPageIndex(0);
+    setPageCursors([null]);
   }, [filters.case_id, filters.search_name]);
+
+  useEffect(() => {
+    setPageIndex(0);
+    setPageCursors([null]);
+  }, [
+    filters.start_date,
+    filters.end_date,
+    filters.verdict,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -222,7 +234,7 @@ export function CasesPage() {
 
     fetchCases({
       limit,
-      offset,
+      cursor: activeCursor,
       start_date: filters.start_date || undefined,
       end_date: filters.end_date || undefined,
       verdict: filters.verdict || undefined,
@@ -232,6 +244,13 @@ export function CasesPage() {
         if (!cancelled) {
           setItems(payload.items);
           setHasMore(payload.has_more);
+          if (payload.next_cursor) {
+            setPageCursors((current) => {
+              const next = current.slice(0, pageIndex + 1);
+              next[pageIndex + 1] = payload.next_cursor;
+              return next;
+            });
+          }
           setError(null);
         }
       })
@@ -252,11 +271,12 @@ export function CasesPage() {
     return () => {
       cancelled = true;
     };
-  }, [offset, filters]);
+  }, [activeCursor, filters, limit, pageIndex]);
 
   function applyFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setOffset(0);
+    setPageIndex(0);
+    setPageCursors([null]);
     setFilters({
       start_date: normalizeUtcFilterDate(draftFilters.start_date),
       end_date: normalizeUtcFilterDate(draftFilters.end_date),
@@ -269,13 +289,15 @@ export function CasesPage() {
   function clearFilters() {
     setDraftFilters(EMPTY_FILTERS);
     setFilters(EMPTY_FILTERS);
-    setOffset(0);
+    setPageIndex(0);
+    setPageCursors([null]);
   }
 
   function clearCaseIdFilter() {
     setDraftFilters((current) => ({ ...current, case_id: "" }));
     setFilters((current) => ({ ...current, case_id: "" }));
-    setOffset(0);
+    setPageIndex(0);
+    setPageCursors([null]);
   }
 
   const casesEmptyState = resolveCasesEmptyState(filters);
@@ -485,10 +507,10 @@ export function CasesPage() {
 
           <div className="flex items-center gap-4 pt-2">
             <Button
-              disabled={offset === 0 || loading}
+              disabled={pageIndex === 0 || loading}
               type="button"
               variant="outline"
-              onClick={() => setOffset((value) => Math.max(0, value - limit))}
+              onClick={() => setPageIndex((value) => Math.max(0, value - 1))}
             >
               Previous page
             </Button>
@@ -499,7 +521,7 @@ export function CasesPage() {
               disabled={!hasMore || loading}
               type="button"
               variant="outline"
-              onClick={() => setOffset((value) => value + limit)}
+              onClick={() => setPageIndex((value) => value + 1)}
             >
               Next page
             </Button>

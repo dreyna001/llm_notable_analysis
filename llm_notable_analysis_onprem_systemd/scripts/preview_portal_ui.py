@@ -188,11 +188,15 @@ class _FakeConnection:
         if "WHERE case_id = %s" in sql:
             case_id = str((params or ("",))[0])
             return _FakeResult(row=self.details_by_case_id.get(case_id))
-        if "LIMIT %s OFFSET %s" in sql and params:
-            limit = int(params[-2])
-            offset = max(0, int(params[-1]))
+        if (
+            "ORDER BY processed_at DESC, case_id ASC" in sql
+            and "LIMIT %s" in sql
+            and "OFFSET %s" not in sql
+            and params
+        ):
+            limit = int(params[-1])
             rows = list(self.summary_rows)
-            filter_params = list(params[:-2])
+            filter_params = list(params[:-1])
             param_index = 0
             if "processed_at >= %s" in sql:
                 processed_from = filter_params[param_index]
@@ -208,6 +212,7 @@ class _FakeConnection:
                 rows = [row for row in rows if row[5] == verdict]
             if "search_name ILIKE %s" in sql:
                 pattern = filter_params[param_index]
+                param_index += 1
                 needle = str(pattern)[1:-1]
                 needle = (
                     needle.replace("\\%", "%")
@@ -219,7 +224,21 @@ class _FakeConnection:
                     for row in rows
                     if row[7] and needle.lower() in str(row[7]).lower()
                 ]
-            return _FakeResult(rows=rows[offset : offset + limit])
+            if "processed_at < %s OR (processed_at = %s AND case_id > %s)" in sql:
+                cursor_processed_at = filter_params[param_index]
+                cursor_case_id = filter_params[param_index + 2]
+                rows = [
+                    row
+                    for row in rows
+                    if row[3] < cursor_processed_at
+                    or (
+                        row[3] == cursor_processed_at
+                        and str(row[0]) > str(cursor_case_id)
+                    )
+                ]
+            rows.sort(key=lambda row: str(row[0]))
+            rows.sort(key=lambda row: row[3], reverse=True)
+            return _FakeResult(rows=rows[:limit])
         return _FakeResult(rows=self.summary_rows)
 
 

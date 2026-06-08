@@ -7,7 +7,7 @@ import { CaseAttachListSkeleton } from "./LoadingSkeletons";
 import { EmptyState } from "./EmptyState";
 import { ApiError, fetchCase, fetchCases } from "../api/client";
 import { resolveCaseAttachEmptyState } from "../utils/caseAttachEmptyState";
-import type { CaseSummary } from "../types";
+import type { CaseListCursor, CaseSummary } from "../types";
 import { caseDetailToSummary } from "../utils/caseSummary";
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -16,6 +16,7 @@ const PAGE_SIZE = 50;
 type CaseOptionsPage = {
   items: CaseSummary[];
   hasMore: boolean;
+  nextCursor: CaseListCursor | null;
 };
 
 type CaseAttachPickerProps = {
@@ -38,16 +39,16 @@ function matchesQuery(item: CaseSummary, query: string): boolean {
 
 async function loadCaseOptions(
   searchTerm: string,
-  offset: number,
+  cursor: CaseListCursor | null,
 ): Promise<CaseOptionsPage> {
   const trimmed = searchTerm.trim();
   const [listResult, exactDetail] = await Promise.all([
     fetchCases({
       limit: PAGE_SIZE,
-      offset,
+      cursor,
       search_name: trimmed || undefined,
     }),
-    offset === 0 && trimmed
+    cursor === null && trimmed
       ? fetchCase(trimmed).catch((error: unknown) => {
           if (error instanceof ApiError && error.status === 404) {
             return null;
@@ -72,6 +73,7 @@ async function loadCaseOptions(
   return {
     items,
     hasMore: listResult.has_more,
+    nextCursor: listResult.next_cursor,
   };
 }
 
@@ -102,7 +104,7 @@ export function CaseAttachPicker({
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [items, setItems] = useState<CaseSummary[]>([]);
-  const [offset, setOffset] = useState(0);
+  const [nextCursor, setNextCursor] = useState<CaseListCursor | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -120,13 +122,14 @@ export function CaseAttachPicker({
     let cancelled = false;
     setLoading(true);
     setError(null);
-    setOffset(0);
+    setNextCursor(null);
 
-    loadCaseOptions(debouncedQuery, 0)
+    loadCaseOptions(debouncedQuery, null)
       .then((page) => {
         if (!cancelled) {
           setItems(page.items);
           setHasMore(page.hasMore);
+          setNextCursor(page.nextCursor);
         }
       })
       .catch((err: unknown) => {
@@ -154,16 +157,15 @@ export function CaseAttachPicker({
   }, [debouncedQuery]);
 
   const handleLoadMore = useCallback(async () => {
-    if (loading || loadingMore || !hasMore) {
+    if (loading || loadingMore || !hasMore || !nextCursor) {
       return;
     }
-    const nextOffset = offset + PAGE_SIZE;
     setLoadingMore(true);
     setError(null);
     try {
-      const page = await loadCaseOptions(debouncedQuery, nextOffset);
+      const page = await loadCaseOptions(debouncedQuery, nextCursor);
       setItems((current) => mergeCaseItems(current, page.items));
-      setOffset(nextOffset);
+      setNextCursor(page.nextCursor);
       setHasMore(page.hasMore);
     } catch (err: unknown) {
       const message =
@@ -176,7 +178,7 @@ export function CaseAttachPicker({
     } finally {
       setLoadingMore(false);
     }
-  }, [debouncedQuery, hasMore, loading, loadingMore, offset]);
+  }, [debouncedQuery, hasMore, loading, loadingMore, nextCursor]);
 
   const attachEmptyState = resolveCaseAttachEmptyState(query);
 

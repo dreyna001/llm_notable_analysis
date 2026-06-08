@@ -12,6 +12,7 @@ import {
 } from "./responseSchemas";
 import type {
   CaseDetail,
+  CaseListCursor,
   CaseListResponse,
   ChatRequest,
   ChatResponse,
@@ -164,7 +165,7 @@ export async function fetchCapabilities(): Promise<PortalCapabilities> {
 
 export async function fetchCases(params?: {
   limit?: number;
-  offset?: number;
+  cursor?: CaseListCursor | null;
   start_date?: string;
   end_date?: string;
   verdict?: string;
@@ -172,7 +173,10 @@ export async function fetchCases(params?: {
 }): Promise<CaseListResponse> {
   const query = new URLSearchParams();
   if (params?.limit != null) query.set("limit", String(params.limit));
-  if (params?.offset != null) query.set("offset", String(params.offset));
+  if (params?.cursor) {
+    query.set("cursor_processed_at", params.cursor.processed_at);
+    query.set("cursor_case_id", params.cursor.case_id);
+  }
   if (params?.start_date) query.set("start_date", params.start_date);
   if (params?.end_date) query.set("end_date", params.end_date);
   if (params?.verdict) query.set("verdict", params.verdict);

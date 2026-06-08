@@ -137,7 +137,6 @@ class TestCaseIndex(unittest.TestCase):
                 processed_to=processed_to,
                 verdict="likely_malicious",
                 search_name_prefix=r"Power_%Shell",
-                offset=10,
             ),
             page_size=25,
         )
@@ -149,6 +148,7 @@ class TestCaseIndex(unittest.TestCase):
         self.assertIn("verdict = %s", sql)
         self.assertIn("search_name ILIKE %s", sql)
         self.assertIn("ORDER BY processed_at DESC, case_id ASC", sql)
+        self.assertNotIn("OFFSET", sql)
         self.assertEqual(
             params,
             (
@@ -157,7 +157,6 @@ class TestCaseIndex(unittest.TestCase):
                 "likely_malicious",
                 r"Power\_\%Shell%",
                 25,
-                10,
             ),
         )
 
@@ -169,7 +168,24 @@ class TestCaseIndex(unittest.TestCase):
         )
 
         self.assertIn("search_name ILIKE %s", sql)
-        self.assertEqual(params, ("%PowerShell%", 25, 0))
+        self.assertEqual(params, ("%PowerShell%", 25))
+
+    def test_build_list_cases_query_supports_cursor_pagination(self) -> None:
+        cursor_time = datetime(2026, 6, 4, tzinfo=timezone.utc)
+        sql, params = build_list_cases_query(
+            "notable_cases",
+            CaseListFilters(
+                cursor_processed_at=cursor_time,
+                cursor_case_id="case-1",
+            ),
+            page_size=25,
+        )
+
+        self.assertIn(
+            "(processed_at < %s OR (processed_at = %s AND case_id > %s))",
+            sql,
+        )
+        self.assertEqual(params, (cursor_time, cursor_time, "case-1", 25))
 
     def test_build_get_case_query_targets_one_case(self) -> None:
         sql = build_get_case_query("notable_cases")
@@ -196,7 +212,7 @@ class TestCaseIndex(unittest.TestCase):
             connection.executed[0],
             ("SELECT set_config('statement_timeout', %s, true)", ("2500ms",)),
         )
-        self.assertEqual(connection.executed[1][1], (100, 0))
+        self.assertEqual(connection.executed[1][1], (100,))
 
     def test_list_cases_can_fetch_extra_pagination_sentinel(self) -> None:
         config = Config(PORTAL_PAGE_SIZE=50)
@@ -211,7 +227,7 @@ class TestCaseIndex(unittest.TestCase):
         )
 
         self.assertEqual(len(results), 1)
-        self.assertEqual(connection.executed[1][1], (51, 0))
+        self.assertEqual(connection.executed[1][1], (51,))
 
     def test_get_case_maps_detail_row(self) -> None:
         config = Config()

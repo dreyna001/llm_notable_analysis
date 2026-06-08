@@ -155,7 +155,7 @@ export async function loadPortalFixture(
   }
   const caseDetail = (await detailResponse.json()) as CaseDetail;
 
-  const listResponse = await request.get("/api/cases?limit=50&offset=0");
+  const listResponse = await request.get("/api/cases?limit=50");
   if (!listResponse.ok()) {
     throw new Error(`case list HTTP ${listResponse.status()}`);
   }

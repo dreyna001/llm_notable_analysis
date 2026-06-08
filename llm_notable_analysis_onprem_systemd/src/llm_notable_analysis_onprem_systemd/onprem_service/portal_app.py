@@ -72,7 +72,6 @@ from .portal_api_models import (
 logger = logging.getLogger(__name__)
 
 _MAX_PAGE_SIZE = 100
-_MAX_LIST_OFFSET = 10_000
 _MAX_CASE_ID_LENGTH = 128
 _MAX_TRUSTED_USER_LENGTH = 256
 _PUBLIC_PATHS = frozenset({"/health", "/ready"})
@@ -355,7 +354,8 @@ def _detail_payload(record: CaseArchiveRecord) -> dict[str, Any]:
 def _parse_list_filters(
     *,
     limit: str | None,
-    offset: str | None,
+    cursor_processed_at: str | None,
+    cursor_case_id: str | None,
     start: str | None,
     end: str | None,
     start_date: str | None,
@@ -371,15 +371,24 @@ def _parse_list_filters(
         if parsed_limit < 1 or parsed_limit > _MAX_PAGE_SIZE:
             raise ValueError(f"limit must be between 1 and {_MAX_PAGE_SIZE}.")
 
-    parsed_offset = 0
-    if offset is not None:
-        if not str(offset).strip().isdigit():
-            raise ValueError("offset must be a non-negative integer.")
-        parsed_offset = int(offset)
-        if parsed_offset < 0:
-            raise ValueError("offset must be a non-negative integer.")
-        if parsed_offset > _MAX_LIST_OFFSET:
-            raise ValueError(f"offset must be at most {_MAX_LIST_OFFSET}.")
+    parsed_cursor_processed_at: datetime | None = None
+    parsed_cursor_case_id: str | None = None
+    if cursor_processed_at is not None or cursor_case_id is not None:
+        if cursor_processed_at is None or cursor_case_id is None:
+            raise ValueError(
+                "cursor_processed_at and cursor_case_id must be provided together."
+            )
+        parsed_cursor_processed_at = parse_iso8601_timestamp(
+            cursor_processed_at,
+            "cursor_processed_at",
+        )
+        parsed_cursor_case_id = str(cursor_case_id).strip()
+        if not parsed_cursor_case_id:
+            raise ValueError("cursor_case_id must be non-empty.")
+        if len(parsed_cursor_case_id) > _MAX_CASE_ID_LENGTH:
+            raise ValueError(
+                f"cursor_case_id must be at most {_MAX_CASE_ID_LENGTH} characters."
+            )
 
     if start is not None and start_date is not None:
         raise ValueError("Use either start or start_date, not both.")
@@ -424,8 +433,9 @@ def _parse_list_filters(
         processed_to=processed_to,
         verdict=normalized_verdict,
         search_name=normalized_search_name,
+        cursor_processed_at=parsed_cursor_processed_at,
+        cursor_case_id=parsed_cursor_case_id,
         limit=parsed_limit,
-        offset=parsed_offset,
     )
 
 
@@ -586,7 +596,8 @@ def build_portal_app(
     )
     def api_list_cases(
         limit: str | None = None,
-        offset: str | None = None,
+        cursor_processed_at: str | None = None,
+        cursor_case_id: str | None = None,
         start: str | None = None,
         end: str | None = None,
         start_date: str | None = None,
@@ -597,7 +608,8 @@ def build_portal_app(
         try:
             filters = _parse_list_filters(
                 limit=limit,
-                offset=offset,
+                cursor_processed_at=cursor_processed_at,
+                cursor_case_id=cursor_case_id,
                 start=start,
                 end=end,
                 start_date=start_date,
@@ -623,14 +635,21 @@ def build_portal_app(
                 log_message="Failed to list cases",
             )
         response_items = items[:page_size]
+        next_cursor = None
+        if len(items) > page_size and response_items:
+            last_item = response_items[-1]
+            next_cursor = {
+                "processed_at": _format_utc_timestamp(last_item.processed_at),
+                "case_id": last_item.case_id,
+            }
 
         return portal_response(
             CaseListResponse,
             {
                 "items": [_summary_item(item) for item in response_items],
                 "limit": page_size,
-                "offset": filters.offset,
                 "has_more": len(items) > page_size,
+                "next_cursor": next_cursor,
             },
         )
 

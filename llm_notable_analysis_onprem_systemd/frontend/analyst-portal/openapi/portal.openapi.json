@@ -105,6 +105,25 @@
         "title": "CaseDetailResponse",
         "type": "object"
       },
+      "CaseListCursorResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "processed_at": {
+            "title": "Processed At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "processed_at",
+          "case_id"
+        ],
+        "title": "CaseListCursorResponse",
+        "type": "object"
+      },
       "CaseListResponse": {
         "additionalProperties": false,
         "properties": {
@@ -123,15 +142,20 @@
             "title": "Limit",
             "type": "integer"
           },
-          "offset": {
-            "title": "Offset",
-            "type": "integer"
+          "next_cursor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CaseListCursorResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "items",
           "limit",
-          "offset",
           "has_more"
         ],
         "title": "CaseListResponse",
@@ -611,7 +635,7 @@
           },
           {
             "in": "query",
-            "name": "offset",
+            "name": "cursor_processed_at",
             "required": false,
             "schema": {
               "anyOf": [
@@ -622,7 +646,23 @@
                   "type": "null"
                 }
               ],
-              "title": "Offset"
+              "title": "Cursor Processed At"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor_case_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor Case Id"
             }
           },
           {

@@ -60,9 +60,9 @@ const {
 
     const fetchCases = vi.fn(async () => ({
       items: [],
-      limit: 50,
-      offset: 0,
-      has_more: false,
+        limit: 50,
+        has_more: false,
+        next_cursor: null,
     }));
     const fetchCase = vi.fn(async () => matchingCaseDetail);
 
@@ -102,9 +102,9 @@ describe("CasesPage", () => {
     fetchCases.mockReset();
     fetchCases.mockImplementation(async () => ({
       items: [],
-      limit: 50,
-      offset: 0,
-      has_more: false,
+        limit: 50,
+        has_more: false,
+        next_cursor: null,
     }));
   });
 

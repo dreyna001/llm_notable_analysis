@@ -634,11 +634,11 @@ portal cannot serve case data.
 Query params:
 
 - `limit`: optional integer, default `PORTAL_PAGE_SIZE`, max `100`.
-- `offset`: optional integer, default `0`.
+- `cursor_processed_at`, `cursor_case_id`: optional cursor pair for the next page; both are required when either is present.
 - `start`: optional ISO-8601 timestamp filter on `processed_at`.
 - `end`: optional ISO-8601 timestamp filter on `processed_at`.
 - `verdict`: optional exact filter.
-- `search_name`: optional exact filter.
+- `search_name`: optional partial alert-name filter.
 
 Response `200`:
 
@@ -657,8 +657,8 @@ Response `200`:
     }
   ],
   "limit": 50,
-  "offset": 0,
-  "has_more": false
+  "has_more": false,
+  "next_cursor": null
 }
 ```
 
