@@ -11,7 +11,10 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { postChat } from "../api/client";
 import type { ChatMode, ChatResponse } from "../types";
-import { formatApiError } from "../utils/formatApiError";
+import {
+  formatChatApiError,
+  isChatSessionScopeMismatch,
+} from "../utils/formatApiError";
 import { sanitizeChatAnswer } from "../utils/sanitizeChatAnswer";
 import { MarkdownMessage } from "./MarkdownMessage";
 import { ChatTypingIndicator } from "./StreamingAssistantMessage";
@@ -285,7 +288,10 @@ export function ChatPanel({
       }
       setTurns((value) => value.filter((turn) => turn.id !== turnId));
       setQuestion(trimmed);
-      setError(formatApiError(err, "Unknown error"));
+      if (isChatSessionScopeMismatch(err)) {
+        setSessionId(null);
+      }
+      setError(formatChatApiError(err, "Unknown error"));
     } finally {
       if (chatAbortRef.current === abortController) {
         chatAbortRef.current = null;

@@ -44,6 +44,7 @@ import {
   findUnusedSession,
   isUnusedSession,
   loadChatSessionStore,
+  resolveSyncedServerSessionId,
   saveChatSessionStore,
   sessionTitleFromQuestion,
   detachActiveCase,
@@ -323,6 +324,7 @@ export function HomeChatWorkspace({
   const panelResetKey = [
     activeSession?.localId ?? "",
     activeSession?.serverSessionId ?? "",
+    activeMode,
     effectiveSelectedCaseId ?? "none",
     loadingSessionId === activeSession?.localId ? "loading" : "ready",
   ].join(":");
@@ -784,10 +786,14 @@ export function HomeChatWorkspace({
           : active.title === "New chat" && firstQuestion
             ? sessionTitleFromQuestion(firstQuestion)
             : active.title;
-        const serverSessionId =
-          state.mode === active.mode
-            ? state.sessionId ?? active.serverSessionId
-            : active.serverSessionId;
+        const selectedCaseForPanel =
+          state.mode === "selected_case" ? effectiveSelectedCaseId : undefined;
+        const serverSessionId = resolveSyncedServerSessionId(
+          active,
+          state.mode,
+          state.sessionId,
+          selectedCaseForPanel,
+        );
         const next: ChatSessionStore = {
           ...current,
           sessions: current.sessions.map((session) =>
@@ -796,6 +802,8 @@ export function HomeChatWorkspace({
                   ...session,
                   title,
                   updatedAt: new Date().toISOString(),
+                  mode: state.mode,
+                  selectedCaseId: selectedCaseForPanel,
                   serverSessionId,
                   turns: storedTurns,
                 }
@@ -807,7 +815,7 @@ export function HomeChatWorkspace({
         return capped;
       });
     },
-    [maxChatSessions],
+    [effectiveSelectedCaseId, maxChatSessions],
   );
 
   const handlePanelStateChange = useCallback(

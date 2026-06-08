@@ -3,6 +3,8 @@ import {
   capChatSessionStoreWithMeta,
   createEmptySession,
   detachActiveCase,
+  resolveSyncedServerSessionId,
+  switchToChatContext,
   type ChatSessionStore,
 } from "./chatSessionStore";
 
@@ -45,6 +47,62 @@ describe("detachActiveCase", () => {
     expect(next.sessions.find((session) => session.localId === other.localId)?.selectedCaseId).toBe(
       "other-case",
     );
+  });
+});
+
+describe("resolveSyncedServerSessionId", () => {
+  it("drops the server session link when panel mode no longer matches", () => {
+    const session = createEmptySession("selected_case", "case-a");
+    session.serverSessionId = "server-1";
+
+    expect(
+      resolveSyncedServerSessionId(session, "global_archive", "server-1"),
+    ).toBeNull();
+  });
+
+  it("drops the server session link when the attached case changes", () => {
+    const session = createEmptySession("selected_case", "case-a");
+    session.serverSessionId = "server-1";
+
+    expect(
+      resolveSyncedServerSessionId(
+        session,
+        "selected_case",
+        "server-1",
+        "case-b",
+      ),
+    ).toBeNull();
+  });
+
+  it("keeps the server session link when panel context still matches", () => {
+    const session = createEmptySession("selected_case", "case-a");
+    session.serverSessionId = "server-1";
+
+    expect(
+      resolveSyncedServerSessionId(
+        session,
+        "selected_case",
+        "server-1",
+        "case-a",
+      ),
+    ).toBe("server-1");
+  });
+});
+
+describe("switchToChatContext", () => {
+  it("clears server linkage when an unused session changes context", () => {
+    const active = createEmptySession("selected_case", "case-a");
+    active.serverSessionId = "server-1";
+    const store: ChatSessionStore = {
+      activeLocalId: active.localId,
+      sessions: [active],
+    };
+
+    const next = switchToChatContext(store, "global_archive");
+    const updated = next.sessions.find((session) => session.localId === active.localId);
+
+    expect(updated?.mode).toBe("global_archive");
+    expect(updated?.serverSessionId).toBeNull();
   });
 });
 

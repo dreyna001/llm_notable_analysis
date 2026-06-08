@@ -217,7 +217,7 @@ export function findUnusedSession(
   return sessions.find(isUnusedSession);
 }
 
-function sessionMatchesContext(
+export function sessionMatchesContext(
   session: StoredChatSession,
   mode: ChatMode,
   selectedCaseId?: string,
@@ -229,6 +229,20 @@ function sessionMatchesContext(
     return session.selectedCaseId === selectedCaseId;
   }
   return session.selectedCaseId == null;
+}
+
+/** Keep the server session link only when panel context still matches the stored session. */
+export function resolveSyncedServerSessionId(
+  session: StoredChatSession,
+  panelMode: ChatMode,
+  panelSessionId: string | null,
+  selectedCaseId?: string,
+): string | null {
+  const contextCaseId = panelMode === "selected_case" ? selectedCaseId : undefined;
+  if (!sessionMatchesContext(session, panelMode, contextCaseId)) {
+    return null;
+  }
+  return panelSessionId ?? session.serverSessionId;
 }
 
 function applyContextToSession(
@@ -289,12 +303,15 @@ export function switchToChatContext(
     return store;
   }
 
-  if (isUnusedSession(active) && !active.serverSessionId) {
+  if (isUnusedSession(active)) {
     return {
       ...store,
       sessions: store.sessions.map((session) =>
         session.localId === active.localId
-          ? applyContextToSession(session, mode, selectedCaseId)
+          ? {
+              ...applyContextToSession(session, mode, selectedCaseId),
+              serverSessionId: null,
+            }
           : session,
       ),
     };
