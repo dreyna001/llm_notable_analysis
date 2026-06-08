@@ -19,6 +19,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "../components/EmptyState";
+import { CasesTableSkeleton } from "../components/LoadingSkeletons";
 import { ApiError, fetchCase, fetchCases } from "../api/client";
 import type { CaseSummary } from "../types";
 import { caseDetailToSummary } from "../utils/caseSummary";
@@ -28,6 +30,7 @@ import {
   normalizeUtcFilterDate,
   processedAtMatchesUtcDateRange,
 } from "../utils/utcDateFilter";
+import { resolveCasesEmptyState } from "../utils/casesEmptyState";
 import { normalizeVerdict, verdictLabel } from "../utils/verdict";
 
 type CaseFilters = {
@@ -269,6 +272,20 @@ export function CasesPage() {
     setOffset(0);
   }
 
+  function clearCaseIdFilter() {
+    setDraftFilters((current) => ({ ...current, case_id: "" }));
+    setFilters((current) => ({ ...current, case_id: "" }));
+    setOffset(0);
+  }
+
+  const casesEmptyState = resolveCasesEmptyState(filters);
+  const casesEmptyAction =
+    casesEmptyState.action === "clear_filters"
+      ? { label: "Clear filters", onClick: clearFilters }
+      : casesEmptyState.action === "clear_case_id"
+        ? { label: "Clear case ID", onClick: clearCaseIdFilter }
+        : undefined;
+
   return (
     <section className="space-y-6">
       <div>
@@ -290,11 +307,7 @@ export function CasesPage() {
             className="border-b border-border/60 pb-4"
             onSubmit={applyFilters}
           >
-            <p className="w-full text-xs text-muted-foreground">
-              Start and end dates filter by UTC calendar day, matching stored
-              processed_at timestamps.
-            </p>
-            <div className="flex flex-wrap items-end gap-4">
+            <div className="flex flex-wrap items-start gap-4">
               <DateFilterField
                 id="filter-start"
                 label="Start (UTC)"
@@ -358,6 +371,10 @@ export function CasesPage() {
                     }))
                   }
                 />
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  Exact lookup for one case ID. Verdict and date filters still
+                  apply.
+                </p>
               </div>
               <div className="min-w-[12rem] flex-1">
                 <Label className="mb-1.5 block" htmlFor="filter-search">
@@ -376,8 +393,11 @@ export function CasesPage() {
                     }))
                   }
                 />
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  Partial name search only. This does not look up cases by ID.
+                </p>
               </div>
-              <div className="flex shrink-0 items-center gap-2 pb-0.5">
+              <div className="flex shrink-0 items-center gap-2 self-end pb-0.5">
                 <Button disabled={loading} type="submit">
                   Apply filters
                 </Button>
@@ -393,12 +413,14 @@ export function CasesPage() {
             </div>
           </form>
 
-          {loading ? (
-            <p className="text-sm text-muted-foreground">Loading cases...</p>
-          ) : null}
+          {loading ? <CasesTableSkeleton /> : null}
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
           {!loading && !error && items.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No cases found.</p>
+            <EmptyState
+              action={casesEmptyAction}
+              description={casesEmptyState.description}
+              title={casesEmptyState.title}
+            />
           ) : null}
 
           {!loading && items.length > 0 ? (

@@ -31,6 +31,7 @@ import {
   type OrphanedChatResponse,
 } from "./ChatPanel";
 import { CaseArchiveNoticeBanner } from "./CaseArchiveNoticeBanner";
+import { PortalWorkspaceSkeleton } from "./LoadingSkeletons";
 import { PortalCapabilityBanner } from "./PortalCapabilityBanner";
 import { PortalLoadFailure } from "./PortalLoadFailure";
 import { PortalSidebar } from "./PortalSidebar";
@@ -975,9 +976,7 @@ export function HomeChatWorkspace({
   );
 
   const mainContent = !capabilitiesLoaded ? (
-    <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-sm text-muted-foreground">
-      Checking portal capabilities...
-    </div>
+    <PortalWorkspaceSkeleton />
   ) : blockingLoadError ? (
     <PortalLoadFailure message={blockingLoadError} />
   ) : (

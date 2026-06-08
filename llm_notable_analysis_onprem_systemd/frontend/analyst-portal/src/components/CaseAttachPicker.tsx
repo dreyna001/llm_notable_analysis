@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { CaseAttachListSkeleton } from "./LoadingSkeletons";
+import { EmptyState } from "./EmptyState";
 import { ApiError, fetchCase, fetchCases } from "../api/client";
+import { resolveCaseAttachEmptyState } from "../utils/caseAttachEmptyState";
 import type { CaseSummary } from "../types";
 import { caseDetailToSummary } from "../utils/caseSummary";
 
@@ -176,6 +178,8 @@ export function CaseAttachPicker({
     }
   }, [debouncedQuery, hasMore, loading, loadingMore, offset]);
 
+  const attachEmptyState = resolveCaseAttachEmptyState(query);
+
   return (
     <div className="space-y-1.5">
       <Label className="text-xs text-muted-foreground" htmlFor="attach-case-search">
@@ -191,19 +195,19 @@ export function CaseAttachPicker({
         onChange={(event) => setQuery(event.target.value)}
       />
       <div className="chat-scrollbar max-h-44 space-y-0.5 overflow-y-auto rounded-lg bg-transparent py-1">
-        {loading ? (
-          <p className="px-2 py-2 text-xs text-muted-foreground">Loading cases...</p>
-        ) : null}
+        {loading ? <CaseAttachListSkeleton /> : null}
         {error ? (
           <p className="px-2 py-2 text-xs text-destructive">{error}</p>
         ) : null}
         {!loading && !error && items.length === 0 ? (
-          <p className="px-2 py-2 text-xs text-muted-foreground">
-            No cases found.{" "}
-            <Link className="underline hover:text-foreground" to="/cases">
-              Browse all cases
-            </Link>
-          </p>
+          <div className="px-1 py-1">
+            <EmptyState
+              action={{ label: "Browse all cases", to: "/cases" }}
+              description={attachEmptyState.description}
+              size="sm"
+              title={attachEmptyState.title}
+            />
+          </div>
         ) : null}
         {!loading && !error
           ? items.map((item) => (

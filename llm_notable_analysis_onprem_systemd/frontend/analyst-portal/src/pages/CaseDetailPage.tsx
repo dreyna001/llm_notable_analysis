@@ -41,6 +41,7 @@ import {
   ttpScoreBadgeVariant,
 } from "../components/case-detail/CaseDetailUi";
 import { CaseArchiveNoticeBanner } from "../components/CaseArchiveNoticeBanner";
+import { CaseDetailMetricsSkeleton } from "../components/LoadingSkeletons";
 import { ApiError, fetchCase } from "../api/client";
 import type { CaseDetail } from "../types";
 import {
@@ -670,7 +671,7 @@ export function CaseDetailPage() {
         ]}
       />
 
-      {loading ? <DetailMuted>Loading case...</DetailMuted> : null}
+      {loading ? <CaseDetailMetricsSkeleton /> : null}
       {error ? <DetailError>{error}</DetailError> : null}
 
       {detail?.metadata.archive_notices?.length ? (

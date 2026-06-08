@@ -15,7 +15,9 @@ import {
   formatChatApiError,
   isChatSessionScopeMismatch,
 } from "../utils/formatApiError";
+import { resolveChatEmptyState } from "../utils/chatEmptyState";
 import { sanitizeChatAnswer } from "../utils/sanitizeChatAnswer";
+import { ChatConversationSkeleton } from "./LoadingSkeletons";
 import { MarkdownMessage } from "./MarkdownMessage";
 import { ChatTypingIndicator } from "./StreamingAssistantMessage";
 
@@ -299,6 +301,7 @@ export function ChatPanel({
 
   const hasSelectedCase = Boolean(selectedCaseId);
   const showEmptyState = !loadingHistory && !turns.length;
+  const chatEmptyState = resolveChatEmptyState(mode, selectedCaseId);
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
@@ -312,19 +315,14 @@ export function ChatPanel({
             showEmptyState && "min-h-full justify-center",
           )}
         >
-          {loadingHistory ? (
-            <p className="text-center text-sm text-muted-foreground">
-              Loading conversation...
-            </p>
-          ) : null}
+          {loadingHistory ? <ChatConversationSkeleton /> : null}
           {showEmptyState ? (
             <div className="text-center">
               <h2 className="text-lg font-medium tracking-tight">
-                How can I help?
+                {chatEmptyState.title}
               </h2>
               <p className="mt-2 text-sm text-muted-foreground">
-                Ask about retained cases, the knowledge base, or any technology
-                topic.
+                {chatEmptyState.description}
               </p>
             </div>
           ) : null}

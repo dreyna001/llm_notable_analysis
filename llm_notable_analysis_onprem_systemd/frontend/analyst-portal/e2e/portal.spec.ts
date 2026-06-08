@@ -27,7 +27,7 @@ async function gotoHomeWithCase(
   caseId: string,
 ) {
   await page.goto(`/?case_id=${encodeURIComponent(caseId)}`);
-  await expect(page.getByText(/Checking portal capabilities/)).toBeHidden({
+  await expect(page.getByLabel("Checking portal capabilities")).toBeHidden({
     timeout: 30_000,
   });
 }
@@ -76,7 +76,7 @@ test.describe("Analyst portal E2E", () => {
 
   test("lists the sample case with API-aligned summary data", async ({ page }) => {
     await page.goto("/cases");
-    await expect(page.getByText("Loading cases...")).toBeHidden();
+    await expect(page.getByLabel("Loading cases")).toBeHidden();
 
     const row = caseRow(page);
     await expect(row).toBeVisible();
@@ -103,7 +103,7 @@ test.describe("Analyst portal E2E", () => {
         : null;
 
     await page.goto("/cases");
-    await expect(page.getByText("Loading cases...")).toBeHidden();
+    await expect(page.getByLabel("Loading cases")).toBeHidden();
 
     await page.getByLabel("Alert name").fill(searchTerm.slice(0, Math.max(4, searchTerm.length - 2)));
     await page.waitForTimeout(350);
@@ -113,7 +113,7 @@ test.describe("Analyst portal E2E", () => {
       await page.getByRole("combobox", { name: "Verdict" }).click();
       await page.getByRole("option", { name: verdictFilter }).click();
       await page.getByRole("button", { name: "Apply filters" }).click();
-      await expect(page.getByText("Loading cases...")).toBeHidden();
+      await expect(page.getByLabel("Loading cases")).toBeHidden();
       await expect(caseRow(page)).toBeVisible();
     }
 
@@ -127,7 +127,7 @@ test.describe("Analyst portal E2E", () => {
     const summary = reconciliationSummary(fixture.caseDetail);
 
     await page.goto(`/cases/${encodeURIComponent(env.caseId)}`);
-    await expect(page.getByText("Loading case...")).toBeHidden();
+    await expect(page.getByLabel("Loading case details")).toBeHidden();
 
     await expect(
       page.getByText(env.caseId, { exact: true }).first(),
@@ -176,7 +176,7 @@ test.describe("Analyst portal E2E", () => {
     const name = alertName(fixture.caseDetail);
 
     await page.goto(`/cases/${encodeURIComponent(env.caseId)}`);
-    await expect(page.getByText("Loading case...")).toBeHidden();
+    await expect(page.getByLabel("Loading case details")).toBeHidden();
 
     const assistantLink = page.getByRole("link", {
       name: /Ask Assistant about this case/,
@@ -203,7 +203,7 @@ test.describe("Analyst portal E2E", () => {
     await expect(page.getByText(/404:|not found|Missing case/i)).toBeVisible();
 
     await page.goto(`/?case_id=${encodeURIComponent(missingId)}`);
-    await expect(page.getByText(/Checking portal capabilities/)).toBeHidden({
+    await expect(page.getByLabel("Checking portal capabilities")).toBeHidden({
       timeout: 30_000,
     });
     await expect(page.getByRole("status")).toContainText(
@@ -225,7 +225,7 @@ test.describe("Analyst portal E2E", () => {
 
     await gotoHomeWithCase(page, env.caseId);
     await expectSelectedCaseAttached(page, env.caseId);
-    await expect(page.getByText("Loading case details...")).toBeHidden();
+    await expect(page.getByLabel("Loading case details")).toBeHidden();
 
     const composer = page.getByPlaceholder(/Ask about/i);
     await expect(composer).toBeEnabled();

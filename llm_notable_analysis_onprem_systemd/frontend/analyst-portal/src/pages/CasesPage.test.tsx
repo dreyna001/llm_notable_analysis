@@ -129,6 +129,22 @@ describe("CasesPage", () => {
     expect(fetchCase).not.toHaveBeenCalled();
   });
 
+  it("shows filter-specific empty-state guidance when no cases match", async () => {
+    renderCasesPage();
+    await waitFor(() => expect(fetchCases).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("Alert name"), {
+      target: { value: "missing-alert" },
+    });
+    await flushSearchDebounce();
+    await waitFor(() => expect(fetchCases).toHaveBeenCalledTimes(2));
+
+    expect(screen.getByText("No cases match these filters")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Clear filters" }),
+    ).toBeInTheDocument();
+  });
+
   it("uses the case-id field for exact case lookup", async () => {
     renderCasesPage();
     await waitFor(() => expect(fetchCases).toHaveBeenCalledTimes(1));

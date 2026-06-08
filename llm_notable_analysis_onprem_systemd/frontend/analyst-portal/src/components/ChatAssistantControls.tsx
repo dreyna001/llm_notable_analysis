@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { CaseSummary, ChatMode } from "../types";
+import { CaseAttachMetaSkeleton } from "./LoadingSkeletons";
 import { CaseAttachPicker } from "./CaseAttachPicker";
 
 const MODE_LABELS: Record<ChatMode, string> = {
@@ -85,7 +86,7 @@ export function ChatAssistantControls({
               </div>
               <div className="mt-1 text-xs text-muted-foreground">
                 {selectedCaseLoading ? (
-                  "Loading case details..."
+                  <CaseAttachMetaSkeleton />
                 ) : (
                   <>
                     <Link

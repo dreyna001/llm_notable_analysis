@@ -2,6 +2,7 @@ import { ChevronDown, MessageSquarePlus, Trash2 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "./EmptyState";
 import type { StoredChatSession } from "../utils/chatSessionStore";
 import { PortalNavHeader } from "./PortalNavSidebar";
 
@@ -25,6 +26,12 @@ export function PortalSidebar({
   assistantControls,
 }: PortalSidebarProps) {
   const [chatsExpanded, setChatsExpanded] = useState(true);
+  const hasSavedChats = sessions.some(
+    (session) =>
+      session.turns.length > 0 ||
+      session.serverSessionId ||
+      session.title !== "New chat",
+  );
 
   return (
     <aside
@@ -64,6 +71,15 @@ export function PortalSidebar({
 
           {chatsExpanded ? (
             <div className="mt-1 space-y-0.5">
+              {!hasSavedChats ? (
+                <div className="px-1 py-1">
+                  <EmptyState
+                    description="Ask a question to start a new investigation thread."
+                    size="sm"
+                    title="No saved chats yet"
+                  />
+                </div>
+              ) : null}
               {sessions.map((session) => (
                 <div className="group flex items-center gap-0.5" key={session.localId}>
                   <button
