@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError, fetchChatSessions } from "../api/client";
 import type { PortalCapabilities } from "../types";
 import { HomeChatWorkspace } from "./HomeChatWorkspace";
 
@@ -103,5 +104,34 @@ describe("HomeChatWorkspace attached case", () => {
       serverSessionId: null,
     });
     expect(stored.sessions[0]).not.toHaveProperty("selectedCaseId");
+  });
+});
+
+describe("HomeChatWorkspace server chat sessions", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.clearAllMocks();
+  });
+
+  it("shows a banner when the initial server session list cannot be loaded", async () => {
+    vi.mocked(fetchChatSessions).mockRejectedValueOnce(
+      new ApiError(503, "unavailable"),
+    );
+
+    render(
+      <MemoryRouter>
+        <HomeChatWorkspace
+          sidebarMeta={<div>Case window</div>}
+          selectedCaseId="portal-test-1780770539"
+          selectedCaseName="Portal E2E Test"
+        />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByText(
+        "Could not load server chat sessions. 503: unavailable. Showing local chats only.",
+      ),
+    ).toBeInTheDocument();
   });
 });

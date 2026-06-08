@@ -384,7 +384,11 @@ export function HomeChatWorkspace({
     let cancelled = false;
     fetchChatSessions()
       .then((payload) => {
-        if (cancelled || !payload.history_enabled || !payload.items.length) {
+        if (cancelled) {
+          return;
+        }
+        setHistoryLoadError(null);
+        if (!payload.history_enabled || !payload.items.length) {
           return;
         }
         setStore((current) => {
@@ -397,8 +401,13 @@ export function HomeChatWorkspace({
           return merged;
         });
       })
-      .catch(() => {
-        // Local chat history remains available when server history is disabled.
+      .catch((err: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        setHistoryLoadError(
+          `Could not load server chat sessions. ${formatWorkspaceError(err, "Unknown error")}. Showing local chats only.`,
+        );
       });
     return () => {
       cancelled = true;
