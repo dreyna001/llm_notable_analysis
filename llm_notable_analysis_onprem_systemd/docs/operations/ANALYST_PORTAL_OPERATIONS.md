@@ -197,6 +197,15 @@ The shipped analyst UI is a React SPA served by nginx. Authenticated JSON routes
 | `/api/capabilities` | GET | Portal feature flags, limits, retention window |
 | `/api/cases` | GET | Paginated case list |
 | `/api/cases/{case_id}` | GET | Case detail |
+
+`GET /api/cases` optional query parameters:
+
+- `limit`, `offset` — pagination
+- `start_date`, `end_date` — inclusive UTC calendar days (`YYYY-MM-DD`) applied to `processed_at`
+- `start`, `end` — legacy inclusive ISO-8601 UTC instants (prefer `start_date` / `end_date`)
+- `verdict`, `search_name` — summary filters
+
+The analyst UI sends `start_date` / `end_date` only. Date filters use UTC calendar days end-to-end so list results match stored `processed_at` timestamps without browser timezone conversion.
 | `/api/chat` | POST | Case Q&A synthesis |
 | `/api/chat/sessions` | GET | List saved chat sessions when history enabled |
 | `/api/chat/sessions/{id}/messages` | GET | Load session transcript |

@@ -9,9 +9,10 @@ import asyncio
 import contextvars
 import ipaddress
 import logging
+import re
 import secrets
 import threading
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
 from typing import Any
 from urllib.parse import urlparse
 
@@ -152,6 +153,28 @@ def _same_origin_request(request: Any) -> bool:
     return True
 
 
+_UTC_CALENDAR_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def parse_utc_calendar_date(value: str, field_name: str) -> date:
+    """Parse a YYYY-MM-DD query parameter as a UTC calendar date."""
+    text = str(value or "").strip()
+    if not _UTC_CALENDAR_DATE_RE.match(text):
+        raise ValueError(f"{field_name} must be a YYYY-MM-DD UTC calendar date.")
+    try:
+        return date.fromisoformat(text)
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must be a valid YYYY-MM-DD date.") from exc
+
+
+def utc_day_start(value: date) -> datetime:
+    return datetime.combine(value, time.min, tzinfo=timezone.utc)
+
+
+def utc_day_end(value: date) -> datetime:
+    return datetime.combine(value, time(23, 59, 59, 999999), tzinfo=timezone.utc)
+
+
 def parse_iso8601_timestamp(value: str, field_name: str) -> datetime:
     """Parse an ISO-8601 timestamp query parameter."""
     text = str(value or "").strip()
@@ -254,6 +277,8 @@ def _parse_list_filters(
     offset: str | None,
     start: str | None,
     end: str | None,
+    start_date: str | None,
+    end_date: str | None,
     verdict: str | None,
     search_name: str | None,
 ) -> CaseListFilters:
@@ -275,10 +300,27 @@ def _parse_list_filters(
         if parsed_offset > _MAX_LIST_OFFSET:
             raise ValueError(f"offset must be at most {_MAX_LIST_OFFSET}.")
 
-    processed_from = (
-        parse_iso8601_timestamp(start, "start") if start is not None else None
-    )
-    processed_to = parse_iso8601_timestamp(end, "end") if end is not None else None
+    if start is not None and start_date is not None:
+        raise ValueError("Use either start or start_date, not both.")
+    if end is not None and end_date is not None:
+        raise ValueError("Use either end or end_date, not both.")
+
+    processed_from: datetime | None
+    processed_to: datetime | None
+    if start_date is not None:
+        processed_from = utc_day_start(parse_utc_calendar_date(start_date, "start_date"))
+    elif start is not None:
+        processed_from = parse_iso8601_timestamp(start, "start")
+    else:
+        processed_from = None
+
+    if end_date is not None:
+        processed_to = utc_day_end(parse_utc_calendar_date(end_date, "end_date"))
+    elif end is not None:
+        processed_to = parse_iso8601_timestamp(end, "end")
+    else:
+        processed_to = None
+
     if (
         processed_from is not None
         and processed_to is not None
@@ -459,6 +501,8 @@ def build_portal_app(
         offset: str | None = None,
         start: str | None = None,
         end: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
         verdict: str | None = None,
         search_name: str | None = None,
     ) -> dict[str, Any]:
@@ -468,6 +512,8 @@ def build_portal_app(
                 offset=offset,
                 start=start,
                 end=end,
+                start_date=start_date,
+                end_date=end_date,
                 verdict=verdict,
                 search_name=search_name,
             )

@@ -23,18 +23,22 @@ import { ApiError, fetchCase, fetchCases } from "../api/client";
 import type { CaseSummary } from "../types";
 import { caseDetailToSummary } from "../utils/caseSummary";
 import { retrievalStatusLabel } from "../utils/retrievalStatus";
+import {
+  normalizeUtcFilterDate,
+  processedAtMatchesUtcDateRange,
+} from "../utils/utcDateFilter";
 import { normalizeVerdict, verdictLabel } from "../utils/verdict";
 
 type CaseFilters = {
-  start: string;
-  end: string;
+  start_date: string;
+  end_date: string;
   verdict: string;
   search_name: string;
 };
 
 const EMPTY_FILTERS: CaseFilters = {
-  start: "",
-  end: "",
+  start_date: "",
+  end_date: "",
   verdict: "",
   search_name: "",
 };
@@ -84,46 +88,11 @@ function exactCaseMatchesFilters(
   if (filters.verdict && normalizeVerdict(item.verdict) !== filters.verdict) {
     return false;
   }
-  if (filters.start && (!item.processed_at || item.processed_at < filters.start)) {
-    return false;
-  }
-  if (filters.end && (!item.processed_at || item.processed_at > filters.end)) {
-    return false;
-  }
-  return true;
-}
-
-function filterDateValue(value: string): string {
-  return value.split("T")[0] ?? "";
-}
-
-function localDateToIso(value: string, endOfDay = false): string {
-  const date = filterDateValue(value);
-  if (!date) {
-    return "";
-  }
-  const [year, month, day] = date.split("-").map(Number);
-  if (!year || !month || !day) {
-    return "";
-  }
-  const local = new Date(
-    year,
-    month - 1,
-    day,
-    endOfDay ? 23 : 0,
-    endOfDay ? 59 : 0,
-    endOfDay ? 59 : 0,
-    endOfDay ? 999 : 0,
+  return processedAtMatchesUtcDateRange(
+    item.processed_at,
+    filters.start_date,
+    filters.end_date,
   );
-  return local.toISOString();
-}
-
-function formatFilterStart(value: string): string {
-  return localDateToIso(value);
-}
-
-function formatFilterEnd(value: string): string {
-  return localDateToIso(value, true);
 }
 
 function openNativeDatePicker(event: MouseEvent<HTMLInputElement>) {
@@ -163,7 +132,7 @@ function DateFilterField({ id, label, value, onChange }: DateFilterFieldProps) {
         className={dateInputClassName}
         id={id}
         type="date"
-        value={filterDateValue(value)}
+        value={normalizeUtcFilterDate(value)}
         onChange={(event) => onChange(event.target.value)}
         onClick={openNativeDatePicker}
       />
@@ -211,8 +180,8 @@ export function CasesPage() {
       fetchCases({
         limit,
         offset,
-        start: filters.start || undefined,
-        end: filters.end || undefined,
+        start_date: filters.start_date || undefined,
+        end_date: filters.end_date || undefined,
         verdict: filters.verdict || undefined,
         search_name: searchTerm || undefined,
       }),
@@ -261,8 +230,8 @@ export function CasesPage() {
     event.preventDefault();
     setOffset(0);
     setFilters((previous) => ({
-      start: formatFilterStart(draftFilters.start),
-      end: formatFilterEnd(draftFilters.end),
+      start_date: normalizeUtcFilterDate(draftFilters.start_date),
+      end_date: normalizeUtcFilterDate(draftFilters.end_date),
       verdict: draftFilters.verdict.trim(),
       search_name: previous.search_name,
     }));
@@ -295,26 +264,30 @@ export function CasesPage() {
             className="border-b border-border/60 pb-4"
             onSubmit={applyFilters}
           >
+            <p className="w-full text-xs text-muted-foreground">
+              Start and end dates filter by UTC calendar day, matching stored
+              processed_at timestamps.
+            </p>
             <div className="flex flex-wrap items-end gap-4">
               <DateFilterField
                 id="filter-start"
-                label="Start"
-                value={draftFilters.start}
-                onChange={(start) =>
+                label="Start (UTC)"
+                value={draftFilters.start_date}
+                onChange={(start_date) =>
                   setDraftFilters((value) => ({
                     ...value,
-                    start,
+                    start_date,
                   }))
                 }
               />
               <DateFilterField
                 id="filter-end"
-                label="End"
-                value={draftFilters.end}
-                onChange={(end) =>
+                label="End (UTC)"
+                value={draftFilters.end_date}
+                onChange={(end_date) =>
                   setDraftFilters((value) => ({
                     ...value,
-                    end,
+                    end_date,
                   }))
                 }
               />

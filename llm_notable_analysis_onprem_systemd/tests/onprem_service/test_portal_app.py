@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import inspect
 import json
 import threading
@@ -15,9 +15,13 @@ from llm_notable_analysis_onprem_systemd.onprem_service.case_store import (
 )
 from llm_notable_analysis_onprem_systemd.onprem_service.config import Config
 from llm_notable_analysis_onprem_systemd.onprem_service.portal_app import (
+    _parse_list_filters,
     build_portal_app,
     check_case_archive_ready,
     parse_iso8601_timestamp,
+    parse_utc_calendar_date,
+    utc_day_end,
+    utc_day_start,
 )
 
 _USER_HEADERS = {"X-Forwarded-User": "analyst@example.com"}
@@ -179,6 +183,80 @@ class TestPortalApp(unittest.TestCase):
     def test_parse_iso8601_timestamp_accepts_zulu_suffix(self) -> None:
         parsed = parse_iso8601_timestamp("2026-06-04T00:00:00Z", "start")
         self.assertEqual(parsed, datetime(2026, 6, 4, tzinfo=timezone.utc))
+
+    def test_parse_utc_calendar_date_accepts_yyyy_mm_dd(self) -> None:
+        parsed = parse_utc_calendar_date("2026-06-04", "start_date")
+        self.assertEqual(parsed, date(2026, 6, 4))
+
+    def test_parse_list_filters_maps_utc_calendar_dates_to_day_bounds(self) -> None:
+        filters = _parse_list_filters(
+            limit=None,
+            offset=None,
+            start=None,
+            end=None,
+            start_date="2026-06-01",
+            end_date="2026-06-04",
+            verdict=None,
+            search_name=None,
+        )
+        self.assertEqual(
+            filters.processed_from,
+            utc_day_start(date(2026, 6, 1)),
+        )
+        self.assertEqual(
+            filters.processed_to,
+            utc_day_end(date(2026, 6, 4)),
+        )
+
+    def test_parse_list_filters_rejects_mixed_date_parameters(self) -> None:
+        with self.assertRaisesRegex(ValueError, "start_date"):
+            _parse_list_filters(
+                limit=None,
+                offset=None,
+                start="2026-06-01T00:00:00Z",
+                end=None,
+                start_date="2026-06-01",
+                end_date=None,
+                verdict=None,
+                search_name=None,
+            )
+
+    def test_api_cases_accepts_utc_calendar_date_filters(self) -> None:
+        connections: list[_FakeConnection] = []
+
+        def connect(_dsn):
+            connection = _FakeConnection(rows=[_summary_row(_record(self._config()))])
+            connections.append(connection)
+            return connection
+
+        client = TestClient(
+            build_portal_app(
+                self._config(),
+                connect=connect,
+            )
+        )
+
+        response = client.get(
+            "/api/cases",
+            params={"start_date": "2026-06-04", "end_date": "2026-06-04"},
+            headers=_AUTH_HEADERS,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        list_queries = [
+            params
+            for sql, params in connections[0].executed
+            if "processed_at >=" in sql
+        ]
+        self.assertEqual(len(list_queries), 1)
+        self.assertEqual(
+            list_queries[0][0],
+            datetime(2026, 6, 4, tzinfo=timezone.utc),
+        )
+        self.assertEqual(
+            list_queries[0][1],
+            utc_day_end(date(2026, 6, 4)),
+        )
 
     def test_check_case_archive_ready_requires_read_access(self) -> None:
         ready = check_case_archive_ready(

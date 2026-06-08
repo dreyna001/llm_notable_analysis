@@ -123,16 +123,16 @@ export async function fetchCapabilities(): Promise<PortalCapabilities> {
 export async function fetchCases(params?: {
   limit?: number;
   offset?: number;
-  start?: string;
-  end?: string;
+  start_date?: string;
+  end_date?: string;
   verdict?: string;
   search_name?: string;
 }): Promise<CaseListResponse> {
   const query = new URLSearchParams();
   if (params?.limit != null) query.set("limit", String(params.limit));
   if (params?.offset != null) query.set("offset", String(params.offset));
-  if (params?.start) query.set("start", params.start);
-  if (params?.end) query.set("end", params.end);
+  if (params?.start_date) query.set("start_date", params.start_date);
+  if (params?.end_date) query.set("end_date", params.end_date);
   if (params?.verdict) query.set("verdict", params.verdict);
   if (params?.search_name) query.set("search_name", params.search_name);
   const suffix = query.size ? `?${query}` : "";
