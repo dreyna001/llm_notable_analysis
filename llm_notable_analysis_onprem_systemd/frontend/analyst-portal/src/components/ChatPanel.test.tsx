@@ -66,6 +66,41 @@ describe("ChatPanel session scope recovery", () => {
   });
 });
 
+describe("ChatPanel session instance key", () => {
+  it("remounts when the parent changes its React key", () => {
+    const firstTurn = {
+      id: "turn-1",
+      question: "First question",
+      response: {
+        answer: "First answer",
+        answer_status: "answered",
+      },
+      awaitingResponse: false,
+    };
+
+    const { rerender } = render(
+      <ChatPanel
+        key="session-a:global_archive:none:ready"
+        mode="global_archive"
+        initialTurns={[firstTurn]}
+      />,
+    );
+
+    expect(screen.getByText("First question")).toBeInTheDocument();
+
+    rerender(
+      <ChatPanel
+        key="session-b:global_archive:none:ready"
+        mode="global_archive"
+        initialTurns={[]}
+      />,
+    );
+
+    expect(screen.queryByText("First question")).not.toBeInTheDocument();
+    expect(screen.getByText("How can I help?")).toBeInTheDocument();
+  });
+});
+
 describe("ChatPanel orphan cleanup UX", () => {
   it("surfaces server sync errors above the composer", () => {
     render(

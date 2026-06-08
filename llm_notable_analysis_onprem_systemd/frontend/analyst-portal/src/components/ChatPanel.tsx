@@ -43,7 +43,6 @@ type ChatPanelProps = {
   selectedCaseId?: string;
   initialTurns?: ChatTurn[];
   initialSessionId?: string | null;
-  resetKey?: string;
   loadingHistory?: boolean;
   maxQuestionChars?: number;
   disabledReason?: string;
@@ -74,7 +73,6 @@ export function ChatPanel({
   selectedCaseId,
   initialTurns = [],
   initialSessionId = null,
-  resetKey,
   loadingHistory = false,
   maxQuestionChars,
   disabledReason,
@@ -131,17 +129,6 @@ export function ChatPanel({
   useEffect(() => {
     onStateChange?.({ turns, sessionId, mode });
   }, [turns, sessionId, mode, onStateChange]);
-
-  useEffect(() => {
-    chatRequestGenRef.current += 1;
-    chatAbortRef.current?.abort();
-    chatAbortRef.current = null;
-    pendingQuestionRef.current = null;
-    setTurns(initialTurns);
-    setSessionId(initialSessionId);
-    setError(null);
-    setWaitingElapsedSec(0);
-  }, [resetKey]);
 
   useEffect(() => {
     adjustComposerHeight();

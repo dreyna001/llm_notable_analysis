@@ -339,9 +339,8 @@ export function HomeChatWorkspace({
     [activeSession?.turns],
   );
 
-  const panelResetKey = [
+  const panelInstanceKey = [
     activeSession?.localId ?? "",
-    activeSession?.serverSessionId ?? "",
     activeMode,
     effectiveSelectedCaseId ?? "none",
     loadingSessionId === activeSession?.localId ? "loading" : "ready",
@@ -1011,13 +1010,12 @@ export function HomeChatWorkspace({
           />
         ) : null}
         <ChatPanel
-          key={activeSession.localId}
+          key={panelInstanceKey}
           initialSessionId={activeSession.serverSessionId}
           initialTurns={initialPanelTurns}
           loadingHistory={loadingSessionId === activeSession.localId}
           maxQuestionChars={capabilities?.max_question_chars}
           mode={activeMode}
-          resetKey={panelResetKey}
           selectedCaseId={effectiveSelectedCaseId}
           disabledReason={chatDisabledReason}
           composerDisabled={!capabilitiesLoaded || capabilitiesError}
