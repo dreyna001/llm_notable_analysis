@@ -106,7 +106,6 @@ export function parsePortalCapabilities(value: unknown): PortalCapabilities | nu
   }
   return {
     case_qa_enabled: parsed.case_qa_enabled,
-    global_retrieval_enabled: parsed.global_retrieval_enabled,
     chat_history_enabled: parsed.chat_history_enabled,
     general_knowledge_enabled: parsed.general_knowledge_enabled,
     max_question_chars: parsed.max_question_chars,

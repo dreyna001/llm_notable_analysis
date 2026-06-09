@@ -176,10 +176,8 @@ This profile enables:
 - `PORTAL_ENABLED`
 - `CASE_QA_ENABLED`
 
-It does not enable `CASE_QA_GLOBAL_RETRIEVAL_ENABLED` or `HTML_REPORT_ENABLED`.
-Enable cross-case/global chat retrieval only after reviewing case visibility
-policy. Add the `html_reports` profile separately when static HTML artifacts
-are required.
+It does not enable `HTML_REPORT_ENABLED`. Portal chat requires a pinned case.
+Add the `html_reports` profile separately when static HTML artifacts are required.
 
 Primary follow-up values:
 
@@ -190,8 +188,6 @@ Primary follow-up values:
 - `PORTAL_PAGE_SIZE`
 - `PORTAL_PROXY_SECRET`
 - `PORTAL_PROXY_SECRET_HEADER`
-- `CASE_QA_GLOBAL_RETRIEVAL_ENABLED` when cross-case retrieval is approved
-- `CASE_QA_MAX_RETRIEVED_CASES`
 - `CASE_QA_MAX_CHUNKS_PER_LANE`
 - `CASE_QA_MAX_TOTAL_CHUNKS`
 

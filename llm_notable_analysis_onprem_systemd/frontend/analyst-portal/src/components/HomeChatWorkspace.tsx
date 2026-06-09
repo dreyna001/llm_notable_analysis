@@ -267,7 +267,7 @@ export function HomeChatWorkspace({
     [safeStore],
   );
 
-  const hasCaseContext = Boolean(selectedCaseId);
+  const chatContextCaseId = selectedCaseId ?? activeSession?.selectedCaseId;
 
   const capabilitiesReady =
     capabilitiesLoaded && !capabilitiesLoadError && capabilities !== null;
@@ -286,34 +286,6 @@ export function HomeChatWorkspace({
     historyLoadError,
   ]);
 
-  const availableModes = useMemo<ChatMode[]>(
-    () => {
-      if (!capabilitiesReady) {
-        return [];
-      }
-      const modes: ChatMode[] = [];
-      if (hasCaseContext) {
-        modes.push("selected_case");
-      }
-      if (capabilities.global_retrieval_enabled) {
-        modes.push("global_archive");
-      }
-      return modes;
-    },
-    [capabilities, capabilitiesReady, hasCaseContext],
-  );
-
-  const activeMode = useMemo(() => {
-    const storedMode = activeSession?.mode;
-    if (storedMode && availableModes.includes(storedMode)) {
-      return storedMode;
-    }
-    if (selectedCaseId && availableModes.includes("selected_case")) {
-      return "selected_case";
-    }
-    return availableModes[0] ?? "selected_case";
-  }, [activeSession?.mode, availableModes, selectedCaseId]);
-
   const chatDisabledReason = useMemo(() => {
     if (!capabilitiesLoaded) {
       return "Checking portal capabilities…";
@@ -327,12 +299,12 @@ export function HomeChatWorkspace({
     if (capabilities?.case_qa_enabled && !capabilities.chat_ready) {
       return resolveChatUnavailableReason(capabilities);
     }
-    if (!availableModes.length) {
-      return "Select a case to chat. Cross-case archive chat is disabled for this portal.";
+    if (!chatContextCaseId) {
+      return "Attach or open a case to chat.";
     }
     return undefined;
   }, [
-    availableModes.length,
+    chatContextCaseId,
     capabilities,
     capabilitiesLoadError,
     capabilitiesLoaded,
@@ -347,8 +319,7 @@ export function HomeChatWorkspace({
     );
   }, []);
 
-  const effectiveSelectedCaseId =
-    activeMode === "selected_case" ? selectedCaseId : undefined;
+  const effectiveSelectedCaseId = chatContextCaseId;
 
   const resolvedCaseSummary = effectiveSelectedCaseId
     ? resolvedCaseById[effectiveSelectedCaseId]
@@ -395,7 +366,7 @@ export function HomeChatWorkspace({
 
   const panelInstanceKey = [
     activeSession?.localId ?? "",
-    activeMode,
+    "selected_case",
     effectiveSelectedCaseId ?? "none",
     loadingSessionId === activeSession?.localId ? "loading" : "ready",
   ].join(":");
@@ -436,7 +407,7 @@ export function HomeChatWorkspace({
     setStore(() => {
       const loaded = loadChatSessionStore(maxChatSessions);
       const contextualized = selectedCaseId
-        ? switchToChatContext(loaded, "selected_case", selectedCaseId)
+        ? switchToChatContext(loaded, selectedCaseId)
         : loaded;
       return ensureChatSessionStore(
         capChatSessionStore(contextualized, maxChatSessions),
@@ -547,7 +518,7 @@ export function HomeChatWorkspace({
     }
     setStore((current) => {
       const next = capChatSessionStore(
-        switchToChatContext(current, "selected_case", selectedCaseId),
+        switchToChatContext(current, selectedCaseId),
         maxChatSessions,
       );
       return next;
@@ -593,11 +564,7 @@ export function HomeChatWorkspace({
   }, [onCapabilitiesLoaded]);
 
   const handleNewChat = useCallback(() => {
-    const context = resolveNewChatContext(
-      availableModes,
-      capabilitiesReady,
-      selectedCaseId,
-    );
+    const context = resolveNewChatContext(selectedCaseId);
     if (!context) {
       return;
     }
@@ -607,14 +574,16 @@ export function HomeChatWorkspace({
         (item) => item.localId === current.activeLocalId,
       );
       if (active && isUnusedSession(active)) {
-        if (sessionMatchesContext(active, context.mode, context.selectedCaseId)) {
+        if (
+          sessionMatchesContext(
+            active,
+            context.mode,
+            context.selectedCaseId,
+          )
+        ) {
           return current;
         }
-        const next = switchToChatContext(
-          current,
-          context.mode,
-          context.selectedCaseId,
-        );
+        const next = switchToChatContext(current, context.selectedCaseId);
         const capped = ensureChatSessionStore(
           capChatSessionStore(next, maxChatSessions),
         );
@@ -625,7 +594,6 @@ export function HomeChatWorkspace({
       if (existingUnused) {
         const next = switchToChatContext(
           { ...current, activeLocalId: existingUnused.localId },
-          context.mode,
           context.selectedCaseId,
         );
         const capped = ensureChatSessionStore(
@@ -634,7 +602,7 @@ export function HomeChatWorkspace({
         return capped;
       }
 
-      const session = createEmptySession(context.mode, context.selectedCaseId);
+      const session = createEmptySession(context.selectedCaseId);
       const next = {
         activeLocalId: session.localId,
         sessions: [session, ...current.sessions],
@@ -644,12 +612,7 @@ export function HomeChatWorkspace({
       );
       return capped;
     });
-  }, [
-    availableModes,
-    capabilitiesReady,
-    maxChatSessions,
-    selectedCaseId,
-  ]);
+  }, [maxChatSessions, selectedCaseId]);
 
   const handleSelectSession = useCallback(
     async (localId: string) => {
@@ -680,7 +643,7 @@ export function HomeChatWorkspace({
       const abortController = new AbortController();
       sessionHistoryAbortRef.current = abortController;
 
-      if (session.mode === "selected_case" && session.selectedCaseId) {
+      if (session.selectedCaseId) {
         onAttachCase?.(session.selectedCaseId);
       } else {
         onClearSelectedCase?.();
@@ -726,7 +689,7 @@ export function HomeChatWorkspace({
           return;
         }
 
-        if (payload.mode === "selected_case" && payload.selected_case_id) {
+        if (payload.selected_case_id) {
           onAttachCase?.(payload.selected_case_id);
         } else {
           onClearSelectedCase?.();
@@ -745,35 +708,12 @@ export function HomeChatWorkspace({
     [maxChatSessions, onAttachCase, onClearSelectedCase],
   );
 
-  const handleModeChange = useCallback(
-    (mode: ChatMode) => {
-      if (mode === "global_archive") {
-        setAttachedCasePreview(null);
-        onClearSelectedCase?.();
-      }
-      setStore((current) => {
-        const next = switchToChatContext(
-          current,
-          mode,
-          mode === "selected_case"
-            ? current.sessions.find(
-                (session) => session.localId === current.activeLocalId,
-              )?.selectedCaseId ?? selectedCaseId
-            : undefined,
-        );
-        const capped = capChatSessionStore(next, maxChatSessions);
-        return capped;
-      });
-    },
-    [maxChatSessions, onClearSelectedCase, selectedCaseId],
-  );
-
   const handleAttachCase = useCallback(
     (caseSummary: CaseSummary) => {
       setAttachedCasePreview(caseSummary);
       setStore((current) => {
         const next = capChatSessionStore(
-          switchToChatContext(current, "selected_case", caseSummary.case_id),
+          switchToChatContext(current, caseSummary.case_id),
           maxChatSessions,
         );
         return next;
@@ -786,28 +726,12 @@ export function HomeChatWorkspace({
   const handleClearSelectedCase = useCallback(() => {
     setAttachedCasePreview(null);
     flushSync(() => {
-      setStore((current) => {
-        const detached = detachActiveCase(current);
-        const context =
-          resolveNewChatContext(
-            availableModes,
-            capabilitiesReady,
-            undefined,
-          ) ?? { mode: "selected_case" as const };
-        const next = capChatSessionStore(
-          switchToChatContext(detached, context.mode, context.selectedCaseId),
-          maxChatSessions,
-        );
-        return next;
-      });
+      setStore((current) =>
+        capChatSessionStore(detachActiveCase(current), maxChatSessions),
+      );
     });
     onClearSelectedCase?.();
-  }, [
-    availableModes,
-    capabilitiesReady,
-    maxChatSessions,
-    onClearSelectedCase,
-  ]);
+  }, [maxChatSessions, onClearSelectedCase]);
 
   const requestDeleteSession = useCallback(
     (localId: string) => {
@@ -854,16 +778,8 @@ export function HomeChatWorkspace({
         const remaining = current.sessions.filter((item) => item.localId !== localId);
         let next: ChatSessionStore;
         if (!remaining.length) {
-          const context =
-            resolveNewChatContext(
-              availableModes,
-              capabilitiesReady,
-              selectedCaseId,
-            ) ?? { mode: "selected_case" as const };
-          const replacement = createEmptySession(
-            context.mode,
-            context.selectedCaseId,
-          );
+          const context = resolveNewChatContext(selectedCaseId);
+          const replacement = createEmptySession(context?.selectedCaseId);
           next = {
             activeLocalId: replacement.localId,
             sessions: [replacement],
@@ -889,14 +805,7 @@ export function HomeChatWorkspace({
     } finally {
       setDeleteBusy(false);
     }
-  }, [
-    availableModes,
-    capabilitiesReady,
-    deleteBusy,
-    maxChatSessions,
-    pendingDeleteSession,
-    selectedCaseId,
-  ]);
+  }, [deleteBusy, maxChatSessions, pendingDeleteSession, selectedCaseId]);
 
   const syncPanelState = useCallback(
     (state: ChatPanelState, options?: { removeEmptySession?: boolean }) => {
@@ -1070,7 +979,7 @@ export function HomeChatWorkspace({
           initialTurns={initialPanelTurns}
           loadingHistory={loadingSessionId === activeSession.localId}
           maxQuestionChars={capabilities?.max_question_chars}
-          mode={activeMode}
+          mode="selected_case"
           selectedCaseId={effectiveSelectedCaseId}
           disabledReason={chatDisabledReason}
           composerDisabled={
@@ -1092,8 +1001,6 @@ export function HomeChatWorkspace({
         activeLocalId={store.activeLocalId}
         assistantControls={
           <ChatAssistantControls
-            mode={activeMode}
-            modes={availableModes.length ? availableModes : [activeMode]}
             selectedCaseId={effectiveSelectedCaseId}
             selectedCaseLoading={effectiveSelectedCaseLoading}
             selectedCaseName={effectiveSelectedCaseName}
@@ -1101,12 +1008,10 @@ export function HomeChatWorkspace({
             caseAttachEnabled={
               !blockingLoadError &&
               capabilitiesReady &&
-              capabilities.case_qa_enabled &&
-              capabilities.chat_ready
+              capabilities.case_qa_enabled
             }
             onAttachCase={handleAttachCase}
             onClearSelectedCase={handleClearSelectedCase}
-            onModeChange={handleModeChange}
           />
         }
         meta={sidebarMeta}

@@ -58,9 +58,7 @@ export type CaseRawSectionResponse = {
   items: Record<string, unknown>;
 };
 
-export type ChatMode =
-  | "selected_case"
-  | "global_archive";
+export type ChatMode = "selected_case";
 
 export type ChatRequest = {
   mode: ChatMode;
@@ -110,7 +108,6 @@ export type ChatDependencyStatus = {
 
 export type PortalCapabilities = {
   case_qa_enabled: boolean;
-  global_retrieval_enabled: boolean;
   chat_history_enabled: boolean;
   general_knowledge_enabled: boolean;
   max_question_chars: number;

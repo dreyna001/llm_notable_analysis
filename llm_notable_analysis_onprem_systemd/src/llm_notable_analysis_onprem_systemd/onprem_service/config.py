@@ -238,8 +238,6 @@ class Config:
         CASE_SCHEMA_VERSION: Case record schema version.
         CASE_ANALYSIS_SCHEMA_VERSION: Structured analysis schema version.
         CASE_QA_ENABLED: Enables portal case Q&A.
-        CASE_QA_GLOBAL_RETRIEVAL_ENABLED: Enables global case archive retrieval.
-        CASE_QA_MAX_RETRIEVED_CASES: Max distinct cases retrieved by chat.
         CASE_QA_MAX_CHUNKS_PER_LANE: Max chunks per chat source lane.
         CASE_QA_MAX_TOTAL_CHUNKS: Max total chunks supplied to chat.
         CASE_QA_MAX_INDEX_CHUNKS_PER_CASE: Max chunks built and embedded per archived case.
@@ -393,8 +391,6 @@ class Config:
     CASE_SCHEMA_VERSION: int = 1
     CASE_ANALYSIS_SCHEMA_VERSION: int = 1
     CASE_QA_ENABLED: bool = False
-    CASE_QA_GLOBAL_RETRIEVAL_ENABLED: bool = False
-    CASE_QA_MAX_RETRIEVED_CASES: int = 5
     CASE_QA_MAX_CHUNKS_PER_LANE: int = 6
     CASE_QA_MAX_TOTAL_CHUNKS: int = 18
     CASE_QA_MAX_INDEX_CHUNKS_PER_CASE: int = 200
@@ -686,12 +682,6 @@ def load_config() -> Config:
             "CASE_ANALYSIS_SCHEMA_VERSION", 1, max_value=1000
         ),
         CASE_QA_ENABLED=_profile_bool("CASE_QA_ENABLED", False, profile_flags),
-        CASE_QA_GLOBAL_RETRIEVAL_ENABLED=_profile_bool(
-            "CASE_QA_GLOBAL_RETRIEVAL_ENABLED", False, profile_flags
-        ),
-        CASE_QA_MAX_RETRIEVED_CASES=_positive_int_env(
-            "CASE_QA_MAX_RETRIEVED_CASES", 5, max_value=100
-        ),
         CASE_QA_MAX_CHUNKS_PER_LANE=_positive_int_env(
             "CASE_QA_MAX_CHUNKS_PER_LANE", 6, max_value=100
         ),

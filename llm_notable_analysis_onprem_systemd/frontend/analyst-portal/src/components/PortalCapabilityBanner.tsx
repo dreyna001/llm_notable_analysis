@@ -55,16 +55,6 @@ function buildNotices(
     notices.push(chatDisabledReason);
   }
 
-  if (
-    capabilities &&
-    !capabilities.global_retrieval_enabled &&
-    !chatDisabledReason
-  ) {
-    notices.push(
-      "Cross-case archive chat is off. Attach a specific case to ask questions.",
-    );
-  }
-
   if (capabilities && !capabilities.chat_history_enabled) {
     notices.push(
       "Chat history is not saved on the server or in this browser. Conversations are kept only for this page session.",

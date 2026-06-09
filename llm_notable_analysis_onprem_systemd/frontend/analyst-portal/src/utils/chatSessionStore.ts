@@ -52,7 +52,6 @@ export function sessionTitleFromQuestion(question: string, fallback = "New chat"
 }
 
 export function createEmptySession(
-  mode: ChatMode = "global_archive",
   selectedCaseId?: string,
 ): StoredChatSession {
   const now = new Date().toISOString();
@@ -61,14 +60,14 @@ export function createEmptySession(
     serverSessionId: null,
     title: "New chat",
     updatedAt: now,
-    mode,
+    mode: "selected_case",
     selectedCaseId,
     turns: [],
   };
 }
 
 function isChatMode(value: unknown): value is ChatMode {
-  return value === "selected_case" || value === "global_archive";
+  return value === "selected_case";
 }
 
 function isStoredTurn(value: unknown): value is StoredChatTurn {
@@ -218,20 +217,12 @@ export function findUnusedSession(
 }
 
 export function resolveNewChatContext(
-  availableModes: ChatMode[],
-  capabilitiesReady: boolean,
   selectedCaseId?: string,
-): { mode: ChatMode; selectedCaseId?: string } | null {
-  if (selectedCaseId && availableModes.includes("selected_case")) {
+): { mode: ChatMode; selectedCaseId: string } | null {
+  if (selectedCaseId) {
     return { mode: "selected_case", selectedCaseId };
   }
-  if (availableModes.includes("global_archive")) {
-    return { mode: "global_archive" };
-  }
-  if (!capabilitiesReady) {
-    return null;
-  }
-  return { mode: "selected_case" };
+  return null;
 }
 
 export function sessionMatchesContext(
@@ -245,7 +236,7 @@ export function sessionMatchesContext(
   if (mode === "selected_case") {
     return session.selectedCaseId === selectedCaseId;
   }
-  return session.selectedCaseId == null;
+  return false;
 }
 
 /** Keep the server session link only when panel context still matches the stored session. */
@@ -255,7 +246,7 @@ export function resolveSyncedServerSessionId(
   panelSessionId: string | null,
   selectedCaseId?: string,
 ): string | null {
-  const contextCaseId = panelMode === "selected_case" ? selectedCaseId : undefined;
+  const contextCaseId = selectedCaseId;
   if (!sessionMatchesContext(session, panelMode, contextCaseId)) {
     return null;
   }
@@ -264,23 +255,22 @@ export function resolveSyncedServerSessionId(
 
 function applyContextToSession(
   session: StoredChatSession,
-  mode: ChatMode,
-  selectedCaseId?: string,
+  selectedCaseId: string,
 ): StoredChatSession {
   return {
     ...session,
-    mode,
-    selectedCaseId: mode === "selected_case" ? selectedCaseId : undefined,
+    mode: "selected_case",
+    selectedCaseId,
     updatedAt: new Date().toISOString(),
   };
 }
 
-/** Drop the attached case from the active chat and clear case-specific history. */
+/** Clear the attached case from the active chat and reset case-specific history. */
 export function detachActiveCase(store: ChatSessionStore): ChatSessionStore {
   const active =
     store.sessions.find((session) => session.localId === store.activeLocalId) ??
     store.sessions[0];
-  if (!active?.selectedCaseId && active?.mode === "global_archive") {
+  if (!active?.selectedCaseId) {
     return store;
   }
   if (!active) {
@@ -292,7 +282,7 @@ export function detachActiveCase(store: ChatSessionStore): ChatSessionStore {
       session.localId === active.localId
         ? {
             ...session,
-            mode: "global_archive",
+            mode: "selected_case",
             selectedCaseId: undefined,
             serverSessionId: null,
             turns: [],
@@ -306,14 +296,14 @@ export function detachActiveCase(store: ChatSessionStore): ChatSessionStore {
 /** Keep the active chat when context changes; start a fresh session if it already has turns. */
 export function switchToChatContext(
   store: ChatSessionStore,
-  mode: ChatMode,
-  selectedCaseId?: string,
+  selectedCaseId: string,
 ): ChatSessionStore {
+  const mode: ChatMode = "selected_case";
   const active =
     store.sessions.find((session) => session.localId === store.activeLocalId) ??
     store.sessions[0];
   if (!active) {
-    const session = createEmptySession(mode, selectedCaseId);
+    const session = createEmptySession(selectedCaseId);
     return { activeLocalId: session.localId, sessions: [session] };
   }
 
@@ -327,7 +317,7 @@ export function switchToChatContext(
       sessions: store.sessions.map((session) =>
         session.localId === active.localId
           ? {
-              ...applyContextToSession(session, mode, selectedCaseId),
+              ...applyContextToSession(session, selectedCaseId),
               serverSessionId: null,
             }
           : session,
@@ -345,7 +335,7 @@ export function switchToChatContext(
       sessions: store.sessions.map((session) =>
         session.localId === reusable.localId
           ? {
-              ...applyContextToSession(session, mode, selectedCaseId),
+              ...applyContextToSession(session, selectedCaseId),
               serverSessionId: null,
             }
           : session,
@@ -353,7 +343,7 @@ export function switchToChatContext(
     };
   }
 
-  const session = createEmptySession(mode, selectedCaseId);
+  const session = createEmptySession(selectedCaseId);
   return {
     activeLocalId: session.localId,
     sessions: [session, ...store.sessions],

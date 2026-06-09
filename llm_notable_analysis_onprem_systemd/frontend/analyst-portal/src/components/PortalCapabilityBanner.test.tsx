@@ -4,7 +4,6 @@ import { PortalCapabilityBanner } from "./PortalCapabilityBanner";
 
 const enabledCapabilities = {
   case_qa_enabled: true,
-  global_retrieval_enabled: true,
   chat_history_enabled: true,
   general_knowledge_enabled: true,
   max_question_chars: 2000,

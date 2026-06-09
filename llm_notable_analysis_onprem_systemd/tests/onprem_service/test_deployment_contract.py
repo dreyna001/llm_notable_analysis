@@ -254,7 +254,6 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("CASE_RETENTION_DAYS=30", config_text)
         self.assertIn("CASE_RETENTION_DELETE_BATCH_SIZE=500", config_text)
         self.assertIn("CASE_QA_ENABLED=false", config_text)
-        self.assertIn("CASE_QA_GLOBAL_RETRIEVAL_ENABLED=false", config_text)
         self.assertIn("CASE_QA_MAX_INDEX_CHUNKS_PER_CASE=200", config_text)
         self.assertIn("CASE_QA_CHAT_HISTORY_ENABLED=false", config_text)
         self.assertIn("CASE_QA_LEXICAL_TOP_K=30", config_text)
@@ -546,7 +545,7 @@ class TestDeploymentContract(unittest.TestCase):
         """README SFTP guidance should match installer-created paths."""
         readme_text = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
 
-        self.assertIn("Chroot: `/var/sftp/soar`", readme_text)
+        self.assertIn("chroot `/var/sftp/soar`", readme_text)
         self.assertIn("/var/notables/incoming -> /var/sftp/soar/incoming", readme_text)
         self.assertNotIn("ChrootDirectory /var/notables", readme_text)
 

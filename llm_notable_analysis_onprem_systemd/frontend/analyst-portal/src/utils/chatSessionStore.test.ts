@@ -22,38 +22,21 @@ function makeStore(count: number): ChatSessionStore {
 }
 
 describe("resolveNewChatContext", () => {
-  it("waits for capabilities before choosing a mode", () => {
-    expect(
-      resolveNewChatContext([], false, undefined),
-    ).toBeNull();
+  it("returns null when no case is attached", () => {
+    expect(resolveNewChatContext(undefined)).toBeNull();
   });
 
-  it("uses selected-case mode when global retrieval is disabled", () => {
-    expect(
-      resolveNewChatContext([], true, undefined),
-    ).toEqual({ mode: "selected_case" });
-  });
-
-  it("uses global mode only when the portal allows it", () => {
-    expect(
-      resolveNewChatContext(["global_archive"], true, undefined),
-    ).toEqual({ mode: "global_archive" });
-  });
-
-  it("prefers the attached case when one is selected", () => {
-    expect(
-      resolveNewChatContext(
-        ["selected_case", "global_archive"],
-        true,
-        "case-123",
-      ),
-    ).toEqual({ mode: "selected_case", selectedCaseId: "case-123" });
+  it("returns selected-case context when a case is attached", () => {
+    expect(resolveNewChatContext("case-123")).toEqual({
+      mode: "selected_case",
+      selectedCaseId: "case-123",
+    });
   });
 });
 
 describe("detachActiveCase", () => {
   it("clears the attached case, server linkage, and prior turns from the active session", () => {
-    const active = createEmptySession("selected_case", "portal-test-123");
+    const active = createEmptySession("portal-test-123");
     active.serverSessionId = "server-session-1";
     active.turns = [
       {
@@ -62,7 +45,7 @@ describe("detachActiveCase", () => {
         response: { answer: "Likely benign.", answer_status: "answered" },
       },
     ];
-    const other = createEmptySession("selected_case", "other-case");
+    const other = createEmptySession("other-case");
     const store: ChatSessionStore = {
       activeLocalId: active.localId,
       sessions: [active, other],
@@ -71,7 +54,7 @@ describe("detachActiveCase", () => {
     const next = detachActiveCase(store);
     const updated = next.sessions.find((session) => session.localId === active.localId);
 
-    expect(updated?.mode).toBe("global_archive");
+    expect(updated?.mode).toBe("selected_case");
     expect(updated?.selectedCaseId).toBeUndefined();
     expect(updated?.serverSessionId).toBeNull();
     expect(updated?.turns).toHaveLength(0);
@@ -83,16 +66,16 @@ describe("detachActiveCase", () => {
 
 describe("resolveSyncedServerSessionId", () => {
   it("drops the server session link when panel mode no longer matches", () => {
-    const session = createEmptySession("selected_case", "case-a");
+    const session = createEmptySession("case-a");
     session.serverSessionId = "server-1";
 
     expect(
-      resolveSyncedServerSessionId(session, "global_archive", "server-1"),
+      resolveSyncedServerSessionId(session, "selected_case", "server-1", "case-b"),
     ).toBeNull();
   });
 
   it("drops the server session link when the attached case changes", () => {
-    const session = createEmptySession("selected_case", "case-a");
+    const session = createEmptySession("case-a");
     session.serverSessionId = "server-1";
 
     expect(
@@ -106,7 +89,7 @@ describe("resolveSyncedServerSessionId", () => {
   });
 
   it("keeps the server session link when panel context still matches", () => {
-    const session = createEmptySession("selected_case", "case-a");
+    const session = createEmptySession("case-a");
     session.serverSessionId = "server-1";
 
     expect(
@@ -122,17 +105,17 @@ describe("resolveSyncedServerSessionId", () => {
 
 describe("switchToChatContext", () => {
   it("clears server linkage when an unused session changes context", () => {
-    const active = createEmptySession("selected_case", "case-a");
+    const active = createEmptySession("case-a");
     active.serverSessionId = "server-1";
     const store: ChatSessionStore = {
       activeLocalId: active.localId,
       sessions: [active],
     };
 
-    const next = switchToChatContext(store, "global_archive");
+    const next = switchToChatContext(store, "case-b");
     const updated = next.sessions.find((session) => session.localId === active.localId);
 
-    expect(updated?.mode).toBe("global_archive");
+    expect(updated?.mode).toBe("selected_case");
     expect(updated?.serverSessionId).toBeNull();
   });
 });

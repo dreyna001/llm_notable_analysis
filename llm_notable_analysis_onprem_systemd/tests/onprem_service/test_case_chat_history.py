@@ -239,7 +239,6 @@ def _config(*, history_enabled: bool = True) -> Config:
     return Config(
         CASE_ARCHIVE_ENABLED=True,
         CASE_QA_ENABLED=True,
-        CASE_QA_GLOBAL_RETRIEVAL_ENABLED=True,
         CASE_QA_CHAT_HISTORY_ENABLED=history_enabled,
         CASE_QA_CHAT_HISTORY_RETENTION_DAYS=7,
         CASE_QA_MAX_MESSAGES_PER_SESSION=4,
@@ -300,15 +299,15 @@ class TestCaseChatHistory(unittest.TestCase):
                 session_ids[0]: (
                     session_ids[0],
                     "analyst@example.com",
-                    "global_archive",
-                    None,
+                    "selected_case",
+                    "case-1",
                     expires_at,
                 ),
                 session_ids[1]: (
                     session_ids[1],
                     "analyst@example.com",
-                    "global_archive",
-                    None,
+                    "selected_case",
+                    "case-1",
                     expires_at,
                 ),
             },
@@ -317,9 +316,9 @@ class TestCaseChatHistory(unittest.TestCase):
         config = replace(_config(), CASE_QA_MAX_SESSIONS_PER_USER=2)
         new_session_id = persist_chat_history(
             config=config,
-            mode="global_archive",
+            mode="selected_case",
             question="hello",
-            selected_case_id=None,
+                selected_case_id="case-1",
             requested_session_id=None,
             user_id="analyst@example.com",
             response={"answer": "hi", "answer_status": "ok"},
@@ -346,8 +345,8 @@ class TestCaseChatHistory(unittest.TestCase):
                 session_id: (
                     session_id,
                     "analyst@example.com",
-                    "global_archive",
-                    None,
+                    "selected_case",
+                    "case-1",
                     expires_at,
                 )
             },
@@ -381,8 +380,8 @@ class TestCaseChatHistory(unittest.TestCase):
                 session_id: (
                     session_id,
                     "analyst@example.com",
-                    "global_archive",
-                    None,
+                    "selected_case",
+                    "case-1",
                     expires_at,
                 )
             },
@@ -411,8 +410,8 @@ class TestCaseChatHistory(unittest.TestCase):
                 session_id: (
                     session_id,
                     "analyst@example.com",
-                    "global_archive",
-                    None,
+                    "selected_case",
+                    "case-1",
                     expires_at,
                 )
             },
@@ -441,8 +440,8 @@ class TestCaseChatHistory(unittest.TestCase):
                 session_id: (
                     session_id,
                     "analyst@example.com",
-                    "global_archive",
-                    None,
+                    "selected_case",
+                    "case-1",
                     expires_at,
                 )
             },
@@ -518,8 +517,8 @@ class TestCaseChatHistory(unittest.TestCase):
                 session_id: (
                     session_id,
                     "owner@example.com",
-                    "global_archive",
-                    None,
+                    "selected_case",
+                    "case-1",
                     expires_at,
                 )
             },
@@ -545,8 +544,8 @@ class TestCaseChatHistory(unittest.TestCase):
                 session_id: (
                     session_id,
                     "analyst@example.com",
-                    "global_archive",
-                    None,
+                    "selected_case",
+                    "case-1",
                     expires_at,
                 )
             },
@@ -572,9 +571,9 @@ class TestCaseChatHistory(unittest.TestCase):
         connection = _HistoryFakeConnection()
         session_id = persist_chat_history(
             config=_config(),
-            mode="global_archive",
+            mode="selected_case",
             question="What happened?",
-            selected_case_id=None,
+                selected_case_id="case-1",
             requested_session_id=None,
             user_id="analyst@example.com",
             response={
@@ -596,9 +595,9 @@ class TestCaseChatHistory(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "authenticated user"):
             persist_chat_history(
                 config=_config(),
-                mode="global_archive",
+                mode="selected_case",
                 question="What happened?",
-                selected_case_id=None,
+                selected_case_id="case-1",
                 requested_session_id=None,
                 user_id=None,
                 response={"answer": "x", "answer_status": "answered"},
@@ -654,9 +653,9 @@ class TestCaseChatHistory(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "scope does not match"):
             persist_chat_history(
                 config=_config(),
-                mode="global_archive",
+                mode="selected_case",
                 question="Follow-up?",
-                selected_case_id=None,
+                selected_case_id="case-2",
                 requested_session_id=session_id,
                 user_id="analyst@example.com",
                 response={"answer": "x", "answer_status": "answered"},
@@ -667,9 +666,9 @@ class TestCaseChatHistory(unittest.TestCase):
         with self.assertRaises(ChatSessionNotFoundError):
             persist_chat_history(
                 config=_config(),
-                mode="global_archive",
+                mode="selected_case",
                 question="What happened?",
-                selected_case_id=None,
+                selected_case_id="case-1",
                 requested_session_id="00000000-0000-0000-0000-000000000001",
                 user_id="analyst@example.com",
                 response={"answer": "x", "answer_status": "answered"},
@@ -684,8 +683,8 @@ class TestCaseChatHistory(unittest.TestCase):
                 session_id: (
                     session_id,
                     "analyst@example.com",
-                    "global_archive",
-                    None,
+                    "selected_case",
+                    "case-1",
                     expired_at,
                 )
             }
@@ -693,9 +692,9 @@ class TestCaseChatHistory(unittest.TestCase):
         with self.assertRaises(ChatSessionExpiredError):
             persist_chat_history(
                 config=_config(),
-                mode="global_archive",
+                mode="selected_case",
                 question="What happened?",
-                selected_case_id=None,
+                selected_case_id="case-1",
                 requested_session_id=session_id,
                 user_id="analyst@example.com",
                 response={"answer": "x", "answer_status": "answered"},
@@ -710,8 +709,8 @@ class TestCaseChatHistory(unittest.TestCase):
                 session_id: (
                     session_id,
                     "analyst-a@example.com",
-                    "global_archive",
-                    None,
+                    "selected_case",
+                    "case-1",
                     expires_at,
                 )
             }
@@ -719,9 +718,9 @@ class TestCaseChatHistory(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not belong"):
             persist_chat_history(
                 config=_config(),
-                mode="global_archive",
+                mode="selected_case",
                 question="What happened?",
-                selected_case_id=None,
+                selected_case_id="case-1",
                 requested_session_id=session_id,
                 user_id="analyst-b@example.com",
                 response={"answer": "x", "answer_status": "answered"},
@@ -736,8 +735,8 @@ class TestCaseChatHistory(unittest.TestCase):
                 session_id: (
                     session_id,
                     None,
-                    "global_archive",
-                    None,
+                    "selected_case",
+                    "case-1",
                     expires_at,
                 )
             }
@@ -758,8 +757,8 @@ class TestCaseChatHistory(unittest.TestCase):
                 session_id: (
                     session_id,
                     "analyst@example.com",
-                    "global_archive",
-                    None,
+                    "selected_case",
+                    "case-1",
                     expires_at,
                 )
             },
@@ -786,8 +785,8 @@ class TestCaseChatHistory(unittest.TestCase):
                 session_id: (
                     session_id,
                     "analyst@example.com",
-                    "global_archive",
-                    None,
+                    "selected_case",
+                    "case-1",
                     expires_at,
                 )
             },
@@ -800,9 +799,9 @@ class TestCaseChatHistory(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "message limit"):
             persist_chat_history(
                 config=_config(),
-                mode="global_archive",
+                mode="selected_case",
                 question="What happened?",
-                selected_case_id=None,
+                selected_case_id="case-1",
                 requested_session_id=session_id,
                 user_id="analyst@example.com",
                 response={"answer": "x", "answer_status": "answered"},
@@ -818,8 +817,8 @@ class TestCaseChatHistory(unittest.TestCase):
                 session_id: (
                     session_id,
                     "analyst@example.com",
-                    "global_archive",
-                    None,
+                    "selected_case",
+                    "case-1",
                     expires_at,
                 )
             },
@@ -837,9 +836,9 @@ class TestCaseChatHistory(unittest.TestCase):
                 barrier.wait(timeout=5)
                 persist_chat_history(
                     config=_config(),
-                    mode="global_archive",
+                    mode="selected_case",
                     question=question,
-                    selected_case_id=None,
+                selected_case_id="case-1",
                     requested_session_id=session_id,
                     user_id="analyst@example.com",
                     response={"answer": "ok", "answer_status": "answered"},

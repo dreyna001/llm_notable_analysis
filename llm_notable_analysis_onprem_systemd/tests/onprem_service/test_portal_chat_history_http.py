@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from llm_notable_analysis_onprem_systemd.onprem_service.config import Config
 from llm_notable_analysis_onprem_systemd.onprem_service.portal_app import build_portal_app
 
-from .test_case_chat_history import _HistoryFakeConnection
+from test_case_chat_history import _HistoryFakeConnection
 
 _USER_HEADERS = {"X-Forwarded-User": "analyst@example.com"}
 _AUTH_HEADERS = {
@@ -34,7 +34,6 @@ def _history_config(**overrides: object) -> Config:
         "PORTAL_ENABLED": True,
         "CASE_ARCHIVE_ENABLED": True,
         "CASE_QA_ENABLED": True,
-        "CASE_QA_GLOBAL_RETRIEVAL_ENABLED": True,
         "CASE_QA_GENERAL_KNOWLEDGE_ENABLED": False,
         "CASE_QA_CHAT_HISTORY_ENABLED": True,
         "CASE_QA_MAX_MESSAGES_PER_SESSION": 20,
@@ -60,8 +59,8 @@ def _chunk_row() -> tuple:
 def _session_bundle(
     *,
     user_id: str = "analyst@example.com",
-    mode: str = "global_archive",
-    selected_case_id: str | None = None,
+    mode: str = "selected_case",
+    selected_case_id: str | None = "case-1",
     message_pairs: int = 2,
 ) -> tuple[str, _HistoryFakeConnection]:
     session_id = str(uuid.uuid4())
@@ -240,7 +239,7 @@ class TestPortalChatHistoryHttp(unittest.TestCase):
 
     def test_post_chat_resumes_existing_session(self) -> None:
         session_id, connection = _session_bundle(
-            mode="global_archive",
+            mode="selected_case",
             message_pairs=1,
         )
         connection.row_pages = [[_chunk_row()], []]
@@ -255,7 +254,7 @@ class TestPortalChatHistoryHttp(unittest.TestCase):
         response = client.post(
             "/api/chat",
             json={
-                "mode": "global_archive",
+                "mode": "selected_case", "selected_case_id": "case-1",
                 "question": "What else should I review?",
                 "session_id": session_id,
             },
@@ -289,8 +288,8 @@ class TestPortalChatHistoryHttp(unittest.TestCase):
         response = client.post(
             "/api/chat",
             json={
-                "mode": "global_archive",
-                "question": "Wrong mode follow-up?",
+                "mode": "selected_case", "selected_case_id": "case-2",
+                "question": "Wrong scope follow-up?",
                 "session_id": session_id,
             },
             headers=_AUTH_HEADERS,
@@ -315,8 +314,8 @@ class TestPortalChatHistoryHttp(unittest.TestCase):
                 session_id: (
                     session_id,
                     "analyst@example.com",
-                    "global_archive",
-                    None,
+                    "selected_case",
+                    "case-1",
                     expired_at,
                 )
             },
@@ -332,7 +331,7 @@ class TestPortalChatHistoryHttp(unittest.TestCase):
         response = client.post(
             "/api/chat",
             json={
-                "mode": "global_archive",
+                "mode": "selected_case", "selected_case_id": "case-1",
                 "question": "Follow-up on expired session?",
                 "session_id": session_id,
             },
@@ -362,7 +361,7 @@ class TestPortalChatHistoryHttp(unittest.TestCase):
         response = client.post(
             "/api/chat",
             json={
-                "mode": "global_archive",
+                "mode": "selected_case", "selected_case_id": "case-1",
                 "question": "Follow-up on missing session?",
                 "session_id": "00000000-0000-0000-0000-000000000001",
             },
@@ -374,7 +373,7 @@ class TestPortalChatHistoryHttp(unittest.TestCase):
 
     def test_post_chat_rejects_full_session_before_synthesis(self) -> None:
         session_id, connection = _session_bundle(
-            mode="global_archive",
+            mode="selected_case",
             message_pairs=2,
         )
         connection.row_pages = [[_chunk_row()], []]
@@ -396,7 +395,7 @@ class TestPortalChatHistoryHttp(unittest.TestCase):
         response = client.post(
             "/api/chat",
             json={
-                "mode": "global_archive",
+                "mode": "selected_case", "selected_case_id": "case-1",
                 "question": "Will this fit?",
                 "session_id": session_id,
             },

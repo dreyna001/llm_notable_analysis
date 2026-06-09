@@ -28,7 +28,6 @@ export type CaseDetail = {
 
 export type PortalCapabilities = {
   case_qa_enabled: boolean;
-  global_retrieval_enabled: boolean;
   chat_history_enabled: boolean;
   general_knowledge_enabled: boolean;
   case_retention_days?: number;

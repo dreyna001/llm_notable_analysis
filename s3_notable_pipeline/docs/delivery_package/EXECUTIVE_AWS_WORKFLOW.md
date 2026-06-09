@@ -60,7 +60,7 @@ This keeps the intake contract flexible enough for early deployments while still
 
 ### 4. Bedrock Analysis
 
-The Lambda function calls Amazon Bedrock using the configured `BEDROCK_MODEL_ID`. The current SAM template configures a Claude Sonnet 4.5 inference profile in `us-east-1`.
+The Lambda function calls Amazon Bedrock using the configured `BEDROCK_MODEL_ID`. The current SAM template configures a Claude Sonnet 4.6 inference profile in `us-east-1`.
 
 The prompt is designed for bounded cybersecurity analysis. It instructs the model to:
 

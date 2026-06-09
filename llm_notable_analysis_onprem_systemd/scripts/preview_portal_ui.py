@@ -390,7 +390,6 @@ def _preview_config() -> Config:
         "PORTAL_ENABLED": True,
         "CASE_ARCHIVE_ENABLED": True,
         "CASE_QA_ENABLED": True,
-        "CASE_QA_GLOBAL_RETRIEVAL_ENABLED": True,
         "PORTAL_BIND_HOST": _PREVIEW_HOST,
         "PORTAL_PAGE_SIZE": 50,
         "PORTAL_TRUSTED_USER_HEADER": "X-Forwarded-User",

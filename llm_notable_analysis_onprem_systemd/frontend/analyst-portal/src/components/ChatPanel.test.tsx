@@ -35,7 +35,7 @@ describe("ChatPanel session scope recovery", () => {
 
     render(
       <ChatPanel
-        mode="global_archive"
+        mode="selected_case" selectedCaseId="case-1"
         initialSessionId="stale-server-id"
       />,
     );
@@ -73,7 +73,7 @@ describe("ChatPanel session scope recovery", () => {
 
     render(
       <ChatPanel
-        mode="global_archive"
+        mode="selected_case" selectedCaseId="case-1"
         initialSessionId="expired-server-id"
       />,
     );
@@ -105,8 +105,8 @@ describe("ChatPanel session instance key", () => {
 
     const { rerender } = render(
       <ChatPanel
-        key="session-a:global_archive:none:ready"
-        mode="global_archive"
+        key="session-a:selected_case:case-1:ready"
+        mode="selected_case" selectedCaseId="case-1"
         initialTurns={[firstTurn]}
       />,
     );
@@ -115,14 +115,14 @@ describe("ChatPanel session instance key", () => {
 
     rerender(
       <ChatPanel
-        key="session-b:global_archive:none:ready"
-        mode="global_archive"
+        key="session-b:selected_case:case-1:ready"
+        mode="selected_case" selectedCaseId="case-1"
         initialTurns={[]}
       />,
     );
 
     expect(screen.queryByText("First question")).not.toBeInTheDocument();
-    expect(screen.getByText("How can I help?")).toBeInTheDocument();
+    expect(screen.getByText("Start investigating this case")).toBeInTheDocument();
   });
 });
 
@@ -136,7 +136,7 @@ describe("ChatPanel error guidance", () => {
       new ApiError(0, "Request timed out.", "timeout"),
     );
 
-    render(<ChatPanel mode="global_archive" />);
+    render(<ChatPanel mode="selected_case" selectedCaseId="case-1" />);
 
     const composer = screen.getByRole("textbox");
     fireEvent.change(composer, {
@@ -156,7 +156,7 @@ describe("ChatPanel error guidance", () => {
 
     render(
       <ChatPanel
-        mode="global_archive"
+        mode="selected_case" selectedCaseId="case-1"
         initialSessionId="missing-server-id"
       />,
     );
@@ -182,7 +182,7 @@ describe("ChatPanel answer status labels", () => {
   it("shows analyst-readable labels for non-answered responses", () => {
     render(
       <ChatPanel
-        mode="global_archive"
+        mode="selected_case" selectedCaseId="case-1"
         initialTurns={[
           {
             id: "turn-refused",
@@ -205,7 +205,7 @@ describe("ChatPanel orphan cleanup UX", () => {
   it("surfaces server sync errors above the composer", () => {
     render(
       <ChatPanel
-        mode="global_archive"
+        mode="selected_case" selectedCaseId="case-1"
         disabledReason="Checking portal capabilities…"
         composerDisabled
         serverSyncError="Stopped locally, but the server could not remove the cancelled reply."

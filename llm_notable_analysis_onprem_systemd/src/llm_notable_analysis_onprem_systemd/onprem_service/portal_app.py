@@ -505,7 +505,6 @@ def _portal_capabilities_payload(
         chat_dependency_status = _chat_dependency_status_payload(chat_readiness)
     payload: dict[str, Any] = {
         "case_qa_enabled": case_qa_enabled,
-        "global_retrieval_enabled": bool(config.CASE_QA_GLOBAL_RETRIEVAL_ENABLED),
         "chat_history_enabled": bool(config.CASE_QA_CHAT_HISTORY_ENABLED),
         "general_knowledge_enabled": bool(config.CASE_QA_GENERAL_KNOWLEDGE_ENABLED),
         "max_question_chars": int(config.CASE_QA_MAX_QUESTION_CHARS),

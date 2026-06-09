@@ -8,8 +8,8 @@ describe("resolveChatEmptyState", () => {
     expect(content.title).toBe("Start investigating this case");
   });
 
-  it("returns general guidance for global archive chat", () => {
-    const content = resolveChatEmptyState("global_archive");
+  it("returns general guidance when no case is attached", () => {
+    const content = resolveChatEmptyState("selected_case");
 
     expect(content.title).toBe("How can I help?");
   });

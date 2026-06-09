@@ -377,7 +377,6 @@ class TestPortalApp(unittest.TestCase):
                     PORTAL_ENABLED=True,
                     CASE_ARCHIVE_ENABLED=True,
                     CASE_QA_ENABLED=True,
-                    CASE_QA_GLOBAL_RETRIEVAL_ENABLED=False,
                     CASE_QA_CHAT_HISTORY_ENABLED=True,
                     CASE_QA_MAX_QUESTION_CHARS=1234,
                     CASE_QA_MAX_ANSWER_TOKENS=567,
@@ -396,7 +395,6 @@ class TestPortalApp(unittest.TestCase):
             response.json(),
             {
                 "case_qa_enabled": True,
-                "global_retrieval_enabled": False,
                 "chat_history_enabled": True,
                 "general_knowledge_enabled": True,
                 "max_question_chars": 1234,
@@ -743,7 +741,7 @@ class TestPortalApp(unittest.TestCase):
 
         response = client.post(
             "/api/chat",
-            json={"mode": "global_archive", "question": "What happened?"},
+            json={"mode": "selected_case", "selected_case_id": "case-1", "question": "What happened?"},
             headers={
                 **_AUTH_HEADERS,
                 "Origin": "https://attacker.example",
@@ -760,17 +758,17 @@ class TestPortalApp(unittest.TestCase):
                     PORTAL_ENABLED=True,
                     CASE_ARCHIVE_ENABLED=True,
                     CASE_QA_ENABLED=True,
-                    CASE_QA_GLOBAL_RETRIEVAL_ENABLED=True,
                     PORTAL_PROXY_SECRET="portal-secret",
                 ),
-                connect=lambda _dsn: _FakeConnection(rows=[]),
+                connect=lambda _dsn: _FakeConnection(row=(1,), row_pages=[[], []]),
             )
         )
 
         response = client.post(
             "/api/chat",
             json={
-                "mode": "global_archive",
+                "mode": "selected_case",
+                "selected_case_id": "case-1",
                 "question": "Run a Splunk search and create a ticket",
             },
             headers={
@@ -920,17 +918,17 @@ class TestPortalApp(unittest.TestCase):
                     PORTAL_ENABLED=True,
                     CASE_ARCHIVE_ENABLED=True,
                     CASE_QA_ENABLED=True,
-                    CASE_QA_GLOBAL_RETRIEVAL_ENABLED=True,
                     PORTAL_PROXY_SECRET="portal-secret",
                 ),
-                connect=lambda _dsn: _FakeConnection(rows=[]),
+                connect=lambda _dsn: _FakeConnection(row=(1,), row_pages=[[], []]),
             )
         )
 
         response = client.post(
             "/api/chat",
             json={
-                "mode": "global_archive",
+                "mode": "selected_case",
+                "selected_case_id": "case-1",
                 "question": "Run a Splunk search and create a ticket",
             },
             headers=_AUTH_HEADERS,

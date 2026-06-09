@@ -84,8 +84,6 @@ CASE_ANALYSIS_SCHEMA_VERSION=1
 
 ```env
 CASE_QA_ENABLED=false
-CASE_QA_GLOBAL_RETRIEVAL_ENABLED=false
-CASE_QA_MAX_RETRIEVED_CASES=5
 CASE_QA_MAX_CHUNKS_PER_LANE=6
 CASE_QA_MAX_TOTAL_CHUNKS=18
 CASE_QA_MAX_INDEX_CHUNKS_PER_CASE=200
@@ -127,7 +125,9 @@ CAPABILITY_PROFILES=core,analyst_portal
 - `CASE_ARCHIVE_ENABLED=true`
 - `PORTAL_ENABLED=true`
 - `CASE_QA_ENABLED=true`
-- `CASE_QA_GLOBAL_RETRIEVAL_ENABLED=false`
+
+Portal chat requires a pinned case (`selected_case_id`). Cross-case archive
+search is not supported.
 
 It must not enable:
 
@@ -500,20 +500,20 @@ Chat response `source_lane` values used during retrieval are contextual to the
 request:
 
 - `current_case`: the selected case in `selected_case` mode.
-- `prior_case`: any case retrieved from all-case search.
+- `prior_case`: removed; cross-case archive search is not supported.
 - `knowledge_base`: advisory Knowledge Base grounding used by chat.
 
 ## Chat Modes
 
-Supported modes:
+Supported mode:
 
 | Mode | Backend behavior |
 |------|------------------|
-| `selected_case` | Search the selected case and configured Knowledge Base context |
-| `global_archive` | Search retained case chunks and configured Knowledge Base context; no pinned case |
+| `selected_case` | Search the pinned case and configured Knowledge Base context; requires `selected_case_id` |
 
-All modes are read-only. Chat must return `unknown` or no-match when retrieval
-is weak.
+Chat is read-only. It must return `unknown` or no-match when retrieval is weak.
+General technology / TTP fallback remains available when
+`CASE_QA_GENERAL_KNOWLEDGE_ENABLED=true`.
 
 Portal chat synthesis should use the existing local LLM configuration
 (`LLM_API_URL`, `LLM_API_TOKEN`, `LLM_MODEL_NAME`, `LLM_TIMEOUT`) and a bounded
@@ -539,9 +539,6 @@ Mode-specific retrieval:
 
 - `selected_case`: retrieve chunks from `selected_case_id`, then append
   configured Knowledge Base context as `knowledge_base`.
-- `global_archive`: retrieve chunks across retained cases where
-  `retrieval_status='ready'`, capped to `CASE_QA_MAX_RETRIEVED_CASES` distinct
-  cases, then append configured Knowledge Base context as `knowledge_base`.
 
 When chat history is disabled, ignore incoming `session_id` and return
 `session_id=null`. When `CASE_QA_CHAT_HISTORY_ENABLED=true`, persist bounded

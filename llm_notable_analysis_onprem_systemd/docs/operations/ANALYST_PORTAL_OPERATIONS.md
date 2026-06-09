@@ -23,7 +23,6 @@ CAPABILITY_PROFILES=core,analyst_portal
 CASE_POSTGRES_DSN=postgresql://notable_portal@127.0.0.1:5432/notable_rag
 CASE_POSTGRES_SCHEMA=notable_cases
 CASE_RETENTION_DAYS=30
-CASE_QA_GLOBAL_RETRIEVAL_ENABLED=false
 PORTAL_BIND_HOST=127.0.0.1
 PORTAL_PORT=8080
 PORTAL_PAGE_SIZE=50
@@ -35,10 +34,9 @@ PORTAL_PROXY_SECRET_HEADER=X-Notable-Portal-Proxy-Secret
 ```
 
 The `analyst_portal` profile enables `CASE_ARCHIVE_ENABLED`, `PORTAL_ENABLED`,
-and `CASE_QA_ENABLED`. It does not enable cross-case/global chat retrieval or
-`HTML_REPORT_ENABLED`, or `CASE_QA_CHAT_HISTORY_ENABLED`; enable
-`CASE_QA_GLOBAL_RETRIEVAL_ENABLED=true` only after reviewing case visibility
-policy, enable `CASE_QA_CHAT_HISTORY_ENABLED=true` only when bounded transcript
+and `CASE_QA_ENABLED`. Portal chat requires a pinned case (`selected_case_id`).
+It does not enable `HTML_REPORT_ENABLED` or `CASE_QA_CHAT_HISTORY_ENABLED`;
+enable `CASE_QA_CHAT_HISTORY_ENABLED=true` only when bounded transcript
 persistence is required, and add `html_reports` separately if static HTML
 artifacts are still required.
 
@@ -379,10 +377,13 @@ Operator review points:
 
 ## Chatbot Behavior
 
-Supported modes:
+Portal chat requires a pinned case. Supported mode:
 
-- `selected_case`
-- `global_archive`
+- `selected_case` (requires `selected_case_id`)
+
+General technology / TTP questions still work via `CASE_QA_GENERAL_KNOWLEDGE_ENABLED`
+and optional advisory knowledge-base context when enabled. Cross-case archive
+search is not supported.
 
 Weak retrieval returns `answer_status=unknown`. Action requests return
 `answer_status=refused`. The portal chat does not call Splunk, ServiceNow, SOAR,

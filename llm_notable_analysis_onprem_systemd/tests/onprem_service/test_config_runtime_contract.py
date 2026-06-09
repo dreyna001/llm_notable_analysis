@@ -44,7 +44,6 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertFalse(config.PORTAL_ENABLED)
         self.assertEqual(config.PORTAL_CHAT_MAX_CONCURRENCY, 4)
         self.assertFalse(config.CASE_QA_ENABLED)
-        self.assertFalse(config.CASE_QA_GLOBAL_RETRIEVAL_ENABLED)
         self.assertFalse(config.CASE_QA_CHAT_HISTORY_ENABLED)
         self.assertEqual(config.CASE_QA_EMBEDDING_MODEL, "BAAI/bge-base-en-v1.5")
         self.assertEqual(config.CASE_QA_VECTOR_DIMENSIONS, 768)
@@ -148,7 +147,6 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertTrue(config.CASE_ARCHIVE_ENABLED)
         self.assertTrue(config.PORTAL_ENABLED)
         self.assertTrue(config.CASE_QA_ENABLED)
-        self.assertFalse(config.CASE_QA_GLOBAL_RETRIEVAL_ENABLED)
         self.assertFalse(config.CASE_QA_CHAT_HISTORY_ENABLED)
         self.assertFalse(config.SPLUNK_SINK_ENABLED)
         self.assertFalse(config.SERVICENOW_CREATE_ENABLED)
@@ -331,8 +329,6 @@ class TestConfigRuntimeContract(unittest.TestCase):
             "CASE_SCHEMA_VERSION": "2",
             "CASE_ANALYSIS_SCHEMA_VERSION": "3",
             "CASE_QA_ENABLED": "true",
-            "CASE_QA_GLOBAL_RETRIEVAL_ENABLED": "true",
-            "CASE_QA_MAX_RETRIEVED_CASES": "7",
             "CASE_QA_MAX_CHUNKS_PER_LANE": "8",
             "CASE_QA_MAX_TOTAL_CHUNKS": "20",
             "CASE_QA_MAX_INDEX_CHUNKS_PER_CASE": "210",
@@ -371,8 +367,6 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.CASE_SCHEMA_VERSION, 2)
         self.assertEqual(config.CASE_ANALYSIS_SCHEMA_VERSION, 3)
         self.assertTrue(config.CASE_QA_ENABLED)
-        self.assertTrue(config.CASE_QA_GLOBAL_RETRIEVAL_ENABLED)
-        self.assertEqual(config.CASE_QA_MAX_RETRIEVED_CASES, 7)
         self.assertEqual(config.CASE_QA_MAX_CHUNKS_PER_LANE, 8)
         self.assertEqual(config.CASE_QA_MAX_TOTAL_CHUNKS, 20)
         self.assertEqual(config.CASE_QA_MAX_INDEX_CHUNKS_PER_CASE, 210)

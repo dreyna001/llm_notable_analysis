@@ -16,7 +16,6 @@ const PortalCapabilitiesResponse = z.object({
   chat_history_enabled: z.boolean(),
   chat_ready: z.boolean(),
   general_knowledge_enabled: z.boolean(),
-  global_retrieval_enabled: z.boolean(),
   max_answer_tokens: z.number().int(),
   max_chat_sessions_per_user: z.number().int(),
   max_question_chars: z.number().int(),
@@ -92,7 +91,7 @@ const ChatResponseModel = z.object({
   session_id: z.union([z.string(), z.null()]).optional(),
 });
 const ChatSessionSummaryResponse = z.object({
-  mode: z.enum(["selected_case", "global_archive"]),
+  mode: z.string(),
   selected_case_id: z.union([z.string(), z.null()]),
   session_id: z.string(),
   title: z.string(),
@@ -114,7 +113,7 @@ const ChatSessionMessageResponse = z.object({
 });
 const ChatSessionMessagesResponse = z.object({
   messages: z.array(ChatSessionMessageResponse),
-  mode: z.enum(["selected_case", "global_archive"]),
+  mode: z.string(),
   selected_case_id: z.union([z.string(), z.null()]),
   session_id: z.string(),
 });

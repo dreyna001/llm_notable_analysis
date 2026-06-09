@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: S3-triggered notable analysis pipeline using Bedrock Nova Pro (pure CloudFormation)
+Description: S3-triggered notable analysis pipeline using Bedrock Claude Sonnet 4.6 (pure CloudFormation)
 
 Parameters:
   InputBucketName:
@@ -498,7 +498,7 @@ Resources:
                 Action:
                   - bedrock:InvokeModel
                 Resource:
-                  - !Sub 'arn:aws:bedrock:us-east-1:${AwsAccountId}:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0'
+                  - !Sub 'arn:aws:bedrock:us-east-1:${AwsAccountId}:inference-profile/us.anthropic.claude-sonnet-4-6'
               - !If
                 - HasRagKnowledgeBase
                 - Effect: Allow
@@ -602,7 +602,7 @@ Resources:
           RAG_MAX_SNIPPETS: !Ref RagMaxSnippets
           RAG_CONTEXT_BUDGET_CHARS: !Ref RagContextBudgetChars
           RAG_FAILURE_MODE: !Ref RagFailureMode
-          BEDROCK_MODEL_ID: !Sub 'arn:aws:bedrock:us-east-1:${AwsAccountId}:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0'
+          BEDROCK_MODEL_ID: !Sub 'arn:aws:bedrock:us-east-1:${AwsAccountId}:inference-profile/us.anthropic.claude-sonnet-4-6'
           SPLUNK_SINK_MODE: !Ref SplunkSinkMode
           SPLUNK_BASE_URL: !Ref SplunkBaseUrl
           SPLUNK_API_TOKEN_SECRET_ARN: !Ref SplunkApiTokenSecretArn

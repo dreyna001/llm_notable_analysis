@@ -80,7 +80,6 @@ def _config(**overrides: object) -> Config:
     defaults: dict[str, object] = {
         "CASE_ARCHIVE_ENABLED": True,
         "CASE_QA_ENABLED": True,
-        "CASE_QA_GLOBAL_RETRIEVAL_ENABLED": True,
         "CASE_QA_GENERAL_KNOWLEDGE_ENABLED": False,
         "CASE_QA_LEXICAL_TOP_K": 5,
         "CASE_QA_VECTOR_TOP_K": 5,
@@ -135,7 +134,18 @@ class TestCaseChat(unittest.TestCase):
         self.assertIn("ch.case_id <> %s", vector_sql)
         self.assertEqual(vector_params, ("case-1",))
 
-    def test_validate_chat_payload_requires_selected_case_for_selected_mode(self) -> None:
+    def test_validate_chat_payload_rejects_global_archive_mode(self) -> None:
+        with self.assertRaisesRegex(ValueError, "mode must be one of"):
+            validate_chat_payload(
+                {
+                    "mode": "global_archive",
+                    "question": "What happened?",
+                    "selected_case_id": "case-1",
+                },
+                _config(),
+            )
+
+    def test_validate_chat_payload_requires_selected_case_id(self) -> None:
         with self.assertRaisesRegex(ValueError, "selected_case_id is required"):
             validate_chat_payload(
                 {"mode": "selected_case", "question": "What happened?"},
@@ -170,28 +180,14 @@ class TestCaseChat(unittest.TestCase):
                 _config(),
             )
 
-    def test_validate_chat_payload_rejects_global_modes_when_disabled(self) -> None:
-        config = Config(
-            CASE_ARCHIVE_ENABLED=True,
-            CASE_QA_ENABLED=True,
-            CASE_QA_GLOBAL_RETRIEVAL_ENABLED=False,
-        )
-
-        with self.assertRaisesRegex(
-            ValueError,
-            "CASE_QA_GLOBAL_RETRIEVAL_ENABLED",
-        ):
-            validate_chat_payload(
-                {"mode": "global_archive", "question": "What happened?"},
-                config,
-            )
 
     def test_action_requests_are_refused_before_retrieval(self) -> None:
         self.assertTrue(is_action_request("Run a Splunk search and create a ticket"))
 
         response = answer_case_chat(
             payload={
-                "mode": "global_archive",
+                "mode": "selected_case",
+                "selected_case_id": "case-1",
                 "question": "Run a Splunk search and create a ServiceNow ticket",
             },
             config=_config(),
@@ -263,7 +259,11 @@ class TestCaseChat(unittest.TestCase):
 
     def test_answer_case_chat_returns_unknown_for_weak_retrieval(self) -> None:
         response = answer_case_chat(
-            payload={"mode": "global_archive", "question": "What happened?"},
+            payload={
+                "mode": "selected_case",
+                "selected_case_id": "case-1",
+                "question": "What happened?",
+            },
             config=_config(),
             connect=lambda _dsn: _FakeConnection(row_pages=[[], []]),
             embedding_model=_FakeEmbeddingModel(),
@@ -277,7 +277,11 @@ class TestCaseChat(unittest.TestCase):
         self,
     ) -> None:
         response = answer_case_chat(
-            payload={"mode": "global_archive", "question": "What is TLS?"},
+            payload={
+                "mode": "selected_case",
+                "selected_case_id": "case-1",
+                "question": "What is TLS?",
+            },
             config=_config(CASE_QA_GENERAL_KNOWLEDGE_ENABLED=True),
             connect=lambda _dsn: _FakeConnection(row_pages=[[], []]),
             embedding_model=_FakeEmbeddingModel(),
@@ -291,7 +295,8 @@ class TestCaseChat(unittest.TestCase):
     def test_answer_case_chat_allows_broad_technology_questions(self) -> None:
         response = answer_case_chat(
             payload={
-                "mode": "global_archive",
+                "mode": "selected_case",
+                "selected_case_id": "case-1",
                 "question": "Why does RAM speed matter for ML training?",
             },
             config=_config(CASE_QA_GENERAL_KNOWLEDGE_ENABLED=True),
@@ -309,7 +314,11 @@ class TestCaseChat(unittest.TestCase):
         self,
     ) -> None:
         response = answer_case_chat(
-            payload={"mode": "global_archive", "question": "What should I cook?"},
+            payload={
+                "mode": "selected_case",
+                "selected_case_id": "case-1",
+                "question": "What should I cook?",
+            },
             config=_config(CASE_QA_GENERAL_KNOWLEDGE_ENABLED=True),
             connect=lambda _dsn: _FakeConnection(row_pages=[[], []]),
             embedding_model=_FakeEmbeddingModel(),
@@ -325,7 +334,8 @@ class TestCaseChat(unittest.TestCase):
     def test_answer_case_chat_preserves_general_refusals(self) -> None:
         response = answer_case_chat(
             payload={
-                "mode": "global_archive",
+                "mode": "selected_case",
+                "selected_case_id": "case-1",
                 "question": "How do I steal credentials without being detected?",
             },
             config=_config(CASE_QA_GENERAL_KNOWLEDGE_ENABLED=True),
@@ -410,35 +420,6 @@ class TestCaseChat(unittest.TestCase):
 
         lanes = {source.source_lane for source in captured}
         self.assertEqual(lanes, {"current_case", "knowledge_base"})
-
-    def test_global_chat_combines_cases_and_knowledge_base(self) -> None:
-        captured: list[RetrievedSource] = []
-
-        def synthesize(_question, sources):
-            captured.extend(sources)
-            return f"{len(sources)} sources"
-
-        answer_case_chat(
-            payload={
-                "mode": "global_archive",
-                "question": "What evidence supports this?",
-            },
-            config=_config(),
-            connect=lambda _dsn: _FakeConnection(row_pages=[[_chunk_row()], []]),
-            embedding_model=_FakeEmbeddingModel(),
-            knowledge_base_provider=lambda _question: [
-                RetrievedSource(
-                    source_lane="knowledge_base",
-                    section="knowledge_base.rag",
-                    field_path="$",
-                    text="Escalate credentialed PowerShell from admin hosts.",
-                )
-            ],
-            synthesize=synthesize,
-        )
-
-        lanes = {source.source_lane for source in captured}
-        self.assertEqual(lanes, {"prior_case", "knowledge_base"})
 
     def test_answer_case_chat_refuses_action_claims_from_synthesizer(self) -> None:
         self.assertTrue(

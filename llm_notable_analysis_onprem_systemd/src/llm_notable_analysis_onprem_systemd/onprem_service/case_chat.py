@@ -59,15 +59,9 @@ ConnectionFactory = Callable[[str], Any]
 SynthesizeFn = Callable[[str, list["RetrievedSource"]], str]
 GeneralSynthesizeFn = Callable[[str], str]
 KnowledgeBaseProvider = Callable[[str], list["RetrievedSource"]]
-ChatMode = Literal[
-    "selected_case",
-    "global_archive",
-]
+ChatMode = Literal["selected_case"]
 
-_SUPPORTED_MODES = {
-    "selected_case",
-    "global_archive",
-}
+_SUPPORTED_MODES = {"selected_case"}
 
 
 class CaseNotFoundError(LookupError):
@@ -155,7 +149,6 @@ _ANSWER_CITATION_RE = re.compile(
     re.IGNORECASE,
 )
 _MAX_PROMPT_SOURCE_CHARS = 2400
-_GLOBAL_RETRIEVAL_MODES = {"global_archive"}
 _MAX_CASE_ID_LENGTH = 128
 _READINESS_CASE_ID = "__portal_chat_readiness__"
 _READINESS_QUESTION = "portal chat readiness"
@@ -541,13 +534,6 @@ def validate_chat_payload(payload: Any, config: Config) -> ChatRequest:
             + ", ".join(sorted(_SUPPORTED_MODES))
             + "."
         )
-    if (
-        mode in _GLOBAL_RETRIEVAL_MODES
-        and not bool(config.CASE_QA_GLOBAL_RETRIEVAL_ENABLED)
-    ):
-        raise ValueError(
-            "CASE_QA_GLOBAL_RETRIEVAL_ENABLED must be true for this chat mode."
-        )
     question = str(payload.get("question") or "").strip()
     if not question:
         raise ValueError("question is required.")
@@ -561,8 +547,8 @@ def validate_chat_payload(payload: Any, config: Config) -> ChatRequest:
         raise ValueError(
             f"selected_case_id must be at most {_MAX_CASE_ID_LENGTH} characters."
         )
-    if mode == "selected_case" and not selected_case_id:
-        raise ValueError("selected_case_id is required for this mode.")
+    if not selected_case_id:
+        raise ValueError("selected_case_id is required for portal chat.")
     session_id = payload.get("session_id")
     session_id = str(session_id).strip() if session_id else None
     return ChatRequest(
@@ -580,7 +566,7 @@ def retrieve_case_sources(
     connect: ConnectionFactory | None = None,
     embedding_model: Any = None,
 ) -> list[RetrievedSource]:
-    """Retrieve archived case chunks according to the selected chat mode."""
+    """Retrieve archived case chunks for the pinned selected case."""
     query_vector = _encode_query_vector(
         request.question,
         config,
@@ -590,38 +576,21 @@ def retrieve_case_sources(
     sources: list[RetrievedSource] = []
     with connect_fn(config.CASE_POSTGRES_DSN) as conn:
         _set_statement_timeout(conn, config.CASE_POSTGRES_STATEMENT_TIMEOUT_MS)
-        if request.mode == "selected_case":
-            current = _execute_chunk_retrieval(
-                conn,
-                config=config,
-                question=request.question,
-                query_vector=query_vector,
+        current = _execute_chunk_retrieval(
+            conn,
+            config=config,
+            question=request.question,
+            query_vector=query_vector,
+            selected_case_id=request.selected_case_id,
+        )
+        sources.extend(
+            _sources_from_candidates(
+                current,
+                source_lane="current_case",
                 selected_case_id=request.selected_case_id,
+                max_cases=1,
             )
-            sources.extend(
-                _sources_from_candidates(
-                    current,
-                    source_lane="current_case",
-                    selected_case_id=request.selected_case_id,
-                    max_cases=1,
-                )
-            )
-        if request.mode == "global_archive":
-            prior = _execute_chunk_retrieval(
-                conn,
-                config=config,
-                question=request.question,
-                query_vector=query_vector,
-                exclude_case_id=request.selected_case_id,
-            )
-            sources.extend(
-                _sources_from_candidates(
-                    prior,
-                    source_lane="prior_case",
-                    selected_case_id=request.selected_case_id,
-                    max_cases=config.CASE_QA_MAX_RETRIEVED_CASES,
-                )
-            )
+        )
     return _trim_sources(sources, config)
 
 

@@ -454,10 +454,7 @@
             "type": "array"
           },
           "mode": {
-            "enum": [
-              "selected_case",
-              "global_archive"
-            ],
+            "const": "selected_case",
             "title": "Mode",
             "type": "string"
           },
@@ -490,10 +487,7 @@
         "additionalProperties": false,
         "properties": {
           "mode": {
-            "enum": [
-              "selected_case",
-              "global_archive"
-            ],
+            "const": "selected_case",
             "title": "Mode",
             "type": "string"
           },
@@ -674,10 +668,6 @@
             "title": "General Knowledge Enabled",
             "type": "boolean"
           },
-          "global_retrieval_enabled": {
-            "title": "Global Retrieval Enabled",
-            "type": "boolean"
-          },
           "max_answer_tokens": {
             "title": "Max Answer Tokens",
             "type": "integer"
@@ -693,7 +683,6 @@
         },
         "required": [
           "case_qa_enabled",
-          "global_retrieval_enabled",
           "chat_history_enabled",
           "general_knowledge_enabled",
           "max_question_chars",

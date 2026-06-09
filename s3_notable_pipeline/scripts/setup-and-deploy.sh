@@ -75,7 +75,7 @@ if nova_models="$(aws bedrock list-foundation-models --region "$region" --query 
   fi
 fi
 
-if claude_profiles="$(aws bedrock list-inference-profiles --region "$region" --query "inferenceProfileSummaries[?contains(inferenceProfileId, 'claude-sonnet-4-5')].inferenceProfileId" --output text 2>/dev/null)"; then
+if claude_profiles="$(aws bedrock list-inference-profiles --region "$region" --query "inferenceProfileSummaries[?contains(inferenceProfileId, 'claude-sonnet-4-6')].inferenceProfileId" --output text 2>/dev/null)"; then
   if [ -n "$claude_profiles" ] && [ "$claude_profiles" != "None" ]; then
     claude_available=1
   fi
@@ -87,11 +87,11 @@ if [ "$nova_available" -eq 1 ] || [ "$claude_available" -eq 1 ]; then
     echo "  Available Nova Pro models: $nova_models"
   fi
   if [ "$claude_available" -eq 1 ]; then
-    echo "  Available Claude Sonnet 4.5 inference profiles: $claude_profiles"
+    echo "  Available Claude Sonnet 4.6 inference profiles: $claude_profiles"
   fi
   echo "  Validate deploy-time values still match template parameters (AwsAccountId, model/profile, region)."
 else
-  echo "  Could not verify Nova Pro models or Claude Sonnet 4.5 inference profiles (may need model/profile access request)."
+  echo "  Could not verify Nova Pro models or Claude Sonnet 4.6 inference profiles (may need model/profile access request)."
 fi
 
 echo

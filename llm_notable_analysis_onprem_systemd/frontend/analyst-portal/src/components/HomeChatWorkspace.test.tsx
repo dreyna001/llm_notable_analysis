@@ -1,16 +1,15 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, fetchCapabilities, fetchChatSessions } from "../api/client";
+import { ApiError, fetchCapabilities, fetchCase, fetchChatSessions } from "../api/client";
 import type { PortalCapabilities } from "../types";
+
 import { HomeChatWorkspace } from "./HomeChatWorkspace";
 
 const STORAGE_KEY = "portal-chat-sessions-v1";
 
 const capabilities: PortalCapabilities = {
   case_qa_enabled: true,
-  global_retrieval_enabled: false,
   chat_history_enabled: false,
   general_knowledge_enabled: true,
   max_question_chars: 2000,
@@ -46,43 +45,16 @@ function resetApiMocks() {
     history_enabled: false,
     items: [],
   });
-}
-
-function seedSelectedCaseSession() {
-  window.localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify({
-      activeLocalId: "local-selected",
-      sessions: [
-        {
-          localId: "local-selected",
-          serverSessionId: "server-selected",
-          title: "Portal E2E Test",
-          updatedAt: "2026-01-01T00:00:00.000Z",
-          mode: "selected_case",
-          selectedCaseId: "portal-test-1780770539",
-          turns: [],
-        },
-      ],
-    }),
-  );
-}
-
-function ClearableWorkspace() {
-  const [caseId, setCaseId] = useState<string | undefined>(
-    "portal-test-1780770539",
-  );
-  return (
-    <MemoryRouter>
-      <HomeChatWorkspace
-        sidebarMeta={<div>Case window</div>}
-        selectedCaseId={caseId}
-        selectedCaseName={caseId ? "Portal E2E Test" : undefined}
-        onAttachCase={(nextCaseId) => setCaseId(nextCaseId)}
-        onClearSelectedCase={() => setCaseId(undefined)}
-      />
-    </MemoryRouter>
-  );
+  vi.mocked(fetchCase).mockResolvedValue({
+    case_id: "portal-test-1780770539",
+    metadata: {
+      processed_at: "2026-01-01T00:00:00.000Z",
+      retrieval_status: "ready",
+      source_completeness: "complete",
+    },
+    alert_payload: { search_name: "Portal E2E Test" },
+    analysis: {},
+  });
 }
 
 describe("HomeChatWorkspace attached case", () => {
@@ -90,39 +62,21 @@ describe("HomeChatWorkspace attached case", () => {
     window.localStorage.clear();
     vi.clearAllMocks();
     resetApiMocks();
-    vi.mocked(fetchCapabilities).mockResolvedValue({
-      ...capabilities,
-      chat_history_enabled: true,
-    });
   });
 
-  it("removes a stale selected-case session from the active view when the URL case is cleared", async () => {
-    seedSelectedCaseSession();
-
-    render(<ClearableWorkspace />);
-
-    expect(await screen.findByText("Portal E2E Test")).toBeInTheDocument();
-
-    fireEvent.click(
-      screen.getByRole("button", { name: /clear attached case/i }),
+  it("shows an attached case from workspace props", async () => {
+    render(
+      <MemoryRouter>
+        <HomeChatWorkspace
+          sidebarMeta={<div>Case window</div>}
+          selectedCaseId="portal-test-1780770539"
+          selectedCaseName="Portal E2E Test"
+        />
+      </MemoryRouter>,
     );
 
-    await waitFor(() => {
-      expect(screen.queryByText("Case attached")).not.toBeInTheDocument();
-    });
-    expect(screen.queryByText("Portal E2E Test")).not.toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Select a case to chat. Cross-case archive chat is disabled for this portal.",
-      ),
-    ).toBeInTheDocument();
-
-    const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}");
-    expect(stored.sessions[0]).toMatchObject({
-      mode: "selected_case",
-      serverSessionId: null,
-    });
-    expect(stored.sessions[0]).not.toHaveProperty("selectedCaseId");
+    expect(await screen.findByText("Portal E2E Test")).toBeInTheDocument();
+    expect(screen.getByText("Case attached")).toBeInTheDocument();
   });
 });
 
@@ -137,7 +91,7 @@ describe("HomeChatWorkspace new chat", () => {
     });
   });
 
-  it("does not create a global-mode session when cross-case chat is disabled", async () => {
+  it("does not create a chat session without an attached case", async () => {
     window.localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
@@ -148,7 +102,7 @@ describe("HomeChatWorkspace new chat", () => {
             serverSessionId: null,
             title: "Old chat",
             updatedAt: "2026-01-01T00:00:00.000Z",
-            mode: "global_archive",
+            mode: "selected_case",
             turns: [
               {
                 id: "turn-1",
@@ -172,7 +126,7 @@ describe("HomeChatWorkspace new chat", () => {
 
     expect(
       await screen.findByText(
-        "Select a case to chat. Cross-case archive chat is disabled for this portal.",
+        "Attach or open a case to chat.",
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText("All cases + knowledge base")).not.toBeInTheDocument();
@@ -230,6 +184,9 @@ describe("HomeChatWorkspace startup failures", () => {
 
     expect(
       await screen.findByText("Case chat is unavailable: LLM gateway is down."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText("Case ID or alert name"),
     ).toBeInTheDocument();
     expect(screen.queryByPlaceholderText(/ask/i)).not.toBeInTheDocument();
   });

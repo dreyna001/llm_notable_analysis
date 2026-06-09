@@ -73,7 +73,7 @@ try {
     $novaModels = aws bedrock list-foundation-models --region $region --query "modelSummaries[?contains(modelId, 'nova-pro')].modelId" --output text 2>$null
     $novaAvailable = $LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($novaModels) -and $novaModels -ne "None"
 
-    $claudeProfiles = aws bedrock list-inference-profiles --region $region --query "inferenceProfileSummaries[?contains(inferenceProfileId, 'claude-sonnet-4-5')].inferenceProfileId" --output text 2>$null
+    $claudeProfiles = aws bedrock list-inference-profiles --region $region --query "inferenceProfileSummaries[?contains(inferenceProfileId, 'claude-sonnet-4-6')].inferenceProfileId" --output text 2>$null
     $claudeAvailable = $LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($claudeProfiles) -and $claudeProfiles -ne "None"
 
     if ($novaAvailable -or $claudeAvailable) {
@@ -82,14 +82,14 @@ try {
             Write-Host "  Available Nova Pro models: $novaModels" -ForegroundColor Gray
         }
         if ($claudeAvailable) {
-            Write-Host "  Available Claude Sonnet 4.5 inference profiles: $claudeProfiles" -ForegroundColor Gray
+            Write-Host "  Available Claude Sonnet 4.6 inference profiles: $claudeProfiles" -ForegroundColor Gray
         }
         Write-Host "  Validate deploy-time values still match template parameters (AwsAccountId, model/profile, region)." -ForegroundColor Gray
     } else {
-        Write-Host "  Could not verify Nova Pro models or Claude Sonnet 4.5 inference profiles (may need model/profile access request)." -ForegroundColor Yellow
+        Write-Host "  Could not verify Nova Pro models or Claude Sonnet 4.6 inference profiles (may need model/profile access request)." -ForegroundColor Yellow
     }
 } catch {
-    Write-Host "  Could not check Bedrock access for Nova Pro or Claude Sonnet 4.5 profile" -ForegroundColor Yellow
+    Write-Host "  Could not check Bedrock access for Nova Pro or Claude Sonnet 4.6 profile" -ForegroundColor Yellow
 }
 
 # Build

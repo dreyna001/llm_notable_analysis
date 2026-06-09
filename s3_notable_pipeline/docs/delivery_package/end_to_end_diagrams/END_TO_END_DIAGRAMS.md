@@ -9,7 +9,7 @@ These Mermaid diagrams summarize how work flows from **how customers build and f
 **Assumptions (planning, not a guarantee):**
 
 - **Volume:** **~250 alerts per day** handed to analysis **as one notable object each** (typical SOAR/upload pattern). That scale assumes **well-tuned detections**, not an unbounded noisy firehose.
-- **Illustrative AWS-only run cost** (order of magnitude; excludes labor, SIEM/SOAR, and other tools; varies with model choice, prompt size, tokens per notable, retries, and regional pricing): **Bedrock inference is usually the dominant line item** at this volume; S3 and Lambda are comparatively small. About **US$1k/year** all-in on AWS with **Nova Pro**–class Bedrock usage, and about **US$4.5k/year** with **Claude Sonnet 4.5**–class usage, as modeled for this pipeline shape.
+- **Illustrative AWS-only run cost** (order of magnitude; excludes labor, SIEM/SOAR, and other tools; varies with model choice, prompt size, tokens per notable, retries, and regional pricing): **Bedrock inference is usually the dominant line item** at this volume; S3 and Lambda are comparatively small. About **US$1k/year** all-in on AWS with **Nova Pro**–class Bedrock usage, and about **US$4.5k–5.5k/year** with **Claude Sonnet 4.6**–class usage (analyzer default), as modeled for this pipeline shape.
 
 ---
 
@@ -161,7 +161,7 @@ flowchart TB
     end
 
     subgraph AI["Model + Retrieval"]
-      BR[Amazon Bedrock<br/>inference in target region<br/>Claude Sonnet 4.5 or comparable]
+      BR[Amazon Bedrock<br/>inference in target region<br/>Claude Sonnet 4.6 or comparable]
       KB[Bedrock Knowledge Bases<br/>SOC, SPL, Elastic context]
     end
 

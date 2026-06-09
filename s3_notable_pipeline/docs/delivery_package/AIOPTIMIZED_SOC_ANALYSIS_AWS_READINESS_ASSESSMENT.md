@@ -148,6 +148,6 @@ For `s3_notable_pipeline` specifically, these are the main sources of deployment
 
 - `s3_notable_pipeline/template-sam.yaml` and `template-cfn.yaml` parameterize account ID, but customers must still align the selected model/profile and region with approvals
 - `s3_notable_pipeline/Dockerfile` uses a placeholder or private-style base image, so many orgs cannot build it unchanged
-- `s3_notable_pipeline/setup-and-deploy.ps1` checks for either Nova models or Claude Sonnet 4.5 inference profiles, but operators still need to verify the exact deploy-time model/profile and region match template and runtime settings
+- `s3_notable_pipeline/setup-and-deploy.ps1` checks for either Nova models or Claude Sonnet 4.6 inference profiles, but operators still need to verify the exact deploy-time model/profile and region match template and runtime settings
 - Splunk integration now has a template-driven notable_rest injection path, but operators still need an approved secret lifecycle for `SplunkApiTokenSecretArn`
 

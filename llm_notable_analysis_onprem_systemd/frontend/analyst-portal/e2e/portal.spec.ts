@@ -243,18 +243,5 @@ test.describe("Analyst portal E2E", () => {
       .last();
     await expect(assistantReply).not.toBeEmpty({ timeout: 5_000 });
 
-    if (fixture.capabilities.global_retrieval_enabled) {
-      await page.getByRole("combobox", { name: "Mode" }).click();
-      await page.getByRole("option", { name: "All cases + knowledge base" }).click();
-
-      const globalQuestion =
-        "How many archived cases mention Portal E2E Test? Answer briefly from archived case context.";
-      await composer.fill(globalQuestion);
-      await page.getByRole("button", { name: "Send" }).click();
-      await expect(page.getByText(globalQuestion)).toBeVisible();
-      await expect(page.getByRole("button", { name: "Stop response" })).toBeHidden({
-        timeout: env.chatTimeoutMs,
-      });
-    }
   });
 });

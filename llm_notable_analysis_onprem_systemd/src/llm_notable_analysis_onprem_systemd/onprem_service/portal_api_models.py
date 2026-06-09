@@ -6,7 +6,7 @@ from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict
 
-ChatMode = Literal["selected_case", "global_archive"]
+ChatMode = Literal["selected_case"]
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
@@ -29,7 +29,6 @@ class PortalCapabilitiesResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     case_qa_enabled: bool
-    global_retrieval_enabled: bool
     chat_history_enabled: bool
     general_knowledge_enabled: bool
     max_question_chars: int
