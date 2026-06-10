@@ -136,14 +136,6 @@ _GENERAL_OUT_OF_SCOPE_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
-_GENERAL_REFUSAL_RE = re.compile(
-    r"^\s*(?:"
-    r"refused:"
-    r"|i\s+(?:can't|cannot)\s+help\s+with\s+.*?\b(?:credential theft|malware|"
-    r"persistence|evasion|exfiltration|unauthorized|exploit)\b"
-    r")",
-    re.IGNORECASE,
-)
 _ANSWER_CITATION_RE = re.compile(
     r"(?:"
     r"\(?\s*sources?\s*(?:[#:]|no\.?|number)?\s*\d+(?:\s*[-–,]\s*\d+)*\s*\)?"
@@ -964,11 +956,6 @@ def _build_general_knowledge_prompt(question: str) -> str:
         "CrowdStrike hunts, shell commands, or API examples for a human to review "
         "and run. Never claim you performed an action; label drafted query text as "
         "unvalidated draft guidance.\n"
-        "For cybersecurity dual-use topics, default to defensive, educational, "
-        "and authorized-use guidance. If the user asks for credential theft, "
-        "malware deployment, persistence, evasion, exfiltration, or exploitation "
-        "of unauthorized systems, begin with 'Refused:' and offer a safe defensive "
-        "alternative.\n"
         "For code questions, include concise examples when useful and state "
         "assumptions. Do not claim you ran code.\n"
         "Keep answers practical and use enough detail to be useful.\n\n"
@@ -1053,11 +1040,6 @@ def _finalize_general_knowledge_response(
         return {
             "answer": answer,
             "answer_status": "unknown",
-        }
-    if _GENERAL_REFUSAL_RE.search(answer):
-        return {
-            "answer": answer,
-            "answer_status": "refused",
         }
     return {
         "answer": answer,
