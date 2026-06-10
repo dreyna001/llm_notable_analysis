@@ -34,6 +34,8 @@ operations, tuning, security, and integration guidance lives under
 | Runtime config values | [`config.env.example`](config.env.example) |
 | Tests and validation | [`docs/testing/TESTING.md`](docs/testing/TESTING.md) |
 | Local dev venv (Python + frontend) | [`../DEVELOPING.md`](../DEVELOPING.md) |
+| Analyst portal local preview | [`docs/operations/ANALYST_PORTAL_PREVIEW.md`](docs/operations/ANALYST_PORTAL_PREVIEW.md) |
+| Analyst portal chat security | [`docs/operations/ANALYST_PORTAL_CHAT_SECURITY.md`](docs/operations/ANALYST_PORTAL_CHAT_SECURITY.md) |
 | Host paths vs local checkout | [Filesystem map](#filesystem-map) (below) |
 | Security posture | [`docs/operations/SECURITY_OPERATIONS.md`](docs/operations/SECURITY_OPERATIONS.md) and [`docs/security/SECURITY_POSTURE.md`](docs/security/SECURITY_POSTURE.md) |
 | Deployment readiness | [`docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.md`](docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.md) |

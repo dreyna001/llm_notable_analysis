@@ -385,10 +385,18 @@ General technology / TTP questions still work via `CASE_QA_GENERAL_KNOWLEDGE_ENA
 and optional advisory knowledge-base context when enabled. Cross-case archive
 search is not supported.
 
-Weak retrieval returns `answer_status=unknown`. Action requests return
-`answer_status=refused`. The portal chat does not call Splunk, ServiceNow, SOAR,
-or remediation systems. Chat responses return the synthesized answer and
-`answer_status` only; source citations are not exposed in the API or UI.
+Weak retrieval returns `answer_status=unknown`. The portal chat has no live
+Splunk, ServiceNow, SOAR, or remediation integrations and cannot execute
+searches or tickets. Analysts may ask for draft Splunk SPL, Elasticsearch
+queries, CrowdStrike hunts, and similar guidance; the assistant should answer
+with investigation steps and unvalidated draft query text, not pre-refuse the
+question. Answers that claim the portal already performed an external action
+still return `answer_status=refused`. Chat responses return the synthesized
+answer and `answer_status` only; source citations are not exposed in the API or
+UI.
+
+For architecture, threat model, and non-execution guarantees, see
+[`ANALYST_PORTAL_CHAT_SECURITY.md`](ANALYST_PORTAL_CHAT_SECURITY.md).
 
 ## Troubleshooting
 
@@ -440,3 +448,5 @@ Portal startup failures:
 - Treat case data as sensitive incident evidence.
 - Do not log tokens, auth headers, or raw sensitive payloads.
 - The portal and chat path are read-only by design.
+- Portal chat cannot execute integrations or filesystem operations; see
+  [`ANALYST_PORTAL_CHAT_SECURITY.md`](ANALYST_PORTAL_CHAT_SECURITY.md).

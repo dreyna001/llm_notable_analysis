@@ -4,6 +4,9 @@ This guide helps customers decide safe operational settings around exposure,
 secrets, TLS, permissions, and audit posture. It summarizes customer decisions;
 the deeper implemented posture lives in [`../security/SECURITY_POSTURE.md`](../security/SECURITY_POSTURE.md).
 
+Portal chat non-execution boundaries (no tools, no filesystem, no integration
+calls from `/api/chat`): [`ANALYST_PORTAL_CHAT_SECURITY.md`](ANALYST_PORTAL_CHAT_SECURITY.md).
+
 ## What This Controls
 
 Security operations covers host-level and configuration choices that affect the

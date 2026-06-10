@@ -99,6 +99,18 @@ npm --prefix llm_notable_analysis_onprem_systemd/frontend/analyst-portal run dev
 
 Open http://127.0.0.1:5173/ (UI) with the API on http://127.0.0.1:8765/.
 
+Full preview setup (Bedrock chat, stored cases 1-5, troubleshooting) is in
+[`llm_notable_analysis_onprem_systemd/docs/operations/ANALYST_PORTAL_PREVIEW.md`](llm_notable_analysis_onprem_systemd/docs/operations/ANALYST_PORTAL_PREVIEW.md).
+
+Recommended analyst questions for preview case investigation are in
+[`PREVIEW_CASE_INVESTIGATION_GUIDE.md`](PREVIEW_CASE_INVESTIGATION_GUIDE.md).
+
+After bootstrap, install Bedrock support for preview chat:
+
+```powershell
+pip install boto3==1.37.38
+```
+
 ### Portal E2E (Playwright)
 
 Bootstrap installs `@playwright/test` under the analyst-portal frontend and

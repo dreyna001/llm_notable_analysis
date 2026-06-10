@@ -40,7 +40,9 @@ Optional deep dives:
 |-------|-------------|
 | Executive on-prem build summary | [EXECUTIVE_ONPREM_BUILD_WRITEUP.md](delivery_package/EXECUTIVE_ONPREM_BUILD_WRITEUP.md) |
 | Capability profiles | [CAPABILITY_PROFILES.md](operations/CAPABILITY_PROFILES.md), [`config.env.example`](../config.env.example) (`CAPABILITY_PROFILES`) |
-| Analyst portal operations | [ANALYST_PORTAL_OPERATIONS.md](operations/ANALYST_PORTAL_OPERATIONS.md), [`notable-portal.service`](../deploy/systemd/notable-portal.service), [`notable-portal.conf`](../deploy/nginx/notable-portal.conf) |
+| Analyst portal operations | [`ANALYST_PORTAL_OPERATIONS.md`](ANALYST_PORTAL_OPERATIONS.md), [`notable-portal.service`](../deploy/systemd/notable-portal.service), [`notable-portal.conf`](../deploy/nginx/notable-portal.conf) |
+| Analyst portal chat security | [`ANALYST_PORTAL_CHAT_SECURITY.md`](operations/ANALYST_PORTAL_CHAT_SECURITY.md) |
+| Analyst portal local preview (dev) | [`ANALYST_PORTAL_PREVIEW.md`](operations/ANALYST_PORTAL_PREVIEW.md), [`PREVIEW_CASE_INVESTIGATION_GUIDE.md`](../../PREVIEW_CASE_INVESTIGATION_GUIDE.md) |
 | Analyst portal React UI (dev spike) | [`frontend/analyst-portal/README.md`](../frontend/analyst-portal/README.md) |
 | Shared local dev venv (Python + Node) | [`DEVELOPING.md`](../../DEVELOPING.md) |
 | Host paths vs local checkout | [`README.md` § Filesystem map](../README.md#filesystem-map) |
