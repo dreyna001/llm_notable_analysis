@@ -1,0 +1,23 @@
+{
+  "notable_id": "syn-003",
+  "search_name": "Suspicious PowerShell",
+  "urgency": "high",
+  "risk_score": 78,
+  "owner": "unassigned",
+  "status": "new",
+  "event_time": "2026-06-04T16:41:03Z",
+  "user": "corp\\jsmith",
+  "host": "workstation-14.corp.local",
+  "src_ip": "10.20.14.55",
+  "process": "powershell.exe",
+  "process_id": 8844,
+  "parent_process": "winword.exe",
+  "parent_process_id": 7120,
+  "command_line": "powershell.exe -nop -w hidden -enc SQBFAFgAYQBuACAAcwBjAHIAaXB0AA==",
+  "event_id": "4688",
+  "logon_type": 2,
+  "integrity_level": "high",
+  "change_ticket": "",
+  "edr_action": "not blocked",
+  "description": "Encoded PowerShell with hidden window launched from winword.exe under admin user corp\\jsmith on workstation-14; no matching change ticket."
+}

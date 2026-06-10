@@ -4,7 +4,7 @@
 # HTTP client for LLM API calls
 requests==2.32.5
 
-# Optional Bedrock portal chat provider (PORTAL_LLM_PROVIDER=bedrock)
+# Preview-only Bedrock chat (scripts/preview_portal_ui.py)
 boto3==1.37.38
 
 # Shared local OpenAI-compatible transport/runtime contract

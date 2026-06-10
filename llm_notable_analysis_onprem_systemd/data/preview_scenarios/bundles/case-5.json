@@ -1,0 +1,297 @@
+{
+  "scenario_index": 5,
+  "case_id": "case-5",
+  "finding_id": "syn-005",
+  "search_name": "Suspicious RDP Lateral Movement",
+  "source_filename": "case-5-lateral-movement-rdp.json",
+  "alert": {
+    "notable_id": "syn-005",
+    "search_name": "Suspicious RDP Lateral Movement",
+    "urgency": "high",
+    "risk_score": 83,
+    "owner": "unassigned",
+    "status": "new",
+    "event_time": "2026-06-04T20:55:17Z",
+    "src_user": "corp\\svc-backup",
+    "src_host": "jump-01.corp.local",
+    "src_ip": "10.10.5.22",
+    "dest_host": "db-prod-01.corp.local",
+    "dest_ip": "10.30.8.40",
+    "protocol": "RDP",
+    "dest_port": 3389,
+    "event_id": "4624",
+    "logon_type": 10,
+    "auth_package": "Negotiate",
+    "service_account_expected_on_dest": false,
+    "prior_failed_logons_15m": 6,
+    "description": "Service account corp\\svc-backup initiated interactive RDP from jump-01 to db-prod-01 after six failed logon attempts; destination host is not in the approved jump path for this account."
+  },
+  "analysis": {
+    "alert_reconciliation": {
+      "verdict": "likely_malicious",
+      "confidence": "0.82",
+      "one_sentence_summary": "Service account corp\\svc-backup opened interactive RDP from jump-01 to db-prod-01 after six failed logons, outside the approved jump path for that account on a production database host.",
+      "decision_drivers": [
+        "protocol=RDP with logon_type=10 interactive remote",
+        "prior_failed_logons_15m=6 before success",
+        "service_account_expected_on_dest=false",
+        "dest_host=db-prod-01.corp.local is production database tier"
+      ],
+      "recommended_actions": [
+        "Terminate active RDP session and disable corp\\svc-backup until ownership verified.",
+        "Review PAM and jump-server authorization for svc-backup on db-prod-01."
+      ]
+    },
+    "competing_hypotheses": [
+      {
+        "hypothesis_type": "benign",
+        "hypothesis": "Emergency DBA access via break-glass service account.",
+        "evidence_support": [
+          "src_host=jump-01.corp.local is jump server",
+          "Successful 4624 after failures"
+        ],
+        "evidence_gaps": [
+          "No break-glass ticket in alert",
+          "service_account_expected_on_dest=false"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "PAM session logs",
+            "key_fields": [
+              "user",
+              "dest_host"
+            ]
+          },
+          {
+            "log_source": "Change management",
+            "key_fields": [
+              "dest_host"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "benign",
+        "hypothesis": "Backup software vendor remote support session misrouted through jump-01.",
+        "evidence_support": [
+          "src_user=corp\\svc-backup naming suggests backup role"
+        ],
+        "evidence_gaps": [
+          "Vendor maintenance window unknown",
+          "RDP instead of backup protocol unexpected"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "Backup console",
+            "key_fields": [
+              "host",
+              "job_id"
+            ]
+          },
+          {
+            "log_source": "VPN/jump logs",
+            "key_fields": [
+              "user"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "benign",
+        "hypothesis": "Automated jump-box script testing connectivity to db-prod-01.",
+        "evidence_support": [
+          "Multiple attempts then success pattern could be retry logic"
+        ],
+        "evidence_gaps": [
+          "Script name not in alert",
+          "Automation schedule unknown"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "Task Scheduler",
+            "key_fields": [
+              "src_host",
+              "task_name"
+            ]
+          },
+          {
+            "log_source": "Windows Security",
+            "key_fields": [
+              "dest_host"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "adversary",
+        "hypothesis": "Stolen service account used for lateral movement to database tier.",
+        "evidence_support": [
+          "RDP from jump-01 to db-prod-01",
+          "prior_failed_logons_15m=6",
+          "service_account_expected_on_dest=false"
+        ],
+        "evidence_gaps": [
+          "Initial credential theft not in alert",
+          "Post-RDP activity unknown"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "AD auth",
+            "key_fields": [
+              "user",
+              "src_ip"
+            ]
+          },
+          {
+            "log_source": "EDR",
+            "key_fields": [
+              "dest_host",
+              "logon_type"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "adversary",
+        "hypothesis": "Pass-the-hash or brute force success against svc-backup on jump-01.",
+        "evidence_support": [
+          "Six failed logons within 15 minutes",
+          "Interactive RDP success follows"
+        ],
+        "evidence_gaps": [
+          "Auth failure codes not shown",
+          "Source attacker IP unknown"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "Windows Security",
+            "key_fields": [
+              "src_host",
+              "user"
+            ]
+          },
+          {
+            "log_source": "NDR",
+            "key_fields": [
+              "src_ip",
+              "dest_ip"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "adversary",
+        "hypothesis": "Operator misused service account after prior compromise of jump-01.",
+        "evidence_support": [
+          "Service account on approved jump host reaching prod DB",
+          "logon_type=10"
+        ],
+        "evidence_gaps": [
+          "Jump-01 compromise evidence missing",
+          "Session duration unknown"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "EDR",
+            "key_fields": [
+              "src_host",
+              "process"
+            ]
+          },
+          {
+            "log_source": "PAM",
+            "key_fields": [
+              "user",
+              "dest_host"
+            ]
+          }
+        ]
+      }
+    ],
+    "evidence_vs_inference": {
+      "evidence": [
+        "src_user=corp\\svc-backup",
+        "src_host=jump-01.corp.local",
+        "dest_host=db-prod-01.corp.local",
+        "dest_ip=10.30.8.40",
+        "protocol=RDP",
+        "prior_failed_logons_15m=6",
+        "service_account_expected_on_dest=false",
+        "logon_type=10"
+      ],
+      "inferences": [
+        "Interactive RDP to prod DB by backup service account is high risk without PAM record",
+        "Failed logon burst increases likelihood of credential guessing or stale credential reuse"
+      ]
+    },
+    "ioc_extraction": {
+      "ip_addresses": [
+        "10.10.5.22",
+        "10.30.8.40"
+      ],
+      "domains": [],
+      "user_accounts": [
+        "corp\\svc-backup"
+      ],
+      "hostnames": [
+        "jump-01.corp.local",
+        "db-prod-01.corp.local"
+      ],
+      "process_names": [],
+      "file_paths": [],
+      "file_hashes": [],
+      "event_ids": [
+        "4624"
+      ],
+      "urls": []
+    },
+    "ttp_analysis": [
+      {
+        "ttp_id": "T1021.001",
+        "ttp_name": "Remote Services: Remote Desktop Protocol",
+        "confidence_score": "0.85",
+        "explanation": "Interactive RDP logon from jump host to database server. Uncertainty: authorized break-glass not confirmed.",
+        "evidence_fields": [
+          "protocol",
+          "logon_type",
+          "dest_host"
+        ]
+      },
+      {
+        "ttp_id": "T1078",
+        "ttp_name": "Valid Accounts",
+        "confidence_score": "0.68",
+        "explanation": "Service account used for remote authentication. Uncertainty: credential theft not proven.",
+        "evidence_fields": [
+          "src_user",
+          "event_id"
+        ]
+      },
+      {
+        "ttp_id": "T1110",
+        "ttp_name": "Brute Force",
+        "confidence_score": "0.55",
+        "explanation": "Six failed logons within 15 minutes before success. Uncertainty: failure reason codes not shown.",
+        "evidence_fields": [
+          "prior_failed_logons_15m"
+        ]
+      }
+    ],
+    "actions": {
+      "immediate": [
+        "Kill active RDP session to db-prod-01 and rotate svc-backup credentials."
+      ],
+      "short_term": [
+        "Validate PAM recordings and approved jump paths for database tier access."
+      ],
+      "long_term": [
+        "Block interactive RDP for service accounts except through recorded PAM sessions."
+      ]
+    },
+    "metadata": {
+      "preview_synthetic": true,
+      "preview_source": "stored_prompt_aligned_fixture"
+    }
+  },
+  "generated_at": "2026-06-10T22:09:16.938878+00:00"
+}

@@ -1,0 +1,22 @@
+{
+  "notable_id": "syn-005",
+  "search_name": "Suspicious RDP Lateral Movement",
+  "urgency": "high",
+  "risk_score": 83,
+  "owner": "unassigned",
+  "status": "new",
+  "event_time": "2026-06-04T20:55:17Z",
+  "src_user": "corp\\svc-backup",
+  "src_host": "jump-01.corp.local",
+  "src_ip": "10.10.5.22",
+  "dest_host": "db-prod-01.corp.local",
+  "dest_ip": "10.30.8.40",
+  "protocol": "RDP",
+  "dest_port": 3389,
+  "event_id": "4624",
+  "logon_type": 10,
+  "auth_package": "Negotiate",
+  "service_account_expected_on_dest": false,
+  "prior_failed_logons_15m": 6,
+  "description": "Service account corp\\svc-backup initiated interactive RDP from jump-01 to db-prod-01 after six failed logon attempts; destination host is not in the approved jump path for this account."
+}

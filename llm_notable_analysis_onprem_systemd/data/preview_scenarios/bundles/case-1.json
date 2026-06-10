@@ -1,0 +1,300 @@
+{
+  "scenario_index": 1,
+  "case_id": "case-1",
+  "finding_id": "syn-001",
+  "search_name": "Malware Beaconing",
+  "source_filename": "case-1-beaconing.json",
+  "alert": {
+    "notable_id": "syn-001",
+    "search_name": "Malware Beaconing",
+    "urgency": "high",
+    "risk_score": 91,
+    "owner": "unassigned",
+    "status": "new",
+    "event_time": "2026-06-04T14:22:11Z",
+    "src_user": "corp\\mrossi",
+    "src_host": "laptop-22.corp.local",
+    "src_ip": "10.44.12.88",
+    "dest_ip": "203.0.113.77",
+    "dest_domain": "update-service-cloud.net",
+    "dest_port": 443,
+    "uri_path": "/api/v1/session/a8f2c1",
+    "http_method": "POST",
+    "bytes_out": 512,
+    "bytes_in": 128,
+    "beacon_interval_seconds": 60,
+    "beacon_count_24h": 1440,
+    "domain_age_days": 3,
+    "proxy_action": "allowed",
+    "user_agent": "Mozilla/5.0 (compatible; UpdateAgent/2.1)",
+    "description": "Workstation laptop-22 sent 1,440 HTTPS POST requests to update-service-cloud.net at a fixed 60-second interval with constant 512-byte payloads."
+  },
+  "analysis": {
+    "alert_reconciliation": {
+      "verdict": "likely_malicious",
+      "confidence": "0.88",
+      "one_sentence_summary": "Workstation laptop-22 sent 1,440 fixed-interval HTTPS POST beacons to a three-day-old domain with constant 512-byte payloads, consistent with C2 keepalive rather than a known updater.",
+      "decision_drivers": [
+        "beacon_interval_seconds=60 with beacon_count_24h=1440",
+        "domain_age_days=3 for dest_domain=update-service-cloud.net",
+        "bytes_out=512 on each POST with uri_path=/api/v1/session/a8f2c1",
+        "proxy_action=allowed with no vendor attribution in alert"
+      ],
+      "recommended_actions": [
+        "Block dest_domain=update-service-cloud.net at DNS and proxy.",
+        "Isolate src_host=laptop-22.corp.local and collect EDR triage package."
+      ]
+    },
+    "competing_hypotheses": [
+      {
+        "hypothesis_type": "benign",
+        "hypothesis": "Sanctioned endpoint updater using a newly rotated CDN hostname.",
+        "evidence_support": [
+          "dest_port=443",
+          "http_method=POST",
+          "user_agent mentions UpdateAgent"
+        ],
+        "evidence_gaps": [
+          "No inventory match for UpdateAgent on laptop-22",
+          "domain_age_days=3"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "Software inventory",
+            "key_fields": [
+              "host",
+              "process"
+            ]
+          },
+          {
+            "log_source": "Proxy logs",
+            "key_fields": [
+              "dest_domain",
+              "uri_path"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "benign",
+        "hypothesis": "Monitoring agent health checks misclassified as beaconing.",
+        "evidence_support": [
+          "Fixed beacon_interval_seconds=60",
+          "Small bytes_out=512"
+        ],
+        "evidence_gaps": [
+          "Agent name not in alert",
+          "No CMDB monitoring tag on host"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "CMDB",
+            "key_fields": [
+              "host",
+              "monitoring_role"
+            ]
+          },
+          {
+            "log_source": "EDR",
+            "key_fields": [
+              "host",
+              "process"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "benign",
+        "hypothesis": "User-initiated cloud sync with periodic session refresh.",
+        "evidence_support": [
+          "src_user=corp\\mrossi present",
+          "HTTPS to external domain"
+        ],
+        "evidence_gaps": [
+          "No sync product identified",
+          "URI path entropy not explained"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "Proxy logs",
+            "key_fields": [
+              "user",
+              "dest_domain"
+            ]
+          },
+          {
+            "log_source": "Cloud app logs",
+            "key_fields": [
+              "user"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "adversary",
+        "hypothesis": "HTTP C2 channel using periodic POST keepalive to young domain.",
+        "evidence_support": [
+          "beacon_interval_seconds=60",
+          "beacon_count_24h=1440",
+          "dest_domain=update-service-cloud.net",
+          "domain_age_days=3"
+        ],
+        "evidence_gaps": [
+          "Process owner not in alert",
+          "TLS cert and JA3 not shown"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "Proxy logs",
+            "key_fields": [
+              "src_host",
+              "dest_domain",
+              "uri_path"
+            ]
+          },
+          {
+            "log_source": "EDR",
+            "key_fields": [
+              "host",
+              "process"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "adversary",
+        "hypothesis": "Post-phishing implant on laptop-22 calling out for tasking.",
+        "evidence_support": [
+          "src_host=laptop-22.corp.local",
+          "Regular external POST cadence"
+        ],
+        "evidence_gaps": [
+          "Initial access vector not in alert",
+          "Persistence mechanism unknown"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "EDR",
+            "key_fields": [
+              "host",
+              "parent_process"
+            ]
+          },
+          {
+            "log_source": "Email gateway",
+            "key_fields": [
+              "user"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "adversary",
+        "hypothesis": "Low-and-slow exfil staging over repeated small HTTPS posts.",
+        "evidence_support": [
+          "bytes_out=512 constant",
+          "High event count in 24h"
+        ],
+        "evidence_gaps": [
+          "No file access telemetry in alert",
+          "Exfil volume threshold not exceeded"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "Proxy/DLP",
+            "key_fields": [
+              "host",
+              "bytes_out"
+            ]
+          },
+          {
+            "log_source": "EDR",
+            "key_fields": [
+              "host",
+              "file_path"
+            ]
+          }
+        ]
+      }
+    ],
+    "evidence_vs_inference": {
+      "evidence": [
+        "src_host=laptop-22.corp.local",
+        "src_user=corp\\mrossi",
+        "dest_domain=update-service-cloud.net",
+        "dest_ip=203.0.113.77",
+        "beacon_interval_seconds=60",
+        "beacon_count_24h=1440",
+        "bytes_out=512",
+        "domain_age_days=3"
+      ],
+      "inferences": [
+        "Fixed cadence plus young domain is more consistent with C2 than bulk exfil",
+        "Process responsible for traffic is unknown from this notable alone"
+      ]
+    },
+    "ioc_extraction": {
+      "ip_addresses": [
+        "203.0.113.77",
+        "10.44.12.88"
+      ],
+      "domains": [
+        "update-service-cloud.net"
+      ],
+      "user_accounts": [
+        "corp\\mrossi"
+      ],
+      "hostnames": [
+        "laptop-22.corp.local"
+      ],
+      "process_names": [],
+      "file_paths": [],
+      "file_hashes": [],
+      "event_ids": [],
+      "urls": [
+        "https://update-service-cloud.net/api/v1/session/a8f2c1"
+      ]
+    },
+    "ttp_analysis": [
+      {
+        "ttp_id": "T1071.001",
+        "ttp_name": "Application Layer Protocol: Web Protocols",
+        "confidence_score": "0.90",
+        "explanation": "Periodic HTTPS POST beacons to external domain. Uncertainty: payload contents not inspected.",
+        "evidence_fields": [
+          "dest_domain",
+          "http_method",
+          "beacon_interval_seconds"
+        ]
+      },
+      {
+        "ttp_id": "T1568.002",
+        "ttp_name": "Dynamic Resolution: Domain Generation Algorithms",
+        "confidence_score": "0.35",
+        "explanation": "Single young domain only; DGA not established. Uncertainty: domain_age_days=3 alone is weak.",
+        "evidence_fields": [
+          "domain_age_days",
+          "dest_domain"
+        ]
+      }
+    ],
+    "actions": {
+      "immediate": [
+        "Block update-service-cloud.net across DNS, proxy, and egress firewall.",
+        "Isolate laptop-22 from the network pending EDR review."
+      ],
+      "short_term": [
+        "Hunt for the same uri_path across proxy logs for 7 days.",
+        "Identify the process responsible for the beaconing session."
+      ],
+      "long_term": [
+        "Add alerting on fixed-interval POST patterns to domains under 30 days old."
+      ]
+    },
+    "metadata": {
+      "preview_synthetic": true,
+      "preview_source": "stored_prompt_aligned_fixture"
+    }
+  },
+  "generated_at": "2026-06-10T22:09:16.935432+00:00"
+}
