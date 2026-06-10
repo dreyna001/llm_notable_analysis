@@ -346,6 +346,8 @@ class Config:
     LLM_TIMEOUT: int = 240  # seconds
     PORTAL_LLM_PROVIDER: str = "local"
     PORTAL_BEDROCK_MODEL_ID: str = ""
+    BEDROCK_AWS_PROFILE: str = ""
+    AWS_PROFILE: str = ""
     AWS_REGION: str = ""
     BEDROCK_REGION: str = ""
     BEDROCK_READ_TIMEOUT_SECONDS: int = 300
@@ -619,6 +621,8 @@ def load_config() -> Config:
         PORTAL_LLM_PROVIDER=os.getenv("PORTAL_LLM_PROVIDER", "local").strip().lower()
         or "local",
         PORTAL_BEDROCK_MODEL_ID=os.getenv("PORTAL_BEDROCK_MODEL_ID", "").strip(),
+        BEDROCK_AWS_PROFILE=os.getenv("BEDROCK_AWS_PROFILE", "").strip(),
+        AWS_PROFILE=os.getenv("AWS_PROFILE", "").strip(),
         AWS_REGION=os.getenv("AWS_REGION", "").strip(),
         BEDROCK_REGION=os.getenv("BEDROCK_REGION", "").strip(),
         BEDROCK_READ_TIMEOUT_SECONDS=int(

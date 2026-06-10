@@ -7,7 +7,7 @@ from typing import Any
 
 import boto3
 from botocore.config import Config as BotoConfig
-from botocore.exceptions import BotoCoreError, ClientError
+from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError, ProfileNotFound
 
 from .config import Config
 
@@ -42,16 +42,28 @@ def _bedrock_timeouts(config: Config) -> tuple[int, int]:
     return read_timeout, connect_timeout
 
 
+def _bedrock_aws_profile(config: Config) -> str | None:
+    """Return the shared-credentials profile for Bedrock, if configured."""
+    for candidate in (config.BEDROCK_AWS_PROFILE, config.AWS_PROFILE):
+        value = str(candidate or "").strip()
+        if value:
+            return value
+    return None
+
+
 def _bedrock_runtime_client(config: Config) -> Any:
     read_timeout, connect_timeout = _bedrock_timeouts(config)
-    return boto3.client(
-        "bedrock-runtime",
-        region_name=_bedrock_region(config),
-        config=BotoConfig(
+    client_kwargs = {
+        "region_name": _bedrock_region(config),
+        "config": BotoConfig(
             read_timeout=read_timeout,
             connect_timeout=connect_timeout,
         ),
-    )
+    }
+    profile = _bedrock_aws_profile(config)
+    if profile:
+        return boto3.Session(profile_name=profile).client("bedrock-runtime", **client_kwargs)
+    return boto3.client("bedrock-runtime", **client_kwargs)
 
 
 def _extract_converse_text(response: dict[str, Any]) -> str:
@@ -78,8 +90,20 @@ def _extract_converse_text(response: dict[str, Any]) -> str:
 
 
 def _map_bedrock_error(exc: Exception) -> BedrockPortalLlmError:
+    if isinstance(exc, ProfileNotFound):
+        return BedrockPortalLlmUnavailableError(
+            "AWS credentials profile was not found. Check BEDROCK_AWS_PROFILE or AWS_PROFILE."
+        )
+    if isinstance(exc, NoCredentialsError):
+        return BedrockPortalLlmUnavailableError(
+            "AWS credentials were not found for Bedrock. Configure a profile or instance role."
+        )
     if isinstance(exc, ClientError):
         code = str(exc.response.get("Error", {}).get("Code", ""))
+        if code in {"AccessDeniedException", "UnauthorizedException"}:
+            return BedrockPortalLlmUnavailableError(
+                f"Bedrock access denied ({code}). Check IAM policy and model access."
+            )
         if code in {"ThrottlingException", "TooManyRequestsException"}:
             return BedrockPortalLlmUnavailableError(
                 f"Bedrock rate limit reached ({code})"
