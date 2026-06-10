@@ -344,6 +344,12 @@ class Config:
     LLM_STRUCTURED_OUTPUT_MODE: str = "prompt_json"
     LLM_MAX_TOKENS: int = 4096
     LLM_TIMEOUT: int = 240  # seconds
+    PORTAL_LLM_PROVIDER: str = "local"
+    PORTAL_BEDROCK_MODEL_ID: str = ""
+    AWS_REGION: str = ""
+    BEDROCK_REGION: str = ""
+    BEDROCK_READ_TIMEOUT_SECONDS: int = 300
+    BEDROCK_CONNECT_TIMEOUT_SECONDS: int = 10
     HTML_REPORT_ENABLED: bool = False
 
     # Optional retrieval grounding (RAG)
@@ -565,6 +571,14 @@ class Config:
             raise ValueError(
                 "CASE_QA_ENABLED is required when CASE_QA_CHAT_HISTORY_ENABLED=true"
             )
+        portal_llm_provider = str(self.PORTAL_LLM_PROVIDER or "local").strip().lower() or "local"
+        if portal_llm_provider not in {"local", "bedrock"}:
+            raise ValueError("PORTAL_LLM_PROVIDER must be local or bedrock")
+        self.PORTAL_LLM_PROVIDER = portal_llm_provider
+        if portal_llm_provider == "bedrock" and not str(self.PORTAL_BEDROCK_MODEL_ID or "").strip():
+            raise ValueError(
+                "PORTAL_BEDROCK_MODEL_ID is required when PORTAL_LLM_PROVIDER=bedrock"
+            )
         _validate_elasticsearch_runtime_contract(self)
 
 
@@ -602,6 +616,17 @@ def load_config() -> Config:
         ),
         LLM_MAX_TOKENS=int(os.getenv("LLM_MAX_TOKENS", "4096")),
         LLM_TIMEOUT=int(os.getenv("LLM_TIMEOUT", "240")),
+        PORTAL_LLM_PROVIDER=os.getenv("PORTAL_LLM_PROVIDER", "local").strip().lower()
+        or "local",
+        PORTAL_BEDROCK_MODEL_ID=os.getenv("PORTAL_BEDROCK_MODEL_ID", "").strip(),
+        AWS_REGION=os.getenv("AWS_REGION", "").strip(),
+        BEDROCK_REGION=os.getenv("BEDROCK_REGION", "").strip(),
+        BEDROCK_READ_TIMEOUT_SECONDS=int(
+            os.getenv("BEDROCK_READ_TIMEOUT_SECONDS", "300")
+        ),
+        BEDROCK_CONNECT_TIMEOUT_SECONDS=int(
+            os.getenv("BEDROCK_CONNECT_TIMEOUT_SECONDS", "10")
+        ),
         HTML_REPORT_ENABLED=_profile_bool(
             "HTML_REPORT_ENABLED", False, profile_flags
         ),

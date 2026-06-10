@@ -17,6 +17,11 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .case_archive_notices import build_case_archive_notices
+from .bedrock_portal_llm import (
+    BedrockPortalLlmError,
+    BedrockPortalLlmTimeoutError,
+    BedrockPortalLlmUnavailableError,
+)
 from .case_chat import (
     CaseNotFoundError,
     GeneralSynthesizeFn,
@@ -531,6 +536,12 @@ def build_portal_app(
     chat_knowledge_base_provider: Any = None,
 ) -> Any:
     """Build the read-only analyst portal FastAPI application."""
+    from .portal_llm_client import build_portal_synthesizers
+
+    built_synthesizer, built_general_synthesizer = build_portal_synthesizers(config)
+    chat_synthesizer = chat_synthesizer or built_synthesizer
+    chat_general_synthesizer = chat_general_synthesizer or built_general_synthesizer
+
     FastAPI, HTTPException, Request, JSONResponse = _lazy_import_fastapi()
     _validate_portal_security_config(config)
     connect_fn = connect or _default_connect
@@ -932,6 +943,21 @@ def build_portal_app(
             _raise_portal_chat_session_error(exc)
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except BedrockPortalLlmTimeoutError as exc:
+            raise HTTPException(
+                status_code=504,
+                detail="LLM request timed out. Try again or ask a shorter question.",
+            ) from exc
+        except BedrockPortalLlmUnavailableError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="LLM service unavailable.",
+            ) from exc
+        except BedrockPortalLlmError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="LLM service unavailable.",
+            ) from exc
         except (
             LlmRateLimitError,
             LlmRequestTimeoutError,

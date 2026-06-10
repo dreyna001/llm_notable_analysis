@@ -627,6 +627,11 @@ def retrieve_case_sources(
 
 def _probe_llm_reachable(config: Config) -> bool:
     """Lightweight LLM gateway ping for operator readiness checks."""
+    provider = str(getattr(config, "PORTAL_LLM_PROVIDER", "local") or "local").strip().lower()
+    if provider == "bedrock":
+        from .bedrock_portal_llm import probe_bedrock_reachable
+
+        return probe_bedrock_reachable(config)
     try:
         with requests.Session() as http_session:
             openai_chat_complete(
