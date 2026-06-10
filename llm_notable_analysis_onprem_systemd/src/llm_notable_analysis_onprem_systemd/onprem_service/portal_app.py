@@ -489,6 +489,7 @@ def _portal_capabilities_payload(
     *,
     connect: ConnectionFactory,
     chat_embedding_model: Any,
+    chat_llm_gateway_ready: bool | None = None,
 ) -> dict[str, Any]:
     case_qa_enabled = bool(config.CASE_QA_ENABLED)
     chat_ready = False
@@ -499,6 +500,7 @@ def _portal_capabilities_payload(
             config=config,
             connect=connect,
             embedding_model=chat_embedding_model,
+            llm_gateway_ready=chat_llm_gateway_ready,
         )
         chat_ready = chat_readiness.ready
         chat_degraded_reason = chat_readiness.degraded_reason
@@ -529,6 +531,7 @@ def build_portal_app(
     chat_general_synthesizer: GeneralSynthesizeFn | None = None,
     chat_embedding_model: Any = None,
     chat_knowledge_base_provider: Any = None,
+    chat_llm_gateway_ready: bool | None = None,
 ) -> Any:
     """Build the read-only analyst portal FastAPI application."""
     FastAPI, HTTPException, Request, JSONResponse = _lazy_import_fastapi()
@@ -640,6 +643,7 @@ def build_portal_app(
                 config,
                 connect=connect_fn,
                 chat_embedding_model=chat_embedding_model,
+                chat_llm_gateway_ready=chat_llm_gateway_ready,
             ),
         )
 
@@ -649,6 +653,7 @@ def build_portal_app(
             config=config,
             connect=connect_fn,
             embedding_model=chat_embedding_model,
+            llm_gateway_ready=chat_llm_gateway_ready,
         )
         if chat_readiness.ready:
             return {"status": "ready"}

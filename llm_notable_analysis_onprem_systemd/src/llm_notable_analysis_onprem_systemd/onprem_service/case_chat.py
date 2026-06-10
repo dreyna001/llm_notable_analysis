@@ -679,6 +679,7 @@ def evaluate_case_chat_readiness(
     config: Config,
     connect: ConnectionFactory | None = None,
     embedding_model: Any = None,
+    llm_gateway_ready: bool | None = None,
 ) -> CaseChatReadiness:
     """Return chat readiness after checking each dependency independently."""
     if not bool(config.CASE_QA_ENABLED):
@@ -721,7 +722,8 @@ def evaluate_case_chat_readiness(
         logger.exception("Case chat archive retrieval readiness check failed")
         archive_retrieval_ready = False
 
-    llm_gateway_ready = _probe_llm_reachable(config)
+    if llm_gateway_ready is None:
+        llm_gateway_ready = _probe_llm_reachable(config)
     return CaseChatReadiness.from_dependency_checks(
         embeddings_ready=embeddings_ready,
         archive_retrieval_ready=archive_retrieval_ready,

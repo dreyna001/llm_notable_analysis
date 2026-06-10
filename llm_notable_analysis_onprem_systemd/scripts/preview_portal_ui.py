@@ -575,12 +575,17 @@ def build_preview_app(*, inject_loopback_auth: bool | None = None):
     else:
         synthesizer = _preview_chat_synthesizer
         general_synthesizer = _preview_general_synthesizer
+    # Preview injects Bedrock/stub synthesizers; skip localhost LLM gateway probe.
+    llm_gateway_ready = None
+    if bedrock_settings is not None or openai_llm is None:
+        llm_gateway_ready = True
     app = build_portal_app(
         config,
         connect=_fake_connect_factory(records),
         chat_embedding_model=_FakeEmbeddingModel(),
         chat_synthesizer=synthesizer,
         chat_general_synthesizer=general_synthesizer,
+        chat_llm_gateway_ready=llm_gateway_ready,
     )
 
     if inject_loopback_auth:
