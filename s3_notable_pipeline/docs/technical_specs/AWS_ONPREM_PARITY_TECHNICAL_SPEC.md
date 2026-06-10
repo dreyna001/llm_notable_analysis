@@ -2,17 +2,30 @@
 
 ## Status
 
-Technical-spec shell for the AWS parity implementation. Diff 1 establishes
-runtime configuration, centralized AWS client creation, deployment-parameter
-scaffolding, and documentation structure. Later diffs must fill in the relevant
-sections before implementing each capability.
+Implementation contract for AWS/on-prem parity. **Wave 1 sections** (profiles
+through idempotency below) describe implemented analyzer behavior. **Wave 2
+sections** (analyst portal block at end) are synced from
+[`../planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md`](../planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md)
+as of the doc sync; code, SAM/CFN, and tests catch up in Diff 1 through Diff 5.
 
 ## Normative Source
 
-The implementation plan is
-[`../planning/AWS_ONPREM_PARITY_PLAN.md`](../planning/AWS_ONPREM_PARITY_PLAN.md).
-If this spec and the plan conflict before a section is filled in, stop and
-resolve the conflict before coding.
+Primary (wave 2 — portal, archive, Case Q&A, Decisions 1-35):
+
+[`../planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md`](../planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md)
+
+Background (wave 1 — profiles, RAG, SPL, Elastic, ServiceNow, idempotency):
+
+[`../planning/AWS_ONPREM_PARITY_PLAN.md`](../planning/AWS_ONPREM_PARITY_PLAN.md)
+
+If this spec conflicts with REQUIREMENTS_AND_DESIGN, stop and resolve before
+coding. Wave 1 PLAN content applies only where wave 2 does not supersede it.
+
+## Deployment Target (v1)
+
+**Locked (Decision 35):** Production parity deploys target **AWS GovCloud
+`us-gov-west-1`**. Use `arn:aws-us-gov:...` partition ARNs in examples and
+templates unless a customer explicitly chooses a commercial region.
 
 ## Locked Runtime Shape
 
@@ -27,17 +40,15 @@ flow. Do not move orchestration to Step Functions as part of this parity block.
 
 ## Diff 1 Contract
 
-Diff 1 adds:
+Diff 1 adds (wave 2 portal block):
 
-- `src/s3_notable_pipeline/config.py` for capability profile parsing and runtime
-  config validation.
-- `src/s3_notable_pipeline/aws_clients.py` for centralized boto3 client creation
-  with `AWS_ENDPOINT_URL` support for local emulation.
-- `config.env.example` as the operator-readable runtime contract companion to
-  SAM/CloudFormation parameters.
-- Operations documentation skeletons.
-- SAM and pure CloudFormation parameter scaffolding for Lambda resource tuning
-  and future profile-driven settings.
+- `analyst_portal` capability profile parsing and validation in `config.py`.
+- `BEDROCK_ANALYZER_MODEL_PRESET` (`gpt-5.4-medium` default;
+  `sonnet-4.6-medium` per customer decision).
+- `BEDROCK_MANTLE_REGION` default `us-gov-west-1` for GovCloud Mantle calls.
+- Portal/archive/Aurora/RDS Proxy parameter scaffolding in SAM/CloudFormation
+  and `config.env.example` (default-off; no behavior change for `core` only).
+- This technical spec wave 2 sections below.
 
 Diff 1 must preserve current default behavior:
 
@@ -61,6 +72,8 @@ Supported profile names:
 - `elastic_readonly`
 - `ticket_draft`
 - `action_gated`
+- `analyst_portal` (wave 2; enables case archive, portal API, and Case Q&A per
+  REQUIREMENTS_AND_DESIGN)
 
 Rules:
 
@@ -252,3 +265,65 @@ Rules:
   be reclaimed after `SIDE_EFFECT_IDEMPOTENCY_LOCK_SECONDS`; fresh in-progress
   rows are reported as locked rather than completed.
 - Failed side effects release their in-progress reservation.
+
+---
+
+## Wave 2: Analyst Portal Block (Diff 1-5)
+
+Normative detail: REQUIREMENTS_AND_DESIGN Decisions 1-35 and diff sequence.
+Implement only the diff scope active in the current change.
+
+### Analyzer Model Preset Contract (Decision 28)
+
+Default preset: **`gpt-5.4-medium`**.
+
+- Model ID `openai.gpt-5.4` via Bedrock Mantle OpenAI Responses API.
+- Endpoint: `https://bedrock-mantle.{region}.api.aws/openai/v1/responses`.
+- `reasoning.effort=medium`. Bedrock supports `minimal`, `low`, `medium`,
+  `high`; not `xhigh`.
+- `BEDROCK_MANTLE_REGION` defaults to `us-gov-west-1` (Decision 35).
+
+Customer-selectable alternate: **`sonnet-4.6-medium`**.
+
+- Bedrock Runtime Converse with Sonnet 4.6 inference profile.
+- GovCloud example:
+  `arn:aws-us-gov:bedrock:us-gov-west-1:${AwsAccountId}:inference-profile/us.anthropic.claude-sonnet-4-6`.
+- `additionalModelRequestFields`: `thinking.type=adaptive`,
+  `output_config.effort=medium`. `max` effort is not valid for Sonnet on Bedrock.
+
+`ttp_analyzer.py` must branch Mantle Responses vs Converse by preset. Portal
+chat inherits the active preset unless `PORTAL_CHAT_BEDROCK_MODEL_ID` is set
+(Decision 29).
+
+### Case Archive And Aurora Contract (Decisions 1, 7, 10, 26)
+
+- S3 canonical envelope at `cases/yyyy/mm/dd/{case_id}.json`.
+- DynamoDB CaseIndex for browse metadata only.
+- Aurora Postgres `notable_cases.cases` and `notable_cases.case_chunks` with GIN
+  FTS plus HNSW pgvector for hybrid retrieval.
+- Inline Titan embed in analyzer Lambda; `retrieval_status` transitions
+  `pending` to `ready` or `failed` in the same run. No separate embed Lambda.
+- Analyzer and portal connect through **RDS Proxy**, not the Aurora cluster
+  endpoint directly.
+
+### Portal Hosting Contract (Decision 2)
+
+- Portal API: Lambda plus API Gateway; chat long timeout via Function URL plus
+  CloudFront (Decision 19).
+- `PORTAL_LAMBDA_PROVISIONED_CONCURRENCY` default `2`.
+- GovCloud: private subnets, controlled egress, VPC interface endpoints where
+  available.
+
+### Portal API And Case Q&A Contract (Decisions 3-5, 27, 33)
+
+- Read-only portal handler; no case mutations from the portal.
+- Pinned-case chat only (`selected_case_id` required).
+- Hybrid retrieval in portal Lambda over Aurora (lexical plus vector plus RRF),
+  not in-Lambda full-case scans.
+- Chat synthesis in `portal_chat.py`; do not import `ttp_analyzer.py`.
+- Response shapes must match vendored on-prem `portal.openapi.json`.
+
+### Embedding Contract (Decision 6)
+
+- Chunk and query embeddings: Bedrock Titan (`amazon.titan-embed-text-v2:0`), not
+  on-prem BGE, for AWS v1.

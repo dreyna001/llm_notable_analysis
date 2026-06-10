@@ -138,8 +138,9 @@ aws secretsmanager create-secret \
 - `docs/operations/FILE_DROP_AND_RETENTION_OPERATIONS.md` - S3 intake prefixes, gzip handling, lifecycle, and size limits
 - `docs/operations/MITRE_TTP_OPERATIONS.md` - bundled TTP ID data, refresh workflow, and validation
 - `docs/operations/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md` - failure behavior, retry semantics, and recovery duties
-- `docs/technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md` - AWS/on-prem parity implementation contract
-- `docs/planning/AWS_ONPREM_PARITY_PLAN.md` - reviewed parity plan and diff sequence
+- `docs/technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md` - AWS/on-prem parity implementation contract (normative for coding)
+- `docs/planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md` - wave 2 plan: analyst portal, case archive, Case Q&A (Decisions 1-35; GovCloud default)
+- `docs/planning/AWS_ONPREM_PARITY_PLAN.md` - wave 1 plan: profiles, RAG, SPL, Elastic, ServiceNow, idempotency
 - `docs/delivery_package/EXECUTIVE_AWS_WORKFLOW.md` - executive end-to-end workflow overview
 - `docs/delivery_package/end_to_end_diagrams/END_TO_END_DIAGRAMS.md` - end-to-end Mermaid diagrams (SVG exports in the same folder)
 - `docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_AWS_READINESS_OVERVIEW.md` - deployment readiness gateway (executive)
