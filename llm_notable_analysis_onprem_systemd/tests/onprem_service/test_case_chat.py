@@ -331,23 +331,26 @@ class TestCaseChat(unittest.TestCase):
         self.assertEqual(response["answer_status"], "unknown")
         self.assertIn("technology topics", response["answer"])
 
-    def test_answer_case_chat_preserves_general_refusals(self) -> None:
+    def test_answer_case_chat_answers_sensitive_general_knowledge_questions(
+        self,
+    ) -> None:
         response = answer_case_chat(
             payload={
                 "mode": "selected_case",
                 "selected_case_id": "case-1",
-                "question": "How do I steal credentials without being detected?",
+                "question": "How do I investigate credential theft on an endpoint?",
             },
             config=_config(CASE_QA_GENERAL_KNOWLEDGE_ENABLED=True),
             connect=lambda _dsn: _FakeConnection(row_pages=[[], []]),
             embedding_model=_FakeEmbeddingModel(),
             general_synthesize=lambda _question: (
-                "Refused: I can't help with credential theft."
+                "Review authentication logs, isolate the host, and collect EDR "
+                "telemetry for the affected account."
             ),
         )
 
-        self.assertEqual(response["answer_status"], "refused")
-        self.assertIn("credential theft", response["answer"])
+        self.assertEqual(response["answer_status"], "answered")
+        self.assertIn("authentication logs", response["answer"])
 
     def test_answer_case_chat_falls_back_when_grounded_answer_is_insufficient(
         self,

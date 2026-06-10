@@ -104,8 +104,6 @@ Two synthesis prompts in `case_chat.py`:
 
 - Used when archive retrieval is empty and `CASE_QA_GENERAL_KNOWLEDGE_ENABLED=true`
 - Same non-execution rules for external systems and live telemetry
-- Dual-use / offensive requests: model instructed to start with `Refused:` and
-  offer defensive alternatives
 
 Preview Bedrock reuses these prompts via `build_preview_bedrock_synthesizers()`.
 
@@ -119,7 +117,6 @@ After synthesis, before returning to the UI:
 |------|--------|---------|
 | `sanitize_portal_chat_answer()` | `case_chat.py` | Remove citation markers from display text; does not execute fenced code |
 | `synthesized_answer_crosses_action_boundary()` | `case_chat.py` | If answer claims the portal ran/created/wrote something, return `answer_status=refused` |
-| `_GENERAL_REFUSAL_RE` | `case_chat.py` | Honor model `Refused:` on harmful dual-use general answers |
 | Weak retrieval | `case_chat.py` | Return `answer_status=unknown` when archive context is insufficient |
 
 Analyst questions that ask to “run a search” or “create a ticket” are **not**
@@ -196,8 +193,8 @@ What this design **does not** prevent:
 
 - **Human execution**: an analyst can copy draft SPL or shell from chat into
   Splunk or a terminal — that is intentional workflow outside this service
-- **Harmful text in answers**: offensive guidance is mitigated by prompts and
-  `Refused:` handling, not a deterministic content filter on every token
+- **Harmful text in answers**: mitigated by read-only action-boundary post-checks,
+  not a deterministic content filter on every token
 - **Model provider trust**: Bedrock/OpenAI/local LLM are trusted for availability
   and confidentiality per your deployment agreement; prompts should not send secrets
 - **Compromised host**: a rooted host bypasses application boundaries
