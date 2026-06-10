@@ -754,16 +754,22 @@ class TestPortalApp(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_mutating_routes_allow_same_origin_browser_requests(self) -> None:
+        config = Config(
+            PORTAL_ENABLED=True,
+            CASE_ARCHIVE_ENABLED=True,
+            CASE_QA_ENABLED=True,
+            CASE_QA_GLOBAL_RETRIEVAL_ENABLED=True,
+            PORTAL_PROXY_SECRET="portal-secret",
+        )
+        record = _record(config)
         client = TestClient(
             build_portal_app(
-                Config(
-                    PORTAL_ENABLED=True,
-                    CASE_ARCHIVE_ENABLED=True,
-                    CASE_QA_ENABLED=True,
-                    CASE_QA_GLOBAL_RETRIEVAL_ENABLED=True,
-                    PORTAL_PROXY_SECRET="portal-secret",
+                config,
+                connect=lambda _dsn: _FakeConnection(row_pages=[[_chunk_row(record)], []]),
+                chat_embedding_model=_FakeEmbeddingModel(),
+                chat_synthesizer=lambda _question, _sources: (
+                    "Draft SPL guidance only:\n\n```spl\nindex=notable\n```"
                 ),
-                connect=lambda _dsn: _FakeConnection(rows=[]),
             )
         )
 
@@ -781,7 +787,7 @@ class TestPortalApp(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["answer_status"], "refused")
+        self.assertEqual(response.json()["answer_status"], "answered")
 
     def test_non_loopback_bind_requires_explicit_allow(self) -> None:
         config = Config(
@@ -913,17 +919,23 @@ class TestPortalApp(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["detail"], "Chat history is disabled.")
 
-    def test_api_chat_returns_refusal_for_action_request(self) -> None:
+    def test_api_chat_returns_guidance_for_action_request(self) -> None:
+        config = Config(
+            PORTAL_ENABLED=True,
+            CASE_ARCHIVE_ENABLED=True,
+            CASE_QA_ENABLED=True,
+            CASE_QA_GLOBAL_RETRIEVAL_ENABLED=True,
+            PORTAL_PROXY_SECRET="portal-secret",
+        )
+        record = _record(config)
         client = TestClient(
             build_portal_app(
-                Config(
-                    PORTAL_ENABLED=True,
-                    CASE_ARCHIVE_ENABLED=True,
-                    CASE_QA_ENABLED=True,
-                    CASE_QA_GLOBAL_RETRIEVAL_ENABLED=True,
-                    PORTAL_PROXY_SECRET="portal-secret",
+                config,
+                connect=lambda _dsn: _FakeConnection(row_pages=[[_chunk_row(record)], []]),
+                chat_embedding_model=_FakeEmbeddingModel(),
+                chat_synthesizer=lambda _question, _sources: (
+                    "Draft SPL guidance only:\n\n```spl\nindex=notable\n```"
                 ),
-                connect=lambda _dsn: _FakeConnection(rows=[]),
             )
         )
 
@@ -937,7 +949,7 @@ class TestPortalApp(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["answer_status"], "refused")
+        self.assertEqual(response.json()["answer_status"], "answered")
 
     def test_api_chat_validates_request(self) -> None:
         client = TestClient(
