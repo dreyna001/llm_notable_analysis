@@ -1,4 +1,4 @@
-"""Bounded LLM interpretation of deterministic Splunk query results.
+"""Bounded LLM interpretation of deterministic investigation query results.
 
 This module keeps query execution facts separate from model-generated
 interpretation. The LLM may explain how results affect hypotheses, but it must
@@ -307,16 +307,23 @@ def build_query_result_interpretation_prompt(
         max_sample_rows=max_sample_rows,
     )
     context_json = json.dumps(context, ensure_ascii=True, indent=2, sort_keys=True)
-    return f"""You are interpreting deterministic Splunk query execution results for a SOC notable.
+    return f"""You are interpreting deterministic read-only investigation query results for a SOC notable.
 
 Rules:
-- Use only QUERY_RESULT_INTERPRETATION_INPUT. Do not invent events, rows, users, hosts, IOCs, or Splunk facts.
+- Use only QUERY_RESULT_INTERPRETATION_INPUT. Do not invent events, rows, users, hosts, IOCs, or telemetry facts.
 - Treat query results as direct evidence and your explanation as inference.
-- Do not modify or restate new values for alert_reconciliation.confidence, TTP scores, hypothesis ordering, query status, result counts, or search references.
-- confidence_delta is an interpretation-only label, not a numeric score update.
-- For denied, failed, skipped, or ambiguous results, prefer assessment="unknown" or "inconclusive" and confidence_delta="unknown" or "unchanged".
+- A zero-result query is not automatically exculpatory. Interpret zero results against the query intent, supports_if, weakens_if, query status, and known coverage.
+- Treat sample_rows as bounded examples from the executed query, not a complete record of all matching telemetry.
+- For assessment="supports" or "weakens", rationale must mention the relevant result_count and at least one source_query_ref from QUERY_RESULT_INTERPRETATION_INPUT.
+- If a query was denied, failed, skipped, or has no usable result_count, use assessment="unknown" unless another executed query directly supports the same hypothesis.
 - source_query_refs may include only search_reference values present in QUERY_RESULT_INTERPRETATION_INPUT.
-- Return a single JSON object only. No markdown fences.
+
+Scope for this step:
+- Output only query_result_interpretation entries for each hypothesis.
+- Do not output or modify alert_reconciliation, evidence_vs_inference, ioc_extraction, ttp_analysis, competing_hypotheses ordering, query status, result_count, or search_reference values.
+- confidence_delta is a label for this interpretation only; it is not a numeric score update to any other field.
+
+Return a single JSON object only. No markdown fences.
 
 Schema:
 {{
@@ -357,9 +364,19 @@ Validation error:
 Previous output (truncated):
 {_truncate(prior_output, 2000)}
 
-Return ONLY one corrected JSON object matching the schema above. Use only
-QUERY_RESULT_INTERPRETATION_INPUT and the allowed source_query_refs shown there.
-Do not include markdown fences or any extra text.
+Repair only the query_result_interpretation JSON shape, enum values, required
+fields, and allowed source_query_refs. Do not reinterpret query results or add
+new analysis.
+
+Use only QUERY_RESULT_INTERPRETATION_INPUT and the previous output. Do not add
+new facts, result counts, search references, hypotheses, verdict changes, TTPs,
+IOCs, users, hosts, timestamps, or telemetry claims.
+
+Preserve valid prior content whenever it already satisfies the contract. Only
+change fields needed to pass validation.
+
+Return only one valid JSON object containing query_result_interpretation. No
+markdown fences, comments, prose, or explanation.
 """
 
 

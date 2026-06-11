@@ -155,10 +155,6 @@ above, not your local checkout layout.
 - **External write/actions:** add the `action_gated` profile only after Splunk
   writeback, ServiceNow create, approval metadata, and idempotency behavior are
   accepted.
-- **Freeform analyzer mode:** documented in
-  [`docs/operations/LLM_INFERENCE_OPERATIONS.md`](docs/operations/LLM_INFERENCE_OPERATIONS.md);
-  do not run it against the same incoming directory as the structured analyzer.
-
 All optional integrations are disabled by default.
 
 ## Validation Quick Links

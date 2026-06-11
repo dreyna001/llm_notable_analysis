@@ -35,7 +35,7 @@ AWS implementation is explicitly out of scope for this spec.
 - Per-case RBAC.
 - Filesystem, SQLite, or FAISS fallback for portal/archive storage.
 - Storing HTML as a canonical archive artifact.
-- Freeform analyzer portal archival in v1. This spec targets the structured
+- Alternate unstructured analyzer outputs in v1. This spec targets the structured
   notable analyzer path first.
 
 ## Locked Decisions

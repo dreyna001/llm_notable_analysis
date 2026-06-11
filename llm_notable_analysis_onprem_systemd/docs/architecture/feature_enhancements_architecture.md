@@ -230,7 +230,7 @@ This section **supersedes** the former standalone files `docs/planning/SPL_QUERY
 
 **Out of explicit v1 plan scope:**
 
-- `freeform_llm_client.py` paths, playbook-only glue, SPL **execution** in Splunk (**separate bounded investigation executor** documented under Read-only Splunk investigation).
+- Playbook-only glue, SPL **execution** in Splunk (**separate bounded investigation executor** documented under Read-only Splunk investigation).
 
 ---
 

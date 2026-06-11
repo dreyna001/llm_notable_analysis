@@ -379,20 +379,6 @@ surfaces such as `/v1/embeddings`. Those are not the supported analyzer
 integration path in this deployment; use them only for isolated operator tests
 unless the LiteLLM routing contract is intentionally changed.
 
-### Should freeform mode be used?
-
-The default analyzer is the structured report path. A separate freeform service
-entrypoint exists for lab or fallback use when operators want paragraph output
-instead of the structured schema.
-
-- Unit: `notable-analyzer-freeform.service`
-- Entrypoint: `python -m llm_notable_analysis_onprem_systemd.onprem_service.freeform_main`
-- Output suffix: `*_freeform.md`
-
-Do not run the structured analyzer and freeform analyzer against the same
-`INCOMING_DIR` at the same time. Treat freeform as an alternate operating mode,
-not a per-file toggle.
-
 ## Config Quick Reference
 
 | Area | Primary variables |
@@ -403,7 +389,6 @@ not a per-file toggle.
 | Bounds | `LLM_MAX_TOKENS`, `LLM_TIMEOUT` |
 | LiteLLM Admin UI (optional) | `LITELLM_MASTER_KEY` in `/etc/systemd/system/litellm.service.d/` or `general_settings.master_key` in `/etc/litellm/config.yaml`; browse via SSH tunnel to `http://127.0.0.1:4000/ui` |
 | vLLM operator checks | `/health`, `/metrics`, `/v1/models`, `/tokenize` on `127.0.0.1:8000` |
-| Alternate report mode | `notable-analyzer-freeform.service` systemd unit |
 
 ## Validation And Rollout
 

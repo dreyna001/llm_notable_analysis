@@ -44,7 +44,7 @@ This checklist tracks **optional capabilities that exist (or are specified) for 
 
 ## 7. Operational / product siblings (optional)
 
-- [ ] **Freeform / alternate entrypoints:** on-prem has separate modules/services (e.g. freeform analyzer). Decide whether AWS needs an API Gateway + Lambda variant or stays batch-only.
+- [x] **Freeform / alternate entrypoints:** on-prem freeform analyzer removed; AWS stays batch-only on the structured analyzer path.
 - [ ] **Retention:** on-prem uses systemd timers; AWS typically uses **S3 lifecycle**, optional EventBridge cleanup, or downstream ops — document equivalence rather than porting `retention.py` literally.
 
 ## 8. Cross-cutting requirements (when implementing any item above)

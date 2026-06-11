@@ -4,6 +4,7 @@ import json
 from llm_notable_analysis_onprem_systemd.onprem_service.query_result_interpretation import (
     build_query_result_interpretation_context,
     build_query_result_interpretation_prompt,
+    build_query_result_interpretation_repair_prompt,
     merge_query_result_interpretation,
     validate_query_result_interpretation_payload,
 )
@@ -63,9 +64,36 @@ class TestQueryResultInterpretation(unittest.TestCase):
             max_sample_rows=3,
         )
 
-        self.assertIn("confidence_delta is an interpretation-only label", prompt)
-        self.assertIn("Do not modify", prompt)
+        self.assertIn(
+            "You are interpreting deterministic read-only investigation query results",
+            prompt,
+        )
+        self.assertNotIn("Splunk", prompt)
+        self.assertIn("zero-result query is not automatically exculpatory", prompt)
+        self.assertIn("sample_rows as bounded examples", prompt)
+        self.assertIn("assessment=\"unknown\"", prompt)
+        self.assertIn("confidence_delta is a label for this interpretation only", prompt)
+        self.assertIn("Output only query_result_interpretation entries", prompt)
         self.assertIn("QUERY_RESULT_INTERPRETATION_INPUT", prompt)
+
+    def test_repair_prompt_scopes_to_interpretation_contract(self) -> None:
+        original = build_query_result_interpretation_prompt(
+            "beaconing alert",
+            self._analysis_result(),
+            context_budget_chars=4000,
+            max_sample_rows=3,
+        )
+        repair = build_query_result_interpretation_repair_prompt(
+            original_prompt=original,
+            validation_error="missing source_query_refs",
+            prior_output='{"query_result_interpretation": []}',
+        )
+
+        self.assertIn("Repair only the query_result_interpretation JSON shape", repair)
+        self.assertIn("Do not reinterpret query results", repair)
+        self.assertIn("Preserve valid prior content", repair)
+        self.assertIn("containing query_result_interpretation", repair)
+        self.assertIn("markdown fences, comments, prose, or explanation", repair)
 
     def test_context_budget_prunes_sample_rows_and_handles_malformed_counts(self) -> None:
         analysis = self._analysis_result()

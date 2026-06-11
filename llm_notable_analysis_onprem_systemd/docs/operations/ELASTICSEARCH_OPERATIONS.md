@@ -145,6 +145,59 @@ Use `suppress` when operators require grounded index and field usage. Use
 `fallback_to_ungrounded` only for lab or lower-risk deployments where
 alert-only generic queries are acceptable during grounding outages.
 
+KB templates, ingest steps, quality checklist, and retrieval tuning:
+[`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md) (sections
+**Add Or Update Elasticsearch Query KB Documents** through
+**Elasticsearch Query KB — Retrieval Tuning**).
+
+## Customer Onboarding — Elasticsearch Query Grounding
+
+Complete this with Elastic owners **before** setting
+`ELASTICSEARCH_GROUNDING_ENABLED=true` and before enabling
+`elastic_readonly` query generation in production scope.
+
+### Information to collect
+
+| Item | Required | Notes |
+|------|----------|-------|
+| `ELASTICSEARCH_INDEX_ALLOWLIST` | Yes | Config allowlist; must match KB index patterns |
+| `ELASTICSEARCH_ALLOWED_FIELDS` | Yes | Code-enforced; KB must align — not a substitute |
+| `ELASTICSEARCH_TIMESTAMP_FIELD` | Yes | Usually `@timestamp` |
+| ECS vs custom field mapping | Yes | Document both in Elastic query KB |
+| Approved Query DSL examples | Recommended | bool/filter patterns only |
+| Read-only API key scope | Yes if executing | HTTPS base URL and CA bundle |
+| Representative notables | Yes | 3–5 per major index/data source |
+| Execution scope | Yes | Generation-only vs read-only `_search` |
+| Failure mode | Yes | Default `ELASTICSEARCH_GROUNDING_FAILURE_MODE=suppress` |
+| KB owner and review cadence | Yes | Who approves doc changes before rebuild |
+
+### Splunk vs Elastic — field expectations
+
+- **Splunk:** validators gate `index=`, `sourcetype=`, macros, datamodels only.
+  Other SPL field names come from the alert or KB hints.
+- **Elastic:** validators gate index patterns **and** field names against config
+  allowlists. Operators must set `ELASTICSEARCH_ALLOWED_FIELDS` explicitly.
+
+### Rollout checklist
+
+1. [ ] Elastic owners approve index allowlist and field allowlist
+2. [ ] Elastic owners approve Elastic query KB source doc set
+3. [ ] Stage docs under `elasticsearch_source_docs`; run corpus ingest (see
+       [`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md))
+4. [ ] Run Elastic query KB quality checklist
+5. [ ] Set `INVESTIGATION_QUERY_BACKEND=elasticsearch`,
+       `CAPABILITY_PROFILES=core,elastic_readonly`, config allowlists
+6. [ ] Enable `ELASTICSEARCH_GROUNDING_ENABLED=true`
+7. [ ] Process representative notables; review generated Query DSL with Elastic owners
+8. [ ] If executing: validate read-only API key, TLS, row/time caps
+9. [ ] Record onboarding date, owner, and failure mode in change notes
+
+### Quality layers (ops vs engineering)
+
+Same five-layer program as Splunk (KB content, retrieval, prompt labeling,
+validation/failure modes, measurement). See
+[`PROMPT_ENHANCEMENTS_PLAN.md`](../planning/PROMPT_ENHANCEMENTS_PLAN.md).
+
 ## Validation And Rollout
 
 1. Start with `CAPABILITY_PROFILES=core`.
@@ -166,6 +219,7 @@ smoke test after policy and credentials are approved.
 
 ## Related Docs
 
+- [`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md)
 - [`CAPABILITY_PROFILES.md`](CAPABILITY_PROFILES.md)
 - [`SPL_OPERATIONS.md`](SPL_OPERATIONS.md)
 - [`RAG_OPERATIONS.md`](RAG_OPERATIONS.md)

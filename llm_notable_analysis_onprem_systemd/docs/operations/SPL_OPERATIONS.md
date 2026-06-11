@@ -80,6 +80,10 @@ deterministic `SPLUNK_SEARCH_*` policy. RAG does not bypass allowlists.
   accept alert-only SPL generation during SPL KB outages.
 - Keep `SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE` separate from
   `RAG_POSTGRES_CHUNKS_TABLE`; the default is `spl_query_chunks`.
+- For document templates, content examples, post-ingest quality checks, and
+  retrieval tuning workflow, see
+  [`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md) (sections
+  **SPL Query KB Document Template** through **SPL Query KB — Retrieval Tuning**).
 
 **Grounding provenance (structured vs narrative).** Validated responses can
 include per-hypothesis **`primary_spl_query_grounding_refs`** in the structured
@@ -163,6 +167,56 @@ observability without markdown bloat** note in
   analyzer. The injected MCP client must implement `run_search(payload)`.
 - Both modes run the same local policy gate before attempting execution.
 
+## Customer Onboarding — Splunk Query Grounding
+
+Complete this with Splunk owners **before** setting `SPL_QUERY_RAG_ENABLED=true`.
+Generation-only deployments can skip execution items.
+
+### Information to collect
+
+| Item | Required | Notes |
+|------|----------|-------|
+| Approved `index=` names | Yes | Must match real deployment; align with `SPLUNK_SEARCH_ALLOWED_INDEXES` if execution is on |
+| Approved `sourcetype=` names | Yes | Per index or hunt pattern |
+| Macro / datamodel names | If used | Only tokens that may appear in generated SPL |
+| Field hints per sourcetype | Recommended | Not code-enforced; improves hunt quality |
+| Example SPL patterns | Recommended | Known-good queries Splunk admins approve |
+| Representative notables | Yes | 3–5 per major log source for spot-checks |
+| Execution scope | Yes | Generation-only vs read-only execute |
+| Failure mode | Yes | Default `SPL_QUERY_RAG_FAILURE_MODE=suppress` |
+| KB owner and review cadence | Yes | Who approves doc changes before rebuild |
+
+### What you do not need upfront
+
+- Complete field schema for every index (alert observables + KB hints are enough)
+- General SOC runbooks in the SPL KB (keep those in `source_docs` / `rag` profile)
+
+### Rollout checklist
+
+1. [ ] Splunk owners approve SPL query KB source doc set
+2. [ ] Stage docs under `spl_query_source_docs` (see template in
+       [`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md))
+3. [ ] Ingest with `scripts/setup_postgres_rag.sh --spl-query-rag`
+4. [ ] Run SPL query KB quality checklist (same doc)
+5. [ ] Enable `CAPABILITY_PROFILES=core,spl_readonly` and
+       `SPL_QUERY_RAG_ENABLED=true`
+6. [ ] Process representative notables; review `primary_spl_query` and grounding refs
+7. [ ] If enabling execution: set `SPLUNK_SEARCH_*` allowlists to match KB indexes
+8. [ ] Record onboarding date, owner, and failure mode in change notes
+
+### Quality layers (ops vs engineering)
+
+| Layer | Owner | Splunk focus |
+|-------|-------|--------------|
+| 1. KB content | Ops | Indexes, sourcetypes, macros, examples |
+| 2. Retrieval | Ops (+ code later) | Snippets, budgets, rerank |
+| 3. Prompt labeling | Engineering | Advisory env context only |
+| 4. Validation / failure modes | Engineering | Ungrounded token rejection |
+| 5. Measurement | Ops + engineering | Spot-checks, golden alerts |
+
+Details: [`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md),
+[`PROMPT_ENHANCEMENTS_PLAN.md`](../planning/PROMPT_ENHANCEMENTS_PLAN.md).
+
 ## Config Quick Reference
 
 | Area | Primary variables |
@@ -203,4 +257,10 @@ and timeout.
 
 Code reference:
 [`onprem_service/splunk_investigation.py`](../../src/llm_notable_analysis_onprem_systemd/onprem_service/splunk_investigation.py).
+
+## Related Docs
+
+- [`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md) — SPL query KB templates, quality checklist, retrieval tuning
+- [`RAG_OPERATIONS.md`](RAG_OPERATIONS.md) — shared retrieval knobs
+- [`PROMPT_ENHANCEMENTS_PLAN.md`](../planning/PROMPT_ENHANCEMENTS_PLAN.md) — engineering prompt/RAG follow-ups
 

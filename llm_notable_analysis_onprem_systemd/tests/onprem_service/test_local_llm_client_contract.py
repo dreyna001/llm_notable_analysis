@@ -77,7 +77,7 @@ class TestLocalLlmClientContract(unittest.TestCase):
         self.assertIsNotNone(note)
 
     def test_strip_llm_thinking_preamble_keeps_tail_after_marker(self) -> None:
-        mark = llm_client_module._QWEN_THINK_END
+        mark = llm_client_module._LLM_THINKING_TRACE_END
         raw = "preamble" + mark + '{"a": 1}'
         self.assertEqual(strip_llm_thinking_preamble(raw), '{"a": 1}')
 
@@ -181,6 +181,15 @@ class TestLocalLlmClientContract(unittest.TestCase):
         self.assertIn("SOC CONTEXT RULES", prompt)
         self.assertIn("SOC_OPERATIONAL_CONTEXT", prompt)
         self.assertNotIn("SPL QUERY GENERATION (Enabled)", prompt)
+
+    def test_build_prompt_places_output_contract_before_doctrine(self) -> None:
+        client = LocalLLMClient(config=Config(), ttp_validator=_DummyValidator())
+        prompt = client._build_prompt("alert text")
+        contract_idx = prompt.index("OUTPUT CONTRACT:")
+        doctrine_idx = prompt.index("ANALYST DOCTRINE")
+        self.assertLess(contract_idx, doctrine_idx)
+        self.assertIn("This contract is mandatory", prompt)
+        self.assertIn("Direct alert evidence must come only from SECURITY ALERT INPUT", prompt)
 
     def test_build_prompt_excludes_spl_rules_when_enabled(self) -> None:
         client = LocalLLMClient(

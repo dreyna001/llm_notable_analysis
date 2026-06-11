@@ -28,19 +28,15 @@ class TestDeploymentContract(unittest.TestCase):
             service_text,
         )
 
-        freeform_text = (
-            PROJECT_ROOT / "deploy" / "systemd" / "notable-analyzer-freeform.service"
-        ).read_text(encoding="utf-8")
-        self.assertIn("After=network.target litellm.service", freeform_text)
-        self.assertIn("Requires=litellm.service", freeform_text)
-        self.assertIn("HF_HOME=/var/notables/cache/huggingface", freeform_text)
-        self.assertIn(
-            "SENTENCE_TRANSFORMERS_HOME=/var/notables/cache/sentence-transformers",
-            freeform_text,
-        )
-        self.assertIn(
-            "ReadWritePaths=/var/notables /var/notables/cache /var/sftp/soar",
-            freeform_text,
+    def test_freeform_analyzer_service_is_removed(self) -> None:
+        """Structured analyzer is the only supported report path."""
+        self.assertFalse(
+            (
+                PROJECT_ROOT
+                / "deploy"
+                / "systemd"
+                / "notable-analyzer-freeform.service"
+            ).exists()
         )
 
     def test_vllm_service_targets_notable_analysis_context_window(self) -> None:

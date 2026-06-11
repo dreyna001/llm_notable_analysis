@@ -86,6 +86,13 @@ class TestSplQueryGeneration(unittest.TestCase):
         self.assertIn("SOC_OPERATIONAL_CONTEXT", prompt)
         self.assertIn("SPL_QUERY_GROUNDING_CONTEXT", prompt)
         self.assertIn("Return ONLY a single JSON object", prompt)
+        self.assertIn("unvalidated draft investigation guidance", prompt)
+        self.assertIn("was executed or that results were observed", prompt)
+        self.assertIn("When ALERT_TIME is provided", prompt)
+        self.assertIn("earliest/latest", prompt)
+        self.assertIn("observable fields from the alert", prompt)
+        self.assertIn("hypothesis uncertainty it is testing", prompt)
+        self.assertIn("2026-01-01T00:00:00Z", prompt)
 
     def test_merge_spl_query_fields_by_position_keeps_base_hypotheses(self) -> None:
         base = normalize_competing_hypotheses(_valid_hypotheses(), spl_query_enabled=False)

@@ -33,6 +33,7 @@ from .openai_transport_nonsdk import (
     openai_chat_complete_tool_call,
 )
 from .spl_query_generation import (
+    SPL_QUERY_OUTPUT_SCHEMA,
     build_spl_query_generation_prompt,
     merge_spl_query_fields_by_position,
     normalize_competing_hypotheses,
@@ -44,6 +45,7 @@ from .spl_query_grounding import (
     spl_query_rag_failure_mode,
 )
 from .elastic_query_generation import (
+    ELASTIC_QUERY_OUTPUT_SCHEMA,
     build_elastic_query_generation_prompt,
     merge_elastic_query_fields_by_position,
     normalize_competing_hypotheses as normalize_elastic_competing_hypotheses,
@@ -65,13 +67,18 @@ from .verdicts import ALLOWED_VERDICTS, normalize_verdict
 
 logger = logging.getLogger(__name__)
 
-# Qwen3 chat templates may emit a "thinking" trace before the visible answer.
+# Some chat templates emit a "thinking" trace before the visible answer.
 # When present, the final user-facing segment usually follows this marker.
-_QWEN_THINK_END = "</think>"
+_LLM_THINKING_TRACE_END = "</think>"
+
+_STRUCTURED_JSON_OUTPUT_HINT = (
+    "Output policy: Respond with a single JSON object only—no markdown fences, "
+    "no text before or after the object. /no_think\n\n"
+)
 
 
 def strip_llm_thinking_preamble(text: str) -> str:
-    """Drop Qwen-style thinking trace; return the tail after the last think closer.
+    """Drop model thinking trace; return the tail after the last think closer.
 
     If no marker is present, returns ``text`` unchanged (aside from outer strip).
 
@@ -81,22 +88,22 @@ def strip_llm_thinking_preamble(text: str) -> str:
     Returns:
         Cleaned response text suitable for downstream JSON parsing.
     """
-    if not text or _QWEN_THINK_END not in text:
+    if not text or _LLM_THINKING_TRACE_END not in text:
         return text.strip() if text else text
-    tail = text.split(_QWEN_THINK_END)[-1].strip()
+    tail = text.split(_LLM_THINKING_TRACE_END)[-1].strip()
     return tail if tail else text.strip()
 
 
-def _model_name_suggests_qwen(model_name: str) -> bool:
-    """Return whether model name likely refers to a Qwen-family model.
-
-    Args:
-        model_name: Configured model name.
-
-    Returns:
-        True when the model name includes `qwen` (case-insensitive).
-    """
+def _model_prefers_structured_json_hint(model_name: str) -> bool:
+    """Return whether the configured model benefits from a strict JSON prefix hint."""
     return "qwen" in (model_name or "").lower()
+
+
+def _prepend_structured_json_hint_if_needed(prompt: str, model_name: str) -> str:
+    """Prepend strict JSON output guidance when the model profile requires it."""
+    if _model_prefers_structured_json_hint(model_name):
+        return _STRUCTURED_JSON_OUTPUT_HINT + prompt
+    return prompt
 
 
 class _RequestsPostSession:
@@ -479,6 +486,10 @@ OUTPUT_SCHEMA_RAW_JSON = """
 Return ONLY a single JSON object matching the schema. Do not include markdown fences or any extra text.
 
 Additional constraints:
+- This contract is mandatory; omit unsupported facts rather than inventing values.
+- Direct alert evidence must come only from SECURITY ALERT INPUT.
+- SOC_OPERATIONAL_CONTEXT may inform analyst pivots and recommended validation steps, but it must not create findings, verdicts, IOCs, or TTP evidence by itself.
+- Keep direct evidence, inference, and recommended next steps separate.
 - explanation: must end with "Uncertainty: [brief statement]".
 - URLs are only allowed in ioc_extraction.urls[]; no URLs elsewhere.
 - Leave arrays empty [] when no items apply.
@@ -521,7 +532,18 @@ Error: {error}
 Previous output (truncated):
 {prior_output}
 
-Return ONLY a single valid JSON object matching the schema and constraints. Do not include markdown fences or any extra text.
+Repair only formatting, JSON validity, schema shape, enum values, and missing required containers. Do not improve, expand, reinterpret, or add new analysis.
+
+Do not add facts, IOCs, hosts, users, timestamps, verdict reasons, TTPs, queries, or result interpretations that were not present in the previous output or original prompt context.
+
+If a required field cannot be supported, use "unknown" for scalar fields and [] for list fields where the schema allows it.
+
+Preserve valid fields from the previous output whenever they already satisfy the contract. Only change fields needed to pass validation.
+
+OUTPUT CONTRACT:
+{contract}
+
+Return only one valid JSON object. No markdown fences, comments, prose, or explanation.
 """
 
 
@@ -1404,21 +1426,26 @@ class LocalLLMClient:
         """
         alert_time_str = f"\n**ALERT_TIME:** {alert_time}\n" if alert_time else ""
 
-        qwen_json_hint = ""
-        if _model_name_suggests_qwen(self.config.LLM_MODEL_NAME):
-            qwen_json_hint = (
-                "Output policy: Respond with a single JSON object only—no markdown fences, "
-                "no text before or after the object. /no_think\n\n"
-            )
+        json_hint = ""
+        if _model_prefers_structured_json_hint(self.config.LLM_MODEL_NAME):
+            json_hint = _STRUCTURED_JSON_OUTPUT_HINT
 
         soc_context_block = (soc_operational_context or "").strip()
         if not soc_context_block:
             soc_context_block = "SOC_OPERATIONAL_CONTEXT\n(none)\n"
 
-        return f"""{qwen_json_hint}You are a cybersecurity expert mapping MITRE ATT&CK techniques from a single alert.
-{alert_time_str}
----
+        return f"""{json_hint}You are a cybersecurity expert producing a structured SOC analysis from a single alert.
 
+TASK:
+Analyze one alert only. Produce a verdict, separate direct evidence from inference,
+extract supported IOCs, map MITRE ATT&CK only when direct evidence supports it,
+and generate competing benign/adversary hypotheses for analyst validation.
+
+OUTPUT CONTRACT:
+{OUTPUT_SCHEMA_RAW_JSON}
+
+---
+{alert_time_str}
 {ANALYST_DOCTRINE}
 
 {EVIDENCE_GATE}
@@ -1439,10 +1466,6 @@ SECURITY ALERT INPUT:
 {soc_context_block}
 
 {SOC_CONTEXT_RULES}
-
----
-
-{OUTPUT_SCHEMA_RAW_JSON}
 
 ---
 
@@ -1593,12 +1616,10 @@ SECURITY ALERT INPUT:
                     getattr(self.config, "QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS", 3)
                 ),
             )
-            if _model_name_suggests_qwen(self.config.LLM_MODEL_NAME):
-                prompt = (
-                    "Output policy: Respond with a single JSON object only, no markdown fences, "
-                    "no text before or after the object. /no_think\n\n"
-                    + prompt
-                )
+            prompt = _prepend_structured_json_hint_if_needed(
+                prompt,
+                self.config.LLM_MODEL_NAME,
+            )
         except (TypeError, ValueError) as exc:
             reason = f"query result interpretation prompt build failed: {exc}"
             logger.warning(
@@ -2006,12 +2027,10 @@ SECURITY ALERT INPUT:
                 spl_query_grounding_context=spl_grounding_context,
                 alert_time=alert_time_value,
             )
-            if _model_name_suggests_qwen(self.config.LLM_MODEL_NAME):
-                spl_prompt = (
-                    "Output policy: Respond with a single JSON object only, no markdown fences, "
-                    "no text before or after the object. /no_think\n\n"
-                    + spl_prompt
-                )
+            spl_prompt = _prepend_structured_json_hint_if_needed(
+                spl_prompt,
+                self.config.LLM_MODEL_NAME,
+            )
 
             def _merge_and_validate_spl(parsed_obj: Dict[str, Any]) -> Tuple[bool, Optional[str], Dict[str, Any]]:
                 merged_obj = dict(result_obj)
@@ -2066,6 +2085,7 @@ SECURITY ALERT INPUT:
             repair_prompt = REPAIR_PROMPT_TEMPLATE_RAW_JSON.format(
                 error=first_error,
                 prior_output=prior,
+                contract=SPL_QUERY_OUTPUT_SCHEMA,
             )
             try:
                 spl_text2, spl_elapsed2 = _call_llm(
@@ -2164,12 +2184,10 @@ SECURITY ALERT INPUT:
                 elasticsearch_grounding_context=elastic_grounding_context,
                 alert_time=alert_time_value,
             )
-            if _model_name_suggests_qwen(self.config.LLM_MODEL_NAME):
-                elastic_prompt = (
-                    "Output policy: Respond with a single JSON object only, no markdown fences, "
-                    "no text before or after the object. /no_think\n\n"
-                    + elastic_prompt
-                )
+            elastic_prompt = _prepend_structured_json_hint_if_needed(
+                elastic_prompt,
+                self.config.LLM_MODEL_NAME,
+            )
 
             def _merge_and_validate_elastic(
                 parsed_obj: Dict[str, Any]
@@ -2232,6 +2250,7 @@ SECURITY ALERT INPUT:
             repair_prompt = REPAIR_PROMPT_TEMPLATE_RAW_JSON.format(
                 error=first_error,
                 prior_output=prior,
+                contract=ELASTIC_QUERY_OUTPUT_SCHEMA,
             )
             try:
                 elastic_text2, elastic_elapsed2 = _call_llm(
@@ -2471,7 +2490,9 @@ SECURITY ALERT INPUT:
 
                 prior = (llm_text or "")[:4000]
                 repair_prompt = REPAIR_PROMPT_TEMPLATE_RAW_JSON.format(
-                    error=last_error, prior_output=prior
+                    error=last_error,
+                    prior_output=prior,
+                    contract=OUTPUT_SCHEMA_RAW_JSON,
                 )
                 llm_text2, elapsed2 = _call_llm(
                     repair_prompt,

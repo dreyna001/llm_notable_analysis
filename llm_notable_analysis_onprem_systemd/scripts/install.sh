@@ -1543,14 +1543,6 @@ if [[ "${INSTALL_SYSTEMD_UNITS:-true}" == "true" ]]; then
         notable-retention.timer
     )
 
-    # Optional: install the freeform (paragraphs-only) analyzer as an additional unit.
-    # This avoids modifying/replacing the baseline unit and removes "remember to change it back" risk.
-    # Enable with:
-    #   sudo INSTALL_FREEFORM_SERVICE=true bash scripts/install.sh
-    if [[ "${INSTALL_FREEFORM_SERVICE:-false}" == "true" ]]; then
-        units+=(notable-analyzer-freeform.service)
-    fi
-
     for unit in "${units[@]}"; do
         src="$REPO_DIR/deploy/systemd/$unit"
         [[ -f "$src" ]] || err "Missing systemd unit: $src"

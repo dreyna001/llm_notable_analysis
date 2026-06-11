@@ -400,7 +400,7 @@ model.
   case sources, cites evidence, and cannot execute tools or mutate state.
 - Do not let the LLM enforce policy, authorize actions, or decide approvals.
 - Do not make the portal the source of truth for Splunk or ServiceNow state.
-- Do not trigger SOAR playbooks from freeform model output.
+- Do not trigger SOAR playbooks from unstructured model output.
 - Do not mix direct evidence, advisory RAG/context, query results, and inference
   into one undifferentiated narrative.
 - Do not introduce a generic integration framework before concrete adapters

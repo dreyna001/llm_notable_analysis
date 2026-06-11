@@ -68,6 +68,16 @@ class TestElasticQueryGeneration(unittest.TestCase):
         self.assertIn("ELASTICSEARCH_GROUNDING_CONTEXT", prompt)
         self.assertIn("Elasticsearch Query DSL", prompt)
         self.assertIn("Return ONLY a single JSON object", prompt)
+        self.assertIn("unvalidated draft investigation guidance", prompt)
+        self.assertIn("Do not claim the query was executed", prompt)
+        self.assertIn("hypothesis uncertainty it is testing", prompt)
+        self.assertIn("Do not generate KQL, Lucene", prompt)
+        self.assertIn("When ALERT_TIME is provided", prompt)
+        self.assertIn("ELASTICSEARCH_MAX_TIME_RANGE", prompt)
+        self.assertIn("bool.filter", prompt)
+        self.assertIn("Do not invent index patterns", prompt)
+        self.assertIn("comma-separated multi-index", prompt)
+        self.assertIn("2026-01-01T00:00:00Z", prompt)
 
     def test_merge_elastic_query_fields_by_position_keeps_base_hypotheses(self) -> None:
         base = [
