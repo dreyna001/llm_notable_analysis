@@ -16,11 +16,11 @@ API without auto-injection and rely on ``vite.config.ts`` proxy headers::
 
     python scripts/preview_portal_ui.py --no-inject-auth
 
-Optional OpenAI-backed chat synthesis for UI testing:
+Optional live chat synthesis for UI testing (via ``config.portal-preview.env``):
 
-- Set ``OPENAI_API_KEY`` or ``PORTAL_PREVIEW_OPENAI_API_KEY`` in the environment, or
-- Copy ``config.portal-preview.env.example`` to ``config.portal-preview.env`` and
-  fill in your key (that file is gitignored).
+- Bedrock: set ``PORTAL_LLM_PROVIDER=bedrock`` and a model id
+- OpenAI: set ``OPENAI_API_KEY`` or ``PORTAL_PREVIEW_OPENAI_API_KEY``
+- Otherwise chat returns stub preview text
 """
 
 from __future__ import annotations
@@ -50,7 +50,12 @@ from llm_notable_analysis_onprem_systemd.onprem_service.portal_app import (  # n
 )
 from preview_synthetic_pipeline import (  # noqa: E402
     build_synthetic_preview_record,
+    ensure_preview_bundles_present,
     preview_scenario_count,
+)
+from preview_bedrock_llm import (  # noqa: E402
+    build_preview_bedrock_synthesizers,
+    resolve_bedrock_preview_settings,
 )
 
 _PREVIEW_HOST = "127.0.0.1"
@@ -66,42 +71,7 @@ _PREVIEW_CASE_COUNT = 55
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _parse_env_line(line: str) -> tuple[str, str] | None:
-    stripped = line.strip()
-    if not stripped or stripped.startswith("#"):
-        return None
-    if stripped.startswith("export "):
-        stripped = stripped[len("export ") :].strip()
-    if "=" not in stripped:
-        return None
-    key, value = stripped.split("=", 1)
-    key = key.strip()
-    if not key:
-        return None
-    value = value.strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        value = value[1:-1]
-    return key, value
-
-
-def load_optional_preview_env() -> Path | None:
-    """Load optional preview env file without overriding existing os.environ."""
-    candidates: list[Path] = []
-    override = os.environ.get("PORTAL_PREVIEW_ENV", "").strip()
-    if override:
-        candidates.append(Path(override))
-    candidates.append(_REPO_ROOT / "config.portal-preview.env")
-    for path in candidates:
-        if not path.is_file():
-            continue
-        for raw_line in path.read_text(encoding="utf-8").splitlines():
-            parsed = _parse_env_line(raw_line)
-            if parsed is None:
-                continue
-            key, value = parsed
-            os.environ.setdefault(key, value)
-        return path
-    return None
+from preview_env import load_optional_preview_env  # noqa: E402
 
 
 def resolve_openai_preview_llm() -> dict[str, str] | None:
@@ -128,12 +98,16 @@ def resolve_openai_preview_llm() -> dict[str, str] | None:
 
 def preview_chat_mode_label() -> str:
     """Human-readable label for startup logs."""
+    bedrock_settings = resolve_bedrock_preview_settings()
+    if bedrock_settings is not None:
+        profile = bedrock_settings.aws_profile or "default chain"
+        return f"Bedrock ({bedrock_settings.model_id}, profile={profile})"
     if resolve_openai_preview_llm() is not None:
         model = (
             os.environ.get("PORTAL_PREVIEW_OPENAI_MODEL") or _DEFAULT_OPENAI_MODEL
         ).strip()
         return f"OpenAI ({model or _DEFAULT_OPENAI_MODEL})"
-    return "stub (set OPENAI_API_KEY or config.portal-preview.env for live chat)"
+    return "stub (configure Bedrock or OpenAI in config.portal-preview.env)"
 
 
 class _FakeResult:
@@ -265,6 +239,7 @@ def _minimal_analysis(*, verdict: str, confidence: str) -> dict:
 
 def _build_preview_records(config: Config):
     """Build synthetic cases for paginated UI preview."""
+    ensure_preview_bundles_present()
     base_time = datetime(2026, 6, 4, tzinfo=timezone.utc)
     verdicts = ("likely_malicious", "likely_benign", "unknown")
     search_names = (
@@ -587,14 +562,29 @@ def build_preview_app(*, inject_loopback_auth: bool | None = None):
     config = _preview_config()
     records = _build_preview_records(config)
     openai_llm = resolve_openai_preview_llm()
-    synthesizer = None if openai_llm is not None else _preview_chat_synthesizer
-    general_synthesizer = None if openai_llm is not None else _preview_general_synthesizer
+    bedrock_settings = resolve_bedrock_preview_settings()
+    if bedrock_settings is not None:
+        synthesizer, general_synthesizer = build_preview_bedrock_synthesizers(
+            bedrock_settings,
+            max_answer_tokens=config.CASE_QA_MAX_ANSWER_TOKENS,
+        )
+    elif openai_llm is not None:
+        synthesizer = None
+        general_synthesizer = None
+    else:
+        synthesizer = _preview_chat_synthesizer
+        general_synthesizer = _preview_general_synthesizer
+    # Preview injects Bedrock/stub synthesizers; skip localhost LLM gateway probe.
+    llm_gateway_ready = None
+    if bedrock_settings is not None or openai_llm is None:
+        llm_gateway_ready = True
     app = build_portal_app(
         config,
         connect=_fake_connect_factory(records),
         chat_embedding_model=_FakeEmbeddingModel(),
         chat_synthesizer=synthesizer,
         chat_general_synthesizer=general_synthesizer,
+        chat_llm_gateway_ready=llm_gateway_ready,
     )
 
     if inject_loopback_auth:
@@ -687,10 +677,8 @@ def main(argv: list[str] | None = None) -> None:
             f"Quick check: python {Path(__file__).name} --verify-auth-live {url.rstrip('/')}"
         )
     print(f"Preview cases: {_PREVIEW_CASE_COUNT} (paginated at limit 50)")
-    print(
-        f"Pipeline-backed full analysis: case-1 .. case-{preview_scenario_count()} "
-        "(real normalize + query enrichment + archive record builder)"
-    )
+    print(f"Pipeline-backed analyzer cases: case-1 .. case-{preview_scenario_count()} "
+        "(see data/preview_scenarios/; run generate_preview_scenarios.py if bundles missing)")
     print("Pages: /  /cases  /cases/case-1")
     uvicorn.run(
         build_preview_app(inject_loopback_auth=inject_auth),

@@ -181,7 +181,9 @@ class TestCaseChat(unittest.TestCase):
             )
 
 
-    def test_action_requests_are_refused_before_retrieval(self) -> None:
+    def test_action_requests_are_answered_with_guidance_not_preflight_refusal(
+        self,
+    ) -> None:
         self.assertTrue(is_action_request("Run a Splunk search and create a ticket"))
 
         response = answer_case_chat(
@@ -193,19 +195,22 @@ class TestCaseChat(unittest.TestCase):
             config=_config(),
             connect=lambda _dsn: _FakeConnection(row_pages=[[_chunk_row()]]),
             embedding_model=_FakeEmbeddingModel(),
-            synthesize=lambda _question, _sources: "should not be called",
+            synthesize=lambda _question, _sources: (
+                "Draft guidance only:\n\n```spl\nindex=notable\n```"
+            ),
         )
 
-        self.assertEqual(response["answer_status"], "refused")
-        self.assertNotIn("citations", response)
-        self.assertNotIn("retrieved_case_ids", response)
+        self.assertEqual(response["answer_status"], "answered")
+        self.assertIn("```spl", response["answer"])
 
-    def test_spl_authoring_requests_are_allowed_as_guidance(self) -> None:
-        self.assertFalse(
-            is_action_request(
-                "Create Splunk SPL for the last alert to find out its disposition"
-            )
+    def test_spl_authoring_with_domain_names_is_not_treated_as_action_request(
+        self,
+    ) -> None:
+        question = (
+            "Write Splunk SPL to find all hosts contacting "
+            "update-service-cloud.net or 203.0.113.77 in the last 7 days"
         )
+        self.assertFalse(is_action_request(question))
 
         response = answer_case_chat(
             payload={
@@ -226,12 +231,30 @@ class TestCaseChat(unittest.TestCase):
         self.assertEqual(response["answer_status"], "answered")
         self.assertIn("```spl", response["answer"])
 
-    def test_spl_execution_requests_are_still_refused(self) -> None:
+    def test_spl_execution_requests_are_not_preflight_refused(self) -> None:
         self.assertTrue(
             is_action_request(
                 "Run a Splunk search for the last alert to find out its disposition"
             )
         )
+
+        response = answer_case_chat(
+            payload={
+                "mode": "selected_case",
+                "question": (
+                    "Run a Splunk search for the last alert to find out its disposition"
+                ),
+                "selected_case_id": "case-1",
+            },
+            config=_config(),
+            connect=lambda _dsn: _FakeConnection(row_pages=[[_chunk_row()], []]),
+            embedding_model=_FakeEmbeddingModel(),
+            synthesize=lambda _question, _sources: (
+                "Use this SPL as guidance only:\n\n```spl\nindex=notable\n```"
+            ),
+        )
+
+        self.assertEqual(response["answer_status"], "answered")
 
     def test_retrieve_case_sources_merges_lexical_and_vector_candidates(self) -> None:
         connection = _FakeConnection(

@@ -1,0 +1,290 @@
+{
+  "scenario_index": 3,
+  "case_id": "case-3",
+  "finding_id": "syn-003",
+  "search_name": "Suspicious PowerShell",
+  "source_filename": "case-3-powershell.json",
+  "alert": {
+    "notable_id": "syn-003",
+    "search_name": "Suspicious PowerShell",
+    "urgency": "high",
+    "risk_score": 78,
+    "owner": "unassigned",
+    "status": "new",
+    "event_time": "2026-06-04T16:41:03Z",
+    "user": "corp\\jsmith",
+    "host": "workstation-14.corp.local",
+    "src_ip": "10.20.14.55",
+    "process": "powershell.exe",
+    "process_id": 8844,
+    "parent_process": "winword.exe",
+    "parent_process_id": 7120,
+    "command_line": "powershell.exe -nop -w hidden -enc SQBFAFgAYQBuACAAcwBjAHIAaXB0AA==",
+    "event_id": "4688",
+    "logon_type": 2,
+    "integrity_level": "high",
+    "change_ticket": "",
+    "edr_action": "not blocked",
+    "description": "Encoded PowerShell with hidden window launched from winword.exe under admin user corp\\jsmith on workstation-14; no matching change ticket."
+  },
+  "analysis": {
+    "alert_reconciliation": {
+      "verdict": "likely_malicious",
+      "confidence": "0.84",
+      "one_sentence_summary": "Admin user corp\\jsmith launched hidden encoded PowerShell from winword.exe on workstation-14 with no change ticket, indicating probable document-driven execution rather than approved automation.",
+      "decision_drivers": [
+        "command_line contains -enc and -w hidden on powershell.exe",
+        "parent_process=winword.exe",
+        "change_ticket empty",
+        "integrity_level=high for interactive admin context"
+      ],
+      "recommended_actions": [
+        "Isolate workstation-14.corp.local and collect PowerShell script block logs.",
+        "Review recent email attachments for corp\\jsmith."
+      ]
+    },
+    "competing_hypotheses": [
+      {
+        "hypothesis_type": "benign",
+        "hypothesis": "IT pushed encoded maintenance script during patch window.",
+        "evidence_support": [
+          "user=corp\\jsmith is admin",
+          "event_id=4688 process creation audited"
+        ],
+        "evidence_gaps": [
+          "change_ticket empty",
+          "Encoded payload not reviewed"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "Change management",
+            "key_fields": [
+              "user",
+              "host"
+            ]
+          },
+          {
+            "log_source": "EDR",
+            "key_fields": [
+              "host",
+              "command_line"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "benign",
+        "hypothesis": "Security exercise script launched from document helper.",
+        "evidence_support": [
+          "winword.exe parent may indicate document workflow"
+        ],
+        "evidence_gaps": [
+          "No documented exercise",
+          "EDR action=not blocked without context"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "SOC calendar",
+            "key_fields": [
+              "user",
+              "host"
+            ]
+          },
+          {
+            "log_source": "EDR",
+            "key_fields": [
+              "host",
+              "process"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "benign",
+        "hypothesis": "EDR vendor test harness on admin workstation.",
+        "evidence_support": [
+          "powershell.exe with encoded argument pattern"
+        ],
+        "evidence_gaps": [
+          "No test marker in alert",
+          "Vendor schedule unknown"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "EDR console",
+            "key_fields": [
+              "host",
+              "policy_name"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "adversary",
+        "hypothesis": "Phishing attachment executed macro that spawned obfuscated PowerShell.",
+        "evidence_support": [
+          "parent_process=winword.exe",
+          "command_line uses -enc and hidden window"
+        ],
+        "evidence_gaps": [
+          "Macro content unavailable",
+          "Email trace not in alert"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "EDR",
+            "key_fields": [
+              "host",
+              "parent_process"
+            ]
+          },
+          {
+            "log_source": "Email gateway",
+            "key_fields": [
+              "user"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "adversary",
+        "hypothesis": "Compromised admin credentials used for scripted discovery.",
+        "evidence_support": [
+          "user=corp\\jsmith",
+          "integrity_level=high",
+          "Encoded command line"
+        ],
+        "evidence_gaps": [
+          "No lateral movement in alert",
+          "MFA anomaly not shown"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "AD auth",
+            "key_fields": [
+              "user",
+              "src_ip"
+            ]
+          },
+          {
+            "log_source": "EDR",
+            "key_fields": [
+              "host",
+              "process"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "adversary",
+        "hypothesis": "Living-off-the-land download cradle staged next-stage payload.",
+        "evidence_support": [
+          "powershell.exe with hidden window",
+          "Obfuscated invocation"
+        ],
+        "evidence_gaps": [
+          "Network IOCs not in alert",
+          "Child process tree unknown"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "Proxy logs",
+            "key_fields": [
+              "host",
+              "user"
+            ]
+          },
+          {
+            "log_source": "EDR",
+            "key_fields": [
+              "host",
+              "process_guid"
+            ]
+          }
+        ]
+      }
+    ],
+    "evidence_vs_inference": {
+      "evidence": [
+        "user=corp\\jsmith",
+        "host=workstation-14.corp.local",
+        "process=powershell.exe",
+        "parent_process=winword.exe",
+        "command_line contains -enc",
+        "change_ticket empty"
+      ],
+      "inferences": [
+        "Encoded execution from Office parent is atypical for normal admin tasks",
+        "Decoded script content is required before closure"
+      ]
+    },
+    "ioc_extraction": {
+      "ip_addresses": [
+        "10.20.14.55"
+      ],
+      "domains": [],
+      "user_accounts": [
+        "corp\\jsmith"
+      ],
+      "hostnames": [
+        "workstation-14.corp.local"
+      ],
+      "process_names": [
+        "powershell.exe",
+        "winword.exe"
+      ],
+      "file_paths": [],
+      "file_hashes": [],
+      "event_ids": [
+        "4688"
+      ],
+      "urls": []
+    },
+    "ttp_analysis": [
+      {
+        "ttp_id": "T1059.001",
+        "ttp_name": "PowerShell",
+        "confidence_score": "0.88",
+        "explanation": "PowerShell executed with encoded hidden command line. Uncertainty: decoded payload not shown.",
+        "evidence_fields": [
+          "process",
+          "command_line"
+        ]
+      },
+      {
+        "ttp_id": "T1204.002",
+        "ttp_name": "User Execution: Malicious File",
+        "confidence_score": "0.74",
+        "explanation": "Word parent process suggests document-driven execution. Uncertainty: macro content unavailable.",
+        "evidence_fields": [
+          "parent_process"
+        ]
+      },
+      {
+        "ttp_id": "T1078",
+        "ttp_name": "Valid Accounts",
+        "confidence_score": "0.52",
+        "explanation": "Named admin user in alert. Uncertainty: compromise not confirmed.",
+        "evidence_fields": [
+          "user"
+        ]
+      }
+    ],
+    "actions": {
+      "immediate": [
+        "Isolate workstation-14 and terminate suspicious PowerShell descendants."
+      ],
+      "short_term": [
+        "Decode script block logging for the encoded command line."
+      ],
+      "long_term": [
+        "Constrain Office macro execution for privileged users."
+      ]
+    },
+    "metadata": {
+      "preview_synthetic": true,
+      "preview_source": "stored_prompt_aligned_fixture"
+    }
+  },
+  "generated_at": "2026-06-10T22:09:16.937569+00:00"
+}

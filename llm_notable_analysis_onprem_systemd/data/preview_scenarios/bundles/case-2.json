@@ -1,0 +1,290 @@
+{
+  "scenario_index": 2,
+  "case_id": "case-2",
+  "finding_id": "syn-002",
+  "search_name": "Impossible Travel",
+  "source_filename": "case-2-impossible-travel.json",
+  "alert": {
+    "notable_id": "syn-002",
+    "search_name": "Impossible Travel",
+    "urgency": "medium",
+    "risk_score": 74,
+    "owner": "unassigned",
+    "status": "new",
+    "event_time": "2026-06-04T09:18:44Z",
+    "user": "corp\\alee",
+    "auth_method": "MFA",
+    "prior_login_time": "2026-06-04T09:05:12Z",
+    "prior_login_city": "New York",
+    "prior_login_country": "United States",
+    "prior_src_ip": "73.68.210.14",
+    "current_login_time": "2026-06-04T09:18:44Z",
+    "current_login_city": "Amsterdam",
+    "current_login_country": "Netherlands",
+    "current_src_ip": "198.51.100.44",
+    "elapsed_minutes": 13,
+    "minimum_flight_hours": 7,
+    "host": "vpn-gw-02.corp.local",
+    "event_id": "4624",
+    "mfa_result": "success",
+    "device_compliance": "unknown",
+    "description": "Successful VPN authentication for corp\\alee from Amsterdam 13 minutes after a successful login from New York; travel time is physically impossible."
+  },
+  "analysis": {
+    "alert_reconciliation": {
+      "verdict": "likely_malicious",
+      "confidence": "0.79",
+      "one_sentence_summary": "corp\\alee authenticated to VPN from Amsterdam 13 minutes after a successful login from New York, which is physically impossible and suggests credential misuse or session replay despite MFA success.",
+      "decision_drivers": [
+        "elapsed_minutes=13 with minimum_flight_hours=7",
+        "prior_login_country=United States then current_login_country=Netherlands",
+        "prior_src_ip=73.68.210.14 differs from current_src_ip=198.51.100.44",
+        "mfa_result=success on current login"
+      ],
+      "recommended_actions": [
+        "Disable corp\\alee sessions and force password reset plus MFA re-registration.",
+        "Pull IdP and VPN authentication logs for both source IPs in the last 24 hours."
+      ]
+    },
+    "competing_hypotheses": [
+      {
+        "hypothesis_type": "benign",
+        "hypothesis": "Geo-IP mislabeling caused false impossible-travel signal.",
+        "evidence_support": [
+          "host=vpn-gw-02.corp.local",
+          "auth_method=MFA"
+        ],
+        "evidence_gaps": [
+          "Geo database version unknown",
+          "Both IPs not mapped to carriers"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "VPN vendor logs",
+            "key_fields": [
+              "src_ip",
+              "session_id"
+            ]
+          },
+          {
+            "log_source": "IdP sign-in",
+            "key_fields": [
+              "user",
+              "src_ip"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "benign",
+        "hypothesis": "User on VPN split-tunnel with rapid carrier handoff mis-timed in SIEM.",
+        "evidence_support": [
+          "Two successful 4624 events for same user",
+          "MFA success on current login"
+        ],
+        "evidence_gaps": [
+          "Client device telemetry missing",
+          "SIEM correlation window unknown"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "VPN logs",
+            "key_fields": [
+              "user",
+              "client_ip"
+            ]
+          },
+          {
+            "log_source": "Endpoint compliance",
+            "key_fields": [
+              "user",
+              "device_id"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "benign",
+        "hypothesis": "Shared credential used by two employees in different regions (policy violation, not malware).",
+        "evidence_support": [
+          "user=corp\\alee on both events",
+          "Both logons successful"
+        ],
+        "evidence_gaps": [
+          "No concurrent session detail in alert",
+          "HR roster not included"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "HR identity",
+            "key_fields": [
+              "user"
+            ]
+          },
+          {
+            "log_source": "VPN concurrent sessions",
+            "key_fields": [
+              "user"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "adversary",
+        "hypothesis": "Stolen password with MFA approval (fatigue or push hijack) from actor in Netherlands.",
+        "evidence_support": [
+          "elapsed_minutes=13 between distant geos",
+          "current_src_ip=198.51.100.44 external to prior US login"
+        ],
+        "evidence_gaps": [
+          "No MFA denial history shown",
+          "Device posture unknown"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "IdP risky sign-in",
+            "key_fields": [
+              "user",
+              "src_ip"
+            ]
+          },
+          {
+            "log_source": "VPN logs",
+            "key_fields": [
+              "user",
+              "src_ip"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "adversary",
+        "hypothesis": "Session token replay after prior US compromise.",
+        "evidence_support": [
+          "Two successful authentications in impossible window",
+          "event_id=4624"
+        ],
+        "evidence_gaps": [
+          "Token issuance logs not in alert",
+          "Initial compromise vector unknown"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "IdP token logs",
+            "key_fields": [
+              "user"
+            ]
+          },
+          {
+            "log_source": "AD auth",
+            "key_fields": [
+              "user",
+              "src_ip"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "adversary",
+        "hypothesis": "VPN credential stuffing success after prior geo anomaly.",
+        "evidence_support": [
+          "prior_failed_logons not shown but risk_score=74",
+          "External IP to VPN gateway"
+        ],
+        "evidence_gaps": [
+          "No failed login burst in alert",
+          "Password spray scope unknown"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "VPN auth failures",
+            "key_fields": [
+              "src_ip"
+            ]
+          },
+          {
+            "log_source": "IdP lockouts",
+            "key_fields": [
+              "user"
+            ]
+          }
+        ]
+      }
+    ],
+    "evidence_vs_inference": {
+      "evidence": [
+        "user=corp\\alee",
+        "prior_login_city=New York",
+        "current_login_city=Amsterdam",
+        "elapsed_minutes=13",
+        "minimum_flight_hours=7",
+        "prior_src_ip=73.68.210.14",
+        "current_src_ip=198.51.100.44",
+        "mfa_result=success"
+      ],
+      "inferences": [
+        "Physical impossibility outweighs MFA success alone for benign closure",
+        "Travel approval status is unknown from alert fields"
+      ]
+    },
+    "ioc_extraction": {
+      "ip_addresses": [
+        "73.68.210.14",
+        "198.51.100.44"
+      ],
+      "domains": [],
+      "user_accounts": [
+        "corp\\alee"
+      ],
+      "hostnames": [
+        "vpn-gw-02.corp.local"
+      ],
+      "process_names": [],
+      "file_paths": [],
+      "file_hashes": [],
+      "event_ids": [
+        "4624"
+      ],
+      "urls": []
+    },
+    "ttp_analysis": [
+      {
+        "ttp_id": "T1078",
+        "ttp_name": "Valid Accounts",
+        "confidence_score": "0.72",
+        "explanation": "Successful VPN authentication for named user from two distant locations. Uncertainty: account compromise not directly proven.",
+        "evidence_fields": [
+          "user",
+          "event_id",
+          "mfa_result"
+        ]
+      },
+      {
+        "ttp_id": "T1133",
+        "ttp_name": "External Remote Services",
+        "confidence_score": "0.58",
+        "explanation": "External IP authentication to VPN gateway. Uncertainty: legitimate travel cannot be ruled out without approval records.",
+        "evidence_fields": [
+          "current_src_ip",
+          "host"
+        ]
+      }
+    ],
+    "actions": {
+      "immediate": [
+        "Revoke active sessions for corp\\alee and require out-of-band identity verification."
+      ],
+      "short_term": [
+        "Review IdP sign-in risk detections for 198.51.100.44 and 73.68.210.14."
+      ],
+      "long_term": [
+        "Enable impossible-travel blocking policy with travel-ticket enrichment."
+      ]
+    },
+    "metadata": {
+      "preview_synthetic": true,
+      "preview_source": "stored_prompt_aligned_fixture"
+    }
+  },
+  "generated_at": "2026-06-10T22:09:16.936687+00:00"
+}

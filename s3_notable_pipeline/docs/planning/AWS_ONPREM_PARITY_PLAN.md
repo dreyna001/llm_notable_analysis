@@ -2,7 +2,12 @@
 
 ## Status
 
-Planning artifact only. Do not implement until this plan is reviewed and approved.
+Wave 1 planning artifact (analyzer profiles, RAG, SPL, Elastic, ServiceNow,
+idempotency). **Case archive, analyst portal, and Case Q&A are out of scope
+here**; they are specified in
+[`AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md`](AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md)
+(wave 2). The implementation contract is
+[`../technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md`](../technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md).
 
 ## Goal
 

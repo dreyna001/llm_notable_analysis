@@ -1,0 +1,272 @@
+{
+  "scenario_index": 4,
+  "case_id": "case-4",
+  "finding_id": "syn-004",
+  "search_name": "Privilege Escalation Attempt",
+  "source_filename": "case-4-privilege-escalation.json",
+  "alert": {
+    "notable_id": "syn-004",
+    "search_name": "Privilege Escalation Attempt",
+    "urgency": "high",
+    "risk_score": 85,
+    "owner": "unassigned",
+    "status": "new",
+    "event_time": "2026-06-04T11:07:29Z",
+    "user": "corp\\dgreen",
+    "host": "app-server-03.corp.local",
+    "event_id": "4732",
+    "target_group": "Administrators",
+    "process": "net.exe",
+    "command_line": "net localgroup Administrators corp\\dgreen /add",
+    "subject_is_admin": false,
+    "server_role": "application",
+    "cmdb_owner_team": "finance-apps",
+    "description": "Standard user corp\\dgreen attempted to add their account to the local Administrators group on app-server-03 using net.exe."
+  },
+  "analysis": {
+    "alert_reconciliation": {
+      "verdict": "likely_malicious",
+      "confidence": "0.80",
+      "one_sentence_summary": "Non-admin user corp\\dgreen used net.exe to add themselves to the local Administrators group on app-server-03, a direct self-elevation attempt on an application server.",
+      "decision_drivers": [
+        "event_id=4732 membership change",
+        "command_line adds corp\\dgreen to Administrators",
+        "subject_is_admin=false",
+        "server_role=application with cmdb_owner_team=finance-apps"
+      ],
+      "recommended_actions": [
+        "Remove corp\\dgreen from local Administrators on app-server-03.",
+        "Audit privileged group changes fleet-wide for 24 hours."
+      ]
+    },
+    "competing_hypotheses": [
+      {
+        "hypothesis_type": "benign",
+        "hypothesis": "Planned build step executed without recorded change ticket.",
+        "evidence_support": [
+          "process=net.exe used for group management"
+        ],
+        "evidence_gaps": [
+          "change_ticket not in alert",
+          "User not listed as deployer in CMDB"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "CMDB",
+            "key_fields": [
+              "host",
+              "build_id"
+            ]
+          },
+          {
+            "log_source": "Change management",
+            "key_fields": [
+              "host",
+              "user"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "benign",
+        "hypothesis": "Break-glass IR procedure granting temporary admin.",
+        "evidence_support": [
+          "Explicit localgroup modification command"
+        ],
+        "evidence_gaps": [
+          "No IR ticket referenced",
+          "Timing not aligned to incident"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "IR ticketing",
+            "key_fields": [
+              "host",
+              "user"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "benign",
+        "hypothesis": "Misconfigured automation script with excessive privileges.",
+        "evidence_support": [
+          "Command line is scriptable via net.exe"
+        ],
+        "evidence_gaps": [
+          "Automation owner unknown",
+          "Task scheduler context missing"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "Task Scheduler",
+            "key_fields": [
+              "host",
+              "task_name"
+            ]
+          },
+          {
+            "log_source": "EDR",
+            "key_fields": [
+              "host",
+              "process"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "adversary",
+        "hypothesis": "Post-exploitation self-elevation on app-server-03.",
+        "evidence_support": [
+          "Self-add to Administrators by non-admin user",
+          "event_id=4732"
+        ],
+        "evidence_gaps": [
+          "Initial access not in alert",
+          "Exploit IOC missing"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "Windows Security",
+            "key_fields": [
+              "host",
+              "user"
+            ]
+          },
+          {
+            "log_source": "EDR",
+            "key_fields": [
+              "host",
+              "process"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "adversary",
+        "hypothesis": "Insider attempt to gain persistent admin rights.",
+        "evidence_support": [
+          "Direct command targeting Administrators group",
+          "subject_is_admin=false"
+        ],
+        "evidence_gaps": [
+          "UEBA baseline unknown",
+          "HR context not included"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "UEBA",
+            "key_fields": [
+              "user"
+            ]
+          },
+          {
+            "log_source": "PAM logs",
+            "key_fields": [
+              "user"
+            ]
+          }
+        ]
+      },
+      {
+        "hypothesis_type": "adversary",
+        "hypothesis": "Remote execution of net.exe after lateral movement.",
+        "evidence_support": [
+          "4732 follows privileged group change pattern",
+          "Application server target"
+        ],
+        "evidence_gaps": [
+          "Source host of command unknown",
+          "Parent process not shown"
+        ],
+        "best_pivots": [
+          {
+            "log_source": "EDR",
+            "key_fields": [
+              "host",
+              "parent_process"
+            ]
+          },
+          {
+            "log_source": "Network auth",
+            "key_fields": [
+              "host",
+              "user"
+            ]
+          }
+        ]
+      }
+    ],
+    "evidence_vs_inference": {
+      "evidence": [
+        "user=corp\\dgreen",
+        "host=app-server-03.corp.local",
+        "event_id=4732",
+        "target_group=Administrators",
+        "command_line=net localgroup Administrators corp\\dgreen /add",
+        "subject_is_admin=false"
+      ],
+      "inferences": [
+        "Self-elevation without approved change is a strong malicious indicator",
+        "Compromise versus insider intent requires identity and UEBA context"
+      ]
+    },
+    "ioc_extraction": {
+      "ip_addresses": [],
+      "domains": [],
+      "user_accounts": [
+        "corp\\dgreen"
+      ],
+      "hostnames": [
+        "app-server-03.corp.local"
+      ],
+      "process_names": [
+        "net.exe"
+      ],
+      "file_paths": [],
+      "file_hashes": [],
+      "event_ids": [
+        "4732"
+      ],
+      "urls": []
+    },
+    "ttp_analysis": [
+      {
+        "ttp_id": "T1068",
+        "ttp_name": "Exploitation for Privilege Escalation",
+        "confidence_score": "0.76",
+        "explanation": "Local Administrators group modified via net.exe by non-admin user. Uncertainty: exploit versus manual command unclear.",
+        "evidence_fields": [
+          "command_line",
+          "event_id",
+          "subject_is_admin"
+        ]
+      },
+      {
+        "ttp_id": "T1078",
+        "ttp_name": "Valid Accounts",
+        "confidence_score": "0.60",
+        "explanation": "Named user executed the change. Uncertainty: account compromise not proven.",
+        "evidence_fields": [
+          "user"
+        ]
+      }
+    ],
+    "actions": {
+      "immediate": [
+        "Remove corp\\dgreen from local Administrators and disable interactive logon pending review."
+      ],
+      "short_term": [
+        "Search for net localgroup Administrators modifications across the fleet."
+      ],
+      "long_term": [
+        "Alert on self-add to privileged local groups for non-admin accounts."
+      ]
+    },
+    "metadata": {
+      "preview_synthetic": true,
+      "preview_source": "stored_prompt_aligned_fixture"
+    }
+  },
+  "generated_at": "2026-06-10T22:09:16.938219+00:00"
+}

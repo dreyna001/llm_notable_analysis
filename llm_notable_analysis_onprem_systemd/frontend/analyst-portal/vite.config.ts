@@ -26,7 +26,8 @@ export default defineConfig({
     proxy: {
       "/api": {
         target: portalTarget,
-        changeOrigin: true,
+        // Keep the browser Host (5173) so portal same-origin checks match Origin.
+        changeOrigin: false,
         configure: (proxy) => {
           proxy.on("proxyReq", (proxyReq) => {
             proxyReq.setHeader("X-Forwarded-User", devUser);

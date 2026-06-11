@@ -1,0 +1,19 @@
+{
+  "notable_id": "syn-004",
+  "search_name": "Privilege Escalation Attempt",
+  "urgency": "high",
+  "risk_score": 85,
+  "owner": "unassigned",
+  "status": "new",
+  "event_time": "2026-06-04T11:07:29Z",
+  "user": "corp\\dgreen",
+  "host": "app-server-03.corp.local",
+  "event_id": "4732",
+  "target_group": "Administrators",
+  "process": "net.exe",
+  "command_line": "net localgroup Administrators corp\\dgreen /add",
+  "subject_is_admin": false,
+  "server_role": "application",
+  "cmdb_owner_team": "finance-apps",
+  "description": "Standard user corp\\dgreen attempted to add their account to the local Administrators group on app-server-03 using net.exe."
+}
