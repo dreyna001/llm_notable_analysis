@@ -85,8 +85,8 @@ Pre-download model files and transfer them so `config.json` exists under `/opt/m
 If RAG is enabled, also stage the local embedding/reranking model artifacts
 needed by `sentence-transformers`:
 
-- embedder: `BAAI/bge-base-en-v1.5`
-- reranker: `BAAI/bge-reranker-base` when `RAG_RERANK_ENABLED=true`
+- embedder: `mixedbread-ai/mxbai-embed-large-v1`
+- reranker: `mixedbread-ai/mxbai-rerank-large-v2` when `RAG_RERANK_ENABLED=true`
 
 Keep model artifacts outside the repo, record checksums where local policy
 requires it, and update `config.env` if local model paths are used instead of

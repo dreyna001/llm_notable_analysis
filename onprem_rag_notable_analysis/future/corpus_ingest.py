@@ -280,7 +280,7 @@ def ingest_corpus(
     postgres_schema: str = "notable_rag",
     postgres_chunks_table: str = "kb_chunks",
     postgres_fts_config: str = "english",
-    vector_dimensions: int = 768,
+    vector_dimensions: int = 1024,
     embedding_batch_size: int = 64,
     postgres_statement_timeout_ms: int = 0,
     ensure_postgres_schema: bool = True,
@@ -446,7 +446,7 @@ def _parse_args() -> argparse.Namespace:
         default=_config_default(
             config_values,
             "RAG_EMBEDDING_MODEL",
-            "BAAI/bge-base-en-v1.5",
+            "mixedbread-ai/mxbai-embed-large-v1",
         ),
         help="Local sentence-transformers model identifier/path.",
     )
@@ -487,7 +487,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--vector-dimensions",
         type=int,
-        default=int(_config_default(config_values, "RAG_VECTOR_DIMENSIONS", "768")),
+        default=int(_config_default(config_values, "RAG_VECTOR_DIMENSIONS", "1024")),
     )
     parser.add_argument(
         "--postgres-statement-timeout-ms",

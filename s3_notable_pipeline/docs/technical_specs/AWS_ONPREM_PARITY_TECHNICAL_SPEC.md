@@ -322,8 +322,10 @@ chat inherits the active preset unless `PORTAL_CHAT_BEDROCK_MODEL_ID` is set
   not in-Lambda full-case scans.
 - Chat synthesis in `portal_chat.py`; do not import `ttp_analyzer.py`.
 - Response shapes must match vendored on-prem `portal.openapi.json`.
+- Vendor on-prem `portal_api_models.py` (Pydantic); pin `pydantic` in
+  `requirements.txt` per REQUIREMENTS_AND_DESIGN Decision 35.
 
 ### Embedding Contract (Decision 6)
 
 - Chunk and query embeddings: Bedrock Titan (`amazon.titan-embed-text-v2:0`), not
-  on-prem BGE, for AWS v1.
+  on-prem Mixedbread embedder, for AWS v1.

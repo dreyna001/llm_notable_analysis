@@ -2,9 +2,10 @@
 
 ## Status
 
-Planning and implementation-input artifact. Architecture decisions 1 through 34
-are locked in this document. Implementation may proceed once the technical spec
-and diff sequence below are accepted.
+Planning and implementation-input artifact. Architecture decisions 1 through 35
+are locked in this document. **Decision 35** aligns wave-2 Python dependencies
+with the on-prem portal stack (Pydantic for `portal_api_models.py`). Implementation
+may proceed once the technical spec and diff sequence below are accepted.
 
 This is the next parity block for `s3_notable_pipeline`. It extends the earlier
 parity plan in `docs/planning/AWS_ONPREM_PARITY_PLAN.md`, which covered
@@ -104,7 +105,7 @@ This document is scoped to those gaps.
   v1 archive browsing unless a later approved requirement proves DynamoDB/S3 is
   insufficient.
 - Copying the on-prem FastAPI/Postgres implementation into AWS literally.
-- Adding new Python dependencies by default.
+- Adding Python dependencies outside the wave-2 on-prem portal allowlist (Decision 35).
 - Live AWS, Bedrock, Splunk, Elastic, ServiceNow, or IdP calls in unit tests.
 
 ## Design Principles
@@ -124,8 +125,8 @@ host model.
 | Postgres `case_chunks` with pgvector | S3 case chunk objects plus in-Lambda lexical/vector/RRF retrieval |
 | FastAPI portal bound to loopback | API Gateway plus portal Lambda; chat via Function URL (Decision 19) |
 | nginx auth and trusted user header | JWT authorizer plus browser bearer token; IAM second-best |
-| on-prem BGE embedder in app code | Bedrock `amazon.titan-embed-text-v2:0` at chunk write and query |
-| on-prem optional BGE reranker | Bedrock rerank API (`cohere.rerank-v3-5:0`, Amazon fallback) |
+| on-prem Mixedbread embedder in app code | Bedrock `amazon.titan-embed-text-v2:0` at chunk write and query |
+| on-prem optional Mixedbread reranker | Bedrock rerank API (`cohere.rerank-v3-5:0`, Amazon fallback) |
 | local vLLM/LiteLLM answer synthesis | Bedrock model invocation scoped to portal Q&A only |
 | filesystem report paths | S3 report and case object keys |
 
@@ -765,9 +766,10 @@ Files:
 
 - `src/s3_notable_pipeline/portal_handler.py`
 - `src/s3_notable_pipeline/case_index.py`
-- `src/s3_notable_pipeline/portal_api_models.py`
+- `src/s3_notable_pipeline/portal_api_models.py` (vendored from on-prem; Pydantic)
 - `src/s3_notable_pipeline/case_archive_notices.py` (ported verbatim from on-prem)
 - `docs/contracts/portal.openapi.json` (vendored from on-prem)
+- `requirements.txt` (add `pydantic` pin per Decision 35)
 - `deploy/aws/template-sam.yaml`
 - `deploy/aws/template-cfn.yaml`
 - `tests/test_portal_handler.py`
@@ -876,6 +878,36 @@ Primary local command:
 python -m unittest discover -s s3_notable_pipeline/tests -p "test_*.py" -v
 ```
 
+## Dependency Posture (Wave 2)
+
+Reuse on-prem portal packages where they directly support API contract parity.
+Do not reimplement `portal_api_models.py` with ad-hoc dataclasses when Pydantic
+is already the on-prem contract.
+
+**Allowed without extra approval (wave 2 portal block):**
+
+- `requests==2.32.5` (existing; Splunk, Elastic, ServiceNow, HTTP clients)
+- Lambda-provided `boto3` / botocore (Bedrock, S3, DynamoDB, Secrets Manager)
+- **`pydantic`** — pin to the same resolved version as on-prem
+  `fastapi==0.115.12` in `llm_notable_analysis_onprem_systemd/pyproject.toml`;
+  record the pin in `s3_notable_pipeline/requirements.txt` during Diff 3
+  (Decision 35)
+
+**Explicitly not ported to AWS Lambdas (use Bedrock or AWS-native substitutes):**
+
+- `onprem-llm-sdk`, `onprem-rag-notable-analysis`
+- `sentence-transformers`, `transformers`, `huggingface-hub`, `faiss-cpu`,
+  `numpy` (local embedders / rerankers — Decision 6)
+- `psycopg`, `pgvector` (v1 case chunks live in S3, not Postgres — Decision 7)
+- `fastapi`, `uvicorn` (on-prem web server; AWS uses `portal_handler.py` behind
+  API Gateway / Function URL — Pydantic models only, not the FastAPI app)
+
+**Default posture:**
+
+- Prefer packages already pinned in on-prem when they solve the current slice.
+- Do not add other third-party packages for wave 2 unless a hard stop is lifted
+  by an explicit new decision.
+
 ## Implementation Hard Stops
 
 Stop and ask before coding if any of these become necessary:
@@ -887,7 +919,8 @@ Stop and ask before coding if any of these become necessary:
 - loading local sentence-transformers, BGE embedders, or BGE rerankers into Lambda
 - exposing portal routes without IAM or JWT authorization
 - storing full alert payloads in DynamoDB instead of S3 envelopes
-- adding new third-party Python dependencies
+- adding third-party Python dependencies **outside** the Decision 35 on-prem
+  portal allowlist
 - adding cross-case / global archive chat
 - adding analyst write actions from the portal
 
@@ -946,7 +979,7 @@ Stop and ask before coding if any of these become necessary:
 - Model: `amazon.titan-embed-text-v2:0`
 - Output: `1024` dimensions with `normalize=true`
 - Use the same model at chunk write and chat query time.
-- Do not load on-prem `BAAI/bge-base-en-v1.5` into Lambda.
+- Do not load on-prem `mixedbread-ai/mxbai-embed-large-v1` into Lambda.
 
 ### Decision 7: Case retrieval (v1)
 
@@ -1013,7 +1046,7 @@ Stop and ask before coding if any of these become necessary:
 - When enabled, rerank applies only to advisory KB snippets, never case chunks.
 - AWS primary model: `cohere.rerank-v3-5:0`
 - AWS fallback model: `amazon.rerank-v1:0` in regions where Cohere is unavailable
-- Do not load `BAAI/bge-reranker-base` into Lambda.
+- Do not load `mixedbread-ai/mxbai-rerank-large-v2` into Lambda.
 
 ### Decision 15: Vector dimensions config (v1)
 
@@ -1125,7 +1158,10 @@ Gateway integration limit alone.
 
 - Copy `llm_notable_analysis_onprem_systemd/frontend/analyst-portal/openapi/portal.openapi.json`
   into `s3_notable_pipeline/docs/contracts/`.
-- Reuse on-prem Pydantic models in `portal_api_models.py`.
+- Vendor on-prem `portal_api_models.py` **unchanged** (Pydantic `BaseModel` shapes).
+- Serialize responses with `.model_dump()` / `.model_dump_json()` in
+  `portal_handler.py`; do not hand-roll alternate field names.
+- Add `pydantic` to `s3_notable_pipeline/requirements.txt` per Decision 35.
 - Add contract tests for capabilities, case list, and case detail response shapes.
 
 ### Decision 28: Analyzer Bedrock model default (v1)
@@ -1206,6 +1242,22 @@ on Amazon Bedrock unless the customer explicitly overrides `BEDROCK_MODEL_ID`.
 - Keep `CASE_QA_CHAT_HISTORY_ENABLED=false` and `RAG_RERANK_ENABLED=false` unless
   a customer explicitly opts in.
 
+### Decision 35: Wave-2 Python dependencies (v1)
+
+**Locked:** Use on-prem portal contract packages; do not substitute dataclasses
+for Pydantic in `portal_api_models.py`.
+
+- Add **`pydantic`** to `s3_notable_pipeline/requirements.txt` when the portal
+  API slice ships (Diff 3). Pin to the same resolved version as on-prem
+  `fastapi==0.115.12` in `llm_notable_analysis_onprem_systemd/pyproject.toml`.
+- Vendor or copy `portal_api_models.py` from on-prem with Pydantic models intact.
+- Do **not** deploy `fastapi` or `uvicorn` on the portal Lambda; the handler is
+  plain Lambda + API Gateway, not a FastAPI app.
+- Do **not** port on-prem ML/RAG stack packages (`sentence-transformers`,
+  `faiss-cpu`, `onprem-llm-sdk`, etc.); AWS uses Bedrock for embed and chat.
+- Any dependency outside `requests`, Lambda `boto3`, and the Pydantic pin above
+  requires a new locked decision.
+
 ## Portal Frontend Contract
 
 Reuse `llm_notable_analysis_onprem_systemd/frontend/analyst-portal` without
@@ -1237,8 +1289,8 @@ This plan is ready to feed Cursor for implementation when:
   on-prem FastAPI/nginx, with Decision 19 chat timeout routing.
 - [x] Pinned-case Q&A (`selected_case` only) is accepted for AWS and on-prem.
 - [x] Decisions 6 through 27 are accepted.
-- [x] Decisions 28 through 34 are accepted for deploy defaults, auth, routing,
-  model selection, and Diff 4 module boundaries.
+- [x] Decisions 28 through 35 are accepted for deploy defaults, auth, routing,
+  model selection, Diff 4 module boundaries, and on-prem Pydantic dependency parity.
 - [x] Diff 2b (post-archive embed Lambda) is accepted between archive write and
   portal API slices.
 - The hard stops above are treated as plan changes, not implementation details.

@@ -56,12 +56,14 @@ def build_spl_query_rag_config(config: Config) -> Any:
         postgres_statement_timeout_ms=int(
             getattr(config, "RAG_POSTGRES_STATEMENT_TIMEOUT_MS", 5000)
         ),
-        vector_dimensions=int(getattr(config, "RAG_VECTOR_DIMENSIONS", 768)),
+        vector_dimensions=int(getattr(config, "RAG_VECTOR_DIMENSIONS", 1024)),
         embedding_model_name=getattr(
-            config, "RAG_EMBEDDING_MODEL", "BAAI/bge-base-en-v1.5"
+            config, "RAG_EMBEDDING_MODEL", "mixedbread-ai/mxbai-embed-large-v1"
         ),
         rerank_enabled=bool(getattr(config, "RAG_RERANK_ENABLED", False)),
-        rerank_model_name=getattr(config, "RAG_RERANK_MODEL", "BAAI/bge-reranker-base"),
+        rerank_model_name=getattr(
+            config, "RAG_RERANK_MODEL", "mixedbread-ai/mxbai-rerank-large-v2"
+        ),
         max_snippets_120b=max_snippets,
         max_snippets_20b=max_snippets,
         context_budget_chars_120b=context_budget,

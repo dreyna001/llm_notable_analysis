@@ -330,8 +330,15 @@ class PostgresRAGContextProvider:
     def _encode_query(self, query_text: str) -> str:
         """Encode query text and return a pgvector literal."""
         model = self._embedding_model_instance()
+        from .embedding_text import format_embedding_query_text
+
         vectors = model.encode(
-            [query_text],
+            [
+                format_embedding_query_text(
+                    model_name=self.config.embedding_model_name,
+                    query_text=query_text,
+                )
+            ],
             show_progress_bar=False,
             convert_to_numpy=True,
         )

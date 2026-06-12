@@ -14,8 +14,9 @@ RAG adds advisory SOC operational context to the analyzer prompt. It can include
 SOPs, runbooks, Splunk field references, escalation guidance, and customer
 operating notes. Retrieved content is not treated as direct alert evidence.
 
-The production-oriented backend is PostgreSQL FTS + pgvector with local BGE
-embeddings and optional reranking. SQLite/FAISS remains a smaller fallback path.
+The production-oriented backend is PostgreSQL FTS + pgvector with local
+Mixedbread embeddings and optional Mixedbread reranking. SQLite/FAISS remains a
+smaller fallback path.
 
 **SPL query grounding is separate:** enabling `RAG_ENABLED` does not authorize
 environment-specific tokens in generated SPL. For Splunk index, sourcetype,
@@ -68,12 +69,58 @@ macro, and datamodel grounding in the SPL-generation call, operators use
 `RAG_RERANK_ENABLED`, `RAG_RERANK_MODEL`, `HF_HOME`,
 `SENTENCE_TRANSFORMERS_HOME`
 
-- Default embedding model: `BAAI/bge-base-en-v1.5`.
-- Default vector dimension: `768`.
-- Default reranker model: `BAAI/bge-reranker-base`, disabled by default.
+- Default embedding model: `mixedbread-ai/mxbai-embed-large-v1`.
+- Default vector dimension: `1024`.
+- Default reranker model: `mixedbread-ai/mxbai-rerank-large-v2`, disabled by
+  default.
 - Stage models into approved local cache paths before enabling RAG or rerank in
   air-gapped environments.
-- If the embedding model changes, rebuild the KB index.
+- If the embedding model or vector dimensions change, rebuild all KB indexes and
+  re-embed archived case chunks. Reranker-only changes do not require a KB
+  rebuild.
+
+### Retrieval model migration (BGE -> Mixedbread)
+
+**Status:** Active repo default. Replace legacy BGE models on on-prem
+deployments.
+
+| Component | Legacy | Target |
+| --- | --- | --- |
+| Embedder | `BAAI/bge-base-en-v1.5` (China) | `mixedbread-ai/mxbai-embed-large-v1` (US) |
+| Vector dims | `768` | `1024` |
+| Reranker | `BAAI/bge-reranker-base` (China) | `mixedbread-ai/mxbai-rerank-large-v2` (US) |
+| License | MIT | Apache 2.0 |
+| Loader | `SentenceTransformer` + `CrossEncoder` | Same |
+| KB rebuild | Required on embedder/dim change | Not required for reranker-only |
+
+**Config defaults:**
+
+```bash
+RAG_EMBEDDING_MODEL=mixedbread-ai/mxbai-embed-large-v1
+RAG_VECTOR_DIMENSIONS=1024
+CASE_QA_EMBEDDING_MODEL=mixedbread-ai/mxbai-embed-large-v1
+CASE_QA_VECTOR_DIMENSIONS=1024
+RAG_RERANK_MODEL=mixedbread-ai/mxbai-rerank-large-v2
+RAG_RERANK_ENABLED=false
+```
+
+**Operator rollout:**
+
+1. Stage both Mixedbread models under `HF_HOME` / `SENTENCE_TRANSFORMERS_HOME`.
+2. Update `/etc/notable-analyzer/config.env` and portal env if used.
+3. Rebuild general, SPL, and Elastic KB corpora with
+   [`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md).
+4. Apply case-archive schema dimension change on existing Postgres hosts, then
+   re-embed case chunks for archived cases.
+5. Enable `RAG_RERANK_ENABLED=true` only after latency testing.
+
+**Existing Postgres hosts:** new installs use `vector(1024)` in
+`deploy/postgres/notable_cases_schema.sql`. Upgrades from `vector(768)` require
+a planned migration and full re-embed before portal Q&A retrieval is trusted
+again.
+
+Query embeddings use the Mixedbread retrieval prompt prefix automatically at
+encode time. Document/chunk embeddings do not.
 
 ### How much context should enter the prompt?
 

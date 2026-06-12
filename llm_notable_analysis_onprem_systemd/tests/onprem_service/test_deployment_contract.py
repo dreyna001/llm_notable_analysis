@@ -389,7 +389,7 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("CREATE TABLE IF NOT EXISTS notable_cases.chat_sessions", schema_text)
         self.assertIn("CREATE TABLE IF NOT EXISTS notable_cases.chat_messages", schema_text)
         self.assertIn("retrieval_status IN ('pending', 'ready', 'failed', 'not_indexed')", schema_text)
-        self.assertIn("embedding vector(768)", schema_text)
+        self.assertIn("embedding vector(1024)", schema_text)
         self.assertIn("ADD COLUMN IF NOT EXISTS search_vector", schema_text)
         self.assertIn("search_vector tsvector GENERATED ALWAYS AS", schema_text)
         self.assertIn("case_chunks_search_vector_gin_idx", schema_text)

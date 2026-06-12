@@ -219,8 +219,9 @@ Required settings:
 - `SPLUNK_BASE_URL` / `SPLUNK_API_TOKEN` — If Splunk writeback enabled
 
 The packaged analyzer units set `HF_HOME=/var/notables/cache/huggingface` and
-`SENTENCE_TRANSFORMERS_HOME=/var/notables/cache/sentence-transformers` so BGE
-model caches remain writable under `ProtectSystem=strict`. Keep those paths
+`SENTENCE_TRANSFORMERS_HOME=/var/notables/cache/sentence-transformers` so local
+Mixedbread embedder/reranker caches remain writable under `ProtectSystem=strict`.
+Keep those paths
 under `/var/notables/cache` unless you also update the unit `ReadWritePaths`.
 
 ### Analyst portal bring-up

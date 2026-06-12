@@ -55,7 +55,7 @@ PostgreSQL/pgvector service.
 
 This proves the database, pgvector extension, schema/table DDL, insert/upsert,
 and both retrieval-context code paths used by analyzers (`SOC_OPERATIONAL_CONTEXT`
-and SPL query grounding). It does not prove BGE model loading or reranking.
+and SPL query grounding). It does not prove Mixedbread model loading or reranking.
 
 ## Full Service Chain
 

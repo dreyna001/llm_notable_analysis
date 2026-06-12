@@ -99,7 +99,7 @@ The base output contract includes alert reconciliation, competing hypotheses, ev
 
 ### 5. RAG Grounding
 
-When the `rag` capability profile is selected, the service attempts to initialize a local RAG provider. The default production-oriented backend is PostgreSQL with PostgreSQL FTS, pgvector, BGE embeddings, and optional BGE reranking. SQLite FTS5 + FAISS remains available as a local fallback for smaller or lab deployments. The knowledge base can include SOPs, index and sourcetype references, field mapping notes, investigation playbooks, query examples, and local operating guidance.
+When the `rag` capability profile is selected, the service attempts to initialize a local RAG provider. The default production-oriented backend is PostgreSQL with PostgreSQL FTS, pgvector, Mixedbread embeddings, and optional Mixedbread reranking. SQLite FTS5 + FAISS remains available as a local fallback for smaller or lab deployments. The knowledge base can include SOPs, index and sourcetype references, field mapping notes, investigation playbooks, query examples, and local operating guidance.
 
 RAG context is rendered into a `SOC_OPERATIONAL_CONTEXT` block. It is advisory context only. The workflow explicitly prevents retrieved guidance from being treated as current-alert evidence unless the same fact appears in the notable itself.
 

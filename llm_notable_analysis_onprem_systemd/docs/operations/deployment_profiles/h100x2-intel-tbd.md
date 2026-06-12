@@ -120,6 +120,8 @@ Splunk platform limits may cap effective parallelism before GPU limits do.
 
 ```bash
 RAG_BACKEND=postgres
+RAG_EMBEDDING_MODEL=mixedbread-ai/mxbai-embed-large-v1
+RAG_VECTOR_DIMENSIONS=1024
 RAG_FAIL_CLOSED=false
 RAG_RERANK_ENABLED=false
 ```
@@ -128,6 +130,7 @@ After CPU model is known and reranker is staged, rerank is likely safe on a
 dual-socket or high-core Intel host. Enable only after validation:
 
 ```bash
+RAG_RERANK_MODEL=mixedbread-ai/mxbai-rerank-large-v2
 RAG_RERANK_ENABLED=true
 ```
 

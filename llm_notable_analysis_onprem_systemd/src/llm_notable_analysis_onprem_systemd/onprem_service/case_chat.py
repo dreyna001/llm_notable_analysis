@@ -332,8 +332,17 @@ def _encode_query_vector(
 ) -> str:
     """Embed and normalize one chat question for pgvector retrieval."""
     model = embedding_model or _get_embedding_model(config.CASE_QA_EMBEDDING_MODEL)
+    from onprem_rag_notable_analysis.future.embedding_text import (  # type: ignore
+        format_embedding_query_text,
+    )
+
     encoded = model.encode(
-        [question],
+        [
+            format_embedding_query_text(
+                model_name=config.CASE_QA_EMBEDDING_MODEL,
+                query_text=question,
+            )
+        ],
         show_progress_bar=False,
         convert_to_numpy=True,
     )
@@ -781,12 +790,14 @@ def _build_general_knowledge_base_context(config: Config, question: str) -> str:
         postgres_statement_timeout_ms=int(
             getattr(config, "RAG_POSTGRES_STATEMENT_TIMEOUT_MS", 5000)
         ),
-        vector_dimensions=int(getattr(config, "RAG_VECTOR_DIMENSIONS", 768)),
+        vector_dimensions=int(getattr(config, "RAG_VECTOR_DIMENSIONS", 1024)),
         embedding_model_name=getattr(
-            config, "RAG_EMBEDDING_MODEL", "BAAI/bge-base-en-v1.5"
+            config, "RAG_EMBEDDING_MODEL", "mixedbread-ai/mxbai-embed-large-v1"
         ),
         rerank_enabled=bool(getattr(config, "RAG_RERANK_ENABLED", False)),
-        rerank_model_name=getattr(config, "RAG_RERANK_MODEL", "BAAI/bge-reranker-base"),
+        rerank_model_name=getattr(
+            config, "RAG_RERANK_MODEL", "mixedbread-ai/mxbai-rerank-large-v2"
+        ),
         max_snippets_120b=int(getattr(config, "RAG_MAX_SNIPPETS_120B", 5)),
         max_snippets_20b=int(getattr(config, "RAG_MAX_SNIPPETS_20B", 4)),
         context_budget_chars_120b=int(

@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS notable_cases.case_chunks (
     section text NOT NULL,
     field_path text NOT NULL,
     text text NOT NULL,
-    embedding vector(768),
+    embedding vector(1024),
     search_vector tsvector GENERATED ALWAYS AS (
         to_tsvector('english'::regconfig, section || ' ' || field_path || ' ' || text)
     ) STORED,

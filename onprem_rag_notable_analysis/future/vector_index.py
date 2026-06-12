@@ -237,8 +237,15 @@ class VectorSearchClient:
         assert self._model is not None
         assert self._index is not None
 
+        from .embedding_text import format_embedding_query_text
+
         q = self._model.encode(
-            [query_text],
+            [
+                format_embedding_query_text(
+                    model_name=self.embedding_model_name,
+                    query_text=query_text,
+                )
+            ],
             show_progress_bar=False,
             convert_to_numpy=True,
         )

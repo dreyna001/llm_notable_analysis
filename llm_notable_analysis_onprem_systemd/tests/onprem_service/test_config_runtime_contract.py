@@ -15,8 +15,8 @@ from llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client_nonsdk 
 
 
 class TestConfigRuntimeContract(unittest.TestCase):
-    def test_defaults_target_litellm_and_bge_contract(self) -> None:
-        """Default config should expose the new on-prem runtime targets."""
+    def test_defaults_target_litellm_and_mixedbread_contract(self) -> None:
+        """Default config should expose the on-prem LiteLLM and Mixedbread targets."""
         with patch.dict(os.environ, {}, clear=True):
             config = load_config()
 
@@ -26,10 +26,14 @@ class TestConfigRuntimeContract(unittest.TestCase):
         )
         self.assertEqual(config.RAG_BACKEND, "postgres")
         self.assertFalse(config.RAG_FAIL_CLOSED)
-        self.assertEqual(config.RAG_EMBEDDING_MODEL, "BAAI/bge-base-en-v1.5")
+        self.assertEqual(
+            config.RAG_EMBEDDING_MODEL, "mixedbread-ai/mxbai-embed-large-v1"
+        )
         self.assertFalse(config.RAG_RERANK_ENABLED)
-        self.assertEqual(config.RAG_RERANK_MODEL, "BAAI/bge-reranker-base")
-        self.assertEqual(config.RAG_VECTOR_DIMENSIONS, 768)
+        self.assertEqual(
+            config.RAG_RERANK_MODEL, "mixedbread-ai/mxbai-rerank-large-v2"
+        )
+        self.assertEqual(config.RAG_VECTOR_DIMENSIONS, 1024)
         self.assertEqual(config.RAG_POSTGRES_STATEMENT_TIMEOUT_MS, 5000)
         self.assertEqual(config.RAG_FUSED_RANK_LIMIT_120B, 8)
         self.assertEqual(config.RAG_FUSED_RANK_LIMIT_20B, 6)
@@ -45,8 +49,10 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.PORTAL_CHAT_MAX_CONCURRENCY, 4)
         self.assertFalse(config.CASE_QA_ENABLED)
         self.assertFalse(config.CASE_QA_CHAT_HISTORY_ENABLED)
-        self.assertEqual(config.CASE_QA_EMBEDDING_MODEL, "BAAI/bge-base-en-v1.5")
-        self.assertEqual(config.CASE_QA_VECTOR_DIMENSIONS, 768)
+        self.assertEqual(
+            config.CASE_QA_EMBEDDING_MODEL, "mixedbread-ai/mxbai-embed-large-v1"
+        )
+        self.assertEqual(config.CASE_QA_VECTOR_DIMENSIONS, 1024)
         self.assertEqual(config.CASE_QA_LEXICAL_TOP_K, 30)
         self.assertEqual(config.CASE_QA_VECTOR_TOP_K, 30)
         self.assertEqual(config.CASE_QA_RRF_K, 60)
@@ -336,8 +342,9 @@ class TestConfigRuntimeContract(unittest.TestCase):
             "CASE_QA_MAX_QUESTION_CHARS": "3000",
             "CASE_QA_MAX_ANSWER_TOKENS": "900",
             "CASE_QA_CHUNK_SCHEMA_VERSION": "2",
-            "CASE_QA_EMBEDDING_MODEL": "custom/bge",
-            "CASE_QA_VECTOR_DIMENSIONS": "768",
+            "CASE_QA_EMBEDDING_MODEL": "custom/mxbai",
+            "CASE_QA_VECTOR_DIMENSIONS": "1024",
+            "RAG_VECTOR_DIMENSIONS": "1024",
             "CASE_QA_CHAT_HISTORY_RETENTION_DAYS": "14",
             "CASE_QA_MAX_MESSAGES_PER_SESSION": "40",
             "CASE_QA_MAX_STORED_MESSAGE_BYTES": "5000",
@@ -374,8 +381,8 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.CASE_QA_MAX_QUESTION_CHARS, 3000)
         self.assertEqual(config.CASE_QA_MAX_ANSWER_TOKENS, 900)
         self.assertEqual(config.CASE_QA_CHUNK_SCHEMA_VERSION, 2)
-        self.assertEqual(config.CASE_QA_EMBEDDING_MODEL, "custom/bge")
-        self.assertEqual(config.CASE_QA_VECTOR_DIMENSIONS, 768)
+        self.assertEqual(config.CASE_QA_EMBEDDING_MODEL, "custom/mxbai")
+        self.assertEqual(config.CASE_QA_VECTOR_DIMENSIONS, 1024)
         self.assertFalse(config.CASE_QA_CHAT_HISTORY_ENABLED)
         self.assertEqual(config.CASE_QA_CHAT_HISTORY_RETENTION_DAYS, 14)
         self.assertEqual(config.CASE_QA_MAX_MESSAGES_PER_SESSION, 40)
@@ -433,10 +440,10 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertTrue(config.CASE_QA_CHAT_HISTORY_ENABLED)
 
     def test_case_qa_vector_dimensions_are_fixed_for_v1(self) -> None:
-        """Case archive schema is vector(768), so v1 config must not drift."""
+        """Case archive schema is vector(1024), so v1 config must not drift."""
         with patch.dict(
             os.environ,
-            {"CASE_QA_VECTOR_DIMENSIONS": "1024"},
+            {"CASE_QA_VECTOR_DIMENSIONS": "768"},
             clear=True,
         ):
             with self.assertRaisesRegex(ValueError, "CASE_QA_VECTOR_DIMENSIONS"):

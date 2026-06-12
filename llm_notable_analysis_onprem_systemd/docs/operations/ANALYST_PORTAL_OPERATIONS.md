@@ -328,7 +328,7 @@ python scripts/rebuild_case_chunks.py --all --batch-size 100 --config-env /etc/n
 
 Warnings:
 
-- `CASE_QA_VECTOR_DIMENSIONS` is fixed at `768` for v1.
+- `CASE_QA_VECTOR_DIMENSIONS` is fixed at `1024` for v1.
 - Embedding model changes require a chunk rebuild.
 - Stale or missing chunks show up as weak retrieval, `unknown` chat answers, or
   cases with `retrieval_status` not equal to `ready`.

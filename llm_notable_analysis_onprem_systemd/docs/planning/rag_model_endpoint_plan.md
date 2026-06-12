@@ -21,15 +21,15 @@ analyzer -> LiteLLM 127.0.0.1:4000 -> vLLM 127.0.0.1:8000
 The planned RAG model path is separate:
 
 ```text
-RAG ingest/retrieval -> RAG model endpoint 127.0.0.1:<port> -> BGE embedder/reranker
+RAG ingest/retrieval -> RAG model endpoint 127.0.0.1:<port> -> Mixedbread embedder + reranker
 ```
 
 ## Current Baseline
 
-- KB ingest loads `BAAI/bge-base-en-v1.5` in-process and writes vectors to
+- KB ingest loads `mixedbread-ai/mxbai-embed-large-v1` in-process and writes vectors to
   Postgres `pgvector` or FAISS.
 - Runtime retrieval loads the same embedder in-process to encode query text.
-- Runtime rerank loads `BAAI/bge-reranker-base` in-process only when
+- Runtime rerank loads `mixedbread-ai/mxbai-rerank-large-v2` in-process only when
   `RAG_RERANK_ENABLED=true`.
 - `RAG_RERANK_ENABLED=false` by default.
 - The only supported HTTP model path today is LiteLLM/vLLM for chat completion.
@@ -73,7 +73,7 @@ Request:
 
 ```json
 {
-  "model": "BAAI/bge-base-en-v1.5",
+  "model": "mixedbread-ai/mxbai-embed-large-v1",
   "input": ["text chunk one", "text chunk two"]
 }
 ```
@@ -82,8 +82,8 @@ Response:
 
 ```json
 {
-  "model": "BAAI/bge-base-en-v1.5",
-  "dimensions": 768,
+  "model": "mixedbread-ai/mxbai-embed-large-v1",
+  "dimensions": 1024,
   "data": [
     {"index": 0, "embedding": [0.01, 0.02]},
     {"index": 1, "embedding": [0.03, 0.04]}
@@ -100,7 +100,7 @@ Request:
 
 ```json
 {
-  "model": "BAAI/bge-reranker-base",
+  "model": "mixedbread-ai/mxbai-rerank-large-v2",
   "query": "notable summary or retrieval query",
   "documents": ["candidate snippet one", "candidate snippet two"],
   "top_n": 5
@@ -111,7 +111,7 @@ Response:
 
 ```json
 {
-  "model": "BAAI/bge-reranker-base",
+  "model": "mixedbread-ai/mxbai-rerank-large-v2",
   "results": [
     {"index": 1, "relevance_score": 0.91},
     {"index": 0, "relevance_score": 0.73}
@@ -135,10 +135,10 @@ RAG_RERANK_MAX_DOCUMENTS=64
 Existing values remain authoritative for model identity:
 
 ```text
-RAG_EMBEDDING_MODEL=BAAI/bge-base-en-v1.5
-RAG_VECTOR_DIMENSIONS=768
+RAG_EMBEDDING_MODEL=mixedbread-ai/mxbai-embed-large-v1
+RAG_VECTOR_DIMENSIONS=1024
 RAG_RERANK_ENABLED=false
-RAG_RERANK_MODEL=BAAI/bge-reranker-base
+RAG_RERANK_MODEL=mixedbread-ai/mxbai-rerank-large-v2
 ```
 
 Startup validation should fail fast when endpoint mode is enabled and required
@@ -176,7 +176,7 @@ fail-closed behavior.
 
 ## Acceptance Criteria
 
-- Embedding endpoint returns normalized 768-dimension vectors for valid input.
+- Embedding endpoint returns normalized 1024-dimension vectors for valid input.
 - Rerank endpoint returns stable document indexes and relevance scores without
   mutating candidate text.
 - Analyzer can run in endpoint mode and in current in-process mode.

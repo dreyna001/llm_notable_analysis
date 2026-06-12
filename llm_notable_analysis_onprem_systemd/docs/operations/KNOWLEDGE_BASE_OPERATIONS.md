@@ -529,7 +529,7 @@ runtime host if rollback auditability is required.
   retrieved context.
 - `RAG_BACKEND=postgres` for the Postgres/pgvector path.
 - `RAG_POSTGRES_DSN` points to the intended local database.
-- `RAG_VECTOR_DIMENSIONS=768` for `BAAI/bge-base-en-v1.5`.
+- `RAG_VECTOR_DIMENSIONS=1024` for `mixedbread-ai/mxbai-embed-large-v1`.
 - `RAG_RERANK_ENABLED=true` only after the reranker model is staged and tested.
 - `SPL_QUERY_RAG_ENABLED=true` only after the SPL source docs have been ingested
   into `SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE`; SPL generation itself should come

@@ -98,7 +98,7 @@ class TestPostgresIngest(unittest.TestCase):
             postgres_chunks_table="chunks",
             postgres_fts_config="english",
             vector_dimensions=3,
-            embedding_model_name="BAAI/bge-base-en-v1.5",
+            embedding_model_name="mixedbread-ai/mxbai-embed-large-v1",
             embedding_batch_size=10,
             connect=lambda _dsn: connection,
             embedding_model=model,
@@ -140,7 +140,7 @@ class TestPostgresIngest(unittest.TestCase):
                 postgres_chunks_table="chunks",
                 postgres_fts_config="english",
                 vector_dimensions=3,
-                embedding_model_name="BAAI/bge-base-en-v1.5",
+                embedding_model_name="mixedbread-ai/mxbai-embed-large-v1",
                 connect=lambda _dsn: connection,
                 embedding_model=model,
             )
@@ -166,14 +166,14 @@ class TestPostgresIngest(unittest.TestCase):
                     source_dir=source_dir,
                     index_dir=index_dir,
                     backend="postgres",
-                    embedding_model_name="BAAI/bge-base-en-v1.5",
+                    embedding_model_name="mixedbread-ai/mxbai-embed-large-v1",
                     target_words=100,
                     overlap_words=0,
                     postgres_dsn="postgresql://svc@127.0.0.1:5432/kb",
                     postgres_schema="soc_kb",
                     postgres_chunks_table="chunks",
                     postgres_fts_config="english",
-                    vector_dimensions=768,
+                    vector_dimensions=1024,
                     embedding_batch_size=32,
                 )
 
@@ -200,7 +200,7 @@ class TestPostgresIngest(unittest.TestCase):
             postgres_chunks_table="chunks",
             postgres_fts_config="english",
             vector_dimensions=3,
-            embedding_model_name="BAAI/bge-base-en-v1.5",
+            embedding_model_name="mixedbread-ai/mxbai-embed-large-v1",
             postgres_statement_timeout_ms=2500,
             ensure_schema=False,
             connect=lambda _dsn: connection,
@@ -233,7 +233,7 @@ class TestPostgresIngest(unittest.TestCase):
                 postgres_chunks_table="chunks",
                 postgres_fts_config="english",
                 vector_dimensions=3,
-                embedding_model_name="BAAI/bge-base-en-v1.5",
+                embedding_model_name="mixedbread-ai/mxbai-embed-large-v1",
                 embedding_batch_size=10,
                 connect=lambda _dsn: connection,
                 embedding_model=model,
@@ -242,7 +242,7 @@ class TestPostgresIngest(unittest.TestCase):
     def test_parse_args_defaults_postgres_values_from_environment(self) -> None:
         """CLI defaults should allow DSNs to come from env instead of argv."""
         env = {
-            "RAG_EMBEDDING_MODEL": "BAAI/bge-base-en-v1.5",
+            "RAG_EMBEDDING_MODEL": "mixedbread-ai/mxbai-embed-large-v1",
             "RAG_POSTGRES_DSN": "postgresql://svc@127.0.0.1:5432/kb",
             "RAG_POSTGRES_SCHEMA": "soc_kb",
             "RAG_POSTGRES_CHUNKS_TABLE": "chunks",
@@ -258,7 +258,7 @@ class TestPostgresIngest(unittest.TestCase):
         ):
             args = corpus_ingest._parse_args()
 
-        self.assertEqual(args.embedding_model, "BAAI/bge-base-en-v1.5")
+        self.assertEqual(args.embedding_model, "mixedbread-ai/mxbai-embed-large-v1")
         self.assertEqual(args.postgres_dsn, "postgresql://svc@127.0.0.1:5432/kb")
         self.assertEqual(args.postgres_schema, "soc_kb")
         self.assertEqual(args.postgres_chunks_table, "chunks")
@@ -274,7 +274,7 @@ class TestPostgresIngest(unittest.TestCase):
                 "\n".join(
                     [
                         "RAG_BACKEND=postgres",
-                        "RAG_EMBEDDING_MODEL=BAAI/bge-base-en-v1.5",
+                        "RAG_EMBEDDING_MODEL=mixedbread-ai/mxbai-embed-large-v1",
                         "RAG_POSTGRES_DSN='postgresql://svc@127.0.0.1:5432/kb'",
                         "RAG_POSTGRES_SCHEMA=soc_kb",
                         "RAG_POSTGRES_CHUNKS_TABLE=chunks",

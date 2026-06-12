@@ -91,8 +91,8 @@ CASE_QA_CONTEXT_BUDGET_CHARS=12000
 CASE_QA_MAX_QUESTION_CHARS=2000
 CASE_QA_MAX_ANSWER_TOKENS=800
 CASE_QA_CHUNK_SCHEMA_VERSION=1
-CASE_QA_EMBEDDING_MODEL=BAAI/bge-base-en-v1.5
-CASE_QA_VECTOR_DIMENSIONS=768
+CASE_QA_EMBEDDING_MODEL=mixedbread-ai/mxbai-embed-large-v1
+CASE_QA_VECTOR_DIMENSIONS=1024
 CASE_QA_CHAT_HISTORY_ENABLED=false
 CASE_QA_CHAT_HISTORY_RETENTION_DAYS=7
 CASE_QA_MAX_MESSAGES_PER_SESSION=30
@@ -241,7 +241,7 @@ CREATE TABLE IF NOT EXISTS notable_cases.case_chunks (
     section text NOT NULL,
     field_path text NOT NULL,
     text text NOT NULL,
-    embedding vector(768),
+    embedding vector(1024),
     metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
     chunk_schema_version integer NOT NULL,
     embedding_model text NOT NULL,
@@ -266,8 +266,8 @@ If the target Postgres version supports the chosen pgvector index type, add a
 vector index during migration or as a documented optional operator step. Exact
 index parameters should be set after measuring corpus size.
 
-V1 fixes `CASE_QA_VECTOR_DIMENSIONS=768` to match the existing BGE embedding
-default and the `vector(768)` column. Changing dimensions later requires a
+V1 fixes `CASE_QA_VECTOR_DIMENSIONS=1024` to match the Mixedbread embedding
+default and the `vector(1024)` column. Changing dimensions later requires a
 schema migration and chunk rebuild.
 
 ### Optional Chat History Tables
@@ -421,7 +421,7 @@ For native cases with `CASE_ARCHIVE_ENABLED=true`:
 Build chunks deterministically from JSON fields, not from markdown or HTML.
 
 Embedding generation should reuse the existing on-prem RAG embedding stack and
-model defaults (`BAAI/bge-base-en-v1.5`, 768 dimensions) rather than adding a
+model defaults (`mixedbread-ai/mxbai-embed-large-v1`, 1024 dimensions) rather than adding a
 new embedding service in this portal slice.
 
 Initial section mapping:

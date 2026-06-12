@@ -14,7 +14,7 @@ and read local fallback retrieval artifacts:
 - `chunks.jsonl`: exported chunk records for inspection/debugging.
 - `ingest_report.json`: ingestion summary and counts.
 
-By default, embeddings are generated with `BAAI/bge-base-en-v1.5`. The fallback
+By default, embeddings are generated with `mixedbread-ai/mxbai-embed-large-v1`. The fallback
 vector search uses FAISS over L2-normalized embeddings.
 
 ## End-to-End Usage
@@ -28,7 +28,7 @@ the ingestion command:
 python -m onprem_rag_notable_analysis.future.corpus_ingest \
   --source-dir /path/to/source_docs \
   --index-dir /path/to/index \
-  --embedding-model BAAI/bge-base-en-v1.5
+  --embedding-model mixedbread-ai/mxbai-embed-large-v1
 ```
 
 The command writes the retrieval artifacts into `--index-dir`.
@@ -55,9 +55,9 @@ rag_cfg = RAGConfig(
     postgres_dsn="postgresql://notable_analyzer@127.0.0.1:5432/notable_rag",
     postgres_schema="notable_rag",
     postgres_chunks_table="kb_chunks",
-    embedding_model_name="BAAI/bge-base-en-v1.5",
+    embedding_model_name="mixedbread-ai/mxbai-embed-large-v1",
     rerank_enabled=True,
-    rerank_model_name="BAAI/bge-reranker-base",
+    rerank_model_name="mixedbread-ai/mxbai-rerank-large-v2",
 )
 provider = PostgresRAGContextProvider.from_config(rag_cfg)
 ```
@@ -80,7 +80,7 @@ rag_cfg = RAGConfig(
     backend="sqlite_faiss",
     sqlite_path=Path("/path/to/index/kb.sqlite3"),
     faiss_path=Path("/path/to/index/kb.faiss"),
-    embedding_model_name="BAAI/bge-base-en-v1.5",
+    embedding_model_name="mixedbread-ai/mxbai-embed-large-v1",
 )
 provider = RAGContextProvider.from_config(rag_cfg)
 ```
@@ -129,7 +129,7 @@ report = ingest_corpus(
     source_dir=Path("/path/to/source_docs"),
     index_dir=Path("/path/to/index"),
     backend="sqlite_faiss",
-    embedding_model_name="BAAI/bge-base-en-v1.5",
+    embedding_model_name="mixedbread-ai/mxbai-embed-large-v1",
     target_words=500,
     overlap_words=50,
 )
@@ -142,13 +142,13 @@ report = ingest_corpus(
     source_dir=Path("/path/to/source_docs"),
     index_dir=Path("/path/to/index"),
     backend="postgres",
-    embedding_model_name="BAAI/bge-base-en-v1.5",
+    embedding_model_name="mixedbread-ai/mxbai-embed-large-v1",
     target_words=500,
     overlap_words=50,
     postgres_dsn="postgresql://notable_analyzer@127.0.0.1:5432/notable_rag",
     postgres_schema="notable_rag",
     postgres_chunks_table="kb_chunks",
     postgres_fts_config="english",
-    vector_dimensions=768,
+    vector_dimensions=1024,
 )
 ```

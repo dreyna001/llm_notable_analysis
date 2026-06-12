@@ -358,15 +358,15 @@ class Config:
             "/opt/llm-notable-analysis/knowledge_base/index/kb.faiss"
         )
     )
-    RAG_EMBEDDING_MODEL: str = "BAAI/bge-base-en-v1.5"
+    RAG_EMBEDDING_MODEL: str = "mixedbread-ai/mxbai-embed-large-v1"
     RAG_RERANK_ENABLED: bool = False
-    RAG_RERANK_MODEL: str = "BAAI/bge-reranker-base"
+    RAG_RERANK_MODEL: str = "mixedbread-ai/mxbai-rerank-large-v2"
     RAG_POSTGRES_DSN: str = "postgresql://notable_analyzer@127.0.0.1:5432/notable_rag"
     RAG_POSTGRES_SCHEMA: str = "notable_rag"
     RAG_POSTGRES_CHUNKS_TABLE: str = "kb_chunks"
     RAG_POSTGRES_FTS_CONFIG: str = "english"
     RAG_POSTGRES_STATEMENT_TIMEOUT_MS: int = 5000
-    RAG_VECTOR_DIMENSIONS: int = 768
+    RAG_VECTOR_DIMENSIONS: int = 1024
     RAG_MAX_SNIPPETS_120B: int = 5
     RAG_MAX_SNIPPETS_20B: int = 4
     RAG_CONTEXT_BUDGET_CHARS_120B: int = 2200
@@ -398,8 +398,8 @@ class Config:
     CASE_QA_MAX_QUESTION_CHARS: int = 2000
     CASE_QA_MAX_ANSWER_TOKENS: int = 800
     CASE_QA_CHUNK_SCHEMA_VERSION: int = 1
-    CASE_QA_EMBEDDING_MODEL: str = "BAAI/bge-base-en-v1.5"
-    CASE_QA_VECTOR_DIMENSIONS: int = 768
+    CASE_QA_EMBEDDING_MODEL: str = "mixedbread-ai/mxbai-embed-large-v1"
+    CASE_QA_VECTOR_DIMENSIONS: int = 1024
     CASE_QA_CHAT_HISTORY_ENABLED: bool = False
     CASE_QA_GENERAL_KNOWLEDGE_ENABLED: bool = True
     CASE_QA_CHAT_HISTORY_RETENTION_DAYS: int = 7
@@ -541,8 +541,12 @@ class Config:
             and self.INVESTIGATION_QUERY_BACKEND == "elasticsearch"
         ):
             self.SPL_QUERY_GENERATION_ENABLED = False
-        if self.CASE_QA_VECTOR_DIMENSIONS != 768:
-            raise ValueError("CASE_QA_VECTOR_DIMENSIONS must be 768 for v1")
+        if self.CASE_QA_VECTOR_DIMENSIONS != 1024:
+            raise ValueError("CASE_QA_VECTOR_DIMENSIONS must be 1024 for v1")
+        if self.RAG_VECTOR_DIMENSIONS != self.CASE_QA_VECTOR_DIMENSIONS:
+            raise ValueError(
+                "RAG_VECTOR_DIMENSIONS must match CASE_QA_VECTOR_DIMENSIONS"
+            )
         if bool(self.CASE_ARCHIVE_ENABLED):
             if not str(self.CASE_POSTGRES_DSN or "").strip():
                 raise ValueError("CASE_POSTGRES_DSN is required when CASE_ARCHIVE_ENABLED=true")
@@ -618,10 +622,12 @@ def load_config() -> Config:
             )
         ),
         RAG_EMBEDDING_MODEL=os.getenv(
-            "RAG_EMBEDDING_MODEL", "BAAI/bge-base-en-v1.5"
+            "RAG_EMBEDDING_MODEL", "mixedbread-ai/mxbai-embed-large-v1"
         ),
         RAG_RERANK_ENABLED=_bool_env("RAG_RERANK_ENABLED", False),
-        RAG_RERANK_MODEL=os.getenv("RAG_RERANK_MODEL", "BAAI/bge-reranker-base"),
+        RAG_RERANK_MODEL=os.getenv(
+            "RAG_RERANK_MODEL", "mixedbread-ai/mxbai-rerank-large-v2"
+        ),
         RAG_POSTGRES_DSN=os.getenv(
             "RAG_POSTGRES_DSN",
             "postgresql://notable_analyzer@127.0.0.1:5432/notable_rag",
@@ -633,7 +639,7 @@ def load_config() -> Config:
             os.getenv("RAG_POSTGRES_STATEMENT_TIMEOUT_MS", "5000")
         ),
         RAG_VECTOR_DIMENSIONS=int(
-            os.getenv("RAG_VECTOR_DIMENSIONS", "768")
+            os.getenv("RAG_VECTOR_DIMENSIONS", "1024")
         ),
         RAG_MAX_SNIPPETS_120B=int(os.getenv("RAG_MAX_SNIPPETS_120B", "5")),
         RAG_MAX_SNIPPETS_20B=int(os.getenv("RAG_MAX_SNIPPETS_20B", "4")),
@@ -704,10 +710,10 @@ def load_config() -> Config:
             "CASE_QA_CHUNK_SCHEMA_VERSION", 1, max_value=1000
         ),
         CASE_QA_EMBEDDING_MODEL=os.getenv(
-            "CASE_QA_EMBEDDING_MODEL", "BAAI/bge-base-en-v1.5"
+            "CASE_QA_EMBEDDING_MODEL", "mixedbread-ai/mxbai-embed-large-v1"
         ),
         CASE_QA_VECTOR_DIMENSIONS=_positive_int_env(
-            "CASE_QA_VECTOR_DIMENSIONS", 768, max_value=100000
+            "CASE_QA_VECTOR_DIMENSIONS", 1024, max_value=100000
         ),
         CASE_QA_CHAT_HISTORY_ENABLED=_profile_bool(
             "CASE_QA_CHAT_HISTORY_ENABLED", False, profile_flags
