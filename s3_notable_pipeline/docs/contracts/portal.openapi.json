@@ -1,0 +1,113 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "AWS Notable Analyst Portal API",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Health status"
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Ready"
+          },
+          "503": {
+            "description": "Not ready"
+          }
+        }
+      }
+    },
+    "/api/capabilities": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Portal capabilities"
+          }
+        }
+      }
+    },
+    "/api/cases": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Case list"
+          }
+        }
+      }
+    },
+    "/api/cases/{case_id}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Case detail"
+          },
+          "404": {
+            "description": "Case not found"
+          }
+        }
+      }
+    },
+    "/api/cases/{case_id}/raw/{section}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "section",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["alert_payload", "analysis"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Raw case section"
+          },
+          "404": {
+            "description": "Case not found"
+          }
+        }
+      }
+    },
+    "/api/chat": {
+      "post": {
+        "responses": {
+          "429": {
+            "description": "Too many concurrent chat requests"
+          },
+          "501": {
+            "description": "Pinned-case Q&A ships in Wave 2 Diff 4"
+          }
+        }
+      }
+    }
+  }
+}

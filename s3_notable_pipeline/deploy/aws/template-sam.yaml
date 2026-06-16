@@ -289,6 +289,11 @@ Parameters:
       - 'true'
       - 'false'
 
+  PortalApiLambdaName:
+    Type: String
+    Description: Lambda function name for the read-only analyst portal API.
+    Default: notable-portal-api
+
   PortalAuthMode:
     Type: String
     Description: Portal authentication mode.
@@ -1119,6 +1124,87 @@ Resources:
                 - logs:CreateLogStream
                 - logs:PutLogEvents
               Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${CaseEmbedLambdaName}:*'
+      ImageUri: !Ref ImageUri
+
+  PortalApiFunction:
+    Type: AWS::Serverless::Function
+    Condition: HasCaseIndexTable
+    Properties:
+      FunctionName: !Ref PortalApiLambdaName
+      PackageType: Image
+      Timeout: !Ref PortalChatTimeoutSec
+      MemorySize: !Ref LambdaMemorySize
+      EphemeralStorage:
+        Size: !Ref LambdaEphemeralStorageMb
+      ImageConfig:
+        Command:
+          - s3_notable_pipeline.portal_handler.handler
+      Environment:
+        Variables:
+          CAPABILITY_PROFILES: !Ref CapabilityProfiles
+          BEDROCK_MODEL_ID: !Sub 'arn:aws:bedrock:us-east-1:${AwsAccountId}:inference-profile/us.anthropic.claude-sonnet-4-6'
+          CASE_ARCHIVE_BUCKET: !If [HasCaseArchiveBucketName, !Ref CaseArchiveBucketName, !Ref OutputBucketName]
+          CASE_ARCHIVE_CHUNKS_PREFIX: !Ref CaseArchiveChunksPrefix
+          CASE_EMBED_LAMBDA_NAME: !If [HasCaseIndexTable, !Ref CaseEmbedFunction, '']
+          CASE_INDEX_TABLE: !Ref CaseIndexTableName
+          CASE_RETENTION_DAYS: !Ref CaseRetentionDays
+          PORTAL_ENABLED: !Ref PortalEnabled
+          PORTAL_AUTH_MODE: !Ref PortalAuthMode
+          PORTAL_PAGE_SIZE: !Ref PortalPageSize
+          PORTAL_MAX_DETAIL_BYTES: !Ref PortalMaxDetailBytes
+          PORTAL_JWT_ISSUER: !Ref PortalJwtIssuer
+          PORTAL_JWT_AUDIENCE: !Ref PortalJwtAudience
+          PORTAL_CORS_ALLOWED_ORIGINS: !Ref PortalCorsAllowedOrigins
+          PORTAL_CHAT_TIMEOUT_SEC: !Ref PortalChatTimeoutSec
+          PORTAL_CHAT_MAX_CONCURRENCY: !Ref PortalChatMaxConcurrency
+          PORTAL_CHAT_BEDROCK_MODEL_ID: !Ref PortalChatBedrockModelId
+          CASE_QA_ENABLED: !Ref CaseQaEnabled
+          CASE_QA_GENERAL_KNOWLEDGE_ENABLED: !Ref CaseQaGeneralKnowledgeEnabled
+          CASE_QA_MAX_QUESTION_CHARS: !Ref CaseQaMaxQuestionChars
+          CASE_QA_MAX_ANSWER_TOKENS: !Ref CaseQaMaxAnswerTokens
+          CASE_QA_CHAT_HISTORY_ENABLED: !Ref CaseQaChatHistoryEnabled
+          CASE_QA_MAX_SESSIONS_PER_USER: !Ref CaseQaMaxSessionsPerUser
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+                - dynamodb:DescribeTable
+              Resource:
+                - !GetAtt CaseIndexTable.Arn
+                - !Sub '${CaseIndexTable.Arn}/index/ProcessedAtIndex'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource:
+                - !Sub 'arn:aws:s3:::${OutputBucketName}/${CaseArchivePrefix}/*'
+                - !Sub 'arn:aws:s3:::${OutputBucketName}/${CaseArchiveChunksPrefix}/*'
+                - !Sub 'arn:aws:s3:::${OutputBucketName}/reports/*'
+        - !If
+          - HasCaseArchiveBucketName
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub 'arn:aws:s3:::${CaseArchiveBucketName}/${CaseArchivePrefix}/*'
+                  - !Sub 'arn:aws:s3:::${CaseArchiveBucketName}/${CaseArchiveChunksPrefix}/*'
+          - !Ref AWS::NoValue
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub 'arn:aws:bedrock:us-east-1:${AwsAccountId}:inference-profile/us.anthropic.claude-sonnet-4-6'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${PortalApiLambdaName}:*'
       ImageUri: !Ref ImageUri
   
   LambdaInvokePermission:

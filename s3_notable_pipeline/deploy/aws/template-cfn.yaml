@@ -288,6 +288,11 @@ Parameters:
       - 'true'
       - 'false'
 
+  PortalApiLambdaName:
+    Type: String
+    Description: Lambda function name for the read-only analyst portal API.
+    Default: notable-portal-api
+
   PortalAuthMode:
     Type: String
     Description: Portal authentication mode.
@@ -1166,6 +1171,104 @@ Resources:
           CASE_QA_EMBEDDING_MODEL: !Ref CaseQaEmbeddingModel
           CASE_QA_VECTOR_DIMENSIONS: !Ref CaseQaVectorDimensions
           CASE_QA_EMBED_NORMALIZE: !Ref CaseQaEmbedNormalize
+
+  PortalApiLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: HasCaseIndexTable
+    Properties:
+      RoleName: NotablePortalApiLambdaRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: CaseIndexReadPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:GetItem
+                  - dynamodb:DescribeTable
+                Resource:
+                  - !GetAtt CaseIndexTable.Arn
+                  - !Sub '${CaseIndexTable.Arn}/index/ProcessedAtIndex'
+        - PolicyName: CaseArchiveReadPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub 'arn:aws:s3:::${OutputBucketName}/${CaseArchivePrefix}/*'
+                  - !Sub 'arn:aws:s3:::${OutputBucketName}/${CaseArchiveChunksPrefix}/*'
+                  - !Sub 'arn:aws:s3:::${OutputBucketName}/reports/*'
+              - !If
+                - HasCaseArchiveBucketName
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                  Resource:
+                    - !Sub 'arn:aws:s3:::${CaseArchiveBucketName}/${CaseArchivePrefix}/*'
+                    - !Sub 'arn:aws:s3:::${CaseArchiveBucketName}/${CaseArchiveChunksPrefix}/*'
+                - !Ref AWS::NoValue
+        - PolicyName: PortalBedrockPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - !Sub 'arn:aws:bedrock:us-east-1:${AwsAccountId}:inference-profile/us.anthropic.claude-sonnet-4-6'
+
+  PortalApiFunction:
+    Type: AWS::Lambda::Function
+    Condition: HasCaseIndexTable
+    Properties:
+      FunctionName: !Ref PortalApiLambdaName
+      Runtime: python3.12
+      Handler: s3_notable_pipeline.portal_handler.handler
+      Role: !GetAtt PortalApiLambdaRole.Arn
+      Timeout: !Ref PortalChatTimeoutSec
+      MemorySize: !Ref LambdaMemorySize
+      EphemeralStorage:
+        Size: !Ref LambdaEphemeralStorageMb
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          CAPABILITY_PROFILES: !Ref CapabilityProfiles
+          BEDROCK_MODEL_ID: !Sub 'arn:aws:bedrock:us-east-1:${AwsAccountId}:inference-profile/us.anthropic.claude-sonnet-4-6'
+          CASE_ARCHIVE_BUCKET: !If [HasCaseArchiveBucketName, !Ref CaseArchiveBucketName, !Ref OutputBucketName]
+          CASE_ARCHIVE_CHUNKS_PREFIX: !Ref CaseArchiveChunksPrefix
+          CASE_EMBED_LAMBDA_NAME: !If [HasCaseIndexTable, !Ref CaseEmbedFunction, '']
+          CASE_INDEX_TABLE: !Ref CaseIndexTableName
+          CASE_RETENTION_DAYS: !Ref CaseRetentionDays
+          PORTAL_ENABLED: !Ref PortalEnabled
+          PORTAL_AUTH_MODE: !Ref PortalAuthMode
+          PORTAL_PAGE_SIZE: !Ref PortalPageSize
+          PORTAL_MAX_DETAIL_BYTES: !Ref PortalMaxDetailBytes
+          PORTAL_JWT_ISSUER: !Ref PortalJwtIssuer
+          PORTAL_JWT_AUDIENCE: !Ref PortalJwtAudience
+          PORTAL_CORS_ALLOWED_ORIGINS: !Ref PortalCorsAllowedOrigins
+          PORTAL_CHAT_TIMEOUT_SEC: !Ref PortalChatTimeoutSec
+          PORTAL_CHAT_MAX_CONCURRENCY: !Ref PortalChatMaxConcurrency
+          PORTAL_CHAT_BEDROCK_MODEL_ID: !Ref PortalChatBedrockModelId
+          CASE_QA_ENABLED: !Ref CaseQaEnabled
+          CASE_QA_GENERAL_KNOWLEDGE_ENABLED: !Ref CaseQaGeneralKnowledgeEnabled
+          CASE_QA_MAX_QUESTION_CHARS: !Ref CaseQaMaxQuestionChars
+          CASE_QA_MAX_ANSWER_TOKENS: !Ref CaseQaMaxAnswerTokens
+          CASE_QA_CHAT_HISTORY_ENABLED: !Ref CaseQaChatHistoryEnabled
+          CASE_QA_MAX_SESSIONS_PER_USER: !Ref CaseQaMaxSessionsPerUser
   
   LambdaInvokePermission:
     Type: AWS::Lambda::Permission
