@@ -97,6 +97,9 @@ This script:
 - Optional `elastic_readonly` parity adds generated Elasticsearch Query DSL and
   bounded read-only `_search` results to the JSON report. It is disabled by
   default and is mutually exclusive with `spl_readonly`.
+- Optional `analyst_portal` parity archives analyzed cases to S3, indexes
+  metadata in DynamoDB, serves a JWT-protected read-only portal API, and ships a
+  static React SPA under `frontend/analyst-portal`.
 
 ## 5) Sink Modes
 
@@ -131,6 +134,7 @@ aws secretsmanager create-secret \
 - `deploy/aws/template-sam.yaml` - deployable SAM infrastructure
 - `tests/test_lambda_handler.py` - focused Lambda sink routing tests
 - `scripts/` - deployment, test, and maintenance helpers
+- `frontend/analyst-portal` - vendored AWS analyst portal SPA
 - `data/test-notable.txt` - sample notable used by the test helper
 - `config.env.example` - AWS runtime contract reference for Lambda environment variables
 - `docs/operations/README.md` - AWS operations guide index
@@ -138,6 +142,7 @@ aws secretsmanager create-secret \
 - `docs/operations/FILE_DROP_AND_RETENTION_OPERATIONS.md` - S3 intake prefixes, gzip handling, lifecycle, and size limits
 - `docs/operations/MITRE_TTP_OPERATIONS.md` - bundled TTP ID data, refresh workflow, and validation
 - `docs/operations/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md` - failure behavior, retry semantics, and recovery duties
+- `docs/operations/ANALYST_PORTAL_OPERATIONS.md` - AWS portal archive, JWT, static SPA, CORS, Q&A, retention, and rollback notes
 - `docs/technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md` - AWS/on-prem parity implementation contract (normative for coding)
 - `docs/planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md` - wave 2 plan: analyst portal, case archive, Case Q&A (Decisions 1-35; GovCloud default)
 - `docs/planning/AWS_ONPREM_PARITY_PLAN.md` - wave 1 plan: profiles, RAG, SPL, Elastic, ServiceNow, idempotency

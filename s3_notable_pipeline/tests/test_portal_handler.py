@@ -162,6 +162,44 @@ class PortalHandlerTests(unittest.TestCase):
         body = json.loads(response["body"])
         self.assertEqual(body["items"][0]["case_id"], "case-1")
 
+    def test_allowed_cors_origin_is_returned_on_api_response(self) -> None:
+        request = event("/api/cases")
+        request["headers"] = {"origin": "https://portal.example.test"}
+        with (
+            patch.object(
+                portal_handler,
+                "load_config",
+                return_value=portal_config(
+                    PORTAL_CORS_ALLOWED_ORIGINS="https://portal.example.test"
+                ),
+            ),
+            patch.object(portal_handler, "dynamodb_client", return_value=FakeDynamoDbClient()),
+        ):
+            response = portal_handler.handler(request, None)
+
+        self.assertEqual(
+            response["headers"]["access-control-allow-origin"],
+            "https://portal.example.test",
+        )
+
+    def test_options_preflight_uses_cors_allowlist(self) -> None:
+        request = event("/api/chat", "OPTIONS")
+        request["headers"] = {"Origin": "https://portal.example.test"}
+        with patch.object(
+            portal_handler,
+            "load_config",
+            return_value=portal_config(
+                PORTAL_CORS_ALLOWED_ORIGINS="https://portal.example.test"
+            ),
+        ):
+            response = portal_handler.handler(request, None)
+
+        self.assertEqual(response["statusCode"], 204)
+        self.assertEqual(
+            response["headers"]["access-control-allow-origin"],
+            "https://portal.example.test",
+        )
+
     def test_case_detail_and_raw_routes_return_bounded_responses(self) -> None:
         with (
             patch.object(portal_handler, "load_config", return_value=portal_config()),

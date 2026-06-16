@@ -33,6 +33,17 @@ def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     config = load_config()
     method = _method(event)
     path = _path(event)
+    if method == "OPTIONS":
+        return _cors_response(config, event)
+    return _with_cors(config, event, _route(event, config, method, path))
+
+
+def _route(
+    event: dict[str, Any],
+    config: Config,
+    method: str,
+    path: str,
+) -> dict[str, Any]:
     if method not in {"GET", "POST"}:
         return _json_response(405, {"error": "Method not allowed"})
     if method == "POST" and path != "/api/chat":
@@ -208,6 +219,51 @@ def _method(event: dict[str, Any]) -> str:
 
 def _path(event: dict[str, Any]) -> str:
     return str(event.get("rawPath") or event.get("path") or "/").rstrip("/") or "/"
+
+
+def _origin(event: dict[str, Any]) -> str:
+    headers = event.get("headers") or {}
+    for key, value in headers.items():
+        if str(key).lower() == "origin":
+            return str(value or "").strip()
+    return ""
+
+
+def _cors_headers(config: Config, event: dict[str, Any]) -> dict[str, str]:
+    origin = _origin(event)
+    allowed_origins = {
+        item.strip()
+        for item in config.PORTAL_CORS_ALLOWED_ORIGINS.split(",")
+        if item.strip()
+    }
+    if not origin or origin not in allowed_origins:
+        return {}
+    return {
+        "access-control-allow-origin": origin,
+        "access-control-allow-methods": "GET,POST,OPTIONS",
+        "access-control-allow-headers": "authorization,content-type",
+        "access-control-max-age": "300",
+        "vary": "Origin",
+    }
+
+
+def _cors_response(config: Config, event: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "statusCode": 204,
+        "headers": _cors_headers(config, event),
+        "body": "",
+    }
+
+
+def _with_cors(
+    config: Config,
+    event: dict[str, Any],
+    response: dict[str, Any],
+) -> dict[str, Any]:
+    headers = dict(response.get("headers") or {})
+    headers.update(_cors_headers(config, event))
+    response["headers"] = headers
+    return response
 
 
 def _int_query(value: Any, default: int | None = None) -> int | None:

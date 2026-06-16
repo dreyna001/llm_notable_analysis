@@ -357,6 +357,20 @@ Parameters:
     Description: Optional Bedrock model override for portal answer synthesis.
     Default: ''
 
+  PortalUiBucketName:
+    Type: String
+    Description: Optional S3 bucket name for the analyst portal static SPA. Leave blank to skip static hosting resources.
+    Default: ''
+
+  PortalUiPriceClass:
+    Type: String
+    Description: CloudFront price class for the analyst portal static SPA.
+    Default: PriceClass_100
+    AllowedValues:
+      - PriceClass_100
+      - PriceClass_200
+      - PriceClass_All
+
   CaseQaEnabled:
     Type: String
     Description: Enables retrieval-bound pinned-case Q&A when set directly or through analyst_portal.
@@ -703,6 +717,8 @@ Conditions:
   HasElasticsearchKnowledgeBase: !Not [!Equals [!Ref ElasticsearchGroundingBedrockKbId, '']]
   HasCaseArchiveBucketName: !Not [!Equals [!Ref CaseArchiveBucketName, '']]
   HasCaseIndexTable: !Not [!Equals [!Ref CaseIndexTableName, '']]
+  HasPortalUiBucketName: !Not [!Equals [!Ref PortalUiBucketName, '']]
+  HasPortalUiDeployment: !And [!Condition HasCaseIndexTable, !Condition HasPortalUiBucketName]
 
 Resources:
   InputBucket:
@@ -1270,6 +1286,85 @@ Resources:
           CASE_QA_CHAT_HISTORY_ENABLED: !Ref CaseQaChatHistoryEnabled
           CASE_QA_MAX_SESSIONS_PER_USER: !Ref CaseQaMaxSessionsPerUser
   
+  PortalUiBucket:
+    Type: AWS::S3::Bucket
+    Condition: HasPortalUiDeployment
+    Properties:
+      BucketName: !Ref PortalUiBucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  PortalUiOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Condition: HasPortalUiDeployment
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${AWS::StackName}-portal-ui-oac'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  PortalUiDistribution:
+    Type: AWS::CloudFront::Distribution
+    Condition: HasPortalUiDeployment
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub '${AWS::StackName} analyst portal UI'
+        DefaultRootObject: index.html
+        PriceClass: !Ref PortalUiPriceClass
+        Origins:
+          - Id: PortalUiS3Origin
+            DomainName: !GetAtt PortalUiBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt PortalUiOriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        DefaultCacheBehavior:
+          TargetOriginId: PortalUiS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+
+  PortalUiBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: HasPortalUiDeployment
+    Properties:
+      Bucket: !Ref PortalUiBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${PortalUiBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${PortalUiDistribution}'
+
   LambdaInvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -1294,5 +1389,15 @@ Outputs:
   TestCommand:
     Description: Command to upload a test notable
     Value: !Sub 'aws s3 cp data/test-notable.txt s3://${InputBucket}/incoming/test-notable.txt'
+
+  PortalUiBucketName:
+    Condition: HasPortalUiDeployment
+    Description: Analyst portal static SPA bucket name
+    Value: !Ref PortalUiBucket
+
+  PortalUiDistributionDomainName:
+    Condition: HasPortalUiDeployment
+    Description: CloudFront domain name for the analyst portal static SPA
+    Value: !GetAtt PortalUiDistribution.DomainName
 
 

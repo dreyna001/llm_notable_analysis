@@ -26,6 +26,21 @@ python -m pytest tests/test_idempotency.py tests/test_servicenow.py
 python -m pytest tests/test_elastic_query_generation.py tests/test_elasticsearch_investigation.py
 ```
 
+Wave 2 portal slices use the stdlib test runner in this repository layout:
+
+```bash
+python -m unittest discover -s s3_notable_pipeline/tests -p "test_portal_handler.py" -v
+python -m unittest discover -s s3_notable_pipeline/tests -p "test_case_chat.py" -v
+python -m unittest discover -s s3_notable_pipeline/tests -p "test_portal_chat.py" -v
+```
+
+Portal frontend checks do not call real AWS:
+
+```bash
+npm --prefix s3_notable_pipeline/frontend/analyst-portal test
+npm --prefix s3_notable_pipeline/frontend/analyst-portal run build
+```
+
 ## Smoke Validation
 
 For a deployed non-production stack:
@@ -38,6 +53,8 @@ For a deployed non-production stack:
    make outbound calls and successful calls produce `investigation_query_results`.
 6. For writeback or ServiceNow create, confirm duplicate events do not duplicate
    side effects when idempotency is enabled.
+7. For `analyst_portal`, confirm case archive objects, CaseIndex rows, and
+   retrieval chunks are present before opening the static SPA.
 
 ## LocalStack Integration Tests
 
@@ -143,3 +160,14 @@ Manual follow-ups still required for **action_gated** idempotency replay, signed
 ServiceNow create approval, and Splunk `notable_rest` writeback. See
 `docs/operations/CAPABILITY_PROFILES.md`, `SERVICENOW_OPERATIONS.md`, and
 `SPLUNK_WRITEBACK_OPERATIONS.md`.
+
+### Wave 2 portal staging checklist
+
+This checklist is optional real AWS validation and must run only in an approved
+dev/staging/prod account.
+
+| Profile slice | Deploy prerequisites | Staging validation |
+| --- | --- | --- |
+| **analyst_portal** | `CapabilityProfiles=core,analyst_portal`; `CaseArchiveBucketName`; `CaseIndexTableName`; JWT issuer/audience; portal CORS origin | Upload a representative notable; confirm archive envelope, chunks, and CaseIndex `retrieval_status=ready`; load `/`, `/cases`, and `/cases/{case_id}` through the SPA; ask a selected-case question and confirm cited answer |
+
+See [`../operations/ANALYST_PORTAL_OPERATIONS.md`](../operations/ANALYST_PORTAL_OPERATIONS.md).

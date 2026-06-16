@@ -32,6 +32,7 @@ within supported config bounds.
 | Elasticsearch generation and execution | [`ELASTICSEARCH_OPERATIONS.md`](ELASTICSEARCH_OPERATIONS.md) | Query DSL generation, Elastic grounding, `_search` execution policy. |
 | Splunk writeback | [`SPLUNK_WRITEBACK_OPERATIONS.md`](SPLUNK_WRITEBACK_OPERATIONS.md) | Optional notable comment writeback and idempotency. |
 | ServiceNow | [`SERVICENOW_OPERATIONS.md`](SERVICENOW_OPERATIONS.md) | Incident draft/create, Secrets Manager token, and approval payload. |
+| Analyst portal | [`ANALYST_PORTAL_OPERATIONS.md`](ANALYST_PORTAL_OPERATIONS.md) | S3 case archive, DynamoDB CaseIndex, JWT portal API, static SPA, and pinned-case Q&A. |
 | S3 intake and retention | [`FILE_DROP_AND_RETENTION_OPERATIONS.md`](FILE_DROP_AND_RETENTION_OPERATIONS.md) | S3 prefixes, gzip handling, lifecycle rules, size limits, and report outputs. |
 | Security | [`SECURITY_OPERATIONS.md`](SECURITY_OPERATIONS.md) | IAM, secrets, TLS, endpoint validation, and action gates. |
 | MITRE ATT&CK/TTP | [`MITRE_TTP_OPERATIONS.md`](MITRE_TTP_OPERATIONS.md) | Bundled TTP ID data, refresh workflow, and validation expectations. |

@@ -6,6 +6,8 @@
 - Store Splunk, Elasticsearch, ServiceNow, MCP, and approval HMAC secrets in AWS Secrets Manager.
 - Use HTTPS endpoints without userinfo. Private or local IP endpoints require `ALLOW_PRIVATE_OUTBOUND_ENDPOINTS=true`.
 - Treat generated SPL, Elasticsearch Query DSL, and ticket payloads as untrusted until policy validation passes.
+- For the analyst portal, use exact JWT issuer/audience validation and exact
+  CORS origins. Do not put JWTs in static assets or logs.
 
 ## External Action Gates
 
@@ -16,6 +18,8 @@
 ## Data Handling
 
 - Raw S3 input is size bounded before prompt construction.
+- Case archive envelopes, chunks, and CaseIndex rows follow the configured
+  `CaseRetentionDays` lifecycle and TTL policy.
 - Splunk result samples drop `_raw`; set `SPLUNK_SEARCH_ALLOWED_FIELDS` to restrict sample fields further.
 - Elasticsearch result samples are restricted to `ELASTICSEARCH_ALLOWED_FIELDS`.
 
@@ -25,3 +29,5 @@
 2. Confirm Lambda reserved concurrency is set to protect downstream systems.
 3. Confirm IAM policies grant only required S3, Secrets Manager, Bedrock, and DynamoDB permissions.
 4. Confirm denied query/action paths do not make outbound calls.
+5. Confirm portal API CORS allows only approved browser origins and
+   `POST /api/chat` returns cited selected-case answers or `insufficient_context`.

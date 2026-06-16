@@ -13,6 +13,10 @@ profile is enabled, a third HTML object is also written.
 S3 lifecycle rules delete old input objects under `incoming/` and old report
 objects under `reports/` after configured retention periods.
 
+When `analyst_portal` is enabled, case envelopes and retrieval chunks are written
+to the case archive bucket. The CaseIndex DynamoDB table uses `expires_at` for
+TTL. Align both with `CaseRetentionDays`.
+
 ## Recommended Starting Posture
 
 - Keep `SplunkSinkMode=s3` until the base S3 report path is validated.
@@ -124,7 +128,7 @@ completes. This avoids partial reads on in-progress uploads.
 |------|-------------------|
 | Intake trigger | S3 `incoming/` prefix, `INPUT_BUCKET_NAME` |
 | Report outputs | `OUTPUT_BUCKET_NAME`, `OUTPUT_PREFIX`, `CAPABILITY_PROFILES` |
-| Retention | `InputRetentionDays`, `OutputRetentionDays` |
+| Retention | `InputRetentionDays`, `OutputRetentionDays`, `CaseRetentionDays` |
 | Input size bound | `MaxDecompressedInputBytes` |
 | Concurrency cap | `LambdaReservedConcurrentExecutions` |
 | Payload correlation | S3 object key stem, JSON `finding_id` / `notable_id` / `sid` |
@@ -143,7 +147,9 @@ Runtime environment variables mirror the SAM/CloudFormation parameters above.
    without `.gz`.
 6. Upload an oversized or malformed object and confirm the invocation fails
    with a clear error in CloudWatch logs.
-7. Confirm lifecycle rules match expected retention before production cutover.
+7. If `analyst_portal` is enabled, confirm case envelopes, chunks, CaseIndex TTL,
+   and S3 lifecycle rules match `CaseRetentionDays`.
+8. Confirm lifecycle rules match expected retention before production cutover.
 
 Smoke script:
 

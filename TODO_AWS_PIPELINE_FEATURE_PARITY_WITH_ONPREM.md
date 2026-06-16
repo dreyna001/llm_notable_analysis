@@ -49,8 +49,8 @@ Open Wave 2 items (do not implement under Wave 1 closeout):
 - [x] Diff 2b: Post-archive embed Lambda and S3 case chunks
 - [x] Diff 3: Read-only portal API Lambda and OpenAPI contract
 - [x] Diff 4: Retrieval-bound pinned-case Q&A over retained cases
-- [ ] Read-only portal API/UI
-- [ ] IAM split between analyzer writer and portal reader permissions
+- [x] Diff 5: Read-only portal UI, auth, operations, and validation
+- [x] IAM split between analyzer writer and portal reader permissions
 
 ---
 
@@ -61,4 +61,4 @@ Open Wave 2 items (do not implement under Wave 1 closeout):
 
 ---
 
-_Last updated: Wave 2 Diff 4 complete; portal frontend/ops validation starts in Diff 5._
+_Last updated: Wave 2 Diff 5 complete; Wave 2 analyst portal implementation is landed._
