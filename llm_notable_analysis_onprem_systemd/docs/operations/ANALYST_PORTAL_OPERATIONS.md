@@ -4,6 +4,9 @@ This guide covers the on-prem read-only analyst portal, Postgres case archive,
 archive-backed Case Q&A, chunk maintenance, legacy markdown backfill, and nginx
 fronting pattern.
 
+**Network URL rollout (DNS, TLS, firewall, analyst browser access):**
+[`ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](ANALYST_PORTAL_NETWORK_DEPLOYMENT.md).
+
 ## What This Controls
 
 The `analyst_portal` capability persists validated cases to Postgres, serves a

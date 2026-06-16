@@ -273,8 +273,10 @@ sudo bash scripts/setup_postgres_case_archive.sh \
   --portal-env /etc/notable-analyzer/portal.env
 ```
 
-See [`ANALYST_PORTAL_OPERATIONS.md`](ANALYST_PORTAL_OPERATIONS.md) for nginx
-TLS/basic-auth, backfill, chunk rebuild, and troubleshooting.
+See [`ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](ANALYST_PORTAL_NETWORK_DEPLOYMENT.md)
+for the step-by-step internal HTTPS URL rollout (DNS, TLS, firewall, analyst
+browser validation). See [`ANALYST_PORTAL_OPERATIONS.md`](ANALYST_PORTAL_OPERATIONS.md)
+for day-two ops: backfill, chunk rebuild, and troubleshooting.
 
 ### 2. Install vLLM (if not already installed)
 

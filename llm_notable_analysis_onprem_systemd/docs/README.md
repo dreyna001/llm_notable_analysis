@@ -29,7 +29,7 @@ Optional deep dives:
 - **[Feature enhancements technical spec](technical_specs/feature_enhancements_technical_spec.md)** — Contract-level detail for SPL, Splunk execution, ServiceNow.
 - **[Analyst portal technical spec](technical_specs/analyst_portal_case_archive_technical_spec.md)** — Draft implementation contract and diff plan for the Postgres-backed portal/archive/chatbot.
 - **[Analyst portal and case archive plan](planning/ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md)** — Living scope for the on-prem 30-day case archive, read-only portal, and archive-backed chatbot.
-- **[Analyst portal networking plan](planning/ANALYST_PORTAL_NETWORKING_PLAN.md)** — Planned internal URL, DNS, TLS, nginx, firewall, and FastAPI serving shape.
+- **[Analyst portal networking plan](planning/ANALYST_PORTAL_NETWORKING_PLAN.md)** — Design rationale for internal URL, DNS, TLS, nginx, firewall, and FastAPI serving shape. **Rollout steps:** [ANALYST_PORTAL_NETWORK_DEPLOYMENT.md](operations/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md).
 - **[Prompt and analysis enhancements plan](planning/PROMPT_ENHANCEMENTS_PLAN.md)** — Approved and in-review prompt improvements for portal chat and analyzer paths; planned post-query reconciliation.
 - **[AI integrity and drift monitoring plan](planning/ai_integrity_drift_monitoring_plan.md)** — Planning proposal for model/prompt/KB hash checks plus simple Evidently-based drift reporting.
 
@@ -39,7 +39,8 @@ Optional deep dives:
 |-------|-------------|
 | Executive on-prem build summary | [EXECUTIVE_ONPREM_BUILD_WRITEUP.md](delivery_package/EXECUTIVE_ONPREM_BUILD_WRITEUP.md) |
 | Capability profiles | [CAPABILITY_PROFILES.md](operations/CAPABILITY_PROFILES.md), [`config.env.example`](../config.env.example) (`CAPABILITY_PROFILES`) |
-| Analyst portal operations | [`ANALYST_PORTAL_OPERATIONS.md`](ANALYST_PORTAL_OPERATIONS.md), [`notable-portal.service`](../deploy/systemd/notable-portal.service), [`notable-portal.conf`](../deploy/nginx/notable-portal.conf) |
+| Analyst portal network rollout | [ANALYST_PORTAL_NETWORK_DEPLOYMENT.md](operations/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md) |
+| Analyst portal operations | [ANALYST_PORTAL_OPERATIONS.md](operations/ANALYST_PORTAL_OPERATIONS.md), [`notable-portal.service`](../deploy/systemd/notable-portal.service), [`notable-portal.conf`](../deploy/nginx/notable-portal.conf) |
 | Analyst portal chat security | [`ANALYST_PORTAL_CHAT_SECURITY.md`](operations/ANALYST_PORTAL_CHAT_SECURITY.md) |
 | Analyst portal local preview (dev) | [`ANALYST_PORTAL_PREVIEW.md`](operations/ANALYST_PORTAL_PREVIEW.md), [`PREVIEW_CASE_INVESTIGATION_GUIDE.md`](../../PREVIEW_CASE_INVESTIGATION_GUIDE.md) |
 | Analyst portal React UI (dev spike) | [`frontend/analyst-portal/README.md`](../frontend/analyst-portal/README.md) |
@@ -47,7 +48,7 @@ Optional deep dives:
 | Host paths vs local checkout | [`README.md` § Filesystem map](../README.md#filesystem-map) |
 | Analyst portal technical spec | [analyst_portal_case_archive_technical_spec.md](technical_specs/analyst_portal_case_archive_technical_spec.md) |
 | Analyst portal case archive plan | [ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md](planning/ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md) |
-| Analyst portal networking plan | [ANALYST_PORTAL_NETWORKING_PLAN.md](planning/ANALYST_PORTAL_NETWORKING_PLAN.md) |
+| Analyst portal networking plan | [ANALYST_PORTAL_NETWORKING_PLAN.md](planning/ANALYST_PORTAL_NETWORKING_PLAN.md) (design); rollout steps in [ANALYST_PORTAL_NETWORK_DEPLOYMENT.md](operations/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md) |
 | RAG grounding for analysis | [EXECUTIVE_ONPREM_WORKFLOW.md § RAG](delivery_package/EXECUTIVE_ONPREM_WORKFLOW.md), [RAG_OPERATIONS.md](operations/RAG_OPERATIONS.md), [KNOWLEDGE_BASE_OPERATIONS.md](operations/KNOWLEDGE_BASE_OPERATIONS.md), [`config.env.example`](../config.env.example) |
 | Planned golden eval / quality regression harness | [golden_eval_harness_todo.md](planning/golden_eval_harness_todo.md) |
 | Planned prompt / analysis enhancements | [PROMPT_ENHANCEMENTS_PLAN.md](planning/PROMPT_ENHANCEMENTS_PLAN.md) |

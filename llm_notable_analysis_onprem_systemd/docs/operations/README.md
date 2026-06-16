@@ -25,6 +25,7 @@ behavior within supported config bounds.
 |------|-------|---------|
 | Deployment hardware profiles | [`deployment_profiles/README.md`](deployment_profiles/README.md) | Recommended vLLM and `config.env` starting values per CPU/GPU build. |
 | Capability profiles | [`CAPABILITY_PROFILES.md`](CAPABILITY_PROFILES.md) | Supported operator-facing feature bundles and legacy low-level flag behavior. |
+| Analyst portal network rollout | [`ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](ANALYST_PORTAL_NETWORK_DEPLOYMENT.md) | Step-by-step internal HTTPS URL: install portal, TLS, nginx, DNS, firewall, analyst browser validation. |
 | Analyst portal | [`ANALYST_PORTAL_OPERATIONS.md`](ANALYST_PORTAL_OPERATIONS.md) | Enable/disable, portal service, nginx, health checks, DB maintenance, chunk rebuild, backfill, and chat guardrails. |
 | Analyst portal chat security | [`ANALYST_PORTAL_CHAT_SECURITY.md`](ANALYST_PORTAL_CHAT_SECURITY.md) | LLM non-execution boundaries, prompting, post-checks, and separation from analyzer actions. |
 | Analyst portal local preview | [`ANALYST_PORTAL_PREVIEW.md`](ANALYST_PORTAL_PREVIEW.md) | Dev workstation preview UI with stored cases 1-5 and optional Bedrock chat. |

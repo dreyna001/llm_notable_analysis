@@ -3,8 +3,10 @@
 ## Status
 
 Planning document for how analysts reach the on-prem portal over the internal
-network. This is not an implementation contract yet, but it records the expected
-deployment shape for the first portal slice.
+network. It records the expected deployment shape for the first portal slice.
+
+**Operator rollout steps:** use the consolidated runbook
+[`operations/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](../operations/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md).
 
 ## Goal
 

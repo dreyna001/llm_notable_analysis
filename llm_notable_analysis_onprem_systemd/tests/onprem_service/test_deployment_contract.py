@@ -351,6 +351,8 @@ class TestDeploymentContract(unittest.TestCase):
 
         self.assertIn("ANALYST_PORTAL_OPERATIONS.md", docs_index)
         self.assertIn("ANALYST_PORTAL_OPERATIONS.md", ops_index)
+        self.assertIn("ANALYST_PORTAL_NETWORK_DEPLOYMENT.md", docs_index)
+        self.assertIn("ANALYST_PORTAL_NETWORK_DEPLOYMENT.md", ops_index)
 
     def test_backfill_script_documents_dry_run_and_legacy_summary(self) -> None:
         """Backfill script should expose dry-run and legacy-summary behavior."""

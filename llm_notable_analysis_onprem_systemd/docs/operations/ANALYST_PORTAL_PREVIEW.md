@@ -238,5 +238,6 @@ Override path with env var `PORTAL_PREVIEW_ENV` if needed.
 ## Related docs
 
 - [`frontend/analyst-portal/README.md`](../../frontend/analyst-portal/README.md) — UI dev details, E2E
-- [`ANALYST_PORTAL_OPERATIONS.md`](ANALYST_PORTAL_OPERATIONS.md) — production portal
+- [`ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](ANALYST_PORTAL_NETWORK_DEPLOYMENT.md) — production network rollout
+- [`ANALYST_PORTAL_OPERATIONS.md`](ANALYST_PORTAL_OPERATIONS.md) — production portal day-two ops
 - [`DEVELOPING.md`](../../../DEVELOPING.md) — shared venv and daily dev workflow
