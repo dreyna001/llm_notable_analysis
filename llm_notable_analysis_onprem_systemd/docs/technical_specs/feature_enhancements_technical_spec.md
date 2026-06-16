@@ -30,9 +30,9 @@ This block must preserve the current default file-drop analysis path.
 
 ### Out of scope
 
-- gzip file-drop intake (planned AWS parity in
-  [`../planning/COMPRESSED_INPUTS_PLAN.md`](../planning/COMPRESSED_INPUTS_PLAN.md);
-  AWS `s3_notable_pipeline` already implements this)
+- gzip file-drop intake (planned on-prem; implemented in AWS
+  `s3_notable_pipeline` — see
+  [`s3_notable_pipeline/docs/operations/FILE_DROP_AND_RETENTION_OPERATIONS.md`](../../../s3_notable_pipeline/docs/operations/FILE_DROP_AND_RETENTION_OPERATIONS.md))
 - broad refactor of `local_llm_client.py`
 - creating `query_models.py`, `query_policy.py`, or `writeback_policy.py` as separate files
 - introducing capability profiles, customer bundles, shared cores, registries, or plugin systems

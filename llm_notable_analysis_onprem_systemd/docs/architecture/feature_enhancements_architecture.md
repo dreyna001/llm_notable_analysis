@@ -50,10 +50,9 @@ This architecture answers:
 The current service:
 
 - reads `.json` and `.txt` files from `INCOMING_DIR` (gzip file-drop is
-  **planned**; see
-  [`../planning/COMPRESSED_INPUTS_PLAN.md`](../planning/COMPRESSED_INPUTS_PLAN.md).
-  AWS `s3_notable_pipeline` already supports `.json.gz` / `.txt.gz` with
-  `MAX_DECOMPRESSED_INPUT_BYTES`.)
+  **planned** on-prem; AWS `s3_notable_pipeline` supports `.json.gz` /
+  `.txt.gz` with `MAX_DECOMPRESSED_INPUT_BYTES` — see
+  [`s3_notable_pipeline/docs/operations/FILE_DROP_AND_RETENTION_OPERATIONS.md`](../../../s3_notable_pipeline/docs/operations/FILE_DROP_AND_RETENTION_OPERATIONS.md))
 - sends one structured prompt to the local LLM client
 - optionally adds RAG/SOC context with `RAG_ENABLED`
 - when `SPL_QUERY_GENERATION_ENABLED=true`, runs a second bounded LLM call for SPL query fields using the alert, the six hypotheses, optional **`SOC_OPERATIONAL_CONTEXT`**, and optional **`SPL_QUERY_GROUNDING_CONTEXT`** (`SPL_QUERY_RAG_ENABLED=true`)
@@ -1033,7 +1032,7 @@ Reference table for roadmap bullets above; **architecture truth** stays in prose
 
 | Cross-cutting roadmap area | Primary on‑prem pattern | Primary AWS (`s3_notable_pipeline` / Step Functions parity) pattern |
 |---|---|---|
-| Gzip notable intake | `*.json.gz` / `*.txt.gz` in `INCOMING_DIR`; `MAX_DECOMPRESSED_INPUT_BYTES` (planned; [`COMPRESSED_INPUTS_PLAN.md`](../planning/COMPRESSED_INPUTS_PLAN.md)) | `incoming/*.gz` + optional S3 `ContentEncoding: gzip`; **implemented** |
+| Gzip notable intake | `*.json.gz` / `*.txt.gz` in `INCOMING_DIR`; `MAX_DECOMPRESSED_INPUT_BYTES` (planned on-prem) | `incoming/*.gz` + optional S3 `ContentEncoding: gzip`; **implemented** — [AWS file-drop ops](../../../s3_notable_pipeline/docs/operations/FILE_DROP_AND_RETENTION_OPERATIONS.md) |
 | TI adapters | systemd host egress + cache dir | Lambda egress + Dynamo/S3 TTL cache |
 | Bounded investigation | Splunk MCP/REST (implemented when enabled) | Security Lake / Athena + similar policy envelope when built |
 | RAG/runbooks | `RAG_*` paths + embeddings | KB / OpenSearch / pgvector-backed retrieve |

@@ -30,8 +30,6 @@ Optional deep dives:
 - **[Analyst portal technical spec](technical_specs/analyst_portal_case_archive_technical_spec.md)** — Draft implementation contract and diff plan for the Postgres-backed portal/archive/chatbot.
 - **[Analyst portal and case archive plan](planning/ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md)** — Living scope for the on-prem 30-day case archive, read-only portal, and archive-backed chatbot.
 - **[Analyst portal networking plan](planning/ANALYST_PORTAL_NETWORKING_PLAN.md)** — Planned internal URL, DNS, TLS, nginx, firewall, and FastAPI serving shape.
-- **[Compressed inputs plan](planning/COMPRESSED_INPUTS_PLAN.md)** — Planned on-prem gzip intake parity with AWS (`*.json.gz`, `MAX_DECOMPRESSED_INPUT_BYTES`, stem/writeback rules).
-- **[Golden evaluation harness TODO](planning/golden_eval_harness_todo.md)** — Planning TODO for future regression, hallucination, weak-retrieval, and assistant Q&A quality evaluation.
 - **[Prompt and analysis enhancements plan](planning/PROMPT_ENHANCEMENTS_PLAN.md)** — Approved and in-review prompt improvements for portal chat and analyzer paths; planned post-query reconciliation.
 - **[AI integrity and drift monitoring plan](planning/ai_integrity_drift_monitoring_plan.md)** — Planning proposal for model/prompt/KB hash checks plus simple Evidently-based drift reporting.
 
@@ -61,7 +59,7 @@ Optional deep dives:
 | Splunk notable writeback | [SPLUNK_WRITEBACK_OPERATIONS.md](operations/SPLUNK_WRITEBACK_OPERATIONS.md), [CAPABILITY_PROFILES.md](operations/CAPABILITY_PROFILES.md) (`action_gated`) |
 | ServiceNow draft/create | [SERVICENOW_OPERATIONS.md](operations/SERVICENOW_OPERATIONS.md), [CAPABILITY_PROFILES.md](operations/CAPABILITY_PROFILES.md) (`ticket_draft`, `action_gated`), [EXECUTIVE_ONPREM_WORKFLOW.md § ServiceNow](delivery_package/EXECUTIVE_ONPREM_WORKFLOW.md), [feature_enhancements_architecture.md](architecture/feature_enhancements_architecture.md) (approval JSON) |
 | File drop and retention | [FILE_DROP_AND_RETENTION_OPERATIONS.md](operations/FILE_DROP_AND_RETENTION_OPERATIONS.md), [`config.env.example`](../config.env.example) (`INCOMING_DIR`, `RETENTION_*`, `CONCURRENCY_*`) |
-| Planned gzip file intake (AWS parity) | [COMPRESSED_INPUTS_PLAN.md](planning/COMPRESSED_INPUTS_PLAN.md) |
+| Planned gzip file intake | [FILE_DROP_AND_RETENTION_OPERATIONS.md](operations/FILE_DROP_AND_RETENTION_OPERATIONS.md) (on-prem planned); AWS: [s3 FILE_DROP ops](../../../s3_notable_pipeline/docs/operations/FILE_DROP_AND_RETENTION_OPERATIONS.md) (implemented) |
 | MITRE/TTP validation | [MITRE_TTP_OPERATIONS.md](operations/MITRE_TTP_OPERATIONS.md), [`config.env.example`](../config.env.example) (`MITRE_IDS_PATH`) |
 | Offline / air-gap prep | [OFFLINE_PRESTAGE_GUIDE.md](operations/OFFLINE_PRESTAGE_GUIDE.md) |
 | Developer / maintainer guide | [DEVELOPER_MAINTAINER_GUIDE.md](internal/DEVELOPER_MAINTAINER_GUIDE.md) |

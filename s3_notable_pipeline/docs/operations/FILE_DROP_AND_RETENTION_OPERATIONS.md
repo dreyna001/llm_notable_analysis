@@ -47,6 +47,33 @@ Strongly preferred fields for correlation and writeback are `finding_id`,
 `notable_id`, `sid`, `event_id`, `search_name`, `alert_time`, `risk_score`,
 `threat_category`, and any raw event context the customer is allowed to send.
 
+### Gzip compressed inputs
+
+Gzip support is **implemented**. Scope is **single-payload gzip only** — not ZIP,
+nested archives, or multiple notables in one object.
+
+**Detection:** `.gz` or `.gzip` suffix on the S3 key, or S3 object metadata
+`ContentEncoding: gzip` (works even when the key has no `.gz` suffix).
+
+**Behavior:**
+
+- Decompress with bounded streaming before UTF-8 decode and analysis.
+- Treat inner type from the filename stem (for example `.json.gz` is JSON).
+- Enforce `MAX_DECOMPRESSED_INPUT_BYTES` on decompressed size (default
+  `1048576`); oversized payloads fail before Bedrock.
+- Output report names strip both compression and inner data extensions (for
+  example `incoming/abc-123.json.gz` -> `reports/abc-123.md`).
+
+**Failure modes (CloudWatch):**
+
+- `Invalid gzip content` — object is not valid gzip.
+- `Decompressed input exceeds MAX_DECOMPRESSED_INPUT_BYTES` — raise
+  `MaxDecompressedInputBytes` only after measuring representative payloads.
+- UTF-8 decode errors after decompression — fix source encoding or upload
+  uncompressed JSON/text instead.
+
+**Not supported:** ZIP archives, tar/gz multi-file bundles, nested archives.
+
 If Splunk writeback is enabled (`notable_rest` + `action_gated`), confirm the
 object key stem maps to the intended Splunk `finding_id`, or set
 `SPLUNK_REQUIRE_PAYLOAD_FINDING_ID=true` and include a matching payload
@@ -111,9 +138,12 @@ Runtime environment variables mirror the SAM/CloudFormation parameters above.
 3. Confirm `reports/test-notable.md` and `reports/test-notable.json` appear in
    the output bucket.
 4. If `html_reports` is enabled, confirm `reports/test-notable.html`.
-5. Upload an oversized or malformed object and confirm the invocation fails
+5. Upload `incoming/test-notable.json.gz` (valid gzip JSON) and confirm
+   `reports/test-notable.md` and `reports/test-notable.json` use the stem
+   without `.gz`.
+6. Upload an oversized or malformed object and confirm the invocation fails
    with a clear error in CloudWatch logs.
-6. Confirm lifecycle rules match expected retention before production cutover.
+7. Confirm lifecycle rules match expected retention before production cutover.
 
 Smoke script:
 

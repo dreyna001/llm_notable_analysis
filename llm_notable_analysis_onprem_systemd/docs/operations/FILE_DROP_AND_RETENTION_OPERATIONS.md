@@ -30,13 +30,13 @@ deletes expired case rows and derived chunks.
 
 The analyzer processes files matching `*.json` or `*.txt` in `INCOMING_DIR`.
 
-**Planned (AWS parity):** single-payload gzip notables (`*.json.gz`, `*.txt.gz`,
-and `.gzip` suffix variants) with bounded decompression and the same
-`MAX_DECOMPRESSED_INPUT_BYTES` default (`1048576`) as
-`s3_notable_pipeline`. See
-[`../planning/COMPRESSED_INPUTS_PLAN.md`](../planning/COMPRESSED_INPUTS_PLAN.md).
-Until that ships, do not drop `.gz` files into `INCOMING_DIR`; they will not be
-discovered.
+**Planned:** single-payload gzip notables (`*.json.gz`, `*.txt.gz`, and `.gzip`
+suffix variants) with bounded decompression and the same
+`MAX_DECOMPRESSED_INPUT_BYTES` default (`1048576`) as the AWS pipeline. AWS
+reference:
+[`s3_notable_pipeline/docs/operations/FILE_DROP_AND_RETENTION_OPERATIONS.md`](../../../s3_notable_pipeline/docs/operations/FILE_DROP_AND_RETENTION_OPERATIONS.md).
+Until gzip intake ships on-prem, do not drop `.gz` files into `INCOMING_DIR`;
+they will not be discovered.
 
 - JSON is preferred: the file should contain a UTF-8 JSON object.
 - Text is supported as a fallback: the full file contents are treated as raw
@@ -131,5 +131,4 @@ patterns.
 - [`../integrations/SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md`](../integrations/SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md)
 - [`RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`](RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md)
 - [`SECURITY_OPERATIONS.md`](SECURITY_OPERATIONS.md)
-- [`../planning/COMPRESSED_INPUTS_PLAN.md`](../planning/COMPRESSED_INPUTS_PLAN.md) (planned gzip intake)
 
