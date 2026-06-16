@@ -17,6 +17,40 @@ When `analyst_portal` is enabled, case envelopes and retrieval chunks are writte
 to the case archive bucket. The CaseIndex DynamoDB table uses `expires_at` for
 TTL. Align both with `CaseRetentionDays`.
 
+## Retention Equivalence (On-Prem vs AWS)
+
+On-prem retention is driven by a **systemd timer** that runs
+`retention.py` on a schedule. AWS does **not** port that script; it uses
+**S3 lifecycle rules** and **DynamoDB TTL** to achieve the same policy intent.
+
+| On-prem mechanism | AWS equivalent | Primary setting |
+| --- | --- | --- |
+| Delete or move aged inputs from `INCOMING_DIR` / processed paths | S3 lifecycle expiration on `incoming/` | `InputRetentionDays` |
+| Delete aged markdown/JSON/HTML reports | S3 lifecycle expiration on `reports/` | `OutputRetentionDays` |
+| Two-stage filesystem archive then delete for processed/quarantine/reports | Not ported literally; S3 lifecycle deletes objects in place | `InputRetentionDays`, `OutputRetentionDays` |
+| Delete expired Postgres case rows and chunks | S3 lifecycle on case envelope/chunk prefixes plus DynamoDB TTL on CaseIndex `expires_at` | `CaseRetentionDays` |
+| Delete expired side-effect idempotency markers | DynamoDB TTL on idempotency table `expires_at` | Idempotency table TTL in template |
+| Scheduled retention timer | S3/DynamoDB automatic expiration (no cron Lambda required for v1) | Lifecycle and TTL only |
+
+Operational notes:
+
+- **Policy alignment, not byte-for-byte parity:** on-prem may move files to an
+  archive directory before deletion; AWS deletes S3 objects when lifecycle rules
+  expire. Match the customer's evidence window with day counts, not directory
+  layout.
+- **Case archive:** set `CaseRetentionDays` consistently in stack parameters,
+  S3 lifecycle rules for archive prefixes, and DynamoDB CaseIndex TTL. Lowering
+  retention deletes analyst-visible cases after the window elapses.
+- **Optional extensions:** customers that need custom purge logic (legal hold
+  exceptions, cross-bucket copies, audit exports) can add EventBridge-scheduled
+  Lambdas or downstream ops jobs. That is outside the default stack contract.
+- **Validation:** before production cutover, confirm lifecycle and TTL match the
+  agreed retention table and that exported evidence exists elsewhere when
+  windows are shortened.
+
+On-prem reference:
+[`llm_notable_analysis_onprem_systemd/docs/operations/FILE_DROP_AND_RETENTION_OPERATIONS.md`](../../../llm_notable_analysis_onprem_systemd/docs/operations/FILE_DROP_AND_RETENTION_OPERATIONS.md).
+
 ## Recommended Starting Posture
 
 - Keep `SplunkSinkMode=s3` until the base S3 report path is validated.

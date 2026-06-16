@@ -40,6 +40,42 @@ Operators must decide:
 - Whether chat history remains disabled or is enabled later with the dedicated
   DynamoDB tables.
 
+## Portal API Front Door (Per Customer)
+
+The SAM/CloudFormation templates deploy the **portal Lambda** and optional
+**static SPA hosting** (`PortalUiBucketName` plus CloudFront). They do **not**
+fully wire the analyst-facing API front door. Each customer or environment must
+choose and configure the items below during deployment.
+
+| Decision | What to identify | Notes |
+| --- | --- | --- |
+| Read API origin | API Gateway HTTP API, private ALB, or direct invoke for ops only | Browser SPA needs HTTPS and JWT validation at the edge or in Lambda. |
+| Chat path | Same API origin or dedicated Lambda Function URL | Chat can exceed API Gateway default timeouts; align routing with `PortalChatTimeoutSec`. |
+| JWT issuer and audience | `PortalJwtIssuer`, `PortalJwtAudience` | Must match the customer IdP or Cognito app client. Enterprise OIDC is the default posture. |
+| Browser CORS origins | `PortalCorsAllowedOrigins` | Exact SPA origins only; required when UI and API are on different hostnames. |
+| SPA build target | `VITE_PORTAL_API_BASE_URL` at build time | Set to the customer API origin when SPA and API are split. |
+| Static UI hostname | CloudFront distribution, custom domain, ACM certificate | Optional stack output: `PortalUiDistributionDomainName` when `PortalUiBucketName` is set. |
+| API hostname | Custom domain on API Gateway or CloudFront behavior for `/api/*` | Often paired with WAF, corporate SSO, or private network access. |
+| Auth at the edge | API Gateway JWT authorizer vs Lambda claim checks only | Lambda validates JWT claims when `PortalAuthMode=jwt`; edge authorizers are customer-specific. |
+
+Recommended v1 shape:
+
+1. Deploy stack with `CapabilityProfiles=core,analyst_portal` and portal config
+   parameters.
+2. Wire **API Gateway HTTP API** (or approved equivalent) to `PortalApiLambdaName`
+   for `GET /health`, `GET /ready`, `GET /api/*`, and `POST /api/chat`.
+3. Optionally expose **chat through a Lambda Function URL** with a longer
+   timeout when API Gateway limits are too low; route `/api/chat` from CloudFront
+   or the corporate reverse proxy to that URL.
+4. Build the SPA with `VITE_PORTAL_API_BASE_URL` pointing at the customer API
+   origin; deploy `dist/` to the portal UI bucket or equivalent static host.
+5. Set `PortalCorsAllowedOrigins` to the SPA origin and validate preflight from
+   the browser.
+
+The stack ships `PortalChatFunctionUrlEnabled` as configuration intent only;
+Function URL and API Gateway resources are **customer/environment wiring**, not
+automatic stack outputs today.
+
 ## Config Quick Reference
 
 Primary SAM/CloudFormation parameters:
@@ -107,6 +143,9 @@ prefixes. DynamoDB CaseIndex items use `expires_at` for TTL. S3 lifecycle rules
 and DynamoDB TTL should both match `CaseRetentionDays`; lowering retention can
 delete evidence needed by analysts, so export reports first when longer audit
 retention is required.
+
+For the full on-prem vs AWS retention mapping, see
+[`FILE_DROP_AND_RETENTION_OPERATIONS.md`](FILE_DROP_AND_RETENTION_OPERATIONS.md#retention-equivalence-on-prem-vs-aws).
 
 ## Validation And Rollout
 

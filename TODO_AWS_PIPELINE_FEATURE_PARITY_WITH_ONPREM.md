@@ -36,13 +36,13 @@ deploy validation is not recorded in this repo**.
 
 ---
 
-## Wave 2 (portal, archive, Case Q&A) — in progress
+## Wave 2 (portal, archive, Case Q&A) — complete
 
 Case archive, analyst portal, and retrieval-bound Case Q&A were **explicitly out
 of Wave 1**. They are specified in
 [`s3_notable_pipeline/docs/planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md`](s3_notable_pipeline/docs/planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md).
 
-Open Wave 2 items (do not implement under Wave 1 closeout):
+Wave 2 implementation (landed on `main`):
 
 - [x] Diff 1: `analyst_portal` capability profile, config validation, and deploy scaffolding
 - [x] Diff 2: Case archive write path and DynamoDB CaseIndex
@@ -57,8 +57,11 @@ Open Wave 2 items (do not implement under Wave 1 closeout):
 ## Future work (outside Wave 1 and Wave 2)
 
 - [x] **Freeform / alternate entrypoints:** on-prem freeform analyzer removed; AWS stays batch-only on the structured analyzer path.
-- [ ] **Retention equivalence:** on-prem uses systemd timers; AWS typically uses **S3 lifecycle**, optional EventBridge cleanup, or downstream ops — document equivalence rather than porting `retention.py` literally (`FILE_DROP_AND_RETENTION_OPERATIONS.md` is the starting point).
+- [x] **Retention equivalence:** on-prem uses a systemd retention timer and
+  filesystem/Postgres cleanup; AWS uses **S3 lifecycle** and **DynamoDB TTL**
+  instead of porting `retention.py` literally. See
+  [`s3_notable_pipeline/docs/operations/FILE_DROP_AND_RETENTION_OPERATIONS.md`](s3_notable_pipeline/docs/operations/FILE_DROP_AND_RETENTION_OPERATIONS.md).
 
 ---
 
-_Last updated: Wave 2 Diff 5 complete; Wave 2 analyst portal implementation is landed._
+_Last updated: Wave 2 complete; real-AWS deploy validation remains an operator step outside this repo._
