@@ -8,14 +8,15 @@ tests, operations docs, and technical spec). All planned runtime modules,
 tests are present in the repository.
 
 **Remaining Wave 1 closeout (Diff 6 tail only):** explicit dev/staging/prod
-deploy validation in a real AWS account. Delivery-package doc parity refresh is
-complete (see commit history on `main`). No real-AWS validation outcome is
+deploy validation in a real AWS account. No real-AWS validation outcome is
 recorded in this repo.
 
-**Out of Wave 1 scope:** case archive, analyst portal, and Case Q&A are
-specified in
-[`AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md`](AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md)
-(Wave 2). Do not fold Wave 2 work into Wave 1 closeout.
+**Wave 2 (portal, archive, Case Q&A):** **code-complete** on `main` (Diffs 1
+through 5). Specified in
+[`AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md`](AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md).
+Real-AWS staging validation and per-customer DNS/WAF/IdP registration remain
+operator steps. API Gateway and Function URL are stack-managed when CaseIndex is
+enabled. Do not fold Wave 2 work into Wave 1 closeout.
 
 Implementation contract:
 [`../technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md`](../technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md).
@@ -30,7 +31,7 @@ Implementation contract:
 | Technical spec | Complete |
 | Delivery docs / readiness assessment parity | Complete — multi-profile readiness docs refreshed |
 | Real AWS deploy validation | Open — operator step, not evidenced in repo |
-| Wave 2 portal / archive / Case Q&A | Out of scope — see Wave 2 requirements doc |
+| Wave 2 portal / archive / Case Q&A (Diffs 1-5) | Code complete — real-AWS validation and portal front-door wiring open |
 
 **Default deploy posture unchanged:** `CAPABILITY_PROFILES=core` with
 `SplunkSinkMode=s3` preserves the original smoke path. Enable additional
@@ -111,7 +112,6 @@ The planning rules and skills applied are:
 
 - Replacing the core S3/Lambda/Bedrock workflow.
 - Moving the workflow to Step Functions.
-- Adding the 90-day case archive, analyst portal, or Case Q&A assistant.
 - Adding threat-intelligence adapters such as VirusTotal.
 - Adding SOAR playbook invocation during investigation.
 - Adding Langfuse/OpenTelemetry LLM tracing.

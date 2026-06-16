@@ -9,6 +9,7 @@ description = "S3-triggered notable analysis Lambda pipeline"
 requires-python = ">=3.12"
 dependencies = [
     "requests==2.32.5",
+    "PyJWT[crypto]==2.10.1",
 ]
 
 [tool.setuptools.packages.find]

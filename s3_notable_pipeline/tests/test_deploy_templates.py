@@ -60,6 +60,27 @@ class DeployTemplateTests(unittest.TestCase):
                 self.assertIn("PortalUiBucketName", template["Outputs"])
                 self.assertIn("PortalUiDistributionDomainName", template["Outputs"])
 
+    def test_portal_front_door_resources_are_present(self) -> None:
+        for path in (
+            "deploy/aws/template-sam.yaml",
+            "deploy/aws/template-cfn.yaml",
+        ):
+            with self.subTest(path=path):
+                template = load_template(path)
+                self.assertIn("HasPortalChatFunctionUrl", template["Conditions"])
+                self.assertIn("HasPortalJwtAuthorizer", template["Conditions"])
+                self.assertIn("IsPortalIamAuth", template["Conditions"])
+                self.assertIn("PortalHttpApi", template["Resources"])
+                self.assertIn("PortalHttpApiIntegration", template["Resources"])
+                self.assertIn("PortalHttpApiDefaultRoute", template["Resources"])
+                self.assertIn("PortalHttpApiStage", template["Resources"])
+                self.assertIn("PortalHttpApiInvokePermission", template["Resources"])
+                self.assertIn("PortalApiFunctionUrl", template["Resources"])
+                self.assertIn("PortalApiFunctionUrlInvokePermission", template["Resources"])
+                self.assertIn("PortalApiUrl", template["Outputs"])
+                self.assertIn("PortalChatFunctionUrl", template["Outputs"])
+                self.assertIn("PortalBrowserApiBaseUrl", template["Outputs"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,11 +2,11 @@
 
 ## Status
 
-Implementation contract for the AWS notable pipeline. **Wave 1 sections** (profiles
-through idempotency below) describe implemented analyzer behavior. **Wave 2
-sections** (analyst portal block at end) are synced from
-[`../planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md`](../planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md)
-as of the doc sync; code, SAM/CFN, and tests catch up in Diff 1 through Diff 5.
+Implementation contract for the AWS notable pipeline. **Wave 1 sections**
+(profiles through idempotency below) and **Wave 2 sections** (analyst portal
+block at end) describe implemented behavior as of Diff 1 through Diff 5 on
+`main`. Normative design detail remains in
+[`../planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md`](../planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md).
 
 ## Normative Source
 
@@ -305,12 +305,14 @@ customer overrides `BEDROCK_MODEL_ID`.
 
 ### Portal Hosting Contract (Decisions 2, 9, 19, 31, 34)
 
-- Portal API: read-only Lambda plus API Gateway with JWT authorizer (IAM
-  second-best).
-- Static React SPA on S3 plus CloudFront (Decision 18).
-- Long-running chat: portal Lambda Function URL behind CloudFront path
-  `/api/chat` and `/api/chat/*`; other `/api/*` routes use API Gateway
-  (Decisions 19, 31).
+- Portal API: read-only Lambda plus stack-managed API Gateway HTTP API and
+  optional Lambda Function URL for long chat (`PortalChatFunctionUrlEnabled`,
+  default `true`).
+- Static React SPA on S3 plus CloudFront (Decision 18). When
+  `PortalUiBucketName` is set, CloudFront routes `/api/*` to API Gateway and
+  `/api/chat` to the Function URL when enabled.
+- Stack outputs: `PortalApiUrl`, `PortalChatFunctionUrl`,
+  `PortalBrowserApiBaseUrl`, `PortalUiDistributionDomainName`.
 - Recommended v1 bundle: `CAPABILITY_PROFILES=core,analyst_portal` (Decision 34).
 - Portal Lambda has no write permissions to case index, input bucket, writeback
   secrets, or external integrations.

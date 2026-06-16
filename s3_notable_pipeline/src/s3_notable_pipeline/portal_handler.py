@@ -10,6 +10,7 @@ from .aws_clients import bedrock_runtime_client, dynamodb_client, s3_client
 from .case_chat import answer_selected_case_question
 from .case_index import get_case_detail, get_case_raw_section, list_cases
 from .config import Config, load_config
+from .portal_jwt import bearer_token_from_headers, validate_portal_jwt
 from .portal_api_models import (
     CaseDetailResponse,
     CaseListResponse,
@@ -183,17 +184,31 @@ def _is_authenticated(event: dict[str, Any], config: Config) -> bool:
     authorizer = ((event.get("requestContext") or {}).get("authorizer") or {})
     if config.PORTAL_AUTH_MODE == "jwt":
         claims = (authorizer.get("jwt") or {}).get("claims")
-        if not isinstance(claims, dict):
+        if isinstance(claims, dict) and _jwt_claims_valid(claims, config):
+            return True
+        token = bearer_token_from_headers(event.get("headers"))
+        if not token:
             return False
-        audience = claims.get("aud")
-        if isinstance(audience, list):
-            audience_valid = config.PORTAL_JWT_AUDIENCE in audience
-        else:
-            audience_valid = str(audience or "") == config.PORTAL_JWT_AUDIENCE
-        return str(claims.get("iss") or "") == config.PORTAL_JWT_ISSUER and audience_valid
+        validated = validate_portal_jwt(
+            token,
+            issuer=config.PORTAL_JWT_ISSUER,
+            audience=config.PORTAL_JWT_AUDIENCE,
+        )
+        return isinstance(validated, dict)
     if config.PORTAL_AUTH_MODE == "iam":
         return bool(authorizer.get("iam"))
     return False
+
+
+def _jwt_claims_valid(claims: dict[str, Any], config: Config) -> bool:
+    audience = claims.get("aud")
+    if isinstance(audience, list):
+        audience_valid = config.PORTAL_JWT_AUDIENCE in audience
+    else:
+        audience_valid = str(audience or "") == config.PORTAL_JWT_AUDIENCE
+    return (
+        str(claims.get("iss") or "") == config.PORTAL_JWT_ISSUER and audience_valid
+    )
 
 
 def _case_route(path: str) -> tuple[str | None, str | None]:

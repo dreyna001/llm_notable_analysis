@@ -722,6 +722,16 @@ Conditions:
   HasCaseIndexTable: !Not [!Equals [!Ref CaseIndexTableName, '']]
   HasPortalUiBucketName: !Not [!Equals [!Ref PortalUiBucketName, '']]
   HasPortalUiDeployment: !And [!Condition HasCaseIndexTable, !Condition HasPortalUiBucketName]
+  HasPortalChatFunctionUrl: !And
+    - !Condition HasCaseIndexTable
+    - !Equals [!Ref PortalChatFunctionUrlEnabled, 'true']
+  HasPortalCorsOrigins: !Not [!Equals [!Ref PortalCorsAllowedOrigins, '']]
+  IsPortalIamAuth: !Equals [!Ref PortalAuthMode, iam]
+  HasPortalJwtAuthorizer: !And
+    - !Condition HasCaseIndexTable
+    - !Equals [!Ref PortalAuthMode, jwt]
+    - !Not [!Equals [!Ref PortalJwtIssuer, '']]
+    - !Not [!Equals [!Ref PortalJwtAudience, '']]
  
 Resources:
   InputBucket:
@@ -1172,6 +1182,7 @@ Resources:
           PORTAL_JWT_AUDIENCE: !Ref PortalJwtAudience
           PORTAL_CORS_ALLOWED_ORIGINS: !Ref PortalCorsAllowedOrigins
           PORTAL_CHAT_TIMEOUT_SEC: !Ref PortalChatTimeoutSec
+          PORTAL_CHAT_FUNCTION_URL_ENABLED: !Ref PortalChatFunctionUrlEnabled
           PORTAL_CHAT_MAX_CONCURRENCY: !Ref PortalChatMaxConcurrency
           PORTAL_CHAT_BEDROCK_MODEL_ID: !Ref PortalChatBedrockModelId
           CASE_QA_ENABLED: !Ref CaseQaEnabled
@@ -1222,6 +1233,129 @@ Resources:
                 - logs:PutLogEvents
               Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${PortalApiLambdaName}:*'
       ImageUri: !Ref ImageUri
+
+  PortalHttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Condition: HasCaseIndexTable
+    Properties:
+      Name: !Sub '${AWS::StackName}-portal-api'
+      ProtocolType: HTTP
+      CorsConfiguration: !If
+        - HasPortalCorsOrigins
+        - AllowCredentials: true
+          AllowHeaders:
+            - authorization
+            - content-type
+          AllowMethods:
+            - GET
+            - POST
+            - OPTIONS
+          AllowOrigins: !Split
+            - ','
+            - !Ref PortalCorsAllowedOrigins
+        - !Ref AWS::NoValue
+
+  PortalHttpApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Condition: HasCaseIndexTable
+    Properties:
+      ApiId: !Ref PortalHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PortalApiFunction.Arn}/invocations'
+      PayloadFormatVersion: '2.0'
+      TimeoutInMillis: 30000
+
+  PortalHttpApiAuthorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Condition: HasPortalJwtAuthorizer
+    Properties:
+      ApiId: !Ref PortalHttpApi
+      AuthorizerType: JWT
+      IdentitySource:
+        - $request.header.Authorization
+      JwtConfiguration:
+        Audience:
+          - !Ref PortalJwtAudience
+        Issuer: !Ref PortalJwtIssuer
+      Name: portal-jwt
+
+  PortalHttpApiHealthRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HasCaseIndexTable
+    DependsOn: PortalHttpApiIntegration
+    Properties:
+      ApiId: !Ref PortalHttpApi
+      RouteKey: GET /health
+      AuthorizationType: NONE
+      Target: !Sub 'integrations/${PortalHttpApiIntegration}'
+
+  PortalHttpApiReadyRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HasCaseIndexTable
+    DependsOn: PortalHttpApiIntegration
+    Properties:
+      ApiId: !Ref PortalHttpApi
+      RouteKey: GET /ready
+      AuthorizationType: NONE
+      Target: !Sub 'integrations/${PortalHttpApiIntegration}'
+
+  PortalHttpApiDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HasCaseIndexTable
+    DependsOn: PortalHttpApiIntegration
+    Properties:
+      ApiId: !Ref PortalHttpApi
+      RouteKey: '$default'
+      AuthorizationType: !If [HasPortalJwtAuthorizer, JWT, !If [IsPortalIamAuth, AWS_IAM, NONE]]
+      AuthorizerId: !If [HasPortalJwtAuthorizer, !Ref PortalHttpApiAuthorizer, !Ref AWS::NoValue]
+      Target: !Sub 'integrations/${PortalHttpApiIntegration}'
+
+  PortalHttpApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Condition: HasCaseIndexTable
+    Properties:
+      ApiId: !Ref PortalHttpApi
+      StageName: $default
+      AutoDeploy: true
+
+  PortalHttpApiInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: HasCaseIndexTable
+    Properties:
+      FunctionName: !Ref PortalApiFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${PortalHttpApi}/*'
+
+  PortalApiFunctionUrl:
+    Type: AWS::Lambda::Url
+    Condition: HasPortalChatFunctionUrl
+    Properties:
+      TargetFunctionArn: !GetAtt PortalApiFunction.Arn
+      AuthType: !If [IsPortalIamAuth, AWS_IAM, NONE]
+      Cors: !If
+        - HasPortalCorsOrigins
+        - AllowCredentials: true
+          AllowHeaders:
+            - authorization
+            - content-type
+          AllowMethods:
+            - GET
+            - POST
+            - OPTIONS
+          AllowOrigins: !Split
+            - ','
+            - !Ref PortalCorsAllowedOrigins
+        - !Ref AWS::NoValue
+
+  PortalApiFunctionUrlInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: HasPortalChatFunctionUrl
+    Properties:
+      FunctionName: !Ref PortalApiFunction
+      Action: lambda:InvokeFunctionUrl
+      FunctionUrlAuthType: !If [IsPortalIamAuth, AWS_IAM, NONE]
+      Principal: '*'
   
   PortalUiBucket:
     Type: AWS::S3::Bucket
@@ -1251,6 +1385,8 @@ Resources:
   PortalUiDistribution:
     Type: AWS::CloudFront::Distribution
     Condition: HasPortalUiDeployment
+    DependsOn:
+      - PortalHttpApiStage
     Properties:
       DistributionConfig:
         Enabled: true
@@ -1263,6 +1399,143 @@ Resources:
             OriginAccessControlId: !GetAtt PortalUiOriginAccessControl.Id
             S3OriginConfig:
               OriginAccessIdentity: ''
+          - Id: PortalHttpApiOrigin
+            DomainName: !Sub '${PortalHttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+            CustomOriginConfig:
+              HTTPSPort: 443
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols:
+                - TLSv1.2
+          - !If
+            - HasPortalChatFunctionUrl
+            - Id: PortalChatFunctionUrlOrigin
+              DomainName: !Select
+                - 0
+                - !Split
+                  - '/'
+                  - !Select
+                    - 1
+                    - !Split
+                      - 'https://'
+                      - !GetAtt PortalApiFunctionUrl.FunctionUrl
+              CustomOriginConfig:
+                HTTPSPort: 443
+                OriginProtocolPolicy: https-only
+                OriginSSLProtocols:
+                  - TLSv1.2
+            - !Ref AWS::NoValue
+        CacheBehaviors: !If
+          - HasPortalChatFunctionUrl
+          - - PathPattern: /api/chat
+              TargetOriginId: PortalChatFunctionUrlOrigin
+              ViewerProtocolPolicy: redirect-to-https
+              AllowedMethods:
+                - GET
+                - HEAD
+                - OPTIONS
+                - PUT
+                - POST
+                - PATCH
+                - DELETE
+              CachedMethods:
+                - GET
+                - HEAD
+                - OPTIONS
+              Compress: true
+              CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+              OriginRequestPolicyId: 8889c0eb-4046-40c1-bcb2-d7a8f9f6e8fd
+            - PathPattern: /api/*
+              TargetOriginId: PortalHttpApiOrigin
+              ViewerProtocolPolicy: redirect-to-https
+              AllowedMethods:
+                - GET
+                - HEAD
+                - OPTIONS
+                - PUT
+                - POST
+                - PATCH
+                - DELETE
+              CachedMethods:
+                - GET
+                - HEAD
+                - OPTIONS
+              Compress: true
+              CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+              OriginRequestPolicyId: 8889c0eb-4046-40c1-bcb2-d7a8f9f6e8fd
+            - PathPattern: /health
+              TargetOriginId: PortalHttpApiOrigin
+              ViewerProtocolPolicy: redirect-to-https
+              AllowedMethods:
+                - GET
+                - HEAD
+                - OPTIONS
+              CachedMethods:
+                - GET
+                - HEAD
+                - OPTIONS
+              Compress: true
+              CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+              OriginRequestPolicyId: 8889c0eb-4046-40c1-bcb2-d7a8f9f6e8fd
+            - PathPattern: /ready
+              TargetOriginId: PortalHttpApiOrigin
+              ViewerProtocolPolicy: redirect-to-https
+              AllowedMethods:
+                - GET
+                - HEAD
+                - OPTIONS
+              CachedMethods:
+                - GET
+                - HEAD
+                - OPTIONS
+              Compress: true
+              CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+              OriginRequestPolicyId: 8889c0eb-4046-40c1-bcb2-d7a8f9f6e8fd
+          - - PathPattern: /api/*
+              TargetOriginId: PortalHttpApiOrigin
+              ViewerProtocolPolicy: redirect-to-https
+              AllowedMethods:
+                - GET
+                - HEAD
+                - OPTIONS
+                - PUT
+                - POST
+                - PATCH
+                - DELETE
+              CachedMethods:
+                - GET
+                - HEAD
+                - OPTIONS
+              Compress: true
+              CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+              OriginRequestPolicyId: 8889c0eb-4046-40c1-bcb2-d7a8f9f6e8fd
+            - PathPattern: /health
+              TargetOriginId: PortalHttpApiOrigin
+              ViewerProtocolPolicy: redirect-to-https
+              AllowedMethods:
+                - GET
+                - HEAD
+                - OPTIONS
+              CachedMethods:
+                - GET
+                - HEAD
+                - OPTIONS
+              Compress: true
+              CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+              OriginRequestPolicyId: 8889c0eb-4046-40c1-bcb2-d7a8f9f6e8fd
+            - PathPattern: /ready
+              TargetOriginId: PortalHttpApiOrigin
+              ViewerProtocolPolicy: redirect-to-https
+              AllowedMethods:
+                - GET
+                - HEAD
+                - OPTIONS
+              CachedMethods:
+                - GET
+                - HEAD
+                - OPTIONS
+              Compress: true
+              CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+              OriginRequestPolicyId: 8889c0eb-4046-40c1-bcb2-d7a8f9f6e8fd
         DefaultCacheBehavior:
           TargetOriginId: PortalUiS3Origin
           ViewerProtocolPolicy: redirect-to-https
@@ -1337,3 +1610,23 @@ Outputs:
     Description: CloudFront domain name for the analyst portal static SPA
     Value: !GetAtt PortalUiDistribution.DomainName
 
+  PortalApiUrl:
+    Condition: HasCaseIndexTable
+    Description: HTTPS invoke URL for the read-only portal API (API Gateway HTTP API)
+    Value: !Sub 'https://${PortalHttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+
+  PortalChatFunctionUrl:
+    Condition: HasPortalChatFunctionUrl
+    Description: Lambda Function URL for long-running portal chat (uses PortalChatTimeoutSec)
+    Value: !GetAtt PortalApiFunctionUrl.FunctionUrl
+
+  PortalBrowserApiBaseUrl:
+    Condition: HasCaseIndexTable
+    Description: Recommended browser API base URL for the SPA (no trailing slash)
+    Value: !If
+      - HasPortalUiDeployment
+      - !Sub 'https://${PortalUiDistribution.DomainName}'
+      - !If
+        - HasPortalChatFunctionUrl
+        - !GetAtt PortalApiFunctionUrl.FunctionUrl
+        - !Sub 'https://${PortalHttpApi}.execute-api.${AWS::Region}.amazonaws.com'

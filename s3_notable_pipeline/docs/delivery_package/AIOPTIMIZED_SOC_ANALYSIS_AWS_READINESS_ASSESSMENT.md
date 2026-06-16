@@ -1,6 +1,7 @@
 # AWS Readiness Assessment
 
-This is the detailed readiness assessment for deploying `s3_notable_pipeline` on AWS (Wave 1).
+This is the detailed readiness assessment for deploying `s3_notable_pipeline` on AWS
+(Wave 1 and optional Wave 2).
 
 Use `AIOPTIMIZED_SOC_ANALYSIS_AWS_READINESS_OVERVIEW.md` as the front-door summary. Use this document when you need the full technical rationale, operational implications, and integration framing.
 
@@ -91,8 +92,9 @@ Before enabling optional profiles beyond `core`, the org should have profile-spe
 - `elastic_readonly` — Elasticsearch owner approval, HTTPS base URL, API key secret, index allowlist, optional grounding KB.
 - `ticket_draft` — ServiceNow assignment group for draft payloads (no POST).
 - `action_gated` — write approval, `SIDE_EFFECT_IDEMPOTENCY_TABLE`, Splunk and/or ServiceNow secrets, signed create approval workflow.
+- `analyst_portal` — case archive bucket, CaseIndex table, embed Lambda target, portal JWT issuer/audience, CORS origins, SPA build API base URL, and customer API front-door routing.
 
-Recommended order: `core` + `s3` first, then one profile at a time in non-production. Full operator workflow is in `docs/operations/CAPABILITY_PROFILES.md`.
+Recommended order: `core` + `s3` first, then one profile at a time in non-production. Add `analyst_portal` only after base analyzer output is validated. Full operator workflow is in `docs/operations/CAPABILITY_PROFILES.md`.
 
 ### 6. Secrets And External Integration Readiness
 
@@ -135,6 +137,42 @@ A low-issue deployment also requires basic day-2 readiness:
 
 Without this, deployment might succeed but the org will still feel blocked.
 
+### 8. Analyst Portal Readiness (Wave 2)
+
+Wave 2 is **code-complete** in the repository. Readiness for `analyst_portal` is
+separate from Wave 1 analyzer readiness.
+
+Before enabling `analyst_portal`, the org should already have:
+
+- validated Wave 1 analyzer output in the target account
+- `CaseArchiveBucketName`, `CaseIndexTableName`, and `CaseRetentionDays` agreed
+- `PortalJwtIssuer` and `PortalJwtAudience` matching the customer identity provider
+- exact browser CORS origins for the SPA (`PortalCorsAllowedOrigins`)
+- a decision on how analysts reach the portal API (API Gateway HTTP API, corporate reverse proxy, or approved equivalent)
+- a decision on whether chat uses the same API origin or a dedicated Lambda Function URL when longer timeouts are required
+- a static SPA host (optional stack `PortalUiBucketName` plus CloudFront, or customer-managed equivalent)
+- `VITE_PORTAL_API_BASE_URL` set at SPA build time when UI and API are on different hostnames
+
+What the stack creates automatically:
+
+- analyzer archive writes, embed Lambda, portal API Lambda, CaseIndex table
+- API Gateway HTTP API (`PortalApiUrl`) and optional chat Function URL
+  (`PortalChatFunctionUrl`) when `PortalChatFunctionUrlEnabled=true`
+- optional static UI bucket/CloudFront with API routing when `PortalUiBucketName`
+  is set (`PortalBrowserApiBaseUrl`)
+
+What remains **customer/environment wiring**:
+
+- JWT issuance to browsers through the customer IdP or approved front door
+- DNS/TLS, WAF, and corporate access controls when custom hostnames are required
+- SPA build/upload and CORS origin alignment with the browser URL analysts use
+
+Operator detail:
+[`../operations/ANALYST_PORTAL_OPERATIONS.md`](../operations/ANALYST_PORTAL_OPERATIONS.md).
+
+Staging validation for Wave 2 is documented in
+[`../testing/TESTING.md`](../testing/TESTING.md) under the Wave 2 portal checklist.
+
 ## The Real "Green State"
 
 For `s3_notable_pipeline`, an org is in true green status when it can answer these questions immediately:
@@ -150,6 +188,7 @@ For `s3_notable_pipeline`, an org is in true green status when it can answer the
 9. What upstream system is writing files into `incoming/`?
 10. Does that upstream system match the filename, payload, and ServiceNow approval assumptions?
 11. Who owns smoke testing and runtime support after deploy?
+12. If `analyst_portal` is enabled, what JWT issuer/audience, CORS origins, SPA API base URL, and API front-door routing will analysts use?
 
 If they cannot answer those without a workshop, they are not ready for low-friction deployment.
 
@@ -180,6 +219,7 @@ This section does not add new requirements. It reorganizes the same readiness po
 - validate that the deployed Bedrock target, region, and runtime settings match the approved values
 - run smoke tests by uploading a known-good file and checking output for each enabled profile
 - verify Lambda logs, report generation (markdown/JSON/HTML), optional RAG and read-only investigation, and if enabled writeback or ServiceNow paths
+- if `analyst_portal` is enabled, validate archive/envelope write, embed completion, portal routes, SPA load, and cited selected-case chat
 - distinguish whether a failure is coming from deployment, Bedrock invocation, KB retrieve, query policy, or sink integration
 - document or hand off the exact values and commands needed for rerun and rollback
 
@@ -193,6 +233,7 @@ This section does not add new requirements. It reorganizes the same readiness po
 - Splunk or Elasticsearch owner confirmation of allowlists and endpoint mapping
 - ServiceNow owner confirmation of draft vs create boundaries and signed approval workflow
 - network or private-routing changes if standard internet egress is not the chosen model
+- for `analyst_portal`, identity-platform and network owners confirming JWT, CORS, DNS/TLS when custom hostnames are used, and SPA build alignment with `PortalBrowserApiBaseUrl`
 
 ## Current Package Friction
 
@@ -204,7 +245,7 @@ For `s3_notable_pipeline` specifically, these are the main sources of deployment
 - optional profiles add integration surface area (Knowledge Bases, Splunk/MCP, Elasticsearch, ServiceNow, DynamoDB); each requires owner approval and secrets before enablement
 - Splunk integration has a template-driven `notable_rest` path; new production rollouts should pair it with `action_gated`, and operators still need an approved secret lifecycle and write approval boundaries
 
-## Security And Scope Boundaries (Wave 1)
+## Security And Scope Boundaries (Wave 1 and Wave 2)
 
 These boundaries are intentional and should be reflected in customer security review:
 
@@ -213,5 +254,7 @@ These boundaries are intentional and should be reflected in customer security re
 - **No autonomous remediation**, suppression, or case closure.
 - New production external writes (Splunk notable comments, ServiceNow creates) should use **`action_gated`**, explicit configuration, signed ServiceNow approval for creates, and **DynamoDB side-effect idempotency**. Legacy `notable_rest` writeback remains supported for existing deployments.
 - S3 report writes are not deduplicated by idempotency; customers should treat the object key as the natural boundary for one analysis run.
+- Wave 2 portal routes are read-only; `POST /api/chat` is query transport only and requires a pinned `selected_case_id`.
+- Portal answers must be grounded in archived case chunks with citation enforcement; cross-case or global archive chat is out of v1 scope.
 
 See `docs/security/ATTACK_LLM_ANALYSIS.md` and `docs/delivery_package/end_to_end_diagrams/END_TO_END_DIAGRAMS.md` for grounding and flow detail.

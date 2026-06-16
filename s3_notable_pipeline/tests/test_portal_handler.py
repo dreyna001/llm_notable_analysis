@@ -145,6 +145,25 @@ class PortalHandlerTests(unittest.TestCase):
 
         self.assertEqual(response["statusCode"], 401)
 
+    def test_bearer_jwt_is_accepted_when_authorizer_claims_are_absent(self) -> None:
+        request = {
+            "rawPath": "/api/cases",
+            "requestContext": {"http": {"method": "GET"}},
+            "headers": {"Authorization": "Bearer test-token"},
+        }
+        with (
+            patch.object(portal_handler, "load_config", return_value=portal_config()),
+            patch.object(
+                portal_handler,
+                "validate_portal_jwt",
+                return_value={"iss": "https://issuer.example.test", "aud": "portal"},
+            ),
+            patch.object(portal_handler, "dynamodb_client", return_value=FakeDynamoDbClient()),
+        ):
+            response = portal_handler.handler(request, None)
+
+        self.assertEqual(response["statusCode"], 200)
+
     def test_mutating_method_is_rejected(self) -> None:
         with patch.object(portal_handler, "load_config", return_value=portal_config()):
             response = portal_handler.handler(event("/api/cases/case-1", "DELETE"), None)

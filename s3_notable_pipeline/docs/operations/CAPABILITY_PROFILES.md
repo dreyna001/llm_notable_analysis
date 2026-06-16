@@ -171,9 +171,9 @@ Primary follow-up values:
 - `CHAT_SESSIONS_TABLE` and `CHAT_MESSAGES_TABLE` only when
   `CASE_QA_CHAT_HISTORY_ENABLED=true`
 
-Diff 1 only adds the profile, validation, environment contract, and deployment
-scaffolding. Archive writes, portal API routes, and chat synthesis are delivered
-by the later Wave 2 diffs.
+Diff 1 through Diff 5 deliver archive writes, portal API routes, embed Lambda,
+and pinned-case chat synthesis when `analyst_portal` is enabled. Operator detail:
+[`ANALYST_PORTAL_OPERATIONS.md`](ANALYST_PORTAL_OPERATIONS.md).
 
 ## Advanced Overrides
 
