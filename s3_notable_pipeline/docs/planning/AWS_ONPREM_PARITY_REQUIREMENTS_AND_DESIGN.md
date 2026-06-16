@@ -1126,6 +1126,8 @@ matching on-prem semaphore behavior. Default **`18`** (max `64`) on AWS and on-p
   unconstrained).
 - Return HTTP 429 with *"Too many chat requests are already running. Try again
   shortly."* when concurrency is exceeded.
+- Scope is **per execution environment** (in-process), not account-wide; see
+  Decision 36.
 
 ### Decision 24: Diff sequence and module layout (v1)
 
@@ -1260,6 +1262,22 @@ for Pydantic in `portal_api_models.py`.
   `faiss-cpu`, `onprem-llm-sdk`, etc.); AWS uses Bedrock for embed and chat.
 - Any dependency outside `requests`, Lambda `boto3`, and the Pydantic pin above
   requires a new locked decision.
+
+### Decision 36: Portal chat concurrency scope (v1)
+
+**Locked:** Per portal Lambda **execution environment** (in-process semaphore),
+matching on-prem per-process behavior.
+
+- The semaphore limits concurrent in-flight chat requests within one warm Lambda
+  execution environment only.
+- Approximate fleet-wide concurrency is
+  `PORTAL_CHAT_MAX_CONCURRENCY` times the number of concurrent warm portal
+  execution environments (scales with traffic; provisioned concurrency sets a
+  floor, not a hard global cap).
+- Do **not** implement a DynamoDB, ElastiCache, or other cross-instance chat
+  counter in v1.
+- If a customer requires a hard account-wide chat cap across all warm instances,
+  that requires a new locked decision and is out of v1 scope.
 
 ## Portal Frontend Contract
 

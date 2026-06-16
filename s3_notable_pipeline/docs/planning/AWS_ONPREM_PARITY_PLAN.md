@@ -7,10 +7,10 @@ tests, operations docs, and technical spec). All planned runtime modules,
 `config.env.example`, SAM/CloudFormation contract additions, and mocked unit
 tests are present in the repository.
 
-**Remaining Wave 1 closeout (Diff 6 tail only):** delivery-package doc parity
-refresh (readiness assessment still centers on `core` / `notable_rest`), and
-explicit dev/staging/prod deploy validation in a real AWS account. No real-AWS
-validation outcome is recorded in this repo.
+**Remaining Wave 1 closeout (Diff 6 tail only):** explicit dev/staging/prod
+deploy validation in a real AWS account. Delivery-package doc parity refresh is
+complete (see commit history on `main`). No real-AWS validation outcome is
+recorded in this repo.
 
 **Out of Wave 1 scope:** case archive, analyst portal, and Case Q&A are
 specified in
@@ -28,7 +28,7 @@ Implementation contract:
 | Unit tests (mocked AWS/Splunk/Elastic/ServiceNow) | Complete — `python -m unittest discover -s s3_notable_pipeline/tests -p "test_*.py" -v` |
 | Operations docs | Complete |
 | Technical spec | Complete |
-| Delivery docs / readiness assessment parity | Open — refresh for multi-profile deployments |
+| Delivery docs / readiness assessment parity | Complete — multi-profile readiness docs refreshed |
 | Real AWS deploy validation | Open — operator step, not evidenced in repo |
 | Wave 2 portal / archive / Case Q&A | Out of scope — see Wave 2 requirements doc |
 

@@ -10,7 +10,7 @@ as of the doc sync; code, SAM/CFN, and tests catch up in Diff 1 through Diff 5.
 
 ## Normative Source
 
-Primary (wave 2 — portal, archive, Case Q&A, Decisions 1-35):
+Primary (wave 2 — portal, archive, Case Q&A, Decisions 1-36):
 
 [`../planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md`](../planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md)
 
@@ -23,7 +23,7 @@ coding. Wave 1 PLAN content applies only where wave 2 does not supersede it.
 
 ## Deployment Target (v1)
 
-**Locked (Decision 35):** Production parity deploys target **AWS GovCloud
+**Locked deployment target:** Production parity deploys target **AWS GovCloud
 `us-gov-west-1`**. Use `arn:aws-us-gov:...` partition ARNs in examples and
 templates unless a customer explicitly chooses a commercial region.
 
@@ -43,11 +43,9 @@ flow. Do not move orchestration to Step Functions as part of this parity block.
 Diff 1 adds (wave 2 portal block):
 
 - `analyst_portal` capability profile parsing and validation in `config.py`.
-- `BEDROCK_ANALYZER_MODEL_PRESET` (`gpt-5.4-medium` default;
-  `sonnet-4.6-medium` per customer decision).
-- `BEDROCK_MANTLE_REGION` default `us-gov-west-1` for GovCloud Mantle calls.
-- Portal/archive/Aurora/RDS Proxy parameter scaffolding in SAM/CloudFormation
-  and `config.env.example` (default-off; no behavior change for `core` only).
+- Portal/archive/chunk/index runtime settings in `config.env.example` and
+  SAM/CloudFormation parameter scaffolding (default-off; no behavior change for
+  `core` only).
 - This technical spec wave 2 sections below.
 
 Diff 1 must preserve current default behavior:
@@ -270,62 +268,90 @@ Rules:
 
 ## Wave 2: Analyst Portal Block (Diff 1-5)
 
-Normative detail: REQUIREMENTS_AND_DESIGN Decisions 1-35 and diff sequence.
+Normative detail: REQUIREMENTS_AND_DESIGN Decisions 1-36 and diff sequence.
 Implement only the diff scope active in the current change.
 
-### Analyzer Model Preset Contract (Decision 28)
+### Analyzer And Portal Bedrock Model Contract (Decisions 28, 29)
 
-Default preset: **`gpt-5.4-medium`**.
+Default analyzer model: **Claude Sonnet 4.6** on Amazon Bedrock unless the
+customer overrides `BEDROCK_MODEL_ID`.
 
-- Model ID `openai.gpt-5.4` via Bedrock Mantle OpenAI Responses API.
-- Endpoint: `https://bedrock-mantle.{region}.api.aws/openai/v1/responses`.
-- `reasoning.effort=medium`. Bedrock supports `minimal`, `low`, `medium`,
-  `high`; not `xhigh`.
-- `BEDROCK_MANTLE_REGION` defaults to `us-gov-west-1` (Decision 35).
+- SAM/CloudFormation default `BEDROCK_MODEL_ID` uses the regional Sonnet 4.6
+  inference profile ARN for the deployment region.
+- Portal chat inherits `BEDROCK_MODEL_ID` when `PORTAL_CHAT_BEDROCK_MODEL_ID` is
+  unset.
+- Optional `PORTAL_CHAT_BEDROCK_MODEL_ID` overrides chat synthesis only.
+- Portal chat must not import or reuse analyzer prompts from `ttp_analyzer.py`.
 
-Customer-selectable alternate: **`sonnet-4.6-medium`**.
+### Case Archive And Index Contract (Decisions 1, 5, 10, 20, 24-26)
 
-- Bedrock Runtime Converse with Sonnet 4.6 inference profile.
-- GovCloud example:
-  `arn:aws-us-gov:bedrock:us-gov-west-1:${AwsAccountId}:inference-profile/us.anthropic.claude-sonnet-4-6`.
-- `additionalModelRequestFields`: `thinking.type=adaptive`,
-  `output_config.effort=medium`. `max` effort is not valid for Sonnet on Bedrock.
+- S3 canonical envelope at
+  `{CASE_ARCHIVE_PREFIX}/yyyy/mm/dd/{case_id}.json`.
+- DynamoDB CaseIndex for browse/query metadata and pointers only; no full alert
+  payloads or full analysis bodies in DynamoDB.
+- **No Aurora Postgres, RDS Proxy, or OpenSearch** for v1 archive storage or
+  case retrieval (Decision 1).
+- Analyzer writes envelope and CaseIndex, sets `retrieval_status=pending`, then
+  asynchronously invokes the **embed Lambda (Diff 2b)**. Embedding must not run
+  inside the analyzer Lambda process (Decisions 10, 24).
+- Embed Lambda writes S3 chunk objects at
+  `{CASE_ARCHIVE_CHUNKS_PREFIX}/{case_id}/{chunk_id}.json` with `search_text` and
+  Titan embeddings; transitions `retrieval_status` to `ready` or `failed`
+  (Decisions 6, 20, 26).
+- Identity collision on an existing `case_id` suppresses the archive write
+  (Decision 25).
+- `CASE_ARCHIVE_FAILURE_MODE=suppress` (default) preserves report output on
+  archive/index/embed failure (Decision 5).
 
-`ttp_analyzer.py` must branch Mantle Responses vs Converse by preset. Portal
-chat inherits the active preset unless `PORTAL_CHAT_BEDROCK_MODEL_ID` is set
-(Decision 29).
+### Portal Hosting Contract (Decisions 2, 9, 19, 31, 34)
 
-### Case Archive And Aurora Contract (Decisions 1, 7, 10, 26)
+- Portal API: read-only Lambda plus API Gateway with JWT authorizer (IAM
+  second-best).
+- Static React SPA on S3 plus CloudFront; reuse on-prem analyst portal UI
+  (Decision 18).
+- Long-running chat: portal Lambda Function URL behind CloudFront path
+  `/api/chat` and `/api/chat/*`; other `/api/*` routes use API Gateway
+  (Decisions 19, 31).
+- Recommended v1 bundle: `CAPABILITY_PROFILES=core,analyst_portal` (Decision 34).
+- Portal Lambda has no write permissions to case index, input bucket, writeback
+  secrets, or external integrations.
 
-- S3 canonical envelope at `cases/yyyy/mm/dd/{case_id}.json`.
-- DynamoDB CaseIndex for browse metadata only.
-- Aurora Postgres `notable_cases.cases` and `notable_cases.case_chunks` with GIN
-  FTS plus HNSW pgvector for hybrid retrieval.
-- Inline Titan embed in analyzer Lambda; `retrieval_status` transitions
-  `pending` to `ready` or `failed` in the same run. No separate embed Lambda.
-- Analyzer and portal connect through **RDS Proxy**, not the Aurora cluster
-  endpoint directly.
-
-### Portal Hosting Contract (Decision 2)
-
-- Portal API: Lambda plus API Gateway; chat long timeout via Function URL plus
-  CloudFront (Decision 19).
-- `PORTAL_LAMBDA_PROVISIONED_CONCURRENCY` default `2`.
-- GovCloud: private subnets, controlled egress, VPC interface endpoints where
-  available.
-
-### Portal API And Case Q&A Contract (Decisions 3-5, 27, 33)
+### Portal API And Case Q&A Contract (Decisions 3-4, 7, 11-14, 21-23, 27, 33, 36)
 
 - Read-only portal handler; no case mutations from the portal.
-- Pinned-case chat only (`selected_case_id` required).
-- Hybrid retrieval in portal Lambda over Aurora (lexical plus vector plus RRF),
-  not in-Lambda full-case scans.
-- Chat synthesis in `portal_chat.py`; do not import `ttp_analyzer.py`.
-- Response shapes must match vendored on-prem `portal.openapi.json`.
-- Vendor on-prem `portal_api_models.py` (Pydantic); pin `pydantic` in
-  `requirements.txt` per REQUIREMENTS_AND_DESIGN Decision 35.
+- Pinned-case chat only (`selected_case_id` required on every chat request).
+- Hybrid retrieval in portal Lambda over **S3 case chunk objects**: in-memory
+  BM25 on `search_text`, cosine similarity on Bedrock Titan query embeddings,
+  merged with RRF (`CASE_QA_RRF_K=60`). No OpenSearch, Kendra, or Bedrock KB for
+  case-archive retrieval (Decision 7).
+- Optional advisory KB context when `rag`, `spl_readonly`, or `elastic_readonly`
+  profiles are also enabled (Decision 12).
+- Chat synthesis in `portal_chat.py`; do not import `ttp_analyzer.py`
+  (Decision 33).
+- Response shapes must match vendored on-prem `portal.openapi.json` and
+  `portal_api_models.py` (Pydantic); pin `pydantic` in `requirements.txt` per
+  Decision 35.
+- `archive_notices` on case list and detail; full `chat_dependency_status` when
+  `CASE_QA_ENABLED=true` (Decisions 21-22).
+- Chat concurrency: in-process semaphore per portal Lambda execution environment;
+  default `PORTAL_CHAT_MAX_CONCURRENCY=18` (max `64`). See Decision 36 for
+  fleet-wide scope (Decisions 23, 36).
 
 ### Embedding Contract (Decision 6)
 
-- Chunk and query embeddings: Bedrock Titan (`amazon.titan-embed-text-v2:0`), not
-  on-prem Mixedbread embedder, for AWS v1.
+- Chunk and query embeddings: Bedrock Titan (`amazon.titan-embed-text-v2:0`),
+  `1024` dimensions with `normalize=true`.
+- Do not load on-prem Mixedbread embedder into Lambda.
+- Same model at chunk write (embed Lambda) and chat query time (portal Lambda).
+
+### Chat History Contract (Decisions 8, 17)
+
+- Default-off: `CASE_QA_CHAT_HISTORY_ENABLED=false`.
+- When enabled: DynamoDB `CHAT_SESSIONS_TABLE` and `CHAT_MESSAGES_TABLE`; portal
+  Lambda read/write only.
+
+### Python Dependencies (Decision 35)
+
+- Add `pydantic` (pinned to on-prem resolved version) when Diff 3 ships.
+- Do not deploy `fastapi` or `uvicorn` on the portal Lambda.
+- Do not port on-prem ML/RAG stack packages; AWS uses Bedrock for embed and chat.

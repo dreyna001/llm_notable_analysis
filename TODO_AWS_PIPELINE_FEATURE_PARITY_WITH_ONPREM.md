@@ -16,8 +16,8 @@ Status index for optional capabilities that exist (or are specified) for
 
 Wave 1 runtime implementation is **code-complete**. See
 [`s3_notable_pipeline/docs/planning/AWS_ONPREM_PARITY_PLAN.md`](s3_notable_pipeline/docs/planning/AWS_ONPREM_PARITY_PLAN.md)
-for the diff sequence, scope contract, and remaining closeout (delivery-doc
-refresh and real-AWS deploy validation only).
+for the diff sequence, scope contract, and remaining closeout (real-AWS deploy
+validation only; delivery docs refreshed).
 
 Implemented in `s3_notable_pipeline/`:
 
@@ -58,4 +58,4 @@ Open Wave 2 items (do not implement under Wave 1 closeout):
 
 ---
 
-_Last updated: Wave 1 analyzer parity marked complete; Wave 2 tracked in `AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md`._
+_Last updated: Wave 1 complete; Wave 2 prep docs synced (technical spec, Decision 36); implementation not started._
