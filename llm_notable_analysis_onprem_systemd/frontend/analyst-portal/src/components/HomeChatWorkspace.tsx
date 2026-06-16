@@ -617,28 +617,28 @@ export function HomeChatWorkspace({
   const handleSelectSession = useCallback(
     async (localId: string) => {
       setHistoryLoadError(null);
-      let targetSession: StoredChatSession | null = null;
-      let shouldLoadHistory = false;
+
+      // Resolve the target session from current state synchronously. Reading
+      // values assigned inside a setStore updater is unreliable: React runs the
+      // updater during render, so those reads are still null on the first click
+      // and the history load would only fire on a later interaction.
+      const session = store.sessions.find((item) => item.localId === localId);
+      if (!session || session.localId === store.activeLocalId) {
+        return;
+      }
+      const shouldLoadHistory = Boolean(
+        session.serverSessionId && session.turns.length === 0,
+      );
 
       setStore((current) => {
-        const session = current.sessions.find((item) => item.localId === localId);
-        if (!session || session.localId === current.activeLocalId) {
+        if (!current.sessions.some((item) => item.localId === localId)) {
           return current;
         }
-        targetSession = session;
-        shouldLoadHistory = Boolean(
-          session.serverSessionId && session.turns.length === 0,
-        );
         const next = { ...current, activeLocalId: localId };
         const capped = capChatSessionStore(next, maxChatSessions);
         return capped;
       });
 
-      if (!targetSession) {
-        return;
-      }
-
-      const session = targetSession;
       sessionHistoryAbortRef.current?.abort();
       const abortController = new AbortController();
       sessionHistoryAbortRef.current = abortController;
@@ -705,7 +705,7 @@ export function HomeChatWorkspace({
         setLoadingSessionId((current) => (current === localId ? null : current));
       }
     },
-    [maxChatSessions, onAttachCase, onClearSelectedCase],
+    [maxChatSessions, onAttachCase, onClearSelectedCase, store],
   );
 
   const handleAttachCase = useCallback(
