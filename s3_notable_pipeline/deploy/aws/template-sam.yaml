@@ -921,6 +921,15 @@ Resources:
             BucketName: !Ref InputBucketName
         - S3WritePolicy:
             BucketName: !Ref OutputBucketName
+        - !If
+          - HasCaseArchiveBucketName
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  - !Sub 'arn:aws:s3:::${CaseArchiveBucketName}/${CaseArchivePrefix}/*'
+          - !Ref AWS::NoValue
         - Statement:
             - Effect: Allow
               Action:
@@ -1007,6 +1016,17 @@ Resources:
                 - dynamodb:UpdateItem
                 - dynamodb:DeleteItem
               Resource: !GetAtt SideEffectIdempotencyTable.Arn
+        - !If
+          - HasCaseIndexTable
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource:
+                  - !GetAtt CaseIndexTable.Arn
+          - !Ref AWS::NoValue
         - Statement:
             - Effect: Allow
               Action:

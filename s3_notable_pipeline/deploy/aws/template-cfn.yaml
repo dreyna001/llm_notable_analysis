@@ -834,6 +834,14 @@ Resources:
                 Resource:
                   - !Sub 'arn:aws:s3:::${OutputBucketName}/*'
               - !If
+                - HasCaseArchiveBucketName
+                - Effect: Allow
+                  Action:
+                    - s3:PutObject
+                  Resource:
+                    - !Sub 'arn:aws:s3:::${CaseArchiveBucketName}/${CaseArchivePrefix}/*'
+                - !Ref AWS::NoValue
+              - !If
                 - IsNotableRest
                 - Effect: Allow
                   Action:
@@ -917,6 +925,19 @@ Resources:
                   - dynamodb:UpdateItem
                   - dynamodb:DeleteItem
                 Resource: !GetAtt SideEffectIdempotencyTable.Arn
+        - !If
+          - HasCaseIndexTable
+          - PolicyName: CaseIndexWriterPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - dynamodb:PutItem
+                    - dynamodb:GetItem
+                    - dynamodb:UpdateItem
+                  Resource: !GetAtt CaseIndexTable.Arn
+          - !Ref AWS::NoValue
         - PolicyName: CloudWatchLogsPolicy
           PolicyDocument:
             Version: '2012-10-17'

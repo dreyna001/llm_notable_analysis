@@ -21,7 +21,9 @@ from typing import Dict, Any
 
 from .aws_clients import s3_client as make_s3_client
 from .aws_clients import secretsmanager_client as make_secretsmanager_client
+from .aws_clients import dynamodb_client as make_dynamodb_client
 from .bedrock_kb_retrieval import retrieve_soc_context
+from .case_archive import SourceContext, archive_case
 from .config import Config, load_config
 from .html_generator import generate_html_report
 from .idempotency import (
@@ -50,12 +52,22 @@ logger.setLevel(logging.INFO)
 # mocked clients and local integration can use AWS_ENDPOINT_URL.
 s3_client = make_s3_client()
 secretsmanager_client = make_secretsmanager_client()
+_dynamodb_client: Any | None = None
 
 # Placeholder filenames to skip (case-insensitive basename match)
 PLACEHOLDER_FILENAMES = frozenset({'.keep', '.gitkeep', '_success', '.placeholder'})
 DEFAULT_MAX_DECOMPRESSED_INPUT_BYTES = 1_048_576
 GZIP_CONTENT_ENCODINGS = frozenset({'gzip', 'x-gzip'})
 FINDING_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+
+
+def get_dynamodb_client() -> Any:
+    """Return the DynamoDB client lazily because archive is default-off."""
+
+    global _dynamodb_client  # pylint: disable=global-statement
+    if _dynamodb_client is None:
+        _dynamodb_client = make_dynamodb_client()
+    return _dynamodb_client
 
 
 @dataclass(frozen=True)
@@ -412,6 +424,57 @@ def write_to_notable_rest_sink(
         "s3_result": s3_result,
         "rest_result": rest_result,
     }
+
+
+def write_case_archive_after_sink(
+    *,
+    analysis_result: Dict[str, Any],
+    config: Config,
+    source_bucket: str,
+    source_key: str,
+    decoded_notable: DecodedNotable,
+    sink_result: Dict[str, Any],
+    processed_at: str | None = None,
+) -> Dict[str, Any]:
+    """Archive a completed case after the report sink succeeds."""
+
+    if not config.CASE_ARCHIVE_ENABLED:
+        return {"status": "skipped", "message": "case archive disabled"}
+    if sink_result.get("status") != "success":
+        return {
+            "status": "skipped",
+            "message": "Skipped archive because report sink failed",
+        }
+    try:
+        source = SourceContext(
+            input_bucket=source_bucket,
+            input_key=source_key,
+            source_filename=PurePosixPath(source_key).name,
+            content_type=decoded_notable.content_type,
+            was_compressed=decoded_notable.was_compressed,
+        )
+        result = archive_case(
+            analysis_result=analysis_result,
+            config=config,
+            source=source,
+            sink_result=sink_result,
+            s3_client=s3_client,
+            dynamodb_client=get_dynamodb_client(),
+            processed_at=processed_at,
+        )
+        return {
+            "status": result.status,
+            "case_id": result.case_id,
+            "case_envelope_key": result.case_envelope_key,
+            "retrieval_status": result.retrieval_status,
+            "source_completeness": result.source_completeness,
+            "message": result.message,
+        }
+    except Exception as exc:
+        if config.CASE_ARCHIVE_FAILURE_MODE == "fail_closed":
+            raise
+        logger.error("Case archive failed for %s: %s", source_key, exc)
+        return {"status": "error", "message": str(exc)}
 
 
 def get_splunk_api_token(config: Config | None = None) -> str:
@@ -888,6 +951,18 @@ def handler(event, context):
             else:
                 logger.error(f"Unknown sink mode: {sink_mode}")
                 sink_result = {"sink": sink_mode, "status": "error", "message": "Unknown sink mode"}
+
+            archive_result = write_case_archive_after_sink(
+                analysis_result=analysis_result,
+                config=config,
+                source_bucket=bucket,
+                source_key=key,
+                decoded_notable=decoded_notable,
+                sink_result=sink_result,
+                processed_at=record.get("eventTime"),
+            )
+            if config.CASE_ARCHIVE_ENABLED or archive_result.get("status") != "skipped":
+                sink_result["case_archive_result"] = archive_result
             
             record_status = "success" if sink_result.get("status") == "success" else "error"
             results.append({

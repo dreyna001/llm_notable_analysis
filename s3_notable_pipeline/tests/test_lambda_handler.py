@@ -366,6 +366,62 @@ class CompressedInputTests(unittest.TestCase):
         html_call = next(c for c in mock_put.call_args_list if c.kwargs["Key"].endswith(".html"))
         self.assertEqual(html_call.kwargs["ContentType"], "text/html")
 
+    def test_archive_failure_is_suppressed_after_successful_report_write(self) -> None:
+        """Suppress mode should preserve report output and record archive failure."""
+        with patch.object(
+            self.lambda_handler,
+            "archive_case",
+            side_effect=RuntimeError("archive unavailable"),
+        ):
+            result = self.lambda_handler.write_case_archive_after_sink(
+                analysis_result={"alert_payload": {}, "llm_response": {}},
+                config=self.lambda_handler.Config(
+                    CASE_ARCHIVE_ENABLED=True,
+                    CASE_ARCHIVE_BUCKET="case-bucket",
+                    CASE_INDEX_TABLE="case-index",
+                    CASE_ARCHIVE_FAILURE_MODE="suppress",
+                ),
+                source_bucket="input-bucket",
+                source_key="incoming/example.json",
+                decoded_notable=self.lambda_handler.DecodedNotable(
+                    content="{}",
+                    content_type="json",
+                    was_compressed=False,
+                ),
+                sink_result={"status": "success", "markdown_key": "reports/example.md"},
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("archive unavailable", result["message"])
+
+    def test_archive_failure_fail_closed_raises(self) -> None:
+        """Fail-closed mode should fail the Lambda record after report write."""
+        with (
+            patch.object(
+                self.lambda_handler,
+                "archive_case",
+                side_effect=RuntimeError("archive unavailable"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "archive unavailable"),
+        ):
+            self.lambda_handler.write_case_archive_after_sink(
+                analysis_result={"alert_payload": {}, "llm_response": {}},
+                config=self.lambda_handler.Config(
+                    CASE_ARCHIVE_ENABLED=True,
+                    CASE_ARCHIVE_BUCKET="case-bucket",
+                    CASE_INDEX_TABLE="case-index",
+                    CASE_ARCHIVE_FAILURE_MODE="fail_closed",
+                ),
+                source_bucket="input-bucket",
+                source_key="incoming/example.json",
+                decoded_notable=self.lambda_handler.DecodedNotable(
+                    content="{}",
+                    content_type="json",
+                    was_compressed=False,
+                ),
+                sink_result={"status": "success", "markdown_key": "reports/example.md"},
+            )
+
     def test_finding_id_strips_data_and_gzip_extensions(self) -> None:
         """Compressed source keys should derive the same finding ID as raw inputs."""
         self.assertEqual(
