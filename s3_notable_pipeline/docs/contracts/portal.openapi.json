@@ -100,11 +100,14 @@
     "/api/chat": {
       "post": {
         "responses": {
+          "200": {
+            "description": "Grounded selected-case answer"
+          },
+          "400": {
+            "description": "Malformed chat request"
+          },
           "429": {
             "description": "Too many concurrent chat requests"
-          },
-          "501": {
-            "description": "Pinned-case Q&A ships in Wave 2 Diff 4"
           }
         }
       }

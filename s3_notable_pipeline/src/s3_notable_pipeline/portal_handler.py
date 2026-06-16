@@ -7,12 +7,14 @@ import threading
 from typing import Any
 
 from .aws_clients import bedrock_runtime_client, dynamodb_client, s3_client
+from .case_chat import answer_selected_case_question
 from .case_index import get_case_detail, get_case_raw_section, list_cases
 from .config import Config, load_config
 from .portal_api_models import (
     CaseDetailResponse,
     CaseListResponse,
     CaseRawSectionResponse,
+    ChatResponseModel,
     HealthResponse,
     PortalCapabilitiesResponse,
     portal_response,
@@ -39,7 +41,7 @@ def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
         return _json_response(401, {"error": "Unauthorized"})
 
     if method == "POST" and path == "/api/chat":
-        return _handle_chat_gate(config)
+        return _handle_chat_gate(config, event)
     if path == "/health":
         return _model_response(HealthResponse, {"status": "ok"})
     if path == "/ready":
@@ -85,12 +87,32 @@ def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     return _json_response(404, {"error": "Not found"})
 
 
-def _handle_chat_gate(config: Config) -> dict[str, Any]:
+def _handle_chat_gate(config: Config, event: dict[str, Any]) -> dict[str, Any]:
     semaphore = _get_chat_semaphore(config.PORTAL_CHAT_MAX_CONCURRENCY)
     if not semaphore.acquire(blocking=False):
         return _json_response(429, {"error": CHAT_LIMIT_MESSAGE})
     try:
-        return _json_response(501, {"error": "Case Q&A is implemented in Wave 2 Diff 4"})
+        request = _json_body(event)
+        answer = answer_selected_case_question(
+            case_id=str(request.get("selected_case_id", "")),
+            question=str(request.get("question", "")),
+            config=config,
+            dynamodb_client=dynamodb_client(),
+            s3_client=s3_client(),
+            bedrock_client=bedrock_runtime_client(),
+        )
+        return _model_response(
+            ChatResponseModel,
+            {
+                "answer": answer.answer,
+                "answer_status": answer.answer_status,
+                "citations": answer.citations,
+            },
+        )
+    except LookupError:
+        return _json_response(404, {"error": "Case not found"})
+    except ValueError as exc:
+        return _json_response(400, {"error": str(exc)})
     finally:
         semaphore.release()
 
@@ -195,6 +217,17 @@ def _int_query(value: Any, default: int | None = None) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _json_body(event: dict[str, Any]) -> dict[str, Any]:
+    raw = event.get("body") or "{}"
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("request body must be JSON") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("request body must be a JSON object")
+    return parsed
 
 
 def _model_response(model: Any, payload: Any) -> dict[str, Any]:

@@ -112,6 +112,14 @@ class CaseRawSectionResponse(BaseModel):
     items: dict[str, Any]
 
 
+class ChatResponseModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    answer: str
+    answer_status: str
+    citations: list[str]
+
+
 def portal_response(model: type[ModelT], payload: Any) -> ModelT:
     """Validate a portal JSON payload against its response model."""
 

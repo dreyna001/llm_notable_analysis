@@ -48,7 +48,7 @@ Open Wave 2 items (do not implement under Wave 1 closeout):
 - [x] Diff 2: Case archive write path and DynamoDB CaseIndex
 - [x] Diff 2b: Post-archive embed Lambda and S3 case chunks
 - [x] Diff 3: Read-only portal API Lambda and OpenAPI contract
-- [ ] Retrieval-bound Case Q&A over retained cases
+- [x] Diff 4: Retrieval-bound pinned-case Q&A over retained cases
 - [ ] Read-only portal API/UI
 - [ ] IAM split between analyzer writer and portal reader permissions
 
@@ -61,4 +61,4 @@ Open Wave 2 items (do not implement under Wave 1 closeout):
 
 ---
 
-_Last updated: Wave 2 Diff 3 complete; pinned-case Q&A starts in Diff 4._
+_Last updated: Wave 2 Diff 4 complete; portal frontend/ops validation starts in Diff 5._

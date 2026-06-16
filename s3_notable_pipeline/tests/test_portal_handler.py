@@ -34,10 +34,37 @@ class FakeDynamoDbClient:
 class FakeS3Client:
     """Fake S3 client for portal handler tests."""
 
-    def get_object(self, **_kwargs):
+    def list_objects_v2(self, **kwargs):
+        return {
+            "Contents": [{"Key": f"{kwargs['Prefix']}chunk-1.json"}],
+            "IsTruncated": False,
+        }
+
+    def get_object(self, **kwargs):
         import io
 
+        if str(kwargs.get("Key", "")).startswith("case_chunks/"):
+            chunk = {
+                "case_id": "case-1",
+                "chunk_id": "chunk-1",
+                "search_text": "alert.summary $ suspicious login",
+            }
+            return {"Body": io.BytesIO(json.dumps(chunk).encode("utf-8"))}
         return {"Body": io.BytesIO(json.dumps(case_envelope()).encode("utf-8"))}
+
+
+class FakeBedrockClient:
+    """Fake Bedrock client returning a cited answer."""
+
+    def invoke_model(self, **_kwargs):
+        import io
+
+        body = {
+            "answer": "The login was suspicious based on the archived case chunk.",
+            "answer_status": "answered",
+            "citations": ["chunk-1"],
+        }
+        return {"body": io.BytesIO(json.dumps(body).encode("utf-8"))}
 
 
 def ddb_case_item():
@@ -77,6 +104,7 @@ def portal_config(**overrides):
         "PORTAL_JWT_ISSUER": "https://issuer.example.test",
         "PORTAL_JWT_AUDIENCE": "portal",
         "CASE_ARCHIVE_BUCKET": "case-bucket",
+        "CASE_ARCHIVE_CHUNKS_PREFIX": "case_chunks",
         "CASE_INDEX_TABLE": "case-index",
         "BEDROCK_MODEL_ID": "anthropic.test",
     }
@@ -180,6 +208,47 @@ class PortalHandlerTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 429)
         self.assertIn("Too many chat requests", json.loads(response["body"])["error"])
         semaphore.release()
+
+    def test_chat_requires_selected_case_id(self) -> None:
+        with patch.object(
+            portal_handler,
+            "load_config",
+            return_value=portal_config(
+                CASE_QA_ENABLED=True,
+                CASE_EMBED_LAMBDA_NAME="notable-case-embed",
+            ),
+        ):
+            request = event("/api/chat", "POST")
+            request["body"] = json.dumps({"question": "What happened?"})
+            response = portal_handler.handler(request, None)
+
+        self.assertEqual(response["statusCode"], 400)
+        self.assertIn("selected_case_id", json.loads(response["body"])["error"])
+
+    def test_chat_returns_cited_answer_for_selected_case(self) -> None:
+        with (
+            patch.object(
+                portal_handler,
+                "load_config",
+                return_value=portal_config(
+                    CASE_QA_ENABLED=True,
+                    CASE_EMBED_LAMBDA_NAME="notable-case-embed",
+                ),
+            ),
+            patch.object(portal_handler, "dynamodb_client", return_value=FakeDynamoDbClient()),
+            patch.object(portal_handler, "s3_client", return_value=FakeS3Client()),
+            patch.object(portal_handler, "bedrock_runtime_client", return_value=FakeBedrockClient()),
+        ):
+            request = event("/api/chat", "POST")
+            request["body"] = json.dumps(
+                {"selected_case_id": "case-1", "question": "What happened?"}
+            )
+            response = portal_handler.handler(request, None)
+
+        body = json.loads(response["body"])
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(body["answer_status"], "answered")
+        self.assertEqual(body["citations"], ["chunk-1"])
 
 
 if __name__ == "__main__":
