@@ -16,6 +16,7 @@ if str(SRC_DIR) not in sys.path:
 
 from s3_notable_pipeline.config import Config
 from s3_notable_pipeline import portal_handler
+from s3_notable_pipeline.case_chat_history import ChatSessionNotFoundError
 
 
 class FakeDynamoDbClient:
@@ -124,6 +125,7 @@ def event(path: str, method: str = "GET"):
                     "claims": {
                         "iss": "https://issuer.example.test",
                         "aud": "portal",
+                        "sub": "user-1",
                     }
                 }
             },
@@ -155,8 +157,12 @@ class PortalHandlerTests(unittest.TestCase):
             patch.object(portal_handler, "load_config", return_value=portal_config()),
             patch.object(
                 portal_handler,
-                "validate_portal_jwt",
-                return_value={"iss": "https://issuer.example.test", "aud": "portal"},
+                "resolve_portal_jwt_claims",
+                return_value={
+                    "iss": "https://issuer.example.test",
+                    "aud": "portal",
+                    "sub": "user-1",
+                },
             ),
             patch.object(portal_handler, "dynamodb_client", return_value=FakeDynamoDbClient()),
         ):
@@ -306,6 +312,90 @@ class PortalHandlerTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(body["answer_status"], "answered")
         self.assertEqual(body["citations"], ["chunk-1"])
+
+    def test_chat_sessions_list_returns_disabled_payload(self) -> None:
+        with patch.object(portal_handler, "load_config", return_value=portal_config()):
+            response = portal_handler.handler(event("/api/chat/sessions"), None)
+
+        body = json.loads(response["body"])
+        self.assertEqual(response["statusCode"], 200)
+        self.assertFalse(body["history_enabled"])
+        self.assertEqual(body["items"], [])
+
+    def test_chat_session_delete_returns_404_when_history_disabled(self) -> None:
+        session_id = "00000000-0000-0000-0000-000000000001"
+        with patch.object(portal_handler, "load_config", return_value=portal_config()):
+            response = portal_handler.handler(
+                event(f"/api/chat/sessions/{session_id}", "DELETE"),
+                None,
+            )
+
+        self.assertEqual(response["statusCode"], 404)
+        self.assertIn("disabled", json.loads(response["body"])["error"])
+
+    def test_chat_session_delete_maps_missing_session_to_404(self) -> None:
+        session_id = "00000000-0000-0000-0000-000000000001"
+        with (
+            patch.object(
+                portal_handler,
+                "load_config",
+                return_value=portal_config(
+                    CASE_QA_CHAT_HISTORY_ENABLED=True,
+                    CHAT_SESSIONS_TABLE="chat-sessions",
+                    CHAT_MESSAGES_TABLE="chat-messages",
+                ),
+            ),
+            patch.object(
+                portal_handler,
+                "delete_chat_session",
+                side_effect=ChatSessionNotFoundError("session_id was not found."),
+            ),
+        ):
+            response = portal_handler.handler(
+                event(f"/api/chat/sessions/{session_id}", "DELETE"),
+                None,
+            )
+
+        self.assertEqual(response["statusCode"], 404)
+        self.assertIn("session_id was not found", json.loads(response["body"])["error"])
+
+    def test_chat_persists_session_id_when_history_enabled(self) -> None:
+        with (
+            patch.object(
+                portal_handler,
+                "load_config",
+                return_value=portal_config(
+                    CASE_QA_ENABLED=True,
+                    CASE_EMBED_LAMBDA_NAME="notable-case-embed",
+                    CASE_QA_CHAT_HISTORY_ENABLED=True,
+                    CHAT_SESSIONS_TABLE="chat-sessions",
+                    CHAT_MESSAGES_TABLE="chat-messages",
+                ),
+            ),
+            patch.object(portal_handler, "dynamodb_client", return_value=FakeDynamoDbClient()),
+            patch.object(portal_handler, "s3_client", return_value=FakeS3Client()),
+            patch.object(portal_handler, "bedrock_runtime_client", return_value=FakeBedrockClient()),
+            patch.object(
+                portal_handler,
+                "persist_chat_history",
+                return_value="session-123",
+            ) as persist_mock,
+            patch.object(portal_handler, "validate_chat_history_request"),
+        ):
+            request = event("/api/chat", "POST")
+            request["body"] = json.dumps(
+                {
+                    "mode": "selected_case",
+                    "selected_case_id": "case-1",
+                    "question": "What happened?",
+                }
+            )
+            response = portal_handler.handler(request, None)
+
+        body = json.loads(response["body"])
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(body["session_id"], "session-123")
+        persist_mock.assert_called_once()
 
 
 if __name__ == "__main__":

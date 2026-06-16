@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
+ChatMode = Literal["selected_case"]
+
 
 class HealthResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -118,6 +120,57 @@ class ChatResponseModel(BaseModel):
     answer: str
     answer_status: str
     citations: list[str]
+    session_id: str | None = None
+
+
+class ChatSessionSummaryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    title: str
+    updated_at: str | None
+    mode: ChatMode
+    selected_case_id: str | None
+
+
+class ChatSessionsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    history_enabled: bool
+    items: list[ChatSessionSummaryResponse]
+
+
+class ChatSessionMessageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: str
+    content: str
+    created_at: str | None
+    answer_status: str | None = None
+
+
+class ChatSessionMessagesResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    mode: ChatMode
+    selected_case_id: str | None
+    messages: list[ChatSessionMessageResponse]
+
+
+class DeleteChatSessionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    deleted: bool
+    session_id: str
+
+
+class DeleteLastChatTurnResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    deleted: bool
+    session_id: str
+    deleted_messages: int
 
 
 def portal_response(model: type[ModelT], payload: Any) -> ModelT:

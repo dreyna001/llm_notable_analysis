@@ -118,6 +118,29 @@ class PortalJwtTests(unittest.TestCase):
 
         self.assertIsNone(claims)
 
+    def test_resolve_portal_user_id_reads_jwt_sub(self) -> None:
+        from s3_notable_pipeline.config import Config
+
+        config = Config(
+            PORTAL_AUTH_MODE="jwt",
+            PORTAL_JWT_ISSUER="https://issuer.example.test",
+            PORTAL_JWT_AUDIENCE="portal",
+        )
+        event = {
+            "requestContext": {
+                "authorizer": {
+                    "jwt": {
+                        "claims": {
+                            "iss": "https://issuer.example.test",
+                            "aud": "portal",
+                            "sub": "analyst-1",
+                        }
+                    }
+                }
+            }
+        }
+        self.assertEqual(portal_jwt.resolve_portal_user_id(event, config), "analyst-1")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -81,6 +81,18 @@ class DeployTemplateTests(unittest.TestCase):
                 self.assertIn("PortalChatFunctionUrl", template["Outputs"])
                 self.assertIn("PortalBrowserApiBaseUrl", template["Outputs"])
 
+    def test_chat_history_resources_are_present(self) -> None:
+        for path in (
+            "deploy/aws/template-sam.yaml",
+            "deploy/aws/template-cfn.yaml",
+        ):
+            with self.subTest(path=path):
+                template = load_template(path)
+                self.assertIn("HasChatHistory", template["Conditions"])
+                self.assertIn("HasManagedChatSessionsTable", template["Conditions"])
+                self.assertIn("ChatSessionsTable", template["Resources"])
+                self.assertIn("ChatMessagesTable", template["Resources"])
+
 
 if __name__ == "__main__":
     unittest.main()
