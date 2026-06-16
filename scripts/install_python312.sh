@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Install Python 3.12 system packages on supported Linux distros (dev VM helper).
+# Install Python 3.12 system packages on supported Linux distros.
+# Used by scripts/bootstrap_dev_venv.sh and on-prem scripts/install.sh.
 set -euo pipefail
 
 usage() {
@@ -30,9 +31,17 @@ done
 
 if [[ "$(uname -s)" != "Linux" ]]; then
     echo "Automatic install is only supported on Linux." >&2
-    echo "Install Python 3.12 manually, then re-run bootstrap_dev_venv.sh." >&2
+    echo "Install Python 3.12 manually, then re-run the installer." >&2
     exit 1
 fi
+
+run_privileged() {
+    if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
 
 if [[ ! -f /etc/os-release ]]; then
     echo "Cannot detect OS (/etc/os-release missing)." >&2
@@ -47,15 +56,15 @@ distro_id="${ID:-}"
 
 install_debian_family() {
     local version_id="${VERSION_ID:-}"
-    sudo apt-get update
+    run_privileged apt-get update
     if [[ "$version_id" == "24.04" || "$version_id" == "12" ]]; then
-        sudo apt-get install -y python3.12 python3.12-venv python3.12-dev
+        run_privileged apt-get install -y python3.12 python3.12-venv python3.12-dev
         return 0
     fi
-    sudo apt-get install -y software-properties-common
-    sudo add-apt-repository -y ppa:deadsnakes/ppa
-    sudo apt-get update
-    sudo apt-get install -y python3.12 python3.12-venv python3.12-dev
+    run_privileged apt-get install -y software-properties-common
+    run_privileged add-apt-repository -y ppa:deadsnakes/ppa
+    run_privileged apt-get update
+    run_privileged apt-get install -y python3.12 python3.12-venv python3.12-dev
 }
 
 install_rhel_family() {
@@ -63,7 +72,7 @@ install_rhel_family() {
         echo "dnf is required but not found." >&2
         return 1
     fi
-    sudo dnf install -y python3.12 python3.12-devel
+    run_privileged dnf install -y python3.12 python3.12-devel
 }
 
 case "$distro_id" in
@@ -80,8 +89,7 @@ case "$distro_id" in
             install_rhel_family
         else
             echo "Unsupported distribution: ${PRETTY_NAME:-$distro_id}" >&2
-            echo "Install Python 3.12 manually, then run:" >&2
-            echo "  bash scripts/bootstrap_dev_venv.sh --python python3.12" >&2
+            echo "Install Python 3.12 manually, then re-run the installer." >&2
             exit 1
         fi
         ;;

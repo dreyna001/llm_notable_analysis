@@ -97,7 +97,7 @@ Hub-style identifiers.
 ### Python interpreter (required)
 
 - **Minimum:** Python **3.10+** (installer fails below that).
-- **Default / recommended:** Python **3.12** for both analyzer and vLLM venvs (`scripts/install.sh` defaults `ANALYZER_PYTHON_BIN` / `VLLM_PYTHON_BIN` to `python3.12`).
+- **Default / recommended:** Python **3.12** for both analyzer and vLLM venvs (`scripts/install.sh` defaults `ANALYZER_PYTHON_BIN` / `VLLM_PYTHON_BIN` to `python3.12`). On air-gapped hosts, pre-stage Python 3.12 OS packages and run with `INSTALL_PYTHON=false`.
 - **Pin explicitly:** `sudo ANALYZER_PYTHON_BIN=python3.12 VLLM_PYTHON_BIN=python3.12 bash scripts/install.sh`
 - **3.13+:** allowed; installer warns (vLLM wheel compatibility may break—prefer 3.12 for regulated builds).
 

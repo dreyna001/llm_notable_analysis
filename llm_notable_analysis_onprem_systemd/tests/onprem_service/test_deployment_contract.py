@@ -111,6 +111,9 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("install_analyst_portal_bringup_assets", install_text)
         self.assertIn("INSTALL_ANALYST_PORTAL", install_text)
         self.assertIn("setup_postgres_case_archive.sh", install_text)
+        self.assertIn("ensure_python312_for_install", install_text)
+        self.assertIn("install_python312.sh", install_text)
+        self.assertIn("INSTALL_PYTHON", install_text)
 
         pyproject_text = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         self.assertIn('"onprem-rag-notable-analysis==0.1.0"', pyproject_text)

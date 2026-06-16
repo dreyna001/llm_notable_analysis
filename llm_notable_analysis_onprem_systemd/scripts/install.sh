@@ -38,7 +38,8 @@ readonly HUGGINGFACE_HUB_PIP_SPEC="${HUGGINGFACE_HUB_PIP_SPEC:-huggingface_hub==
 # Example:
 #   sudo ANALYZER_PYTHON_BIN=python3.12 VLLM_PYTHON_BIN=python3.12 bash scripts/install.sh
 #
-# If these are set and missing/unusable, the installer will fail early.
+# If these are set and missing/unusable, the installer will fail early unless
+# INSTALL_PYTHON=true (default) can install python3.12 system packages first.
 readonly ANALYZER_PYTHON_BIN="${ANALYZER_PYTHON_BIN:-python3.12}"
 readonly VLLM_PYTHON_BIN="${VLLM_PYTHON_BIN:-python3.12}"
 
@@ -434,6 +435,32 @@ check_python_version() {
     if [[ "$major" -eq 3 && "$minor" -ge 13 ]]; then
         warn "Detected $label Python $ver. If vLLM fails to start, try pinning to Python 3.12."
     fi
+}
+
+install_requires_python312_package() {
+    [[ "$ANALYZER_PYTHON_BIN" == "python3.12" || "$VLLM_PYTHON_BIN" == "python3.12" ]]
+}
+
+ensure_python312_for_install() {
+    local helper="$1"
+
+    if command -v python3.12 >/dev/null 2>&1; then
+        return 0
+    fi
+    if ! install_requires_python312_package; then
+        return 0
+    fi
+    if [[ "${INSTALL_PYTHON:-true}" != "true" ]]; then
+        err "python3.12 is required (ANALYZER_PYTHON_BIN/VLLM_PYTHON_BIN) but was not found. Install Python 3.12 manually or rerun with INSTALL_PYTHON=true (default)."
+    fi
+    [[ -f "$helper" ]] || err "Missing Python 3.12 install helper: $helper (clone the full monorepo or install python3.12 manually)"
+    [[ -x "$helper" ]] || chmod +x "$helper" 2>/dev/null || true
+
+    info "python3.12 not found; installing system Python 3.12 packages..."
+    bash "$helper" || err "Failed to install Python 3.12 system packages (see output above)"
+    command -v python3.12 >/dev/null 2>&1 \
+        || err "python3.12 is still not on PATH after package install"
+    info "python3.12 is available: $(python3.12 --version 2>&1)"
 }
 
 create_user_if_missing() {
@@ -1192,6 +1219,15 @@ echo "=== On-prem Notable Analyzer Installation ==="
 echo ""
 
 check_root
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+MONOREPO_ROOT="$(cd "$REPO_DIR/.." && pwd)"
+RAG_PACKAGE_SRC_DIR="${RAG_PACKAGE_SRC_DIR:-$MONOREPO_ROOT/onprem_rag_notable_analysis}"
+SDK_SOURCE_DIR="${SDK_SOURCE_DIR:-$MONOREPO_ROOT/onprem-llm-sdk}"
+
+ensure_python312_for_install "$MONOREPO_ROOT/scripts/install_python312.sh"
+
 check_command python3
 check_command pip3
 check_command systemctl
@@ -1199,12 +1235,6 @@ check_python_interpreter "$ANALYZER_PYTHON_BIN"
 check_python_interpreter "$VLLM_PYTHON_BIN"
 check_python_version "$ANALYZER_PYTHON_BIN" "Analyzer"
 check_python_version "$VLLM_PYTHON_BIN" "vLLM"
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-MONOREPO_ROOT="$(cd "$REPO_DIR/.." && pwd)"
-RAG_PACKAGE_SRC_DIR="${RAG_PACKAGE_SRC_DIR:-$MONOREPO_ROOT/onprem_rag_notable_analysis}"
-SDK_SOURCE_DIR="${SDK_SOURCE_DIR:-$MONOREPO_ROOT/onprem-llm-sdk}"
 
 # Verify required files exist
 for f in requirements.txt config.env.example; do
@@ -1701,6 +1731,8 @@ echo "      sudo vi /etc/systemd/system/vllm.service  # add --trust-remote-code"
 echo "      sudo systemctl daemon-reload && sudo systemctl restart vllm"
 echo ""
 echo "Optional installer flags:"
+echo "  - Skip automatic Python 3.12 OS package install (air-gapped / pre-staged):"
+echo "      sudo INSTALL_PYTHON=false bash scripts/install.sh"
 echo "  - Skip vLLM install (air-gapped / preinstalled):"
 echo "      sudo VLLM_SKIP_INSTALL=true bash scripts/install.sh"
 echo "  - Add extra vLLM smoke checks (non-fatal):"
