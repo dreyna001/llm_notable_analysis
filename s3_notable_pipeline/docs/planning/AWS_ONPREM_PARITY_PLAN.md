@@ -87,7 +87,7 @@ The planning rules and skills applied are:
 
 ### In Scope
 
-- Add AWS capability profiles matching on-prem operator semantics:
+- Add AWS capability profiles with operator semantics defined in the parity plan:
   `core`, `html_reports`, `rag`, `spl_readonly`, `elastic_readonly`,
   `ticket_draft`, and `action_gated`.
 - Preserve existing `SPLUNK_SINK_MODE=s3|notable_rest` compatibility.

@@ -2,10 +2,10 @@
 
 ## Status
 
-Planning and implementation-input artifact. Architecture decisions 1 through 35
-are locked in this document. **Decision 35** aligns wave-2 Python dependencies
-with the on-prem portal stack (Pydantic for `portal_api_models.py`). Implementation
-may proceed once the technical spec and diff sequence below are accepted.
+Planning and implementation-input artifact. Architecture decisions 1 through 36
+are locked in this document. **Decision 35** allows `pydantic` for
+`portal_api_models.py` in wave 2. Implementation may proceed once the technical
+spec and diff sequence below are accepted.
 
 This is the next parity block for `s3_notable_pipeline`. It extends the earlier
 parity plan in `docs/planning/AWS_ONPREM_PARITY_PLAN.md`, which covered
@@ -73,20 +73,19 @@ This document is scoped to those gaps.
 
 ### In scope
 
-- Add an AWS `analyst_portal` capability profile matching the on-prem operator
-  semantics as closely as AWS permits.
+- Add an AWS `analyst_portal` capability profile with operator semantics defined
+  in this document.
 - Add a case archive write path after successful analysis using S3 case envelopes
   plus a DynamoDB case index.
 - Preserve existing markdown, JSON, and optional HTML report outputs under
   `reports/`.
 - Add a read-only portal API using API Gateway plus a separate portal Lambda
   handler, with a long-timeout chat integration as defined in Decision 19.
-- Reuse the on-prem analyst portal React UI unchanged in layout and behavior;
-  host it on S3 plus CloudFront with JWT browser auth and a configurable API
-  base URL.
+- Host the analyst portal React UI on S3 plus CloudFront with JWT browser auth
+  and a configurable API base URL.
 - Add selected-case, retrieval-bound Case Q&A using Bedrock answer synthesis over
   retrieved case/archive sources. Portal chat requires a pinned case; cross-case
-  archive search is out of scope for v1 on both AWS and on-prem.
+  archive search is out of scope for v1.
 - Add AWS runtime config, SAM/CloudFormation parameters, IAM, docs, and tests for
   archive and portal behavior.
 - Keep unit tests deterministic with mocked AWS, Bedrock, and HTTP clients.
@@ -113,9 +112,8 @@ This document is scoped to those gaps.
 ### Preserve the AWS shape
 
 The analyzer Lambda remains the writer for new case archive records. The portal
-is a separate read-only surface. This mirrors the on-prem split between the
-systemd analyzer and `notable-portal.service` without turning AWS into a Linux
-host model.
+is a separate read-only surface. Do not move analyzer orchestration into the
+portal API or replace the serverless shape with a long-running host model.
 
 ### Use AWS-native substitutions only where needed
 
@@ -200,13 +198,13 @@ question
 -> lexical + vector + RRF retrieval over S3 case chunks
 -> optionally retrieve advisory KB context when capability flags allow
 -> Bedrock answer synthesis with internal citation validation
--> on-prem chat response shape: answer, answer_status, session_id
+-> response: answer, answer_status, session_id
 ```
 
-Case Q&A supports pinned-case chat only (`selected_case`), matching on-prem.
-Every chat request requires `selected_case_id`. General technology / TTP answers
-still use `CASE_QA_GENERAL_KNOWLEDGE_ENABLED` and optional advisory KB context;
-they do not search other archived cases.
+Case Q&A supports pinned-case chat only (`selected_case`). Every chat request
+requires `selected_case_id`. General technology / TTP answers still use
+`CASE_QA_GENERAL_KNOWLEDGE_ENABLED` and optional advisory KB context; they do
+not search other archived cases.
 
 ## Runtime Contract Additions
 
@@ -292,7 +290,6 @@ Validation rules:
   `CHAT_MESSAGES_TABLE`.
 - `CASE_QA_VECTOR_DIMENSIONS` must match the configured Titan embed output size.
 - `PORTAL_CHAT_MAX_CONCURRENCY` must be a positive integer, default `18`, max `64`.
-  Same default on AWS and on-prem.
 - `PORTAL_CHAT_BEDROCK_MODEL_ID` is optional; when set, it must be non-empty and
   is used only for portal answer synthesis (Decision 29).
 - `RAG_RERANK_MODEL_FALLBACK` is used only when the primary rerank model is
@@ -432,7 +429,7 @@ Rules:
 - Use conditional writes for first insert and deterministic updates for replay.
 - Treat a replay as the same case when at least one of these is true:
   `source_filename` matches, non-empty `correlation_id` matches, or non-empty
-  `finding_id` matches (port on-prem identity contract).
+  `finding_id` matches (see identity contract below).
 - If `case_id` already exists but source identity does not match, suppress the
   archive update: log the conflict, leave the existing row and envelope
   unchanged, and do not overwrite an unrelated case (Decision 25).
@@ -445,8 +442,7 @@ Rules:
 
 ## DynamoDB Chat History Contract
 
-Create two DynamoDB tables when `CASE_QA_CHAT_HISTORY_ENABLED=true`. This is the
-AWS equivalent of on-prem Postgres `chat_sessions` and `chat_messages`.
+Create two DynamoDB tables when `CASE_QA_CHAT_HISTORY_ENABLED=true`.
 
 **ChatSessions table** (`CHAT_SESSIONS_TABLE`):
 
@@ -469,10 +465,10 @@ Rules:
 
 - Portal Lambda has read/write access only when chat history is enabled.
 - Analyzer Lambda has no chat-history permissions.
-- Retention, per-user session caps, and per-session message caps match on-prem
-  config semantics.
-- When chat history is disabled, chat session routes return the same empty or
-  disabled responses as on-prem.
+- Retention, per-user session caps, and per-session message caps follow
+  `CASE_QA_CHAT_HISTORY_*` settings.
+- When chat history is disabled, chat session routes return empty or disabled
+  responses without error.
 
 ## AWS Storage Summary
 
@@ -485,11 +481,10 @@ Rules:
 
 ## Portal API Contract
 
-The read-only API should be a separate Lambda handler, not the analyzer handler.
-The HTTP contract must match on-prem
-`llm_notable_analysis_onprem_systemd/frontend/analyst-portal/openapi/portal.openapi.json`
-and `onprem_service/portal_api_models.py`. Do not invent alternate field names
-for the browser UI.
+The read-only API is a separate Lambda handler, not the analyzer handler.
+HTTP request and response shapes are defined in
+`docs/contracts/portal.openapi.json` and implemented with Pydantic models in
+`portal_api_models.py`. Do not invent alternate field names for the browser UI.
 
 Routes:
 
@@ -521,8 +516,8 @@ Rules:
   metadata plus raw-section links.
 - Raw section reads are paginated by top-level key and max byte budget.
 - Portal responses must not expose input bucket objects.
-- Case detail uses on-prem field names `report_md_path` and `report_html_path`
-  at the API boundary. Map internal S3 artifact keys to those response fields.
+- Case detail exposes `report_md_path` and `report_html_path` at the API
+  boundary. Map internal S3 artifact keys to those response fields.
 - FastAPI-style error bodies with a top-level `detail` string must be preserved
   for UI error handling.
 
@@ -532,9 +527,7 @@ Authentication:
   accounts. Use enterprise OIDC through API Gateway JWT authorizers in production
   (Decision 30). Cognito is a supported lab/small-team configuration example,
   not a required SAM resource.
-- Browser clients cannot use AWS IAM credentials. The reused on-prem React UI
-  must send `Authorization: Bearer <jwt>` on API calls instead of on-prem nginx
-  proxy headers.
+- Browser clients send `Authorization: Bearer <jwt>` on API calls.
 - `PORTAL_AUTH_MODE=iam` is the second-best path for AWS-admin, lab, or
   machine-to-machine access where callers already have AWS identities.
 - Anonymous public portal access is never valid.
@@ -554,14 +547,13 @@ CORS and routing:
     long-running chat (Decision 19).
   - CloudFront `/api/*` -> API Gateway for standard portal routes.
   - Local dev may call API Gateway or Function URL directly without CloudFront.
-- Local development may keep the on-prem Vite proxy pattern; production builds
-  use `VITE_PORTAL_API_BASE_URL`.
+- Production browser builds use `VITE_PORTAL_API_BASE_URL`.
 
 ## Case Q&A Contract
 
 `CASE_QA_ENABLED` enables a bounded answer-synthesis step from the portal API.
 
-Supported chat mode (matches on-prem):
+Supported chat mode:
 
 | Mode | Requires | Retrieval scope |
 | --- | --- | --- |
@@ -575,7 +567,7 @@ Allowed inputs to the model:
 - bounded case chunks or report snippets from the active mode
 - optional approved advisory context when the corresponding capability flags are
   enabled (`rag`, `spl_readonly`, `elastic_readonly`), using Bedrock KB retrieve
-  and the same grounding semantics as on-prem portal chat
+  with advisory-only labeling
 
 The model is allowed to:
 
@@ -594,7 +586,7 @@ The model is not allowed to:
 - decide authorization
 - override deterministic verdict, confidence, query status, or source metadata
 
-External response shape (must match on-prem UI contract):
+Chat response shape:
 
 ```json
 {
@@ -609,11 +601,11 @@ Internal validation rules before mapping to `answer_status`:
 - Retrieved sources must be bounded and citation-checked inside the portal
   Lambda before answer synthesis.
 - Unknown, malformed, or uncited model output gets one repair attempt.
-- If repair fails, return `answer_status=unknown` with the on-prem insufficient
+- If repair fails, return `answer_status=unknown` with the standard insufficient
   archive message, not a malformed model answer.
-- `CASE_QA_GENERAL_KNOWLEDGE_ENABLED=true` follows on-prem fallback semantics:
-  empty retrieval or the on-prem insufficient-archive phrase may trigger a
-  bounded general-knowledge answer.
+- `CASE_QA_GENERAL_KNOWLEDGE_ENABLED=true` triggers fallback on empty retrieval
+  or the standard insufficient-archive phrase, not on an embedding score
+  threshold.
 - Cited sources may be persisted in chat history when enabled, but are not
   required in the external chat response payload.
 
@@ -767,9 +759,9 @@ Files:
 
 - `src/s3_notable_pipeline/portal_handler.py`
 - `src/s3_notable_pipeline/case_index.py`
-- `src/s3_notable_pipeline/portal_api_models.py` (vendored from on-prem; Pydantic)
-- `src/s3_notable_pipeline/case_archive_notices.py` (ported verbatim from on-prem)
-- `docs/contracts/portal.openapi.json` (vendored from on-prem)
+- `src/s3_notable_pipeline/portal_api_models.py` (vendored Pydantic contract)
+- `src/s3_notable_pipeline/case_archive_notices.py`
+- `docs/contracts/portal.openapi.json`
 - `requirements.txt` (add `pydantic` pin per Decision 35)
 - `deploy/aws/template-sam.yaml`
 - `deploy/aws/template-cfn.yaml`
@@ -787,9 +779,10 @@ Acceptance criteria:
 - When `CASE_QA_ENABLED=true`, `/api/capabilities` exposes full
   `chat_dependency_status` (`embeddings`, `archive_retrieval`, `llm_gateway`)
   and `chat_degraded_reason` via live dependency probes (Decision 22).
-- Response shapes match the vendored on-prem OpenAPI contract (Decision 27).
-- In-handler chat concurrency matches `PORTAL_CHAT_MAX_CONCURRENCY`; excess
-  chat requests return HTTP 429 with the on-prem message (Decision 23).
+- Response shapes conform to `docs/contracts/portal.openapi.json` (Decision 27).
+- In-handler chat concurrency enforces `PORTAL_CHAT_MAX_CONCURRENCY`; excess chat
+  requests return HTTP 429 with *"Too many chat requests are already running.
+  Try again shortly."* (Decision 23).
 - Portal Lambda has no writeback, input-bucket, or case mutation permissions.
 - Unauthenticated or malformed auth context fails closed.
 - Mutating methods are rejected.
@@ -826,13 +819,12 @@ Acceptance criteria:
 
 Objective:
 
-- Reuse the on-prem analyst portal UI with AWS-only auth and API wiring.
+- Deploy the analyst portal static SPA with JWT auth and configurable API base URL.
 - Finish operator docs and validation commands.
 
 Files:
 
-- reuse or vendor `llm_notable_analysis_onprem_systemd/frontend/analyst-portal`
-  into the AWS deployment path without visual changes
+- vendor analyst portal UI assets into the AWS deployment path
 - add `VITE_PORTAL_API_BASE_URL` and JWT bearer support in the portal API client
 - `docs/operations/ANALYST_PORTAL_OPERATIONS.md`
 - `docs/operations/README.md`
@@ -844,8 +836,8 @@ Files:
 
 Acceptance criteria:
 
-- UI exposes the same three routes as on-prem: `/`, `/cases`, `/cases/{case_id}`.
-- Browser auth uses JWT bearer tokens; nginx proxy headers are not required.
+- UI exposes routes `/`, `/cases`, and `/cases/{case_id}`.
+- Browser auth uses JWT bearer tokens.
 - Docs explain profile enablement, IAM, auth mode, S3 lifecycle, DynamoDB TTL,
   retention, chat timeout routing, failure behavior, and rollback.
 - Local tests do not call real AWS.
@@ -881,17 +873,15 @@ python -m unittest discover -s s3_notable_pipeline/tests -p "test_*.py" -v
 
 ## Dependency Posture (Wave 2)
 
-Reuse on-prem portal packages where they directly support API contract parity.
-Do not reimplement `portal_api_models.py` with ad-hoc dataclasses when Pydantic
-is already the on-prem contract.
+Vendor shared portal contract packages (`portal.openapi.json`,
+`portal_api_models.py`). Do not reimplement `portal_api_models.py` with ad-hoc
+dataclasses when Pydantic is the contract source.
 
 **Allowed without extra approval (wave 2 portal block):**
 
 - `requests==2.32.5` (existing; Splunk, Elastic, ServiceNow, HTTP clients)
 - Lambda-provided `boto3` / botocore (Bedrock, S3, DynamoDB, Secrets Manager)
-- **`pydantic`** — pin to the same resolved version as on-prem
-  `fastapi==0.115.12` in `llm_notable_analysis_onprem_systemd/pyproject.toml`;
-  record the pin in `s3_notable_pipeline/requirements.txt` during Diff 3
+- **`pydantic`** — pin in `s3_notable_pipeline/requirements.txt` during Diff 3
   (Decision 35)
 
 **Explicitly not ported to AWS Lambdas (use Bedrock or AWS-native substitutes):**
@@ -905,7 +895,8 @@ is already the on-prem contract.
 
 **Default posture:**
 
-- Prefer packages already pinned in on-prem when they solve the current slice.
+- Prefer packages already used by the portal contract when they solve the current
+  slice.
 - Do not add other third-party packages for wave 2 unless a hard stop is lifted
   by an explicit new decision.
 
@@ -920,8 +911,8 @@ Stop and ask before coding if any of these become necessary:
 - loading local sentence-transformers, Mixedbread embedders, or Mixedbread rerankers into Lambda
 - exposing portal routes without IAM or JWT authorization
 - storing full alert payloads in DynamoDB instead of S3 envelopes
-- adding third-party Python dependencies **outside** the Decision 35 on-prem
-  portal allowlist
+- adding third-party Python dependencies **outside** the Decision 35 portal
+  allowlist
 - adding cross-case / global archive chat
 - adding analyst write actions from the portal
 
@@ -959,7 +950,7 @@ Stop and ask before coding if any of these become necessary:
 **Locked:** Implement pinned-case chat only (`selected_case`).
 
 - Every `POST /api/chat` request requires `selected_case_id`.
-- Cross-case / global archive chat is removed on both AWS and on-prem.
+- Cross-case / global archive chat is out of scope for v1.
 - General technology / TTP fallback remains via `CASE_QA_GENERAL_KNOWLEDGE_ENABLED=true`.
 - Optional advisory KB context still applies when `rag`, `spl_readonly`, or
   `elastic_readonly` profiles are also enabled.
@@ -980,13 +971,12 @@ Stop and ask before coding if any of these become necessary:
 - Model: `amazon.titan-embed-text-v2:0`
 - Output: `1024` dimensions with `normalize=true`
 - Use the same model at chunk write and chat query time.
-- Do not load on-prem `mixedbread-ai/mxbai-embed-large-v1` into Lambda.
+- Do not load local sentence-transformer or Mixedbread embedders into Lambda.
 
 ### Decision 7: Case retrieval (v1)
 
 **Locked:** Portal Lambda performs lexical plus vector plus RRF retrieval over S3
-`case_chunks/` objects, porting on-prem `case_chat.py` behavior for
-`selected_case` only.
+`case_chunks/` objects for `selected_case` only.
 
 - Lexical lane: in-memory BM25 over stored `search_text` (stdlib only).
 - Vector lane: cosine similarity on Bedrock Titan embeddings at query time.
@@ -995,8 +985,8 @@ Stop and ask before coding if any of these become necessary:
 
 ### Decision 8: Chat history (v1)
 
-**Locked:** Implement on-prem chat history behind
-`CASE_QA_CHAT_HISTORY_ENABLED=false` by default.
+**Locked:** Optional chat history behind `CASE_QA_CHAT_HISTORY_ENABLED=false` by
+default.
 
 - Storage: DynamoDB `CHAT_SESSIONS_TABLE` and `CHAT_MESSAGES_TABLE`.
 - Portal Lambda read/write only.
@@ -1005,7 +995,7 @@ Stop and ask before coding if any of these become necessary:
 
 **Locked:** Thin static SPA on S3 plus CloudFront.
 
-- Reuse the on-prem analyst portal React app with the same screens and layout.
+- Analyst portal UI: routes `/`, `/cases`, `/cases/{case_id}`.
 
 ### Decision 10: Embed timing (v1)
 
@@ -1016,22 +1006,22 @@ Stop and ask before coding if any of these become necessary:
 
 ### Decision 11: General-knowledge fallback (v1)
 
-**Locked:** Match on-prem default `CASE_QA_GENERAL_KNOWLEDGE_ENABLED=true`.
+**Locked:** `CASE_QA_GENERAL_KNOWLEDGE_ENABLED=true` by default.
 
-- Fallback triggers on empty retrieval or the on-prem insufficient-archive
+- Fallback triggers on empty retrieval or the standard insufficient-archive
   answer phrase, not on an embedding score threshold.
 
 ### Decision 12: Advisory context in portal chat (v1)
 
-**Locked:** Match on-prem gating.
+**Locked:** Advisory KB context in portal chat follows capability profile gating.
 
 - `analyst_portal` alone does not pull KB context into chat.
 - When `rag`, `spl_readonly`, or `elastic_readonly` are also enabled, portal chat
-  may add the same advisory grounding paths as on-prem using Bedrock KB retrieve.
+  may add advisory grounding via Bedrock KB retrieve.
 
 ### Decision 13: Retrieval tuning knobs (v1)
 
-**Locked:** Match on-prem retrieval config names and defaults.
+**Locked:** Use these retrieval config names and defaults:
 
 - `CASE_QA_LEXICAL_TOP_K=30`
 - `CASE_QA_VECTOR_TOP_K=30`
@@ -1047,7 +1037,7 @@ Stop and ask before coding if any of these become necessary:
 - When enabled, rerank applies only to advisory KB snippets, never case chunks.
 - AWS primary model: `cohere.rerank-v3-5:0`
 - AWS fallback model: `amazon.rerank-v1:0` in regions where Cohere is unavailable
-- Do not load `mixedbread-ai/mxbai-rerank-large-v2` into Lambda.
+- Do not load local Mixedbread rerank models into Lambda.
 
 ### Decision 15: Vector dimensions config (v1)
 
@@ -1065,17 +1055,17 @@ Stop and ask before coding if any of these become necessary:
 
 ### Decision 17: Chat history storage shape (v1)
 
-**Locked:** Two DynamoDB tables matching on-prem session/message semantics.
+**Locked:** Two DynamoDB tables for session and message storage.
 
 - See DynamoDB Chat History Contract above.
 
 ### Decision 18: Portal UI scope (v1)
 
-**Locked:** Exact reuse of on-prem analyst portal UI.
+**Locked:** Analyst portal UI scope for v1.
 
 - Routes: `/`, `/cases`, `/cases/{case_id}`
-- AWS-only client changes: JWT bearer auth and `VITE_PORTAL_API_BASE_URL`
-- API responses must match on-prem OpenAPI models
+- Client wiring: JWT bearer auth and `VITE_PORTAL_API_BASE_URL`
+- API responses follow `docs/contracts/portal.openapi.json`
 
 ### Decision 19: Chat route timeout (v1)
 
@@ -1086,7 +1076,7 @@ Gateway integration limit alone.
 - Expose chat through a portal Lambda Function URL integrated behind CloudFront
   or equivalent direct HTTPS path with JWT validation inside the handler
 - Keep standard portal routes on API Gateway with the JWT authorizer
-- Browser client keeps the on-prem long chat timeout behavior
+- Browser client chat timeout: `PORTAL_CHAT_TIMEOUT_SEC` default `300`
 
 ### Decision 20: S3 case chunk storage (v1)
 
@@ -1098,12 +1088,12 @@ Gateway integration limit alone.
 
 ### Decision 21: Archive notices (v1)
 
-**Locked:** Port on-prem `case_archive_notices.py` verbatim.
+**Locked:** Populate `archive_notices` from archive and indexing state.
 
 - Populate `archive_notices` on `/api/cases` and `/api/cases/{case_id}` from
   `retrieval_status`, `source_completeness`, and envelope `archive_metadata`.
 - Notices cover `pending`, `failed`, `not_indexed`, incomplete sources, and
-  `poc_unstructured_output` the same way as on-prem.
+  `poc_unstructured_output`.
 
 ### Decision 22: Chat dependency status (v1)
 
@@ -1112,14 +1102,14 @@ Gateway integration limit alone.
 
 - Keys: `embeddings`, `archive_retrieval`, `llm_gateway` with values `ready` or
   `unavailable`.
-- Use live probes matching on-prem: Bedrock embed, BM25+vector retrieval path,
-  and Bedrock chat gateway reachability.
+- Use live probes for Bedrock embed, BM25+vector retrieval path, and Bedrock chat
+  gateway reachability.
 - Expose `chat_degraded_reason` when `chat_ready=false`.
 
 ### Decision 23: Portal chat concurrency (v1)
 
-**Locked:** Enforce `PORTAL_CHAT_MAX_CONCURRENCY` in the portal Lambda handler,
-matching on-prem semaphore behavior. Default **`18`** (max `64`) on AWS and on-prem.
+**Locked:** Enforce `PORTAL_CHAT_MAX_CONCURRENCY` in the portal Lambda handler.
+Default **`18`** (max `64`).
 
 - Count active chat requests in-handler for the full synthesis duration; do **not**
   use Lambda reserved concurrency as the chat limit (browse routes must stay
@@ -1140,7 +1130,7 @@ matching on-prem semaphore behavior. Default **`18`** (max `64`) on AWS and on-p
 
 ### Decision 25: Case identity collision (v1)
 
-**Locked:** Suppress on identity mismatch; match on-prem runtime behavior.
+**Locked:** Suppress archive update on identity mismatch.
 
 - Conditional DynamoDB write allows replay only when source identity matches.
 - On mismatch: log the conflict, skip archive update, leave the existing case
@@ -1148,7 +1138,8 @@ matching on-prem semaphore behavior. Default **`18`** (max `64`) on AWS and on-p
 
 ### Decision 26: Async embed pending window (v1)
 
-**Locked:** Accept the async `pending` window matching on-prem.
+**Locked:** Accept async `pending` retrieval status between archive write and embed
+completion.
 
 - Analyzer writes CaseIndex with `retrieval_status=pending`; embed Lambda moves
   to `ready` or `failed`.
@@ -1159,11 +1150,10 @@ matching on-prem semaphore behavior. Default **`18`** (max `64`) on AWS and on-p
 
 ### Decision 27: OpenAPI contract tests (v1)
 
-**Locked:** Vendor on-prem `portal.openapi.json` and enforce parity in Diff 3.
+**Locked:** Vendor `portal.openapi.json` and enforce contract tests in Diff 3.
 
-- Copy `llm_notable_analysis_onprem_systemd/frontend/analyst-portal/openapi/portal.openapi.json`
-  into `s3_notable_pipeline/docs/contracts/`.
-- Vendor on-prem `portal_api_models.py` **unchanged** (Pydantic `BaseModel` shapes).
+- Copy the portal OpenAPI spec into `s3_notable_pipeline/docs/contracts/`.
+- Vendor `portal_api_models.py` unchanged (Pydantic `BaseModel` shapes).
 - Serialize responses with `.model_dump()` / `.model_dump_json()` in
   `portal_handler.py`; do not hand-roll alternate field names.
 - Add `pydantic` to `s3_notable_pipeline/requirements.txt` per Decision 35.
@@ -1177,8 +1167,8 @@ on Amazon Bedrock unless the customer explicitly overrides `BEDROCK_MODEL_ID`.
 - SAM/CloudFormation default `BEDROCK_MODEL_ID` must use the regional Sonnet 4.6
   inference profile ARN for the deployment region. For `us-east-1`, use
   `arn:aws:bedrock:us-east-1:${AwsAccountId}:inference-profile/us.anthropic.claude-sonnet-4-6`.
-- Sonnet 4.6 is the AWS-side peer/upgrade to on-prem `gemma-4-31B-it` for
-  structured notable analysis, reasoning over alert JSON, and data synthesis.
+- Sonnet 4.6 is the default for structured notable analysis, reasoning over alert
+  JSON, and data synthesis on AWS.
 - Nova Pro and Claude Haiku 4.5 remain supported operator overrides for cost or
   latency experiments; Claude Sonnet 4.5 is deprecated for new defaults.
 
@@ -1249,31 +1239,29 @@ on Amazon Bedrock unless the customer explicitly overrides `BEDROCK_MODEL_ID`.
 
 ### Decision 35: Wave-2 Python dependencies (v1)
 
-**Locked:** Use on-prem portal contract packages; do not substitute dataclasses
+**Locked:** Use shared portal contract packages; do not substitute dataclasses
 for Pydantic in `portal_api_models.py`.
 
 - Add **`pydantic`** to `s3_notable_pipeline/requirements.txt` when the portal
-  API slice ships (Diff 3). Pin to the same resolved version as on-prem
-  `fastapi==0.115.12` in `llm_notable_analysis_onprem_systemd/pyproject.toml`.
-- Vendor or copy `portal_api_models.py` from on-prem with Pydantic models intact.
+  API slice ships (Diff 3). Pin to the resolved version used by the portal
+  contract package.
+- Vendor or copy `portal_api_models.py` with Pydantic models intact.
 - Do **not** deploy `fastapi` or `uvicorn` on the portal Lambda; the handler is
   plain Lambda + API Gateway, not a FastAPI app.
-- Do **not** port on-prem ML/RAG stack packages (`sentence-transformers`,
-  `faiss-cpu`, `onprem-llm-sdk`, etc.); AWS uses Bedrock for embed and chat.
+- Do **not** port local ML/RAG stack packages (`sentence-transformers`,
+  `faiss-cpu`, etc.); AWS uses Bedrock for embed and chat.
 - Any dependency outside `requests`, Lambda `boto3`, and the Pydantic pin above
   requires a new locked decision.
 
 ### Decision 36: Portal chat concurrency scope (v1)
 
-**Locked:** Per portal Lambda **execution environment** (in-process semaphore),
-matching on-prem per-process behavior.
+**Locked:** Per portal Lambda **execution environment** (in-process semaphore).
 
-- The semaphore limits concurrent in-flight chat requests within one warm Lambda
-  execution environment only.
-- Approximate fleet-wide concurrency is
-  `PORTAL_CHAT_MAX_CONCURRENCY` times the number of concurrent warm portal
-  execution environments (scales with traffic; provisioned concurrency sets a
-  floor, not a hard global cap).
+- Each warm portal Lambda instance handles at most `PORTAL_CHAT_MAX_CONCURRENCY`
+  in-flight chat requests (default `18`, max `64`).
+- Under load, AWS may run multiple warm instances, so total capacity scales with
+  concurrent warm execution environments; provisioned concurrency sets a floor,
+  not a hard global cap.
 - Do **not** implement a DynamoDB, ElastiCache, or other cross-instance chat
   counter in v1.
 - If a customer requires a hard account-wide chat cap across all warm instances,
@@ -1281,10 +1269,10 @@ matching on-prem per-process behavior.
 
 ## Portal Frontend Contract
 
-Reuse `llm_notable_analysis_onprem_systemd/frontend/analyst-portal` without
-visual changes.
+Vendor the analyst portal React UI into the AWS static hosting path without
+layout changes.
 
-Production-only AWS additions:
+Production AWS client config:
 
 ```env
 VITE_PORTAL_API_BASE_URL=https://<portal-api-host>
@@ -1304,14 +1292,14 @@ Do not require analysts to use AWS IAM credentials in the browser.
 This plan is ready to feed Cursor for implementation when:
 
 - [x] `analyst_portal` profile semantics are accepted for AWS.
-- [x] S3 envelope plus DynamoDB index is accepted as the v1 AWS-native equivalent of
-  on-prem Postgres archive storage.
-- [x] API Gateway plus portal Lambda is accepted as the v1 AWS-native equivalent of
-  on-prem FastAPI/nginx, with Decision 19 chat timeout routing.
-- [x] Pinned-case Q&A (`selected_case` only) is accepted for AWS and on-prem.
+- [x] S3 envelope plus DynamoDB index is accepted for v1 case archive storage.
+- [x] API Gateway plus portal Lambda is accepted for v1 portal hosting, with
+  Decision 19 chat timeout routing.
+- [x] Pinned-case Q&A (`selected_case` only) is accepted for v1.
 - [x] Decisions 6 through 27 are accepted.
-- [x] Decisions 28 through 35 are accepted for deploy defaults, auth, routing,
-  model selection, Diff 4 module boundaries, and on-prem Pydantic dependency parity.
+- [x] Decisions 28 through 36 are accepted for deploy defaults, auth, routing,
+  model selection, Diff 4 module boundaries, dependencies, and chat concurrency
+  scope.
 - [x] Diff 2b (post-archive embed Lambda) is accepted between archive write and
   portal API slices.
 - The hard stops above are treated as plan changes, not implementation details.

@@ -1,8 +1,10 @@
-# Compressed Input Handling Plan
+## Status
 
-Branch: `feature/s3-compressed-inputs`
+**Complete.** Gzip compressed input handling is implemented in
+`lambda_handler.py`. Operator guidance lives in `README.md` and
+`docs/operations/FILE_DROP_AND_RETENTION_OPERATIONS.md`.
 
-**On-prem parity plan:** `llm_notable_analysis_onprem_systemd/docs/planning/COMPRESSED_INPUTS_PLAN.md`
+Branch: `feature/s3-compressed-inputs` (merged; retained for history)
 
 ## Goal
 

@@ -1,8 +1,8 @@
-# AWS / On-Prem Parity Technical Spec
+# AWS Notable Pipeline Technical Spec
 
 ## Status
 
-Implementation contract for AWS/on-prem parity. **Wave 1 sections** (profiles
+Implementation contract for the AWS notable pipeline. **Wave 1 sections** (profiles
 through idempotency below) describe implemented analyzer behavior. **Wave 2
 sections** (analyst portal block at end) are synced from
 [`../planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md`](../planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md)
@@ -307,8 +307,7 @@ customer overrides `BEDROCK_MODEL_ID`.
 
 - Portal API: read-only Lambda plus API Gateway with JWT authorizer (IAM
   second-best).
-- Static React SPA on S3 plus CloudFront; reuse on-prem analyst portal UI
-  (Decision 18).
+- Static React SPA on S3 plus CloudFront (Decision 18).
 - Long-running chat: portal Lambda Function URL behind CloudFront path
   `/api/chat` and `/api/chat/*`; other `/api/*` routes use API Gateway
   (Decisions 19, 31).
@@ -328,20 +327,21 @@ customer overrides `BEDROCK_MODEL_ID`.
   profiles are also enabled (Decision 12).
 - Chat synthesis in `portal_chat.py`; do not import `ttp_analyzer.py`
   (Decision 33).
-- Response shapes must match vendored on-prem `portal.openapi.json` and
+- Response shapes follow `docs/contracts/portal.openapi.json` and
   `portal_api_models.py` (Pydantic); pin `pydantic` in `requirements.txt` per
   Decision 35.
 - `archive_notices` on case list and detail; full `chat_dependency_status` when
   `CASE_QA_ENABLED=true` (Decisions 21-22).
-- Chat concurrency: in-process semaphore per portal Lambda execution environment;
-  default `PORTAL_CHAT_MAX_CONCURRENCY=18` (max `64`). See Decision 36 for
-  fleet-wide scope (Decisions 23, 36).
+- Chat concurrency: each portal Lambda instance handles at most
+  `PORTAL_CHAT_MAX_CONCURRENCY` in-flight chat requests (default `18`, max `64`);
+  returns HTTP 429 when exceeded. Under load, total capacity scales with warm
+  instances. v1 does not use a cross-instance counter (Decisions 23, 36).
 
 ### Embedding Contract (Decision 6)
 
 - Chunk and query embeddings: Bedrock Titan (`amazon.titan-embed-text-v2:0`),
   `1024` dimensions with `normalize=true`.
-- Do not load on-prem Mixedbread embedder into Lambda.
+- Do not load local Mixedbread embedder into Lambda.
 - Same model at chunk write (embed Lambda) and chat query time (portal Lambda).
 
 ### Chat History Contract (Decisions 8, 17)
@@ -354,4 +354,4 @@ customer overrides `BEDROCK_MODEL_ID`.
 
 - Add `pydantic` (pinned to on-prem resolved version) when Diff 3 ships.
 - Do not deploy `fastapi` or `uvicorn` on the portal Lambda.
-- Do not port on-prem ML/RAG stack packages; AWS uses Bedrock for embed and chat.
+- Do not port local ML/RAG stack packages; AWS uses Bedrock for embed and chat.
