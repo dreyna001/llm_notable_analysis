@@ -236,7 +236,7 @@ PORTAL_JWT_AUDIENCE=
 PORTAL_CORS_ALLOWED_ORIGINS=
 PORTAL_CHAT_TIMEOUT_SEC=300
 PORTAL_CHAT_FUNCTION_URL_ENABLED=true
-PORTAL_CHAT_MAX_CONCURRENCY=4
+PORTAL_CHAT_MAX_CONCURRENCY=18
 PORTAL_CHAT_BEDROCK_MODEL_ID=
 
 CASE_QA_ENABLED=false
@@ -291,7 +291,8 @@ Validation rules:
 - `CASE_QA_CHAT_HISTORY_ENABLED=true` requires `CHAT_SESSIONS_TABLE` and
   `CHAT_MESSAGES_TABLE`.
 - `CASE_QA_VECTOR_DIMENSIONS` must match the configured Titan embed output size.
-- `PORTAL_CHAT_MAX_CONCURRENCY` must be a positive integer, default `4`, max `64`.
+- `PORTAL_CHAT_MAX_CONCURRENCY` must be a positive integer, default `18`, max `64`.
+  Same default on AWS and on-prem.
 - `PORTAL_CHAT_BEDROCK_MODEL_ID` is optional; when set, it must be non-empty and
   is used only for portal answer synthesis (Decision 29).
 - `RAG_RERANK_MODEL_FALLBACK` is used only when the primary rerank model is
@@ -787,8 +788,8 @@ Acceptance criteria:
   `chat_dependency_status` (`embeddings`, `archive_retrieval`, `llm_gateway`)
   and `chat_degraded_reason` via live dependency probes (Decision 22).
 - Response shapes match the vendored on-prem OpenAPI contract (Decision 27).
-- Portal Lambda reserved concurrency matches `PORTAL_CHAT_MAX_CONCURRENCY`;
-  excess chat requests return HTTP 429 with the on-prem message (Decision 23).
+- In-handler chat concurrency matches `PORTAL_CHAT_MAX_CONCURRENCY`; excess
+  chat requests return HTTP 429 with the on-prem message (Decision 23).
 - Portal Lambda has no writeback, input-bucket, or case mutation permissions.
 - Unauthenticated or malformed auth context fails closed.
 - Mutating methods are rejected.
@@ -916,7 +917,7 @@ Stop and ask before coding if any of these become necessary:
   workflow host
 - adding OpenSearch, Aurora, Bedrock Knowledge Base case ingestion, or a new
   vector database for v1 case-archive storage
-- loading local sentence-transformers, BGE embedders, or BGE rerankers into Lambda
+- loading local sentence-transformers, Mixedbread embedders, or Mixedbread rerankers into Lambda
 - exposing portal routes without IAM or JWT authorization
 - storing full alert payloads in DynamoDB instead of S3 envelopes
 - adding third-party Python dependencies **outside** the Decision 35 on-prem
@@ -1117,10 +1118,12 @@ Gateway integration limit alone.
 
 ### Decision 23: Portal chat concurrency (v1)
 
-**Locked:** Match on-prem `PORTAL_CHAT_MAX_CONCURRENCY` default `4`, max `64`.
+**Locked:** Enforce `PORTAL_CHAT_MAX_CONCURRENCY` in the portal Lambda handler,
+matching on-prem semaphore behavior. Default **`18`** (max `64`) on AWS and on-prem.
 
-- Set Lambda reserved concurrency on the chat-capable portal Lambda to this
-  value.
+- Count active chat requests in-handler for the full synthesis duration; do **not**
+  use Lambda reserved concurrency as the chat limit (browse routes must stay
+  unconstrained).
 - Return HTTP 429 with *"Too many chat requests are already running. Try again
   shortly."* when concurrency is exceeded.
 

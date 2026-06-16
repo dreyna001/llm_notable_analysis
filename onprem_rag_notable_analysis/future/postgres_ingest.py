@@ -1,7 +1,7 @@
 """PostgreSQL + pgvector corpus population helpers."""
 
 # Optional retrieval dependencies are imported lazily so non-Postgres fallback
-# deployments can import the package without Postgres/BGE runtime dependencies.
+# deployments can import the package without Postgres/embedding runtime dependencies.
 # pylint: disable=import-error
 
 from __future__ import annotations

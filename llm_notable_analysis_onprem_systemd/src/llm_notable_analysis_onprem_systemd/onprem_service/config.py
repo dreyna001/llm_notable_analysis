@@ -413,7 +413,7 @@ class Config:
     PORTAL_BIND_HOST: str = "127.0.0.1"
     PORTAL_PORT: int = 8080
     PORTAL_PAGE_SIZE: int = 50
-    PORTAL_CHAT_MAX_CONCURRENCY: int = 4
+    PORTAL_CHAT_MAX_CONCURRENCY: int = 18
     PORTAL_TRUSTED_USER_HEADER: str = "X-Forwarded-User"
     PORTAL_ALLOW_NON_LOOPBACK_BIND: bool = False
     PORTAL_PROXY_SECRET: str = ""
@@ -745,7 +745,7 @@ def load_config() -> Config:
         PORTAL_PORT=_positive_int_env("PORTAL_PORT", 8080, max_value=65535),
         PORTAL_PAGE_SIZE=_positive_int_env("PORTAL_PAGE_SIZE", 50, max_value=100),
         PORTAL_CHAT_MAX_CONCURRENCY=_positive_int_env(
-            "PORTAL_CHAT_MAX_CONCURRENCY", 4, max_value=64
+            "PORTAL_CHAT_MAX_CONCURRENCY", 18, max_value=64
         ),
         PORTAL_TRUSTED_USER_HEADER=os.getenv(
             "PORTAL_TRUSTED_USER_HEADER", "X-Forwarded-User"

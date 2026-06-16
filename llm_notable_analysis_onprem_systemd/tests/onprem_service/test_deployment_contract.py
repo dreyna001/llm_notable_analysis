@@ -271,7 +271,7 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("CAPABILITY_PROFILES=core,analyst_portal", portal_config_text)
         self.assertIn("CASE_POSTGRES_DSN=postgresql://notable_portal@", portal_config_text)
         self.assertIn("PORTAL_PROXY_SECRET=<generate-a-random-shared-secret>", portal_config_text)
-        self.assertIn("PORTAL_CHAT_MAX_CONCURRENCY=4", portal_config_text)
+        self.assertIn("PORTAL_CHAT_MAX_CONCURRENCY=18", portal_config_text)
         self.assertNotIn("SPLUNK_API_TOKEN", portal_config_text)
         self.assertNotIn("SERVICENOW_API_TOKEN", portal_config_text)
 

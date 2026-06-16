@@ -79,19 +79,17 @@ macro, and datamodel grounding in the SPL-generation call, operators use
   re-embed archived case chunks. Reranker-only changes do not require a KB
   rebuild.
 
-### Retrieval model migration (BGE -> Mixedbread)
+### On-prem retrieval models (US defaults)
 
-**Status:** Active repo default. Replace legacy BGE models on on-prem
-deployments.
+**Status:** Active repo default on on-prem deployments.
 
-| Component | Legacy | Target |
+| Component | Model | Notes |
 | --- | --- | --- |
-| Embedder | `BAAI/bge-base-en-v1.5` (China) | `mixedbread-ai/mxbai-embed-large-v1` (US) |
-| Vector dims | `768` | `1024` |
-| Reranker | `BAAI/bge-reranker-base` (China) | `mixedbread-ai/mxbai-rerank-large-v2` (US) |
-| License | MIT | Apache 2.0 |
-| Loader | `SentenceTransformer` + `CrossEncoder` | Same |
-| KB rebuild | Required on embedder/dim change | Not required for reranker-only |
+| Embedder | `mixedbread-ai/mxbai-embed-large-v1` | Apache 2.0, US-made |
+| Vector dims | `1024` | Must match `RAG_VECTOR_DIMENSIONS` and `CASE_QA_VECTOR_DIMENSIONS` |
+| Reranker | `mixedbread-ai/mxbai-rerank-large-v2` | Apache 2.0, disabled by default |
+| Loader | `SentenceTransformer` + `CrossEncoder` | In-process in analyzer |
+| KB rebuild | Required when embedder or dims change | Not required for reranker-only |
 
 **Config defaults:**
 
@@ -115,9 +113,9 @@ RAG_RERANK_ENABLED=false
 5. Enable `RAG_RERANK_ENABLED=true` only after latency testing.
 
 **Existing Postgres hosts:** new installs use `vector(1024)` in
-`deploy/postgres/notable_cases_schema.sql`. Upgrades from `vector(768)` require
-a planned migration and full re-embed before portal Q&A retrieval is trusted
-again.
+`deploy/postgres/notable_cases_schema.sql`. Hosts still on older `vector(768)`
+indexes require a planned migration and full re-embed before portal Q&A retrieval
+is trusted again.
 
 Query embeddings use the Mixedbread retrieval prompt prefix automatically at
 encode time. Document/chunk embeddings do not.

@@ -486,7 +486,7 @@ class PostgresRAGContextProvider:
     def _rerank_snippets(
         self, *, query_text: str, snippets: Sequence[ContextSnippet]
     ) -> list[ContextSnippet]:
-        """Optionally rerank snippets with a BGE-style cross encoder."""
+        """Optionally rerank snippets with a cross-encoder reranker."""
         if not self.config.rerank_enabled or len(snippets) <= 1:
             return list(snippets)
         try:

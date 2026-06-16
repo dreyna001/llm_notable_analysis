@@ -6,7 +6,7 @@ itself. An application imports it when that application wants to add retrieved
 knowledge-base context to an LLM prompt.
 
 The current production-oriented on-prem backend uses PostgreSQL FTS plus
-pgvector, BGE embeddings, and optional BGE reranking. The package can also build
+pgvector, Mixedbread embeddings, and optional Mixedbread reranking. The package can also build
 and read local fallback retrieval artifacts:
 
 - `kb.sqlite3`: chunk metadata plus SQLite FTS5 keyword search.
