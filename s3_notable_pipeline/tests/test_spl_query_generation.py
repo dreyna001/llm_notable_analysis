@@ -60,6 +60,8 @@ class SplQueryGenerationTests(unittest.TestCase):
         self.assertIn("INPUT_COMPETING_HYPOTHESES", prompt)
         self.assertIn("SPL_QUERY_GROUNDING_CONTEXT", prompt)
         self.assertIn("Return ONLY a single JSON object", prompt)
+        self.assertIn("unvalidated draft investigation guidance", prompt)
+        self.assertIn("ALERT_TIME is provided", prompt)
 
     def test_contract_requires_grounded_environment_tokens(self) -> None:
         ok, error = validate_spl_query_contract(

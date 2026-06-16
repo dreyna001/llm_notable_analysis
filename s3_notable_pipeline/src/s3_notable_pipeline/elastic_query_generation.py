@@ -40,11 +40,46 @@ _FIELD_QUERY_KEYS = {"term", "terms", "match", "match_phrase", "range", "prefix"
 
 ELASTIC_QUERY_GENERATION_RULES = """
 ELASTICSEARCH QUERY GENERATION (Enabled):
+- Generated Elasticsearch Query DSL is unvalidated draft investigation guidance.
+  Do not claim the query was executed or that results were observed.
 - For each input hypothesis, include exactly one primary Elasticsearch Query DSL request.
-- primary_elastic_query must contain index_pattern and body.
-- Use only read-only _search Query DSL. Do not use aggregations, query_string, scripts, wildcard clauses, highlighting, or runtime mappings.
-- Every query must include a lower and upper bound range filter on the configured timestamp field.
-- Do not invent index patterns or field names unless they appear in SECURITY ALERT INPUT or ELASTICSEARCH_GROUNDING_CONTEXT.
+- Each hypothesis must include:
+  - query_strategy: "resolve_unknown" or "check_contradiction"
+  - primary_elastic_query: an object with index_pattern and body
+  - why_this_query: short rationale
+  - supports_if: result pattern that strengthens the hypothesis
+  - weakens_if: result pattern that weakens the hypothesis
+- Each query must name the hypothesis uncertainty it is testing and use exact alert
+  fields or values where available.
+- primary_elastic_query.index_pattern must name exactly one target Elastic index or
+  index pattern. Respect wildcard policy and do not emit comma-separated multi-index
+  strings.
+- primary_elastic_query.body must be an Elasticsearch _search body.
+- Do not use placeholders such as <INDEX>, <FIELD>, or similar tokens.
+- Do not output pseudo-queries or prose.
+- Do not invent index patterns, ECS/vendor dotted fields, or timestamp fields. Use only
+  fields and indexes from SECURITY ALERT INPUT or ELASTICSEARCH_GROUNDING_CONTEXT.
+- Keep each search read-only, bounded, and decision-oriented.
+- Use only read-only Elasticsearch _search Query DSL. Do not generate KQL, Lucene,
+  ES|QL, SQL, Kibana API calls, or prose queries.
+- Prefer bool.filter, must_not, term, terms, exists, and range clauses for evidence
+  filtering. Avoid relevance-scoring patterns; security hunts should be decision
+  filters, not text-ranking searches.
+- Use only bounded _search Query DSL. Do not use aggregations, query_string,
+  simple_query_string, regex, wildcard clauses, scripts, highlighting, or runtime mappings.
+- When ALERT_TIME is provided, build a bounded range filter around it on the configured
+  timestamp field. Otherwise stay within ELASTICSEARCH_MAX_TIME_RANGE.
+- Every query must include a lower and upper bound range filter on the configured
+  timestamp field.
+""".strip()
+
+ELASTIC_QUERY_CONTEXT_RULES = """
+ELASTICSEARCH QUERY CONTEXT RULES:
+- Treat SOC_OPERATIONAL_CONTEXT as advisory context only.
+- Treat ELASTICSEARCH_GROUNDING_CONTEXT as advisory Elastic-environment context only.
+- Never treat SOC_OPERATIONAL_CONTEXT as direct alert evidence.
+- Do not use index patterns or field names unless they appear in SECURITY ALERT INPUT or ELASTICSEARCH_GROUNDING_CONTEXT.
+- SOC_OPERATIONAL_CONTEXT may explain analyst process, but it does not authorize environment-specific Elastic tokens.
 """.strip()
 
 ELASTIC_QUERY_OUTPUT_SCHEMA = """
@@ -110,6 +145,10 @@ INPUT_COMPETING_HYPOTHESES (ordered):
 ---
 
 {elastic_grounding_block}
+
+---
+
+{ELASTIC_QUERY_CONTEXT_RULES}
 
 ---
 

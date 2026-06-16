@@ -26,6 +26,8 @@ _GROUNDING_LINE_RE = re.compile(
 
 SPL_QUERY_GENERATION_RULES = """
 SPL QUERY GENERATION (Enabled):
+- Generated SPL is unvalidated draft investigation guidance. Do not claim the query
+  was executed or that results were observed.
 - For each of the EXACTLY 6 hypotheses, include exactly one primary Splunk query.
 - Each hypothesis must include:
   - query_strategy: "resolve_unknown" or "check_contradiction"
@@ -33,10 +35,18 @@ SPL QUERY GENERATION (Enabled):
   - why_this_query: short rationale
   - supports_if: result pattern that strengthens the hypothesis
   - weakens_if: result pattern that weakens the hypothesis
+- Each query must name the hypothesis uncertainty it is testing and use exact alert
+  fields or values where available.
 - Focus each query on a decision-changing unknown or strongest contradiction.
+- When ALERT_TIME is provided, include an explicit bounded time window around it
+  using earliest/latest or an equivalent SPL time constraint.
 - Do not use placeholders such as <INDEX>, <SOURCETYPE>, or similar tokens.
 - Do not output pseudo-queries such as "search ...".
-- Do not invent environment-specific tokens unless they appear in SECURITY ALERT INPUT, SPL_QUERY_GROUNDING_CONTEXT, or the configured allowlist.
+- If no index, sourcetype, macro, or CIM data model is available in SECURITY ALERT
+  INPUT or SPL_QUERY_GROUNDING_CONTEXT, write the query without invented environment
+  tokens and focus on observable fields from the alert.
+- Do not invent environment-specific tokens (indexes/sourcetypes/macros/CIM data model
+  names) unless explicitly present in SECURITY ALERT INPUT or SPL_QUERY_GROUNDING_CONTEXT.
 """.strip()
 
 SPL_QUERY_CONTEXT_RULES = """
@@ -44,7 +54,8 @@ SPL QUERY CONTEXT RULES:
 - Treat SOC_OPERATIONAL_CONTEXT as advisory context only.
 - Treat SPL_QUERY_GROUNDING_CONTEXT as advisory Splunk-environment context only.
 - Never treat either context block as direct alert evidence.
-- Do not use indexes, sourcetypes, macros, or CIM data models unless they appear in SECURITY ALERT INPUT, SPL_QUERY_GROUNDING_CONTEXT, or the configured allowlist.
+- Do not use indexes, sourcetypes, macros, or CIM data models unless they appear in SECURITY ALERT INPUT or SPL_QUERY_GROUNDING_CONTEXT.
+- SOC_OPERATIONAL_CONTEXT may explain analyst process, but it does not authorize environment-specific SPL tokens.
 - Keep each query bounded and decision-oriented.
 """.strip()
 

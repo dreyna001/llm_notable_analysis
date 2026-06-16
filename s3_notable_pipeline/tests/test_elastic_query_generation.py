@@ -80,6 +80,8 @@ class ElasticQueryGenerationTests(unittest.TestCase):
         self.assertIn("INPUT_COMPETING_HYPOTHESES", prompt)
         self.assertIn("ELASTICSEARCH_GROUNDING_CONTEXT", prompt)
         self.assertIn("Return ONLY a single JSON object", prompt)
+        self.assertIn("unvalidated draft investigation guidance", prompt)
+        self.assertIn("ELASTICSEARCH QUERY CONTEXT RULES", prompt)
 
     def test_contract_denies_unallowlisted_index(self) -> None:
         ok, error = validate_elastic_query_contract(

@@ -218,24 +218,46 @@ REQUIRED_RESPONSE_KEYS = {
 REQUIRED_RESPONSE_KEYS_LIST = list(REQUIRED_RESPONSE_KEYS.keys())
 
 # Repair prompt template for content retry when parsing fails
-REPAIR_PROMPT_TEMPLATE = """Your previous response could not be parsed.
+REPAIR_PROMPT_TEMPLATE = """Your previous response could not be parsed or validated.
 
 Error: {error}
 
 Previous output (truncated):
 {prior_output}
 
-Please use the analyze_notable tool to return your analysis. Return ONLY the tool call with valid JSON matching the schema. Do not include any text outside the tool call."""
+Repair only formatting, JSON validity, schema shape, enum values, and missing required containers. Do not improve, expand, reinterpret, or add new analysis.
+
+Do not add facts, IOCs, hosts, users, timestamps, verdict reasons, TTPs, queries, or result interpretations that were not present in the previous output or original prompt context.
+
+If a required field cannot be supported, use "unknown" for scalar fields and [] for list fields where the schema allows it.
+
+Preserve valid fields from the previous output whenever they already satisfy the contract. Only change fields needed to pass validation.
+
+OUTPUT CONTRACT:
+{contract}
+
+Please use the analyze_notable tool to return your analysis. Return ONLY the tool call. No markdown fences, comments, prose, or explanation."""
 
 # Repair prompt for raw-JSON mode (no tool use)
-REPAIR_PROMPT_TEMPLATE_RAW_JSON = """Your previous response could not be parsed.
+REPAIR_PROMPT_TEMPLATE_RAW_JSON = """Your previous response could not be parsed or validated.
 
 Error: {error}
 
 Previous output (truncated):
 {prior_output}
 
-Return ONLY a single valid JSON object matching the schema. Do not include markdown fences, tool calls, or any extra text."""
+Repair only formatting, JSON validity, schema shape, enum values, and missing required containers. Do not improve, expand, reinterpret, or add new analysis.
+
+Do not add facts, IOCs, hosts, users, timestamps, verdict reasons, TTPs, queries, or result interpretations that were not present in the previous output or original prompt context.
+
+If a required field cannot be supported, use "unknown" for scalar fields and [] for list fields where the schema allows it.
+
+Preserve valid fields from the previous output whenever they already satisfy the contract. Only change fields needed to pass validation.
+
+OUTPUT CONTRACT:
+{contract}
+
+Return only one valid JSON object. No markdown fences, comments, prose, or explanation."""
 
 # =============================================================================
 # PROMPT SECTIONS - Modular prompt components for maintainability
@@ -294,41 +316,50 @@ PROCEDURE:
 2. Use sub-techniques when specific variant is confirmed (e.g., T1059.001 for PowerShell); default to parent techniques otherwise.
 """
 
-ALERT_RECONCILIATION = """
-ALERT RECONCILIATION (required):
-- Provide a direct, actionable verdict about what to do with THIS alert right now.
-- Use only evidence present in the notable; if you cannot decide, use verdict "unknown".
-- decision_drivers must cite field=value facts from the notable and/or explicitly state unknowns as "unknown: <missing fact>".
-- recommended_actions must be concrete next steps (pivots, validation checks, containment). Do not assume telemetry that is not present.
-"""
-
-OUTPUT_SCHEMA = """
-Use the analyze_notable tool to return your analysis. Follow the tool's JSON schema exactly.
-
-Additional constraints (not enforceable in JSON schema):
+OUTPUT_CONTRACT_CONSTRAINTS = """
+Additional constraints:
+- This contract is mandatory; omit unsupported facts rather than inventing values.
+- Direct alert evidence must come only from SECURITY ALERT INPUT.
+- SOC_OPERATIONAL_CONTEXT may inform analyst pivots and recommended validation steps, but it must not create findings, verdicts, IOCs, or TTP evidence by itself.
+- Keep direct evidence, inference, and recommended next steps separate.
 - explanation: must end with "Uncertainty: [brief statement]".
 - URLs are only allowed in ioc_extraction.urls[]; no URLs elsewhere.
 - Leave arrays empty [] when no items apply.
 - alert_reconciliation: object with verdict, confidence, one_sentence_summary, decision_drivers (list), recommended_actions (list).
-- Top-level keys (required): alert_reconciliation, competing_hypotheses, evidence_vs_inference, ioc_extraction, ttp_analysis.
+- alert_reconciliation.verdict MUST be exactly one of: "likely_true_positive", "likely_benign", "likely_false_positive", "unknown".
+- Use "likely_true_positive" when direct alert evidence supports adversary activity or a true-positive security concern.
+- Use "likely_benign" or "likely_false_positive" when direct alert evidence supports benign, administrative, expected, or false-positive activity.
+- Use "unknown" when the evidence is insufficient, conflicting, missing critical context, or only supports competing benign/adversary hypotheses.
+- ATT&CK techniques are behavior labels, not verdicts; do not mark a verdict true-positive solely because a technique can be mapped.
+- alert_reconciliation.confidence is confidence in the selected verdict, not an independent probability that the alert is malicious.
+"""
+
+OUTPUT_SCHEMA = f"""
+Use the analyze_notable tool to return your analysis. Follow the tool's JSON schema exactly.
+
+{OUTPUT_CONTRACT_CONSTRAINTS}
+Top-level keys (required): alert_reconciliation, competing_hypotheses, evidence_vs_inference, ioc_extraction, ttp_analysis.
 - Return ONLY the tool call; no extra text.
 """
 
-OUTPUT_SCHEMA_RAW_JSON = """
+OUTPUT_SCHEMA_RAW_JSON = f"""
 Return ONLY a single JSON object matching the schema. Do not include markdown fences or any extra text.
 
-Additional constraints:
-- explanation: must end with "Uncertainty: [brief statement]".
-- URLs are only allowed in ioc_extraction.urls[]; no URLs elsewhere.
-- Leave arrays empty [] when no items apply.
-- alert_reconciliation: object with verdict, confidence, one_sentence_summary, decision_drivers (list), recommended_actions (list).
-
+{OUTPUT_CONTRACT_CONSTRAINTS}
 Top-level keys (required):
 - alert_reconciliation
 - competing_hypotheses
 - evidence_vs_inference
 - ioc_extraction
 - ttp_analysis
+"""
+
+SOC_CONTEXT_RULES = """
+SOC CONTEXT RULES:
+- The SOC_OPERATIONAL_CONTEXT block is operational guidance only.
+- Never treat SOC_OPERATIONAL_CONTEXT as direct alert evidence.
+- Never copy SOC context into evidence_vs_inference.evidence, ttp_analysis[*].evidence_fields, or ioc_extraction unless present in SECURITY ALERT INPUT.
+- If SOC context is weak, missing, or conflicting, keep guidance broad and explicitly use "unknown" where needed.
 """
 
 RULES = """
@@ -1086,23 +1117,26 @@ class BedrockAnalyzer:
         """
         alert_time_str = f"\n**ALERT_TIME:** {alert_time}\n" if alert_time else ""
         output_schema = OUTPUT_SCHEMA if use_tool else OUTPUT_SCHEMA_RAW_JSON
-        soc_context = ""
         if advisory_context and advisory_context.strip():
-            soc_context = f"""
-SOC_OPERATIONAL_CONTEXT (advisory only; not direct alert evidence):
-{advisory_context.strip()}
+            soc_context_block = (
+                "SOC_OPERATIONAL_CONTEXT (advisory only; not direct alert evidence):\n"
+                f"{advisory_context.strip()}\n"
+            )
+        else:
+            soc_context_block = "SOC_OPERATIONAL_CONTEXT\n(none)\n"
 
-Do not treat SOC_OPERATIONAL_CONTEXT as observed facts from the current alert.
-Use it only to interpret environment-specific terminology, SOPs, escalation
-guidance, field names, and operating context.
+        return f"""You are a cybersecurity expert producing a structured SOC analysis from a single alert.
+
+TASK:
+Analyze one alert only. Produce a verdict, separate direct evidence from inference,
+extract supported IOCs, map MITRE ATT&CK only when direct evidence supports it,
+and generate competing benign/adversary hypotheses for analyst validation.
+
+OUTPUT CONTRACT:
+{output_schema}
 
 ---
-"""
-        
-        return f"""You are a cybersecurity expert mapping MITRE ATT&CK techniques from a single alert.
 {alert_time_str}
----
-
 {ANALYST_DOCTRINE}
 
 {EVIDENCE_GATE}
@@ -1120,9 +1154,9 @@ SECURITY ALERT INPUT:
 
 ---
 
-{soc_context}
+{soc_context_block}
 
-{output_schema}
+{SOC_CONTEXT_RULES}
 
 ---
 
@@ -1423,7 +1457,12 @@ SECURITY ALERT INPUT:
                 logger.warning(f"Initial parse/validation failed: {error_msg}. Attempting one repair call.")
                 prior_output = (primary_raw or str(result) or "")[:4000]
                 repair_template = REPAIR_PROMPT_TEMPLATE if used_tool else REPAIR_PROMPT_TEMPLATE_RAW_JSON
-                repair_prompt = repair_template.format(error=error_msg, prior_output=prior_output)
+                contract = OUTPUT_SCHEMA if used_tool else OUTPUT_SCHEMA_RAW_JSON
+                repair_prompt = repair_template.format(
+                    error=error_msg,
+                    prior_output=prior_output,
+                    contract=contract,
+                )
                 t0 = time.time()
                 retry_response = self._converse(repair_prompt, use_tool=used_tool)
                 repair_elapsed = time.time() - t0

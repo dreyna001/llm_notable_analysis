@@ -52,7 +52,8 @@ class QueryResultInterpretationTests(unittest.TestCase):
         )
 
         self.assertIn("Do not invent events", prompt)
-        self.assertIn("Do not modify", prompt)
+        self.assertIn("zero-result query is not automatically exculpatory", prompt)
+        self.assertIn("read-only investigation query results", prompt)
         self.assertIn("source_query_refs may include only", prompt)
 
     def test_context_prunes_to_budget(self) -> None:
