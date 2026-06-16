@@ -38,7 +38,7 @@ in this folder.
 
 ### Python version
 
-- **Default:** The installer defaults both analyzer and vLLM venvs to `python3.12`. When `python3.12` is not on PATH, `scripts/install.sh` runs `scripts/install_python312.sh` from the monorepo root (requires package repos unless pre-staged). Set `INSTALL_PYTHON=false` on air-gapped hosts where Python 3.12 is installed manually.
+- **Default:** The installer defaults both analyzer and vLLM venvs to `python3.12`. When `python3.12` is not on PATH, `scripts/install.sh` runs `scripts/install_python312.sh` beside it (or the monorepo-root copy when present). Set `INSTALL_PYTHON=false` on air-gapped hosts where Python 3.12 is installed manually.
 - **Minimum:** Python 3.10+ is required; the installer fails if the chosen interpreter is older.
 - **3.13+:** If the interpreter is 3.13 or newer, the installer warns (does not fail). If vLLM later fails to start, pin to Python 3.12.
 - **Pinning (regulated envs):** For reproducible installs, pin both venvs to a specific interpreter, e.g. `sudo ANALYZER_PYTHON_BIN=python3.12 VLLM_PYTHON_BIN=python3.12 bash scripts/install.sh`. See README "Reproducibility: pinning Python".

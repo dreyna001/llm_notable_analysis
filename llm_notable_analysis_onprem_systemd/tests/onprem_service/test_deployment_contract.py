@@ -79,6 +79,9 @@ class TestDeploymentContract(unittest.TestCase):
         install_text = (PROJECT_ROOT / "scripts" / "install.sh").read_text(
             encoding="utf-8"
         )
+        python312_helper = PROJECT_ROOT / "scripts" / "install_python312.sh"
+
+        self.assertTrue(python312_helper.is_file(), msg=str(python312_helper))
 
         self.assertIn("RAG_PACKAGE_SRC_DIR", install_text)
         self.assertIn("SDK_SOURCE_DIR", install_text)
@@ -112,6 +115,7 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("INSTALL_ANALYST_PORTAL", install_text)
         self.assertIn("setup_postgres_case_archive.sh", install_text)
         self.assertIn("ensure_python312_for_install", install_text)
+        self.assertIn("resolve_python312_install_helper", install_text)
         self.assertIn("install_python312.sh", install_text)
         self.assertIn("INSTALL_PYTHON", install_text)
 

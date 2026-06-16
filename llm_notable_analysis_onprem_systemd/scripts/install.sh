@@ -453,7 +453,7 @@ ensure_python312_for_install() {
     if [[ "${INSTALL_PYTHON:-true}" != "true" ]]; then
         err "python3.12 is required (ANALYZER_PYTHON_BIN/VLLM_PYTHON_BIN) but was not found. Install Python 3.12 manually or rerun with INSTALL_PYTHON=true (default)."
     fi
-    [[ -f "$helper" ]] || err "Missing Python 3.12 install helper: $helper (clone the full monorepo or install python3.12 manually)"
+    [[ -f "$helper" ]] || err "Missing Python 3.12 install helper: $helper (install python3.12 manually or set INSTALL_PYTHON=false)"
     [[ -x "$helper" ]] || chmod +x "$helper" 2>/dev/null || true
 
     info "python3.12 not found; installing system Python 3.12 packages..."
@@ -461,6 +461,19 @@ ensure_python312_for_install() {
     command -v python3.12 >/dev/null 2>&1 \
         || err "python3.12 is still not on PATH after package install"
     info "python3.12 is available: $(python3.12 --version 2>&1)"
+}
+
+resolve_python312_install_helper() {
+    local candidate=""
+    for candidate in \
+        "$SCRIPT_DIR/install_python312.sh" \
+        "$MONOREPO_ROOT/scripts/install_python312.sh"; do
+        if [[ -f "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    err "Missing Python 3.12 install helper under $SCRIPT_DIR or $MONOREPO_ROOT/scripts (install python3.12 manually or set INSTALL_PYTHON=false)"
 }
 
 create_user_if_missing() {
@@ -1226,7 +1239,7 @@ MONOREPO_ROOT="$(cd "$REPO_DIR/.." && pwd)"
 RAG_PACKAGE_SRC_DIR="${RAG_PACKAGE_SRC_DIR:-$MONOREPO_ROOT/onprem_rag_notable_analysis}"
 SDK_SOURCE_DIR="${SDK_SOURCE_DIR:-$MONOREPO_ROOT/onprem-llm-sdk}"
 
-ensure_python312_for_install "$MONOREPO_ROOT/scripts/install_python312.sh"
+ensure_python312_for_install "$(resolve_python312_install_helper)"
 
 check_command python3
 check_command pip3
