@@ -22,6 +22,7 @@ from typing import Dict, Any
 from .aws_clients import s3_client as make_s3_client
 from .aws_clients import secretsmanager_client as make_secretsmanager_client
 from .aws_clients import dynamodb_client as make_dynamodb_client
+from .aws_clients import lambda_client as make_lambda_client
 from .bedrock_kb_retrieval import retrieve_soc_context
 from .case_archive import SourceContext, archive_case
 from .config import Config, load_config
@@ -53,6 +54,7 @@ logger.setLevel(logging.INFO)
 s3_client = make_s3_client()
 secretsmanager_client = make_secretsmanager_client()
 _dynamodb_client: Any | None = None
+_lambda_client: Any | None = None
 
 # Placeholder filenames to skip (case-insensitive basename match)
 PLACEHOLDER_FILENAMES = frozenset({'.keep', '.gitkeep', '_success', '.placeholder'})
@@ -68,6 +70,15 @@ def get_dynamodb_client() -> Any:
     if _dynamodb_client is None:
         _dynamodb_client = make_dynamodb_client()
     return _dynamodb_client
+
+
+def get_lambda_client() -> Any:
+    """Return the Lambda client lazily because archive is default-off."""
+
+    global _lambda_client  # pylint: disable=global-statement
+    if _lambda_client is None:
+        _lambda_client = make_lambda_client()
+    return _lambda_client
 
 
 @dataclass(frozen=True)
@@ -460,6 +471,7 @@ def write_case_archive_after_sink(
             sink_result=sink_result,
             s3_client=s3_client,
             dynamodb_client=get_dynamodb_client(),
+            lambda_client=get_lambda_client() if config.CASE_QA_ENABLED else None,
             processed_at=processed_at,
         )
         return {

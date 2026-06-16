@@ -54,6 +54,17 @@ class FakeDynamoDbClient:
         self.item = kwargs["Item"]
 
 
+class FakeLambdaClient:
+    """Capture async Lambda invoke calls."""
+
+    def __init__(self) -> None:
+        self.invocations: list[dict[str, Any]] = []
+
+    def invoke(self, **kwargs: Any) -> dict[str, Any]:
+        self.invocations.append(kwargs)
+        return {"StatusCode": 202}
+
+
 def archive_config(**overrides: Any) -> Config:
     """Build a valid archive-enabled config for tests."""
 
@@ -156,14 +167,22 @@ class CaseArchiveTests(unittest.TestCase):
     def test_archive_writes_bounded_envelope_and_case_index(self) -> None:
         s3 = FakeS3Client()
         dynamodb = FakeDynamoDbClient()
+        lambda_client = FakeLambdaClient()
 
         result = archive_case(
             analysis_result=analysis_result(),
-            config=archive_config(PORTAL_ENABLED=True, CASE_QA_ENABLED=True, PORTAL_JWT_ISSUER="https://issuer.example.test", PORTAL_JWT_AUDIENCE="portal"),
+            config=archive_config(
+                PORTAL_ENABLED=True,
+                CASE_QA_ENABLED=True,
+                CASE_EMBED_LAMBDA_NAME="notable-case-embed",
+                PORTAL_JWT_ISSUER="https://issuer.example.test",
+                PORTAL_JWT_AUDIENCE="portal",
+            ),
             source=source_context(),
             sink_result=sink_result(),
             s3_client=s3,
             dynamodb_client=dynamodb,
+            lambda_client=lambda_client,
             processed_at="2026-06-15T10:30:00Z",
         )
 
@@ -190,6 +209,12 @@ class CaseArchiveTests(unittest.TestCase):
         self.assertEqual(item["archive_partition"]["S"], "default")
         self.assertEqual(item["retrieval_status"]["S"], "pending")
         self.assertEqual(item["verdict"]["S"], "likely_true_positive")
+        self.assertEqual(len(lambda_client.invocations), 1)
+        self.assertEqual(
+            lambda_client.invocations[0]["FunctionName"],
+            "notable-case-embed",
+        )
+        self.assertEqual(lambda_client.invocations[0]["InvocationType"], "Event")
 
     def test_oversized_payload_marks_source_completeness_without_truncating(self) -> None:
         s3 = FakeS3Client()

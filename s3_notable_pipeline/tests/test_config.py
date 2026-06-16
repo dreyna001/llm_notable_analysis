@@ -61,6 +61,7 @@ class ConfigTests(unittest.TestCase):
                 "CAPABILITY_PROFILES": "core,analyst_portal",
                 "OUTPUT_BUCKET_NAME": "notable-output",
                 "CASE_INDEX_TABLE": "notable-case-index",
+                "CASE_EMBED_LAMBDA_NAME": "notable-case-embed",
                 "PORTAL_JWT_ISSUER": "https://issuer.example.test",
                 "PORTAL_JWT_AUDIENCE": "notable-portal",
             },
@@ -122,6 +123,24 @@ class ConfigTests(unittest.TestCase):
                 clear=True,
             ),
             self.assertRaisesRegex(ValueError, "CASE_INDEX_TABLE"),
+        ):
+            load_config()
+
+    def test_case_qa_requires_embed_lambda_name(self) -> None:
+        """Case Q&A should not start without the async embed Lambda target."""
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "CAPABILITY_PROFILES": "core,analyst_portal",
+                    "OUTPUT_BUCKET_NAME": "notable-output",
+                    "CASE_INDEX_TABLE": "notable-case-index",
+                    "PORTAL_JWT_ISSUER": "https://issuer.example.test",
+                    "PORTAL_JWT_AUDIENCE": "notable-portal",
+                },
+                clear=True,
+            ),
+            self.assertRaisesRegex(ValueError, "CASE_EMBED_LAMBDA_NAME"),
         ):
             load_config()
 

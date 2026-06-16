@@ -48,6 +48,7 @@ def archive_case(
     sink_result: dict[str, Any],
     s3_client: Any,
     dynamodb_client: Any,
+    lambda_client: Any | None = None,
     processed_at: datetime | str | None = None,
 ) -> ArchiveWriteResult:
     """Write a canonical S3 case envelope and DynamoDB CaseIndex row."""
@@ -175,12 +176,43 @@ def archive_case(
             message="case identity collision suppressed",
         )
 
+    _invoke_embed_lambda(
+        config=config,
+        lambda_client=lambda_client,
+        case_id=case_id,
+        envelope_bucket=config.CASE_ARCHIVE_BUCKET,
+        envelope_key=envelope_key,
+    )
     return ArchiveWriteResult(
         status="success",
         case_id=case_id,
         case_envelope_key=envelope_key,
         retrieval_status=retrieval_status,
         source_completeness=source_completeness,
+    )
+
+
+def _invoke_embed_lambda(
+    *,
+    config: Config,
+    lambda_client: Any | None,
+    case_id: str,
+    envelope_bucket: str,
+    envelope_key: str,
+) -> None:
+    if not config.CASE_QA_ENABLED:
+        return
+    if lambda_client is None:
+        raise ValueError("lambda_client is required when Case Q&A embedding is enabled")
+    payload = {
+        "case_id": case_id,
+        "case_envelope_bucket": envelope_bucket,
+        "case_envelope_key": envelope_key,
+    }
+    lambda_client.invoke(
+        FunctionName=config.CASE_EMBED_LAMBDA_NAME,
+        InvocationType="Event",
+        Payload=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
     )
 
 

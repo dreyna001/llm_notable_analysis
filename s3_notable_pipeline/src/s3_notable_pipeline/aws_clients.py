@@ -61,3 +61,9 @@ def dynamodb_client() -> Any:
     """Return a DynamoDB client."""
 
     return aws_client("dynamodb")
+
+
+def lambda_client() -> Any:
+    """Return an AWS Lambda client."""
+
+    return aws_client("lambda")

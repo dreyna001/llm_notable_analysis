@@ -158,6 +158,8 @@ Primary follow-up values:
 
 - `CASE_INDEX_TABLE` (required; SAM/CloudFormation creates CaseIndex when
   `CaseIndexTableName` is non-empty)
+- `CASE_EMBED_LAMBDA_NAME` (SAM/CloudFormation wires this from
+  `CaseEmbedLambdaName` when CaseIndex resources are enabled)
 - `CASE_ARCHIVE_BUCKET` (defaults to `OUTPUT_BUCKET_NAME`), `CASE_ARCHIVE_PREFIX`,
   `CASE_ARCHIVE_CHUNKS_PREFIX`, `CASE_RETENTION_DAYS`
 - `PORTAL_AUTH_MODE=jwt|iam`

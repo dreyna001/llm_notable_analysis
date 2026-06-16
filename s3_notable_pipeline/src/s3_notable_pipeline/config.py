@@ -245,6 +245,7 @@ class Config:
     CASE_ARCHIVE_BUCKET: str = ""
     CASE_ARCHIVE_PREFIX: str = "cases"
     CASE_ARCHIVE_CHUNKS_PREFIX: str = "case_chunks"
+    CASE_EMBED_LAMBDA_NAME: str = ""
     CASE_INDEX_TABLE: str = ""
     CASE_RETENTION_DAYS: int = 30
     CASE_SCHEMA_VERSION: int = 1
@@ -403,6 +404,9 @@ class Config:
         self.PORTAL_CHAT_BEDROCK_MODEL_ID = self.PORTAL_CHAT_BEDROCK_MODEL_ID.strip()
         if self.CASE_QA_ENABLED and not self.PORTAL_ENABLED:
             raise ValueError("CASE_QA_ENABLED=true requires PORTAL_ENABLED=true")
+        self.CASE_EMBED_LAMBDA_NAME = self.CASE_EMBED_LAMBDA_NAME.strip()
+        if self.CASE_QA_ENABLED and not self.CASE_EMBED_LAMBDA_NAME:
+            raise ValueError("CASE_EMBED_LAMBDA_NAME is required when Case Q&A is enabled")
         if self.CASE_QA_VECTOR_DIMENSIONS != 1024:
             raise ValueError("CASE_QA_VECTOR_DIMENSIONS must be 1024 for Titan V2")
         if self.CASE_QA_CHAT_HISTORY_ENABLED:
@@ -632,6 +636,7 @@ def load_config() -> Config:
         CASE_ARCHIVE_CHUNKS_PREFIX=os.getenv(
             "CASE_ARCHIVE_CHUNKS_PREFIX", "case_chunks"
         ),
+        CASE_EMBED_LAMBDA_NAME=os.getenv("CASE_EMBED_LAMBDA_NAME", ""),
         CASE_INDEX_TABLE=os.getenv("CASE_INDEX_TABLE", ""),
         CASE_RETENTION_DAYS=_positive_int_env(
             "CASE_RETENTION_DAYS", 30, max_value=3650

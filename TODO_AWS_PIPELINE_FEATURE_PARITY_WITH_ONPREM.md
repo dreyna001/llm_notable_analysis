@@ -46,6 +46,7 @@ Open Wave 2 items (do not implement under Wave 1 closeout):
 
 - [x] Diff 1: `analyst_portal` capability profile, config validation, and deploy scaffolding
 - [x] Diff 2: Case archive write path and DynamoDB CaseIndex
+- [x] Diff 2b: Post-archive embed Lambda and S3 case chunks
 - [ ] Retrieval-bound Case Q&A over retained cases
 - [ ] Read-only portal API/UI
 - [ ] IAM split between analyzer writer and portal reader permissions
@@ -59,4 +60,4 @@ Open Wave 2 items (do not implement under Wave 1 closeout):
 
 ---
 
-_Last updated: Wave 2 Diff 2 complete; post-archive embed Lambda starts in Diff 2b._
+_Last updated: Wave 2 Diff 2b complete; read-only portal API starts in Diff 3._

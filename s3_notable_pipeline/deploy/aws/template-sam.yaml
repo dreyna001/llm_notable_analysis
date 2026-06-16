@@ -236,6 +236,11 @@ Parameters:
     Description: S3 prefix for embedded case chunks.
     Default: case_chunks
 
+  CaseEmbedLambdaName:
+    Type: String
+    Description: Lambda function name for post-archive case chunk embedding.
+    Default: notable-case-embed
+
   CaseIndexTableName:
     Type: String
     Description: DynamoDB CaseIndex table name. Leave blank to avoid creating Wave 2 portal resources.
@@ -860,6 +865,7 @@ Resources:
           CASE_ARCHIVE_BUCKET: !If [HasCaseArchiveBucketName, !Ref CaseArchiveBucketName, !Ref OutputBucketName]
           CASE_ARCHIVE_PREFIX: !Ref CaseArchivePrefix
           CASE_ARCHIVE_CHUNKS_PREFIX: !Ref CaseArchiveChunksPrefix
+          CASE_EMBED_LAMBDA_NAME: !If [HasCaseIndexTable, !Ref CaseEmbedFunction, '']
           CASE_INDEX_TABLE: !Ref CaseIndexTableName
           CASE_RETENTION_DAYS: !Ref CaseRetentionDays
           CASE_SCHEMA_VERSION: !Ref CaseSchemaVersion
@@ -1027,6 +1033,15 @@ Resources:
                 Resource:
                   - !GetAtt CaseIndexTable.Arn
           - !Ref AWS::NoValue
+        - !If
+          - HasCaseIndexTable
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt CaseEmbedFunction.Arn
+          - !Ref AWS::NoValue
         - Statement:
             - Effect: Allow
               Action:
@@ -1034,6 +1049,76 @@ Resources:
                 - logs:CreateLogStream
                 - logs:PutLogEvents
               Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/notable-analyzer-s3:*'
+      ImageUri: !Ref ImageUri
+
+  CaseEmbedFunction:
+    Type: AWS::Serverless::Function
+    Condition: HasCaseIndexTable
+    Properties:
+      FunctionName: !Ref CaseEmbedLambdaName
+      PackageType: Image
+      Timeout: 900
+      MemorySize: !Ref LambdaMemorySize
+      EphemeralStorage:
+        Size: !Ref LambdaEphemeralStorageMb
+      ImageConfig:
+        Command:
+          - s3_notable_pipeline.embed_handler.handler
+      Environment:
+        Variables:
+          CAPABILITY_PROFILES: core
+          CASE_ARCHIVE_BUCKET: !If [HasCaseArchiveBucketName, !Ref CaseArchiveBucketName, !Ref OutputBucketName]
+          CASE_ARCHIVE_CHUNKS_PREFIX: !Ref CaseArchiveChunksPrefix
+          CASE_INDEX_TABLE: !Ref CaseIndexTableName
+          CASE_QA_MAX_INDEX_CHUNKS_PER_CASE: !Ref CaseQaMaxIndexChunksPerCase
+          CASE_QA_EMBEDDING_MODEL: !Ref CaseQaEmbeddingModel
+          CASE_QA_VECTOR_DIMENSIONS: !Ref CaseQaVectorDimensions
+          CASE_QA_EMBED_NORMALIZE: !Ref CaseQaEmbedNormalize
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:DeleteObject
+                - s3:ListBucket
+              Resource:
+                - !Sub 'arn:aws:s3:::${OutputBucketName}'
+                - !Sub 'arn:aws:s3:::${OutputBucketName}/${CaseArchivePrefix}/*'
+                - !Sub 'arn:aws:s3:::${OutputBucketName}/${CaseArchiveChunksPrefix}/*'
+        - !If
+          - HasCaseArchiveBucketName
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${CaseArchiveBucketName}'
+                  - !Sub 'arn:aws:s3:::${CaseArchiveBucketName}/${CaseArchivePrefix}/*'
+                  - !Sub 'arn:aws:s3:::${CaseArchiveBucketName}/${CaseArchiveChunksPrefix}/*'
+          - !Ref AWS::NoValue
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                - !GetAtt CaseIndexTable.Arn
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${CaseQaEmbeddingModel}'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${CaseEmbedLambdaName}:*'
       ImageUri: !Ref ImageUri
   
   LambdaInvokePermission:

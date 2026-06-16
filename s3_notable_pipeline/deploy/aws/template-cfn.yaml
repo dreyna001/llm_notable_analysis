@@ -235,6 +235,11 @@ Parameters:
     Description: S3 prefix for embedded case chunks.
     Default: case_chunks
 
+  CaseEmbedLambdaName:
+    Type: String
+    Description: Lambda function name for post-archive case chunk embedding.
+    Default: notable-case-embed
+
   CaseIndexTableName:
     Type: String
     Description: DynamoDB CaseIndex table name. Leave blank to avoid creating Wave 2 portal resources.
@@ -938,6 +943,17 @@ Resources:
                     - dynamodb:UpdateItem
                   Resource: !GetAtt CaseIndexTable.Arn
           - !Ref AWS::NoValue
+        - !If
+          - HasCaseIndexTable
+          - PolicyName: CaseEmbedInvokePolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - lambda:InvokeFunction
+                  Resource: !GetAtt CaseEmbedFunction.Arn
+          - !Ref AWS::NoValue
         - PolicyName: CloudWatchLogsPolicy
           PolicyDocument:
             Version: '2012-10-17'
@@ -1008,6 +1024,7 @@ Resources:
           CASE_ARCHIVE_BUCKET: !If [HasCaseArchiveBucketName, !Ref CaseArchiveBucketName, !Ref OutputBucketName]
           CASE_ARCHIVE_PREFIX: !Ref CaseArchivePrefix
           CASE_ARCHIVE_CHUNKS_PREFIX: !Ref CaseArchiveChunksPrefix
+          CASE_EMBED_LAMBDA_NAME: !If [HasCaseIndexTable, !Ref CaseEmbedFunction, '']
           CASE_INDEX_TABLE: !Ref CaseIndexTableName
           CASE_RETENTION_DAYS: !Ref CaseRetentionDays
           CASE_SCHEMA_VERSION: !Ref CaseSchemaVersion
@@ -1064,6 +1081,91 @@ Resources:
           OUTPUT_BUCKET_NAME: !Ref OutputBucketName
           OUTPUT_PREFIX: reports
           MAX_DECOMPRESSED_INPUT_BYTES: !Ref MaxDecompressedInputBytes
+
+  CaseEmbedLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: HasCaseIndexTable
+    Properties:
+      RoleName: NotableCaseEmbedLambdaRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: CaseChunkS3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${OutputBucketName}'
+                  - !Sub 'arn:aws:s3:::${OutputBucketName}/${CaseArchivePrefix}/*'
+                  - !Sub 'arn:aws:s3:::${OutputBucketName}/${CaseArchiveChunksPrefix}/*'
+              - !If
+                - HasCaseArchiveBucketName
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                    - s3:PutObject
+                    - s3:DeleteObject
+                    - s3:ListBucket
+                  Resource:
+                    - !Sub 'arn:aws:s3:::${CaseArchiveBucketName}'
+                    - !Sub 'arn:aws:s3:::${CaseArchiveBucketName}/${CaseArchivePrefix}/*'
+                    - !Sub 'arn:aws:s3:::${CaseArchiveBucketName}/${CaseArchiveChunksPrefix}/*'
+                - !Ref AWS::NoValue
+        - PolicyName: CaseIndexStatusPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt CaseIndexTable.Arn
+        - PolicyName: BedrockEmbeddingPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${CaseQaEmbeddingModel}'
+
+  CaseEmbedFunction:
+    Type: AWS::Lambda::Function
+    Condition: HasCaseIndexTable
+    Properties:
+      FunctionName: !Ref CaseEmbedLambdaName
+      Runtime: python3.12
+      Handler: s3_notable_pipeline.embed_handler.handler
+      Role: !GetAtt CaseEmbedLambdaRole.Arn
+      Timeout: 900
+      MemorySize: !Ref LambdaMemorySize
+      EphemeralStorage:
+        Size: !Ref LambdaEphemeralStorageMb
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          CAPABILITY_PROFILES: core
+          CASE_ARCHIVE_BUCKET: !If [HasCaseArchiveBucketName, !Ref CaseArchiveBucketName, !Ref OutputBucketName]
+          CASE_ARCHIVE_CHUNKS_PREFIX: !Ref CaseArchiveChunksPrefix
+          CASE_INDEX_TABLE: !Ref CaseIndexTableName
+          CASE_QA_MAX_INDEX_CHUNKS_PER_CASE: !Ref CaseQaMaxIndexChunksPerCase
+          CASE_QA_EMBEDDING_MODEL: !Ref CaseQaEmbeddingModel
+          CASE_QA_VECTOR_DIMENSIONS: !Ref CaseQaVectorDimensions
+          CASE_QA_EMBED_NORMALIZE: !Ref CaseQaEmbedNormalize
   
   LambdaInvokePermission:
     Type: AWS::Lambda::Permission

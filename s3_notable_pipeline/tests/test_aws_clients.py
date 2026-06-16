@@ -49,6 +49,13 @@ class AwsClientTests(unittest.TestCase):
             aws_secret_access_key="test",
         )
 
+    def test_lambda_client_uses_central_factory(self) -> None:
+        """Lambda client creation should share endpoint/region handling."""
+        with patch.object(aws_clients, "aws_client", return_value=object()) as mock_client:
+            aws_clients.lambda_client()
+
+        mock_client.assert_called_once_with("lambda")
+
 
 if __name__ == "__main__":
     unittest.main()
