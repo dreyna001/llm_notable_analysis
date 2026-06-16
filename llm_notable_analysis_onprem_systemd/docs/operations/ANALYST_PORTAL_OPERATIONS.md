@@ -99,7 +99,8 @@ data fail closed unless they came through the reverse proxy auth path.
 The example config is `deploy/nginx/notable-portal.conf`. It documents:
 
 - Internal DNS name via `server_name`.
-- TLS certificate and key paths.
+- TLS certificate and key paths. Lab self-signed generation: see
+  [`ANALYST_PORTAL_NETWORK_DEPLOYMENT.md` Step 4](ANALYST_PORTAL_NETWORK_DEPLOYMENT.md#step-4--stage-tls-certificates).
 - Basic auth with `auth_basic_user_file`.
 - `client_max_body_size 1m`.
 - React static assets served from

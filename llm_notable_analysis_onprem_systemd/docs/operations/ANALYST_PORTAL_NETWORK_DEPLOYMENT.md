@@ -151,12 +151,36 @@ Certificate options:
 - Existing internal wildcard certificate.
 - Self-signed certificate for lab-only testing (distribute trust to analyst browsers or accept warnings).
 
+Prepare directories (required before nginx can start):
+
 ```bash
 sudo mkdir -p /etc/nginx/tls /etc/nginx/htpasswd
 sudo chmod 700 /etc/nginx/tls
+```
+
+**Lab-only:** generate a self-signed certificate when no internal CA cert is
+available yet. Set `-subj "/CN=..."` to the same hostname you will use in nginx
+`server_name` (Step 5):
+
+```bash
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /etc/nginx/tls/notable-portal.key \
+  -out /etc/nginx/tls/notable-portal.crt \
+  -subj "/CN=notable-portal.internal"
+```
+
+**Production:** copy your approved certificate and private key to the paths above
+(or update `ssl_certificate` / `ssl_certificate_key` in Step 5 to match your paths).
+
+Set permissions after the `.crt` and `.key` files exist:
+
+```bash
 sudo chown root:root /etc/nginx/tls/notable-portal.crt /etc/nginx/tls/notable-portal.key
 sudo chmod 600 /etc/nginx/tls/notable-portal.key
 ```
+
+If these files are missing, `nginx -t` fails with
+`cannot load certificate "/etc/nginx/tls/notable-portal.crt"`.
 
 ## Step 5 — Configure nginx for your hostname
 
@@ -302,6 +326,7 @@ After embedding model or dimension changes, rebuild chunks per
 | TLS error in browser | Certificate SAN, corp CA trust, cert/key paths in nginx |
 | 401 at nginx | htpasswd user, `auth_basic_user_file` path |
 | 403 on `/api/*` | `notable-portal-proxy-secret.conf` matches `PORTAL_PROXY_SECRET` |
+| 403 `Cross-site portal write` on chat (tunnel) | Browse `https://127.0.0.1:<local-port>/` (not `localhost`); nginx must forward `Host $http_host` per `deploy/nginx/notable-portal.conf` |
 | Empty case list | Analyzer archiving, retention, backfill; `/ready` on loopback |
 | Chat unavailable | `GET /api/capabilities` `chat_ready`, LiteLLM, embedder cache |
 | 502 from nginx | `notable-portal.service` running, `127.0.0.1:8080` reachable |

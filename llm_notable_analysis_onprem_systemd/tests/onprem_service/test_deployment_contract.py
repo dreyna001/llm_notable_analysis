@@ -322,6 +322,7 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("location = /health", nginx_text)
         self.assertIn("location = /ready", nginx_text)
         self.assertIn("proxy_pass http://127.0.0.1:8080", nginx_text)
+        self.assertIn("proxy_set_header Host $http_host", nginx_text)
         self.assertIn("proxy_set_header X-Forwarded-User $remote_user", nginx_text)
         self.assertIn("include /etc/nginx/notable-portal-proxy-secret.conf", nginx_text)
         self.assertIn("proxy_read_timeout 300s", nginx_text)
