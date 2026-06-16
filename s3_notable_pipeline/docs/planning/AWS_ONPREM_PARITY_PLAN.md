@@ -2,12 +2,39 @@
 
 ## Status
 
-Wave 1 planning artifact (analyzer profiles, RAG, SPL, Elastic, ServiceNow,
-idempotency). **Case archive, analyst portal, and Case Q&A are out of scope
-here**; they are specified in
+Wave 1 **runtime implementation is complete** (Diffs 1 through 6 code, unit
+tests, operations docs, and technical spec). All planned runtime modules,
+`config.env.example`, SAM/CloudFormation contract additions, and mocked unit
+tests are present in the repository.
+
+**Remaining Wave 1 closeout (Diff 6 tail only):** delivery-package doc parity
+refresh (readiness assessment still centers on `core` / `notable_rest`), and
+explicit dev/staging/prod deploy validation in a real AWS account. No real-AWS
+validation outcome is recorded in this repo.
+
+**Out of Wave 1 scope:** case archive, analyst portal, and Case Q&A are
+specified in
 [`AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md`](AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md)
-(wave 2). The implementation contract is
+(Wave 2). Do not fold Wave 2 work into Wave 1 closeout.
+
+Implementation contract:
 [`../technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md`](../technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md).
+
+## Build Readiness
+
+| Area | Status |
+| --- | --- |
+| Runtime code (Diffs 1-6) | Complete |
+| Unit tests (mocked AWS/Splunk/Elastic/ServiceNow) | Complete — `python -m unittest discover -s s3_notable_pipeline/tests -p "test_*.py" -v` |
+| Operations docs | Complete |
+| Technical spec | Complete |
+| Delivery docs / readiness assessment parity | Open — refresh for multi-profile deployments |
+| Real AWS deploy validation | Open — operator step, not evidenced in repo |
+| Wave 2 portal / archive / Case Q&A | Out of scope — see Wave 2 requirements doc |
+
+**Default deploy posture unchanged:** `CAPABILITY_PROFILES=core` with
+`SplunkSinkMode=s3` preserves the original smoke path. Enable additional
+profiles one at a time after non-production validation.
 
 ## Goal
 
@@ -427,6 +454,9 @@ Acceptance criteria:
 
 ### Diff 6: Elasticsearch Read-Only Parity And Final Docs
 
+**Status:** Runtime code and unit tests complete. Closeout remaining: delivery-doc
+parity refresh and real-AWS deploy validation (not recorded in repo).
+
 Objective:
 
 - Add Elastic query generation, Bedrock KB grounding, and bounded `_search`
@@ -654,5 +684,9 @@ updated and re-approved.
 
 ## Open Questions
 
-None for the current planning block.
+None for runtime implementation. Wave 1 closeout tracking:
+
+- Refresh delivery-package readiness docs for multi-profile deployments.
+- Run and record dev/staging/prod deploy validation when an AWS environment is
+  available.
 

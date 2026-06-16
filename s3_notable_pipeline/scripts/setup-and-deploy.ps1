@@ -103,10 +103,41 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+# Wave 1 parity parameters (safe defaults stay core-first)
+Write-Host "`n=== Wave 1 Parity Parameters (reference) ===" -ForegroundColor Cyan
+Write-Host "Defaults are core-only and safe for first deploy. Enable parity profiles only in dev/staging after prerequisites are ready." -ForegroundColor Gray
+Write-Host "See docs/operations/CAPABILITY_PROFILES.md and config.env.example for full contracts." -ForegroundColor Gray
+Write-Host ""
+Write-Host "  CapabilityProfiles (default: core)" -ForegroundColor Yellow
+Write-Host "    core                          - required base analysis path" -ForegroundColor Gray
+Write-Host "    core,html_reports             - add escaped HTML companion reports" -ForegroundColor Gray
+Write-Host "    core,rag                      - Bedrock KB advisory context (set RagEnabled=true, RagBedrockKbId)" -ForegroundColor Gray
+Write-Host "    core,rag,spl_readonly         - SPL generation + read-only Splunk investigation (SplunkBaseUrl, token secret)" -ForegroundColor Gray
+Write-Host "    core,rag,elastic_readonly     - Elasticsearch read-only investigation (mutually exclusive with spl_readonly)" -ForegroundColor Gray
+Write-Host "    core,ticket_draft             - ServiceNow draft payloads in JSON reports" -ForegroundColor Gray
+Write-Host "    core,action_gated             - Splunk writeback / ServiceNow create + DynamoDB idempotency" -ForegroundColor Gray
+Write-Host ""
+Write-Host "  Knowledge Base IDs (leave blank unless profile enabled)" -ForegroundColor Yellow
+Write-Host "    RagBedrockKbId                  - general SOC RAG" -ForegroundColor Gray
+Write-Host "    SplQueryRagBedrockKbId          - SPL query grounding (spl_readonly)" -ForegroundColor Gray
+Write-Host "    ElasticsearchGroundingBedrockKbId - Elastic query grounding (elastic_readonly)" -ForegroundColor Gray
+Write-Host ""
+Write-Host "  Investigation backend (choose one read-only profile)" -ForegroundColor Yellow
+Write-Host "    spl_readonly: SplunkBaseUrl, SplunkApiTokenSecretArn, InvestigationQueryExecutor (rest|mcp)" -ForegroundColor Gray
+Write-Host "    elastic_readonly: ElasticsearchBaseUrl, ElasticsearchApiKeySecretArn, ElasticsearchIndexAllowlist" -ForegroundColor Gray
+Write-Host ""
+Write-Host "  ServiceNow / idempotency (action_gated or ticket_draft)" -ForegroundColor Yellow
+Write-Host "    ServiceNowBaseUrl, ServiceNowApiTokenSecretArn, ServiceNowApprovalHmacSecretArn" -ForegroundColor Gray
+Write-Host "    ServiceNowAssignmentGroup (required for ticket_draft drafts)" -ForegroundColor Gray
+Write-Host "    SideEffectIdempotencyTableName (default: notable-side-effect-idempotency)" -ForegroundColor Gray
+Write-Host ""
+Write-Host "  Safe first deploy: CapabilityProfiles=core, SplunkSinkMode=s3, HtmlReportEnabled=false, RagEnabled=false" -ForegroundColor Green
+
 # Deploy
 Write-Host "`n=== Step 2: Deploying to AWS ===" -ForegroundColor Cyan
 if (Test-Path "samconfig.toml") {
     Write-Host "Found samconfig.toml - using existing configuration" -ForegroundColor Gray
+    Write-Host "Review parameter_overrides for Wave 1 settings before deploy (see reference above)." -ForegroundColor Gray
     Write-Host "Running: sam deploy --template-file $samBuiltTemplate" -ForegroundColor Gray
     sam deploy --template-file $samBuiltTemplate
 } else {
@@ -117,7 +148,14 @@ if (Test-Path "samconfig.toml") {
     Write-Host "  - AWS Region (e.g., us-east-1)" -ForegroundColor Gray
     Write-Host "  - Input bucket name (must be globally unique)" -ForegroundColor Gray
     Write-Host "  - Output bucket name (must be globally unique)" -ForegroundColor Gray
-    Write-Host "  - Splunk sink mode ('s3' or 'notable_rest'; use 's3' for testing)" -ForegroundColor Gray
+    Write-Host "  - SplunkSinkMode ('s3' or 'notable_rest'; use 's3' for testing)" -ForegroundColor Gray
+    Write-Host "  - CapabilityProfiles (default 'core'; see Wave 1 reference above)" -ForegroundColor Gray
+    Write-Host "  - HtmlReportEnabled (default 'false')" -ForegroundColor Gray
+    Write-Host "  - RagEnabled / RagBedrockKbId (default off; enable with core,rag profile)" -ForegroundColor Gray
+    Write-Host "  - SplQueryRagBedrockKbId, InvestigationQueryExecutor (spl_readonly staging only)" -ForegroundColor Gray
+    Write-Host "  - ElasticsearchBaseUrl / ElasticsearchApiKeySecretArn / ElasticsearchGroundingBedrockKbId (elastic_readonly)" -ForegroundColor Gray
+    Write-Host "  - ServiceNowBaseUrl, ServiceNowApiTokenSecretArn, ServiceNowApprovalHmacSecretArn, ServiceNowAssignmentGroup" -ForegroundColor Gray
+    Write-Host "  - SideEffectIdempotencyTableName (action_gated; default notable-side-effect-idempotency)" -ForegroundColor Gray
     Write-Host "  - AwsAccountId (12-digit) and ImageUri (existing ECR URI for this Lambda image)" -ForegroundColor Gray
     Write-Host "  - If notable_rest: SplunkBaseUrl + SplunkApiTokenSecretArn (Secrets Manager ARN)" -ForegroundColor Gray
     Write-Host "  - Optional: SplunkApiTokenSecretField (default 'token') and SplunkNotableUpdatePath" -ForegroundColor Gray
@@ -131,4 +169,6 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "`nDeployment complete!" -ForegroundColor Green
 Write-Host "`nNext steps:" -ForegroundColor Cyan
-Write-Host "  1. Run scripts/test-pipeline.ps1 to test the deployment" -ForegroundColor Yellow
+Write-Host "  1. Core smoke: .\scripts\test-pipeline.ps1" -ForegroundColor Yellow
+Write-Host "  2. Wave 1 staging smoke (live AWS): .\scripts\test-pipeline.ps1 -Wave1Smoke" -ForegroundColor Yellow
+Write-Host "     Add -ExpectCapabilityProfiles `"core,rag`" when validating a specific profile bundle." -ForegroundColor Gray

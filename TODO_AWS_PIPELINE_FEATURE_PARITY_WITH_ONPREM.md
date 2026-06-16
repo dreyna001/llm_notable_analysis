@@ -1,66 +1,61 @@
-# TODO: AWS notable pipeline — feature parity with on-prem enhancements
+# AWS notable pipeline — feature parity with on-prem
 
-This checklist tracks **optional capabilities that exist (or are specified) for `llm_notable_analysis_onprem_systemd/`** but are **not present today in `s3_notable_pipeline/`** (S3 → Lambda → Bedrock → sinks).
+Status index for optional capabilities that exist (or are specified) for
+`llm_notable_analysis_onprem_systemd/` relative to `s3_notable_pipeline/`
+(S3 -> Lambda -> Bedrock -> sinks).
 
-**Normative on-prem contract:** [`llm_notable_analysis_onprem_systemd/docs/technical_specs/feature_enhancements_technical_spec.md`](llm_notable_analysis_onprem_systemd/docs/technical_specs/feature_enhancements_technical_spec.md)  
-**Architecture companion:** [`llm_notable_analysis_onprem_systemd/docs/architecture/feature_enhancements_architecture.md`](llm_notable_analysis_onprem_systemd/docs/architecture/feature_enhancements_architecture.md)
+**Normative on-prem contract:**
+[`llm_notable_analysis_onprem_systemd/docs/technical_specs/feature_enhancements_technical_spec.md`](llm_notable_analysis_onprem_systemd/docs/technical_specs/feature_enhancements_technical_spec.md)
 
-**Current AWS baseline (for contrast):** ingest from S3, Bedrock analysis with validation/repair, ATT&CK ID filtering, markdown report, sink to output S3 and/or Splunk **notable comment** REST (`notable_rest` mode). No separate investigation queries, no ServiceNow, no RAG/KB grounding in the Lambda path.
+**Architecture companion:**
+[`llm_notable_analysis_onprem_systemd/docs/architecture/feature_enhancements_architecture.md`](llm_notable_analysis_onprem_systemd/docs/architecture/feature_enhancements_architecture.md)
 
 ---
 
-## 1. SPL query generation (second bounded LLM call)
+## Wave 1 (analyzer parity) — complete
 
-- [ ] Port or reimplement the **SPL-only second call** pattern (`SPL_QUERY_GENERATION_ENABLED`): hypotheses → structured SPL query fields, contract validation, merge-by-position, repair-once behavior.
-- [ ] Align output schema and validators with on-prem `spl_query_generation.py` behavior (and tests as reference: `llm_notable_analysis_onprem_systemd/tests/onprem_service/test_spl_query_generation.py`).
-- [ ] Decide Bedrock structured output shape for AWS (tool use vs prompt-JSON) and mirror `LLM_STRUCTURED_OUTPUT_MODE`-style controls if needed.
+Wave 1 runtime implementation is **code-complete**. See
+[`s3_notable_pipeline/docs/planning/AWS_ONPREM_PARITY_PLAN.md`](s3_notable_pipeline/docs/planning/AWS_ONPREM_PARITY_PLAN.md)
+for the diff sequence, scope contract, and remaining closeout (delivery-doc
+refresh and real-AWS deploy validation only).
 
-## 2. Read-only Splunk investigation (execute generated SPL)
+Implemented in `s3_notable_pipeline/`:
 
-- [ ] Add **read-only** Splunk search execution (REST oneshot path) with the same **policy gates** as on-prem: allowed indexes/commands, denied commands, time bounds, row caps, timeouts (see spec §8).
-- [ ] Wire **after** SPL generation: validate → execute → capture normalized results (no treating raw search rows as “alert evidence” without labeling).
-- [ ] Network path: Lambda in VPC to Splunk management/API host; secrets via Secrets Manager/Parameter Store; avoid embedding tokens in env defaults.
+- [x] **SPL query generation** — second bounded Bedrock call, contract validation, merge-by-position, repair-once behavior (`spl_query_generation.py`, tests).
+- [x] **Read-only Splunk investigation** — REST oneshot and MCP-over-HTTPS executors with policy gates (`splunk_investigation.py`, tests).
+- [x] **Splunk MCP executor** — `INVESTIGATION_QUERY_EXECUTOR=rest|mcp` parity option (configured runtime HTTP integration, no Cursor dependency).
+- [x] **Query-result enrichment + markdown** — deterministic `query_result_section` and Query Results rendering (`query_result_enrichment.py`, `markdown_generator.py`, tests).
+- [x] **ServiceNow incident draft and approval-gated create** — draft has no network side effect; create requires approval metadata (`servicenow.py`, tests).
+- [x] **RAG / KB grounding** — Bedrock Knowledge Base retrieval for general SOC RAG, SPL grounding, and Elastic grounding (`bedrock_kb_retrieval.py`, grounding modules, operations docs).
+- [x] **Cross-cutting Wave 1 requirements** — default-off capability profiles, fail-closed validation, orchestration order, deterministic mocked unit tests (`s3_notable_pipeline/tests/`), SAM/CFN contract sync (`config.env.example`, operations docs).
 
-## 3. Splunk MCP executor (optional parity)
+Wave 1 also shipped: Elasticsearch read-only investigation, query-result
+interpretation, HTML reports, DynamoDB side-effect idempotency, and AWS
+operations docs. Unit tests pass locally with mocked clients only; **real AWS
+deploy validation is not recorded in this repo**.
 
-- [ ] On-prem supports `INVESTIGATION_QUERY_EXECUTOR=rest|mcp`. If MCP is required in AWS, define **how** Lambda reaches MCP (private integration, proxy, or defer and document “REST-only on AWS v1”).
+---
 
-## 4. Query-result enrichment + markdown
+## Wave 2 (portal, archive, Case Q&A) — not started
 
-- [ ] Port deterministic **`query_result_section`** enrichment (attempted / denied / skipped / failed states, compact samples).
-- [ ] Extend AWS markdown generator with a **Query Results** section when enrichment is present (`query_result_enrichment.py` / markdown tests as reference).
+Case archive, analyst portal, and retrieval-bound Case Q&A are **explicitly out
+of Wave 1**. They are specified in
+[`s3_notable_pipeline/docs/planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md`](s3_notable_pipeline/docs/planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md).
 
-## 5. ServiceNow incident draft and approval-gated create
+Open Wave 2 items (do not implement under Wave 1 closeout):
 
-- [ ] **Draft** incident payload from analysis (no network side effect when draft-only).
-- [ ] **Create** incident only with explicit approval metadata (spec §12); normalize responses; never log tokens.
-- [ ] Decide how approval is supplied for AWS (e.g. field inside uploaded notable JSON vs separate control plane).
-- [ ] IAM/network: outbound HTTPS to ServiceNow; secrets handling; timeouts aligned with Lambda remaining time.
+- [ ] `analyst_portal` capability profile and read-only portal API/UI
+- [ ] Case archive write path and DynamoDB case index
+- [ ] Retrieval-bound Case Q&A over retained cases
+- [ ] IAM split between analyzer writer and portal reader permissions
 
-## 6. RAG / KB grounding (SOPs, data dictionary, index docs)
+---
 
-- [ ] On-prem: SQLite FTS + FAISS + local embedding model (`RAG_*` in `config.env.example`). **Lambda is not a drop-in host for that stack** — pick an AWS-shaped approach (for example Bedrock Knowledge Bases, OpenSearch, Aurora/pgvector, or a dedicated small retrieval service) and treat this as an **architecture milestone**, not a straight file copy.
-- [ ] If AWS RAG lands, keep the same **trust boundary**: retrieved text is advisory context, not notable evidence unless reflected in the alert payload.
-
-## 7. Operational / product siblings (optional)
+## Future work (outside Wave 1 and Wave 2)
 
 - [x] **Freeform / alternate entrypoints:** on-prem freeform analyzer removed; AWS stays batch-only on the structured analyzer path.
-- [ ] **Retention:** on-prem uses systemd timers; AWS typically uses **S3 lifecycle**, optional EventBridge cleanup, or downstream ops — document equivalence rather than porting `retention.py` literally.
-
-## 8. Cross-cutting requirements (when implementing any item above)
-
-- [ ] **Default-off flags** for risky capabilities; fail-closed validation; same orchestration order idea as spec §11 (analysis → optional SPL gen → optional execute → enrich → markdown → optional SNOW).
-- [ ] **Deterministic tests** with fakes (no live Splunk/ServiceNow/Bedrock in unit tests); extend `s3_notable_pipeline/tests/`.
-- [ ] **Contract sync:** SAM/template parameters, README, and operator docs updated whenever new secrets, VPC wiring, or payload fields are introduced ([`s3_notable_pipeline/README.md`](s3_notable_pipeline/README.md), [`docs/operations/DEPLOYMENT_IMAGE_STEPS.md`](s3_notable_pipeline/docs/operations/DEPLOYMENT_IMAGE_STEPS.md)).
+- [ ] **Retention equivalence:** on-prem uses systemd timers; AWS typically uses **S3 lifecycle**, optional EventBridge cleanup, or downstream ops — document equivalence rather than porting `retention.py` literally (`FILE_DROP_AND_RETENTION_OPERATIONS.md` is the starting point).
 
 ---
 
-## Suggested sequencing
-
-1. SPL query generation only (no execution) — smallest additive Bedrock change, lowest blast radius.  
-2. REST investigation + enrichment + markdown — highest analyst value; requires VPC + Splunk policy testing.  
-3. ServiceNow draft/create — approval and CMDB/process alignment with stakeholders.  
-4. RAG — depends on chosen AWS retrieval architecture.  
-5. MCP executor — only if REST-only is insufficient.
-
-_Last updated: aligns with on-prem feature-enhancement spec as a planning backlog; not a commitment order._
+_Last updated: Wave 1 analyzer parity marked complete; Wave 2 tracked in `AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md`._
