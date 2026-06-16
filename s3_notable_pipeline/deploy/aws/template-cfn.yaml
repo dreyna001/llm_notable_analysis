@@ -204,6 +204,312 @@ Parameters:
     MinValue: 1
     MaxValue: 86400
 
+  CaseArchiveEnabled:
+    Type: String
+    Description: Enables S3 case envelope archiving when set directly or through analyst_portal.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  CaseArchiveFailureMode:
+    Type: String
+    Description: Case archive failure behavior.
+    Default: suppress
+    AllowedValues:
+      - suppress
+      - fail_closed
+
+  CaseArchiveBucketName:
+    Type: String
+    Description: Optional archive bucket override. Defaults to OutputBucketName when blank.
+    Default: ''
+
+  CaseArchivePrefix:
+    Type: String
+    Description: S3 prefix for canonical case envelopes.
+    Default: cases
+
+  CaseArchiveChunksPrefix:
+    Type: String
+    Description: S3 prefix for embedded case chunks.
+    Default: case_chunks
+
+  CaseIndexTableName:
+    Type: String
+    Description: DynamoDB CaseIndex table name. Leave blank to avoid creating Wave 2 portal resources.
+    Default: ''
+
+  CaseRetentionDays:
+    Type: Number
+    Description: Retention in days for case envelopes, chunks, and index rows.
+    Default: 30
+    MinValue: 1
+    MaxValue: 3650
+
+  CaseSchemaVersion:
+    Type: Number
+    Description: Canonical case envelope schema version.
+    Default: 1
+    MinValue: 1
+    MaxValue: 1000
+
+  CaseAnalysisSchemaVersion:
+    Type: Number
+    Description: Canonical case analysis payload schema version.
+    Default: 1
+    MinValue: 1
+    MaxValue: 1000
+
+  CaseArchiveMaxAlertBytes:
+    Type: Number
+    Description: Maximum alert bytes stored in one case envelope.
+    Default: 262144
+    MinValue: 1
+    MaxValue: 10485760
+
+  CaseArchiveMaxAnalysisBytes:
+    Type: Number
+    Description: Maximum analysis bytes stored in one case envelope.
+    Default: 524288
+    MinValue: 1
+    MaxValue: 20971520
+
+  PortalEnabled:
+    Type: String
+    Description: Enables the read-only analyst portal API when set directly or through analyst_portal.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  PortalAuthMode:
+    Type: String
+    Description: Portal authentication mode.
+    Default: jwt
+    AllowedValues:
+      - jwt
+      - iam
+
+  PortalPageSize:
+    Type: Number
+    Description: Default case list page size.
+    Default: 50
+    MinValue: 1
+    MaxValue: 100
+
+  PortalMaxDetailBytes:
+    Type: Number
+    Description: Maximum bytes returned for case detail/raw reads.
+    Default: 262144
+    MinValue: 1
+    MaxValue: 10485760
+
+  PortalJwtIssuer:
+    Type: String
+    Description: JWT issuer required when PortalAuthMode=jwt and the portal is enabled.
+    Default: ''
+
+  PortalJwtAudience:
+    Type: String
+    Description: JWT audience required when PortalAuthMode=jwt and the portal is enabled.
+    Default: ''
+
+  PortalCorsAllowedOrigins:
+    Type: String
+    Description: Comma-separated browser origins allowed to call the portal API.
+    Default: ''
+
+  PortalChatTimeoutSec:
+    Type: Number
+    Description: Portal chat timeout in seconds.
+    Default: 300
+    MinValue: 1
+    MaxValue: 900
+
+  PortalChatFunctionUrlEnabled:
+    Type: String
+    Description: Enables the dedicated Function URL path for portal chat.
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  PortalChatMaxConcurrency:
+    Type: Number
+    Description: In-handler portal chat concurrency cap per Lambda execution environment.
+    Default: 18
+    MinValue: 1
+    MaxValue: 64
+
+  PortalChatBedrockModelId:
+    Type: String
+    Description: Optional Bedrock model override for portal answer synthesis.
+    Default: ''
+
+  CaseQaEnabled:
+    Type: String
+    Description: Enables retrieval-bound pinned-case Q&A when set directly or through analyst_portal.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  CaseQaGeneralKnowledgeEnabled:
+    Type: String
+    Description: Enables advisory general-knowledge fallback for Case Q&A.
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  CaseQaMaxIndexChunksPerCase:
+    Type: Number
+    Description: Maximum embedded chunks indexed for one case.
+    Default: 200
+    MinValue: 1
+    MaxValue: 10000
+
+  CaseQaMaxChunksPerLane:
+    Type: Number
+    Description: Maximum chunks returned from one retrieval lane.
+    Default: 6
+    MinValue: 1
+    MaxValue: 50
+
+  CaseQaMaxTotalChunks:
+    Type: Number
+    Description: Maximum chunks included across all retrieval lanes.
+    Default: 18
+    MinValue: 1
+    MaxValue: 100
+
+  CaseQaLexicalTopK:
+    Type: Number
+    Description: Lexical retrieval candidate count.
+    Default: 30
+    MinValue: 1
+    MaxValue: 100
+
+  CaseQaVectorTopK:
+    Type: Number
+    Description: Vector retrieval candidate count.
+    Default: 30
+    MinValue: 1
+    MaxValue: 100
+
+  CaseQaRrfK:
+    Type: Number
+    Description: Reciprocal-rank-fusion K value.
+    Default: 60
+    MinValue: 1
+    MaxValue: 1000
+
+  CaseQaContextBudgetChars:
+    Type: Number
+    Description: Character budget for Case Q&A context.
+    Default: 12000
+    MinValue: 1
+    MaxValue: 50000
+
+  CaseQaMaxQuestionChars:
+    Type: Number
+    Description: Maximum user question length for Case Q&A.
+    Default: 2000
+    MinValue: 1
+    MaxValue: 8000
+
+  CaseQaMaxAnswerTokens:
+    Type: Number
+    Description: Maximum answer tokens for portal Case Q&A synthesis.
+    Default: 800
+    MinValue: 1
+    MaxValue: 4096
+
+  CaseQaEmbeddingModel:
+    Type: String
+    Description: Embedding model used for case chunk vectors.
+    Default: amazon.titan-embed-text-v2:0
+
+  CaseQaVectorDimensions:
+    Type: Number
+    Description: Embedding vector dimensions. Locked to 1024 for Titan V2 in v1.
+    Default: 1024
+    MinValue: 1
+    MaxValue: 100000
+
+  CaseQaEmbedNormalize:
+    Type: String
+    Description: Normalize Case Q&A embeddings before persistence/search.
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  CaseQaChatHistoryEnabled:
+    Type: String
+    Description: Enables bounded DynamoDB-backed portal chat history.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  CaseQaChatHistoryRetentionDays:
+    Type: Number
+    Description: Retention in days for persisted portal chat history.
+    Default: 30
+    MinValue: 1
+    MaxValue: 3650
+
+  CaseQaMaxSessionsPerUser:
+    Type: Number
+    Description: Maximum persisted chat sessions per user.
+    Default: 10
+    MinValue: 1
+    MaxValue: 100
+
+  CaseQaMaxMessagesPerSession:
+    Type: Number
+    Description: Maximum persisted messages per chat session.
+    Default: 30
+    MinValue: 1
+    MaxValue: 200
+
+  CaseQaMaxStoredMessageBytes:
+    Type: Number
+    Description: Maximum bytes stored for one chat message.
+    Default: 4000
+    MinValue: 1
+    MaxValue: 65536
+
+  ChatSessionsTableName:
+    Type: String
+    Description: DynamoDB chat sessions table required when CaseQaChatHistoryEnabled=true.
+    Default: ''
+
+  ChatMessagesTableName:
+    Type: String
+    Description: DynamoDB chat messages table required when CaseQaChatHistoryEnabled=true.
+    Default: ''
+
+  RagRerankEnabled:
+    Type: String
+    Description: Enables optional reranking for retrieval workflows.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  RagRerankModel:
+    Type: String
+    Description: Primary rerank model ID.
+    Default: cohere.rerank-v3-5:0
+
+  RagRerankModelFallback:
+    Type: String
+    Description: Fallback rerank model ID for regions without the primary model.
+    Default: amazon.rerank-v1:0
+
   ElasticsearchBaseUrl:
     Type: String
     Description: HTTPS Elasticsearch base URL for read-only investigation.
@@ -385,6 +691,8 @@ Conditions:
   HasServiceNowApprovalSecret: !Not [!Equals [!Ref ServiceNowApprovalHmacSecretArn, '*']]
   HasElasticsearchSecret: !Not [!Equals [!Ref ElasticsearchApiKeySecretArn, '*']]
   HasElasticsearchKnowledgeBase: !Not [!Equals [!Ref ElasticsearchGroundingBedrockKbId, '']]
+  HasCaseArchiveBucketName: !Not [!Equals [!Ref CaseArchiveBucketName, '']]
+  HasCaseIndexTable: !Not [!Equals [!Ref CaseIndexTableName, '']]
 
 Resources:
   InputBucket:
@@ -436,6 +744,20 @@ Resources:
             Status: Enabled
             Prefix: reports/
             ExpirationInDays: !Ref OutputRetentionDays
+          - !If
+            - HasCaseIndexTable
+            - Id: DeleteCaseArchiveAfterRetention
+              Status: Enabled
+              Prefix: !Sub '${CaseArchivePrefix}/'
+              ExpirationInDays: !Ref CaseRetentionDays
+            - !Ref AWS::NoValue
+          - !If
+            - HasCaseIndexTable
+            - Id: DeleteCaseChunksAfterRetention
+              Status: Enabled
+              Prefix: !Sub '${CaseArchiveChunksPrefix}/'
+              ExpirationInDays: !Ref CaseRetentionDays
+            - !Ref AWS::NoValue
 
   SideEffectIdempotencyTable:
     Type: AWS::DynamoDB::Table
@@ -450,6 +772,35 @@ Resources:
           KeyType: HASH
       TimeToLiveSpecification:
         AttributeName: expires_at
+        Enabled: true
+
+  CaseIndexTable:
+    Type: AWS::DynamoDB::Table
+    Condition: HasCaseIndexTable
+    Properties:
+      TableName: !Ref CaseIndexTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: case_id
+          AttributeType: S
+        - AttributeName: archive_partition
+          AttributeType: S
+        - AttributeName: processed_at_case_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: case_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: ProcessedAtIndex
+          KeySchema:
+            - AttributeName: archive_partition
+              KeyType: HASH
+            - AttributeName: processed_at_case_id
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: expires_at_epoch
         Enabled: true
   
   LambdaExecutionRole:
@@ -631,6 +982,52 @@ Resources:
           SIDE_EFFECT_IDEMPOTENCY_TABLE: !Ref SideEffectIdempotencyTableName
           SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS: !Ref SideEffectIdempotencyRetentionDays
           SIDE_EFFECT_IDEMPOTENCY_LOCK_SECONDS: !Ref SideEffectIdempotencyLockSeconds
+          CASE_ARCHIVE_ENABLED: !Ref CaseArchiveEnabled
+          CASE_ARCHIVE_FAILURE_MODE: !Ref CaseArchiveFailureMode
+          CASE_ARCHIVE_BUCKET: !If [HasCaseArchiveBucketName, !Ref CaseArchiveBucketName, !Ref OutputBucketName]
+          CASE_ARCHIVE_PREFIX: !Ref CaseArchivePrefix
+          CASE_ARCHIVE_CHUNKS_PREFIX: !Ref CaseArchiveChunksPrefix
+          CASE_INDEX_TABLE: !Ref CaseIndexTableName
+          CASE_RETENTION_DAYS: !Ref CaseRetentionDays
+          CASE_SCHEMA_VERSION: !Ref CaseSchemaVersion
+          CASE_ANALYSIS_SCHEMA_VERSION: !Ref CaseAnalysisSchemaVersion
+          CASE_ARCHIVE_MAX_ALERT_BYTES: !Ref CaseArchiveMaxAlertBytes
+          CASE_ARCHIVE_MAX_ANALYSIS_BYTES: !Ref CaseArchiveMaxAnalysisBytes
+          PORTAL_ENABLED: !Ref PortalEnabled
+          PORTAL_AUTH_MODE: !Ref PortalAuthMode
+          PORTAL_PAGE_SIZE: !Ref PortalPageSize
+          PORTAL_MAX_DETAIL_BYTES: !Ref PortalMaxDetailBytes
+          PORTAL_JWT_ISSUER: !Ref PortalJwtIssuer
+          PORTAL_JWT_AUDIENCE: !Ref PortalJwtAudience
+          PORTAL_CORS_ALLOWED_ORIGINS: !Ref PortalCorsAllowedOrigins
+          PORTAL_CHAT_TIMEOUT_SEC: !Ref PortalChatTimeoutSec
+          PORTAL_CHAT_FUNCTION_URL_ENABLED: !Ref PortalChatFunctionUrlEnabled
+          PORTAL_CHAT_MAX_CONCURRENCY: !Ref PortalChatMaxConcurrency
+          PORTAL_CHAT_BEDROCK_MODEL_ID: !Ref PortalChatBedrockModelId
+          CASE_QA_ENABLED: !Ref CaseQaEnabled
+          CASE_QA_GENERAL_KNOWLEDGE_ENABLED: !Ref CaseQaGeneralKnowledgeEnabled
+          CASE_QA_MAX_INDEX_CHUNKS_PER_CASE: !Ref CaseQaMaxIndexChunksPerCase
+          CASE_QA_MAX_CHUNKS_PER_LANE: !Ref CaseQaMaxChunksPerLane
+          CASE_QA_MAX_TOTAL_CHUNKS: !Ref CaseQaMaxTotalChunks
+          CASE_QA_LEXICAL_TOP_K: !Ref CaseQaLexicalTopK
+          CASE_QA_VECTOR_TOP_K: !Ref CaseQaVectorTopK
+          CASE_QA_RRF_K: !Ref CaseQaRrfK
+          CASE_QA_CONTEXT_BUDGET_CHARS: !Ref CaseQaContextBudgetChars
+          CASE_QA_MAX_QUESTION_CHARS: !Ref CaseQaMaxQuestionChars
+          CASE_QA_MAX_ANSWER_TOKENS: !Ref CaseQaMaxAnswerTokens
+          CASE_QA_EMBEDDING_MODEL: !Ref CaseQaEmbeddingModel
+          CASE_QA_VECTOR_DIMENSIONS: !Ref CaseQaVectorDimensions
+          CASE_QA_EMBED_NORMALIZE: !Ref CaseQaEmbedNormalize
+          CASE_QA_CHAT_HISTORY_ENABLED: !Ref CaseQaChatHistoryEnabled
+          CASE_QA_CHAT_HISTORY_RETENTION_DAYS: !Ref CaseQaChatHistoryRetentionDays
+          CASE_QA_MAX_SESSIONS_PER_USER: !Ref CaseQaMaxSessionsPerUser
+          CASE_QA_MAX_MESSAGES_PER_SESSION: !Ref CaseQaMaxMessagesPerSession
+          CASE_QA_MAX_STORED_MESSAGE_BYTES: !Ref CaseQaMaxStoredMessageBytes
+          CHAT_SESSIONS_TABLE: !Ref ChatSessionsTableName
+          CHAT_MESSAGES_TABLE: !Ref ChatMessagesTableName
+          RAG_RERANK_ENABLED: !Ref RagRerankEnabled
+          RAG_RERANK_MODEL: !Ref RagRerankModel
+          RAG_RERANK_MODEL_FALLBACK: !Ref RagRerankModelFallback
           ELASTICSEARCH_BASE_URL: !Ref ElasticsearchBaseUrl
           ELASTICSEARCH_API_KEY_SECRET_ARN: !Ref ElasticsearchApiKeySecretArn
           ELASTICSEARCH_INDEX_ALLOWLIST: !Ref ElasticsearchIndexAllowlist

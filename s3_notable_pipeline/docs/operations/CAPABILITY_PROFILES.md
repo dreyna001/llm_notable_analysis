@@ -21,6 +21,7 @@ takes precedence.
 | `elastic_readonly` | Elasticsearch Query DSL generation and bounded read-only `_search` execution. | Read-only external Elasticsearch queries. |
 | `ticket_draft` | ServiceNow incident draft payloads in JSON reports. | Report content only; no ServiceNow POST. |
 | `action_gated` | Splunk notable writeback (when `SPLUNK_SINK_MODE=notable_rest`), ServiceNow draft/create, signed ServiceNow approval, and DynamoDB side-effect idempotency. | External write/action path. |
+| `analyst_portal` | S3 case archive, DynamoDB CaseIndex, read-only portal API, and retrieval-bound pinned-case Q&A. | Read-only analyst browse/chat over retained case evidence. |
 
 Profiles are additive. `core` is automatically included when omitted.
 Profiles may be separated with commas or semicolons.
@@ -32,6 +33,7 @@ CAPABILITY_PROFILES=core,rag,spl_readonly
 CAPABILITY_PROFILES=core,rag,elastic_readonly
 CAPABILITY_PROFILES=core,ticket_draft
 CAPABILITY_PROFILES=core,action_gated
+CAPABILITY_PROFILES=core,analyst_portal
 ```
 
 SAM parameter: `CapabilityProfiles`
@@ -143,6 +145,34 @@ Primary follow-up values:
 ServiceNow create requires a signed `servicenow_create_approval` object in the
 incoming alert payload. See `SERVICENOW_OPERATIONS.md`.
 
+### `analyst_portal`
+
+Use when operators want the AWS read-only analyst portal and pinned-case Q&A
+over retained case evidence. This profile enables `CASE_ARCHIVE_ENABLED`,
+`PORTAL_ENABLED`, and `CASE_QA_ENABLED`.
+
+This profile does not enable HTML reports, Splunk writeback, Elasticsearch
+queries, ServiceNow actions, SOAR, or any other external write path.
+
+Primary follow-up values:
+
+- `CASE_INDEX_TABLE` (required; SAM/CloudFormation creates CaseIndex when
+  `CaseIndexTableName` is non-empty)
+- `CASE_ARCHIVE_BUCKET` (defaults to `OUTPUT_BUCKET_NAME`), `CASE_ARCHIVE_PREFIX`,
+  `CASE_ARCHIVE_CHUNKS_PREFIX`, `CASE_RETENTION_DAYS`
+- `PORTAL_AUTH_MODE=jwt|iam`
+- `PORTAL_JWT_ISSUER` and `PORTAL_JWT_AUDIENCE` when `PORTAL_AUTH_MODE=jwt`
+- `PORTAL_PAGE_SIZE`, `PORTAL_MAX_DETAIL_BYTES`, `PORTAL_CHAT_TIMEOUT_SEC`,
+  `PORTAL_CHAT_MAX_CONCURRENCY`
+- `CASE_QA_EMBEDDING_MODEL`, `CASE_QA_VECTOR_DIMENSIONS`,
+  `CASE_QA_CONTEXT_BUDGET_CHARS`, `CASE_QA_MAX_ANSWER_TOKENS`
+- `CHAT_SESSIONS_TABLE` and `CHAT_MESSAGES_TABLE` only when
+  `CASE_QA_CHAT_HISTORY_ENABLED=true`
+
+Diff 1 only adds the profile, validation, environment contract, and deployment
+scaffolding. Archive writes, portal API routes, and chat synthesis are delivered
+by the later Wave 2 diffs.
+
 ## Advanced Overrides
 
 Use low-level flags only for legacy or lab configs when the capability is not
@@ -151,6 +181,7 @@ controlled by a selected profile. Examples:
 - enabling `HTML_REPORT_ENABLED` without selecting `html_reports`
 - enabling `SPL_QUERY_RAG_ENABLED` after the dedicated SPL Knowledge Base is curated
 - enabling `ELASTICSEARCH_GROUNDING_ENABLED` after the dedicated Elastic Knowledge Base is curated
+- enabling `CASE_QA_CHAT_HISTORY_ENABLED` after chat-history DynamoDB tables are provisioned
 
 Unknown profile names fail startup validation. Invalid boolean overrides also
 fail startup validation.

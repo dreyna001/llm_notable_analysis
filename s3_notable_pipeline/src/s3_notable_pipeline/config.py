@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,6 +11,7 @@ from .runtime_security import validate_https_url
 
 _TRUE_VALUES = {"true", "1", "yes"}
 _FALSE_VALUES = {"false", "0", "no"}
+_DYNAMODB_TABLE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{3,255}$")
 
 _CAPABILITY_PROFILE_FLAGS: dict[str, dict[str, Any]] = {
     "core": {},
@@ -32,6 +34,11 @@ _CAPABILITY_PROFILE_FLAGS: dict[str, dict[str, Any]] = {
         "SERVICENOW_CREATE_ENABLED": True,
         "SERVICENOW_CREATE_REQUIRES_APPROVAL": True,
         "SIDE_EFFECT_IDEMPOTENCY_ENABLED": True,
+    },
+    "analyst_portal": {
+        "CASE_ARCHIVE_ENABLED": True,
+        "PORTAL_ENABLED": True,
+        "CASE_QA_ENABLED": True,
     },
 }
 
@@ -113,6 +120,33 @@ def _profile_str(name: str, default: str, profile_flags: dict[str, Any]) -> str:
     if name in profile_flags:
         return str(profile_flags[name])
     return os.getenv(name, default).strip() or default
+
+
+def _optional_str_env(name: str) -> str:
+    raw = os.getenv(name)
+    if raw is None:
+        return ""
+    return raw.strip()
+
+
+def _validate_dynamodb_table_name(value: str, *, setting_name: str) -> str:
+    value = value.strip()
+    if not _DYNAMODB_TABLE_NAME_PATTERN.fullmatch(value):
+        raise ValueError(
+            f"{setting_name} must be a valid DynamoDB table name "
+            "(3-255 characters: letters, numbers, underscore, dash, dot)"
+        )
+    return value
+
+
+def _normalize_s3_prefix(value: str, *, setting_name: str) -> str:
+    prefix = value.strip().strip("/")
+    if not prefix:
+        raise ValueError(f"{setting_name} cannot be blank")
+    parts = prefix.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        raise ValueError(f"{setting_name} must be a normalized S3 prefix")
+    return prefix
 
 
 @dataclass
@@ -206,6 +240,56 @@ class Config:
     SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS: int = 30
     SIDE_EFFECT_IDEMPOTENCY_LOCK_SECONDS: int = 900
 
+    CASE_ARCHIVE_ENABLED: bool = False
+    CASE_ARCHIVE_FAILURE_MODE: str = "suppress"
+    CASE_ARCHIVE_BUCKET: str = ""
+    CASE_ARCHIVE_PREFIX: str = "cases"
+    CASE_ARCHIVE_CHUNKS_PREFIX: str = "case_chunks"
+    CASE_INDEX_TABLE: str = ""
+    CASE_RETENTION_DAYS: int = 30
+    CASE_SCHEMA_VERSION: int = 1
+    CASE_ANALYSIS_SCHEMA_VERSION: int = 1
+    CASE_ARCHIVE_MAX_ALERT_BYTES: int = 262_144
+    CASE_ARCHIVE_MAX_ANALYSIS_BYTES: int = 524_288
+
+    PORTAL_ENABLED: bool = False
+    PORTAL_AUTH_MODE: str = "jwt"
+    PORTAL_PAGE_SIZE: int = 50
+    PORTAL_MAX_DETAIL_BYTES: int = 262_144
+    PORTAL_JWT_ISSUER: str = ""
+    PORTAL_JWT_AUDIENCE: str = ""
+    PORTAL_CORS_ALLOWED_ORIGINS: str = ""
+    PORTAL_CHAT_TIMEOUT_SEC: int = 300
+    PORTAL_CHAT_FUNCTION_URL_ENABLED: bool = True
+    PORTAL_CHAT_MAX_CONCURRENCY: int = 18
+    PORTAL_CHAT_BEDROCK_MODEL_ID: str = ""
+
+    CASE_QA_ENABLED: bool = False
+    CASE_QA_GENERAL_KNOWLEDGE_ENABLED: bool = True
+    CASE_QA_MAX_INDEX_CHUNKS_PER_CASE: int = 200
+    CASE_QA_MAX_CHUNKS_PER_LANE: int = 6
+    CASE_QA_MAX_TOTAL_CHUNKS: int = 18
+    CASE_QA_LEXICAL_TOP_K: int = 30
+    CASE_QA_VECTOR_TOP_K: int = 30
+    CASE_QA_RRF_K: int = 60
+    CASE_QA_CONTEXT_BUDGET_CHARS: int = 12_000
+    CASE_QA_MAX_QUESTION_CHARS: int = 2_000
+    CASE_QA_MAX_ANSWER_TOKENS: int = 800
+    CASE_QA_EMBEDDING_MODEL: str = "amazon.titan-embed-text-v2:0"
+    CASE_QA_VECTOR_DIMENSIONS: int = 1024
+    CASE_QA_EMBED_NORMALIZE: bool = True
+    CASE_QA_CHAT_HISTORY_ENABLED: bool = False
+    CASE_QA_CHAT_HISTORY_RETENTION_DAYS: int = 30
+    CASE_QA_MAX_SESSIONS_PER_USER: int = 10
+    CASE_QA_MAX_MESSAGES_PER_SESSION: int = 30
+    CASE_QA_MAX_STORED_MESSAGE_BYTES: int = 4_000
+    CHAT_SESSIONS_TABLE: str = ""
+    CHAT_MESSAGES_TABLE: str = ""
+
+    RAG_RERANK_ENABLED: bool = False
+    RAG_RERANK_MODEL: str = "cohere.rerank-v3-5:0"
+    RAG_RERANK_MODEL_FALLBACK: str = "amazon.rerank-v1:0"
+
     def __post_init__(self) -> None:
         profiles = _parse_capability_profiles(self.CAPABILITY_PROFILES)
         self.CAPABILITY_PROFILES = ",".join(profiles)
@@ -271,6 +355,82 @@ class Config:
             if self.SERVICENOW_CREATE_REQUIRES_APPROVAL and not self.SERVICENOW_APPROVAL_HMAC_SECRET_ARN:
                 raise ValueError(
                     "SERVICENOW_APPROVAL_HMAC_SECRET_ARN is required when ServiceNow create requires approval"
+                )
+        self.CASE_ARCHIVE_FAILURE_MODE = (
+            self.CASE_ARCHIVE_FAILURE_MODE or "suppress"
+        ).strip().lower()
+        if self.CASE_ARCHIVE_FAILURE_MODE not in {"suppress", "fail_closed"}:
+            raise ValueError(
+                "CASE_ARCHIVE_FAILURE_MODE must be suppress or fail_closed"
+            )
+        self.CASE_ARCHIVE_BUCKET = (
+            self.CASE_ARCHIVE_BUCKET.strip() or self.OUTPUT_BUCKET_NAME.strip()
+        )
+        if self.CASE_ARCHIVE_ENABLED and not self.CASE_ARCHIVE_BUCKET:
+            raise ValueError(
+                "CASE_ARCHIVE_BUCKET or OUTPUT_BUCKET_NAME is required when case archive is enabled"
+            )
+        self.CASE_ARCHIVE_PREFIX = _normalize_s3_prefix(
+            self.CASE_ARCHIVE_PREFIX,
+            setting_name="CASE_ARCHIVE_PREFIX",
+        )
+        self.CASE_ARCHIVE_CHUNKS_PREFIX = _normalize_s3_prefix(
+            self.CASE_ARCHIVE_CHUNKS_PREFIX,
+            setting_name="CASE_ARCHIVE_CHUNKS_PREFIX",
+        )
+        if self.CASE_ARCHIVE_ENABLED or self.PORTAL_ENABLED:
+            self.CASE_INDEX_TABLE = _validate_dynamodb_table_name(
+                self.CASE_INDEX_TABLE,
+                setting_name="CASE_INDEX_TABLE",
+            )
+        elif self.CASE_INDEX_TABLE:
+            self.CASE_INDEX_TABLE = _validate_dynamodb_table_name(
+                self.CASE_INDEX_TABLE,
+                setting_name="CASE_INDEX_TABLE",
+            )
+        self.PORTAL_AUTH_MODE = (self.PORTAL_AUTH_MODE or "jwt").strip().lower()
+        if self.PORTAL_AUTH_MODE not in {"jwt", "iam"}:
+            raise ValueError("PORTAL_AUTH_MODE must be jwt or iam")
+        if self.PORTAL_ENABLED and self.PORTAL_AUTH_MODE == "jwt":
+            if not self.PORTAL_JWT_ISSUER.strip():
+                raise ValueError(
+                    "PORTAL_JWT_ISSUER is required when portal JWT auth is enabled"
+                )
+            if not self.PORTAL_JWT_AUDIENCE.strip():
+                raise ValueError(
+                    "PORTAL_JWT_AUDIENCE is required when portal JWT auth is enabled"
+                )
+        self.PORTAL_CHAT_BEDROCK_MODEL_ID = self.PORTAL_CHAT_BEDROCK_MODEL_ID.strip()
+        if self.CASE_QA_ENABLED and not self.PORTAL_ENABLED:
+            raise ValueError("CASE_QA_ENABLED=true requires PORTAL_ENABLED=true")
+        if self.CASE_QA_VECTOR_DIMENSIONS != 1024:
+            raise ValueError("CASE_QA_VECTOR_DIMENSIONS must be 1024 for Titan V2")
+        if self.CASE_QA_CHAT_HISTORY_ENABLED:
+            self.CHAT_SESSIONS_TABLE = _validate_dynamodb_table_name(
+                self.CHAT_SESSIONS_TABLE,
+                setting_name="CHAT_SESSIONS_TABLE",
+            )
+            self.CHAT_MESSAGES_TABLE = _validate_dynamodb_table_name(
+                self.CHAT_MESSAGES_TABLE,
+                setting_name="CHAT_MESSAGES_TABLE",
+            )
+        else:
+            if self.CHAT_SESSIONS_TABLE:
+                self.CHAT_SESSIONS_TABLE = _validate_dynamodb_table_name(
+                    self.CHAT_SESSIONS_TABLE,
+                    setting_name="CHAT_SESSIONS_TABLE",
+                )
+            if self.CHAT_MESSAGES_TABLE:
+                self.CHAT_MESSAGES_TABLE = _validate_dynamodb_table_name(
+                    self.CHAT_MESSAGES_TABLE,
+                    setting_name="CHAT_MESSAGES_TABLE",
+                )
+        if self.RAG_RERANK_ENABLED:
+            if not self.RAG_RERANK_MODEL.strip():
+                raise ValueError("RAG_RERANK_MODEL is required when rerank is enabled")
+            if not self.RAG_RERANK_MODEL_FALLBACK.strip():
+                raise ValueError(
+                    "RAG_RERANK_MODEL_FALLBACK is required when rerank is enabled"
                 )
 
 
@@ -459,5 +619,117 @@ def load_config() -> Config:
         ),
         SIDE_EFFECT_IDEMPOTENCY_LOCK_SECONDS=_positive_int_env(
             "SIDE_EFFECT_IDEMPOTENCY_LOCK_SECONDS", 900, max_value=86400
+        ),
+        CASE_ARCHIVE_ENABLED=_profile_bool(
+            "CASE_ARCHIVE_ENABLED", False, profile_flags
+        ),
+        CASE_ARCHIVE_FAILURE_MODE=(
+            os.getenv("CASE_ARCHIVE_FAILURE_MODE", "suppress").strip().lower()
+            or "suppress"
+        ),
+        CASE_ARCHIVE_BUCKET=os.getenv("CASE_ARCHIVE_BUCKET", ""),
+        CASE_ARCHIVE_PREFIX=os.getenv("CASE_ARCHIVE_PREFIX", "cases"),
+        CASE_ARCHIVE_CHUNKS_PREFIX=os.getenv(
+            "CASE_ARCHIVE_CHUNKS_PREFIX", "case_chunks"
+        ),
+        CASE_INDEX_TABLE=os.getenv("CASE_INDEX_TABLE", ""),
+        CASE_RETENTION_DAYS=_positive_int_env(
+            "CASE_RETENTION_DAYS", 30, max_value=3650
+        ),
+        CASE_SCHEMA_VERSION=_positive_int_env(
+            "CASE_SCHEMA_VERSION", 1, max_value=1000
+        ),
+        CASE_ANALYSIS_SCHEMA_VERSION=_positive_int_env(
+            "CASE_ANALYSIS_SCHEMA_VERSION", 1, max_value=1000
+        ),
+        CASE_ARCHIVE_MAX_ALERT_BYTES=_positive_int_env(
+            "CASE_ARCHIVE_MAX_ALERT_BYTES", 262_144, max_value=10_485_760
+        ),
+        CASE_ARCHIVE_MAX_ANALYSIS_BYTES=_positive_int_env(
+            "CASE_ARCHIVE_MAX_ANALYSIS_BYTES", 524_288, max_value=20_971_520
+        ),
+        PORTAL_ENABLED=_profile_bool("PORTAL_ENABLED", False, profile_flags),
+        PORTAL_AUTH_MODE=os.getenv("PORTAL_AUTH_MODE", "jwt"),
+        PORTAL_PAGE_SIZE=_positive_int_env("PORTAL_PAGE_SIZE", 50, max_value=100),
+        PORTAL_MAX_DETAIL_BYTES=_positive_int_env(
+            "PORTAL_MAX_DETAIL_BYTES", 262_144, max_value=10_485_760
+        ),
+        PORTAL_JWT_ISSUER=os.getenv("PORTAL_JWT_ISSUER", ""),
+        PORTAL_JWT_AUDIENCE=os.getenv("PORTAL_JWT_AUDIENCE", ""),
+        PORTAL_CORS_ALLOWED_ORIGINS=os.getenv("PORTAL_CORS_ALLOWED_ORIGINS", ""),
+        PORTAL_CHAT_TIMEOUT_SEC=_positive_int_env(
+            "PORTAL_CHAT_TIMEOUT_SEC", 300, max_value=900
+        ),
+        PORTAL_CHAT_FUNCTION_URL_ENABLED=_bool_env(
+            "PORTAL_CHAT_FUNCTION_URL_ENABLED", True
+        ),
+        PORTAL_CHAT_MAX_CONCURRENCY=_positive_int_env(
+            "PORTAL_CHAT_MAX_CONCURRENCY", 18, max_value=64
+        ),
+        PORTAL_CHAT_BEDROCK_MODEL_ID=_optional_str_env(
+            "PORTAL_CHAT_BEDROCK_MODEL_ID"
+        ),
+        CASE_QA_ENABLED=_profile_bool("CASE_QA_ENABLED", False, profile_flags),
+        CASE_QA_GENERAL_KNOWLEDGE_ENABLED=_bool_env(
+            "CASE_QA_GENERAL_KNOWLEDGE_ENABLED", True
+        ),
+        CASE_QA_MAX_INDEX_CHUNKS_PER_CASE=_positive_int_env(
+            "CASE_QA_MAX_INDEX_CHUNKS_PER_CASE", 200, max_value=10000
+        ),
+        CASE_QA_MAX_CHUNKS_PER_LANE=_positive_int_env(
+            "CASE_QA_MAX_CHUNKS_PER_LANE", 6, max_value=50
+        ),
+        CASE_QA_MAX_TOTAL_CHUNKS=_positive_int_env(
+            "CASE_QA_MAX_TOTAL_CHUNKS", 18, max_value=100
+        ),
+        CASE_QA_LEXICAL_TOP_K=_positive_int_env(
+            "CASE_QA_LEXICAL_TOP_K", 30, max_value=100
+        ),
+        CASE_QA_VECTOR_TOP_K=_positive_int_env(
+            "CASE_QA_VECTOR_TOP_K", 30, max_value=100
+        ),
+        CASE_QA_RRF_K=_positive_int_env("CASE_QA_RRF_K", 60, max_value=1000),
+        CASE_QA_CONTEXT_BUDGET_CHARS=_positive_int_env(
+            "CASE_QA_CONTEXT_BUDGET_CHARS", 12_000, max_value=50_000
+        ),
+        CASE_QA_MAX_QUESTION_CHARS=_positive_int_env(
+            "CASE_QA_MAX_QUESTION_CHARS", 2_000, max_value=8_000
+        ),
+        CASE_QA_MAX_ANSWER_TOKENS=_positive_int_env(
+            "CASE_QA_MAX_ANSWER_TOKENS", 800, max_value=4096
+        ),
+        CASE_QA_EMBEDDING_MODEL=(
+            os.getenv("CASE_QA_EMBEDDING_MODEL", "amazon.titan-embed-text-v2:0").strip()
+            or "amazon.titan-embed-text-v2:0"
+        ),
+        CASE_QA_VECTOR_DIMENSIONS=_positive_int_env(
+            "CASE_QA_VECTOR_DIMENSIONS", 1024, max_value=100_000
+        ),
+        CASE_QA_EMBED_NORMALIZE=_bool_env("CASE_QA_EMBED_NORMALIZE", True),
+        CASE_QA_CHAT_HISTORY_ENABLED=_bool_env(
+            "CASE_QA_CHAT_HISTORY_ENABLED", False
+        ),
+        CASE_QA_CHAT_HISTORY_RETENTION_DAYS=_positive_int_env(
+            "CASE_QA_CHAT_HISTORY_RETENTION_DAYS", 30, max_value=3650
+        ),
+        CASE_QA_MAX_SESSIONS_PER_USER=_positive_int_env(
+            "CASE_QA_MAX_SESSIONS_PER_USER", 10, max_value=100
+        ),
+        CASE_QA_MAX_MESSAGES_PER_SESSION=_positive_int_env(
+            "CASE_QA_MAX_MESSAGES_PER_SESSION", 30, max_value=200
+        ),
+        CASE_QA_MAX_STORED_MESSAGE_BYTES=_positive_int_env(
+            "CASE_QA_MAX_STORED_MESSAGE_BYTES", 4_000, max_value=65_536
+        ),
+        CHAT_SESSIONS_TABLE=os.getenv("CHAT_SESSIONS_TABLE", ""),
+        CHAT_MESSAGES_TABLE=os.getenv("CHAT_MESSAGES_TABLE", ""),
+        RAG_RERANK_ENABLED=_bool_env("RAG_RERANK_ENABLED", False),
+        RAG_RERANK_MODEL=(
+            os.getenv("RAG_RERANK_MODEL", "cohere.rerank-v3-5:0").strip()
+            or "cohere.rerank-v3-5:0"
+        ),
+        RAG_RERANK_MODEL_FALLBACK=(
+            os.getenv("RAG_RERANK_MODEL_FALLBACK", "amazon.rerank-v1:0").strip()
+            or "amazon.rerank-v1:0"
         ),
     )

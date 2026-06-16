@@ -36,17 +36,18 @@ deploy validation is not recorded in this repo**.
 
 ---
 
-## Wave 2 (portal, archive, Case Q&A) — not started
+## Wave 2 (portal, archive, Case Q&A) — in progress
 
-Case archive, analyst portal, and retrieval-bound Case Q&A are **explicitly out
+Case archive, analyst portal, and retrieval-bound Case Q&A were **explicitly out
 of Wave 1**. They are specified in
 [`s3_notable_pipeline/docs/planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md`](s3_notable_pipeline/docs/planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md).
 
 Open Wave 2 items (do not implement under Wave 1 closeout):
 
-- [ ] `analyst_portal` capability profile and read-only portal API/UI
+- [x] Diff 1: `analyst_portal` capability profile, config validation, and deploy scaffolding
 - [ ] Case archive write path and DynamoDB case index
 - [ ] Retrieval-bound Case Q&A over retained cases
+- [ ] Read-only portal API/UI
 - [ ] IAM split between analyzer writer and portal reader permissions
 
 ---
@@ -58,4 +59,4 @@ Open Wave 2 items (do not implement under Wave 1 closeout):
 
 ---
 
-_Last updated: Wave 1 complete; Wave 2 prep docs synced (technical spec, Decision 36); implementation not started._
+_Last updated: Wave 2 Diff 1 complete; archive write path starts in Diff 2._

@@ -30,6 +30,10 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(config.SPL_QUERY_GENERATION_ENABLED)
         self.assertFalse(config.INVESTIGATION_QUERY_EXECUTION_ENABLED)
         self.assertFalse(config.SPLUNK_SINK_ENABLED)
+        self.assertFalse(config.CASE_ARCHIVE_ENABLED)
+        self.assertFalse(config.PORTAL_ENABLED)
+        self.assertFalse(config.CASE_QA_ENABLED)
+        self.assertEqual(config.PORTAL_CHAT_MAX_CONCURRENCY, 18)
 
     def test_action_gated_profile_enables_writeback_and_idempotency(self) -> None:
         """`action_gated` should mirror the on-prem external-action posture."""
@@ -48,6 +52,33 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(config.SERVICENOW_CREATE_ENABLED)
         self.assertTrue(config.SERVICENOW_CREATE_REQUIRES_APPROVAL)
         self.assertTrue(config.SIDE_EFFECT_IDEMPOTENCY_ENABLED)
+
+    def test_analyst_portal_profile_enables_archive_portal_and_qa(self) -> None:
+        """`analyst_portal` should enable only the read-only portal bundle."""
+        with patch.dict(
+            "os.environ",
+            {
+                "CAPABILITY_PROFILES": "core,analyst_portal",
+                "OUTPUT_BUCKET_NAME": "notable-output",
+                "CASE_INDEX_TABLE": "notable-case-index",
+                "PORTAL_JWT_ISSUER": "https://issuer.example.test",
+                "PORTAL_JWT_AUDIENCE": "notable-portal",
+            },
+            clear=True,
+        ):
+            config = load_config()
+
+        self.assertTrue(config.CASE_ARCHIVE_ENABLED)
+        self.assertTrue(config.PORTAL_ENABLED)
+        self.assertTrue(config.CASE_QA_ENABLED)
+        self.assertEqual(config.CASE_ARCHIVE_BUCKET, "notable-output")
+        self.assertEqual(config.CASE_INDEX_TABLE, "notable-case-index")
+        self.assertEqual(config.CASE_RETENTION_DAYS, 30)
+        self.assertEqual(config.PORTAL_AUTH_MODE, "jwt")
+        self.assertEqual(config.PORTAL_CHAT_MAX_CONCURRENCY, 18)
+        self.assertFalse(config.HTML_REPORT_ENABLED)
+        self.assertFalse(config.SPLUNK_SINK_ENABLED)
+        self.assertFalse(config.SERVICENOW_CREATE_ENABLED)
 
     def test_spl_and_elastic_readonly_profiles_are_mutually_exclusive(self) -> None:
         """Only one read-only investigation backend can be active."""
@@ -74,6 +105,86 @@ class ConfigTests(unittest.TestCase):
         with (
             patch.dict("os.environ", {"SPLUNK_SINK_MODE": "side_effects"}, clear=True),
             self.assertRaisesRegex(ValueError, "SPLUNK_SINK_MODE"),
+        ):
+            load_config()
+
+    def test_analyst_portal_requires_case_index_table(self) -> None:
+        """Archive or portal enablement needs a DynamoDB CaseIndex table."""
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "CAPABILITY_PROFILES": "core,analyst_portal",
+                    "OUTPUT_BUCKET_NAME": "notable-output",
+                    "PORTAL_JWT_ISSUER": "https://issuer.example.test",
+                    "PORTAL_JWT_AUDIENCE": "notable-portal",
+                },
+                clear=True,
+            ),
+            self.assertRaisesRegex(ValueError, "CASE_INDEX_TABLE"),
+        ):
+            load_config()
+
+    def test_portal_jwt_auth_requires_issuer_and_audience(self) -> None:
+        """JWT portal auth should fail closed when identity settings are missing."""
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "PORTAL_ENABLED": "true",
+                    "CASE_INDEX_TABLE": "notable-case-index",
+                },
+                clear=True,
+            ),
+            self.assertRaisesRegex(ValueError, "PORTAL_JWT_ISSUER"),
+        ):
+            load_config()
+
+    def test_invalid_portal_auth_mode_fails_fast(self) -> None:
+        """Portal auth mode remains restricted to the approved v1 modes."""
+        with (
+            patch.dict("os.environ", {"PORTAL_AUTH_MODE": "none"}, clear=True),
+            self.assertRaisesRegex(ValueError, "PORTAL_AUTH_MODE"),
+        ):
+            load_config()
+
+    def test_case_qa_requires_portal(self) -> None:
+        """Case Q&A is only exposed through the portal API."""
+        with (
+            patch.dict("os.environ", {"CASE_QA_ENABLED": "true"}, clear=True),
+            self.assertRaisesRegex(ValueError, "CASE_QA_ENABLED"),
+        ):
+            load_config()
+
+    def test_portal_chat_concurrency_is_bounded(self) -> None:
+        """The per-environment chat semaphore limit should be capped."""
+        with (
+            patch.dict(
+                "os.environ",
+                {"PORTAL_CHAT_MAX_CONCURRENCY": "65"},
+                clear=True,
+            ),
+            self.assertRaisesRegex(ValueError, "PORTAL_CHAT_MAX_CONCURRENCY"),
+        ):
+            load_config()
+
+    def test_case_qa_vector_dimensions_are_locked_to_titan_v2(self) -> None:
+        """Titan V2 embeddings use the locked 1024-dimensional vector contract."""
+        with (
+            patch.dict("os.environ", {"CASE_QA_VECTOR_DIMENSIONS": "1536"}, clear=True),
+            self.assertRaisesRegex(ValueError, "CASE_QA_VECTOR_DIMENSIONS"),
+        ):
+            load_config()
+
+    def test_chat_history_requires_dynamodb_tables(self) -> None:
+        """Persisted chat history should not start without both table names."""
+        with (
+            patch.dict(
+                "os.environ",
+                {"CASE_QA_CHAT_HISTORY_ENABLED": "true"},
+                clear=True,
+            ),
+            self.assertRaisesRegex(ValueError, "CHAT_SESSIONS_TABLE"),
         ):
             load_config()
 
