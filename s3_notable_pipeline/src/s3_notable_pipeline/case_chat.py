@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .aws_clients import bedrock_agent_runtime_client
 from .case_index import get_case_metadata
 from .config import Config
-from .portal_chat import PortalAnswer, synthesize_case_answer
+from .portal_chat import PortalAnswer, synthesize_case_answer, trim_sources
+from .portal_chat_kb import build_chat_knowledge_sources
 
 
 def answer_selected_case_question(
@@ -19,7 +21,7 @@ def answer_selected_case_question(
     s3_client: Any,
     bedrock_client: Any,
 ) -> PortalAnswer:
-    """Answer one question using only chunks from the selected case."""
+    """Answer one question using retrieval-bound synthesis for the selected case."""
 
     selected_case_id = str(case_id or "").strip()
     if not selected_case_id:
@@ -32,18 +34,37 @@ def answer_selected_case_question(
     if not config.CASE_QA_ENABLED:
         return PortalAnswer(
             answer="Case Q&A is disabled.",
-            answer_status="insufficient_context",
-            citations=[],
+            answer_status="unknown",
         )
-    chunks = retrieve_selected_case_chunks(
+
+    case_chunks = retrieve_selected_case_chunks(
         case_id=selected_case_id,
         config=config,
         dynamodb_client=dynamodb_client,
         s3_client=s3_client,
     )
+    sources: list[dict[str, Any]] = [
+        {
+            "source_lane": "current_case",
+            "section": str(chunk.get("section") or ""),
+            "chunk_id": str(chunk.get("chunk_id") or ""),
+            "text": str(chunk.get("search_text") or chunk.get("text") or ""),
+            "search_text": str(chunk.get("search_text") or chunk.get("text") or ""),
+        }
+        for chunk in case_chunks
+    ]
+    sources.extend(
+        build_chat_knowledge_sources(
+            question=normalized_question,
+            config=config,
+            bedrock_agent_client=bedrock_agent_runtime_client(),
+        )
+    )
+    sources = trim_sources(sources, config)
+
     return synthesize_case_answer(
         question=normalized_question,
-        sources=chunks,
+        sources=sources,
         config=config,
         bedrock_client=bedrock_client,
     )

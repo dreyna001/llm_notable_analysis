@@ -55,17 +55,22 @@ class FakeS3Client:
 
 
 class FakeBedrockClient:
-    """Fake Bedrock client returning a cited answer."""
+    """Fake Bedrock client returning Markdown chat answers."""
 
-    def invoke_model(self, **_kwargs):
-        import io
-
-        body = {
-            "answer": "The login was suspicious based on the archived case chunk.",
-            "answer_status": "answered",
-            "citations": ["chunk-1"],
+    def converse(self, **_kwargs):
+        return {
+            "output": {
+                "message": {
+                    "content": [
+                        {
+                            "text": (
+                                "The login was suspicious based on the archived case chunk."
+                            )
+                        }
+                    ]
+                }
+            }
         }
-        return {"body": io.BytesIO(json.dumps(body).encode("utf-8"))}
 
 
 def ddb_case_item():
@@ -288,7 +293,7 @@ class PortalHandlerTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 400)
         self.assertIn("selected_case_id", json.loads(response["body"])["error"])
 
-    def test_chat_returns_cited_answer_for_selected_case(self) -> None:
+    def test_chat_returns_markdown_answer_for_selected_case(self) -> None:
         with (
             patch.object(
                 portal_handler,
@@ -301,17 +306,26 @@ class PortalHandlerTests(unittest.TestCase):
             patch.object(portal_handler, "dynamodb_client", return_value=FakeDynamoDbClient()),
             patch.object(portal_handler, "s3_client", return_value=FakeS3Client()),
             patch.object(portal_handler, "bedrock_runtime_client", return_value=FakeBedrockClient()),
+            patch(
+                "s3_notable_pipeline.case_chat.build_chat_knowledge_sources",
+                return_value=[],
+            ),
         ):
             request = event("/api/chat", "POST")
             request["body"] = json.dumps(
-                {"selected_case_id": "case-1", "question": "What happened?"}
+                {
+                    "mode": "selected_case",
+                    "selected_case_id": "case-1",
+                    "question": "What happened?",
+                }
             )
             response = portal_handler.handler(request, None)
 
         body = json.loads(response["body"])
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(body["answer_status"], "answered")
-        self.assertEqual(body["citations"], ["chunk-1"])
+        self.assertIn("suspicious", body["answer"])
+        self.assertNotIn("citations", body)
 
     def test_chat_sessions_list_returns_disabled_payload(self) -> None:
         with patch.object(portal_handler, "load_config", return_value=portal_config()):
@@ -375,6 +389,10 @@ class PortalHandlerTests(unittest.TestCase):
             patch.object(portal_handler, "dynamodb_client", return_value=FakeDynamoDbClient()),
             patch.object(portal_handler, "s3_client", return_value=FakeS3Client()),
             patch.object(portal_handler, "bedrock_runtime_client", return_value=FakeBedrockClient()),
+            patch(
+                "s3_notable_pipeline.case_chat.build_chat_knowledge_sources",
+                return_value=[],
+            ),
             patch.object(
                 portal_handler,
                 "persist_chat_history",

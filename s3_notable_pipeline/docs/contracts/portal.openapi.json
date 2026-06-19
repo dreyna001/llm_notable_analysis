@@ -101,7 +101,24 @@
       "post": {
         "responses": {
           "200": {
-            "description": "Grounded selected-case answer"
+            "description": "Grounded selected-case answer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["answer", "answer_status"],
+                  "properties": {
+                    "answer": {"type": "string"},
+                    "answer_status": {
+                      "type": "string",
+                      "enum": ["answered", "unknown", "refused"]
+                    },
+                    "session_id": {"type": "string", "nullable": true}
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
           },
           "400": {
             "description": "Malformed chat request"

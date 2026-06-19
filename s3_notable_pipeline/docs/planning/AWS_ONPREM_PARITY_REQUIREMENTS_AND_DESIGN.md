@@ -596,18 +596,21 @@ Chat response shape:
 }
 ```
 
-Internal validation rules before mapping to `answer_status`:
+Internal validation rules before mapping to `answer_status` (Wave 3 — match
+on-prem; supersedes earlier JSON/citation/repair rules in this section):
 
-- Retrieved sources must be bounded and citation-checked inside the portal
-  Lambda before answer synthesis.
-- Unknown, malformed, or uncited model output gets one repair attempt.
-- If repair fails, return `answer_status=unknown` with the standard insufficient
-  archive message, not a malformed model answer.
+- Retrieved sources must be bounded before answer synthesis.
+- Model returns **plain Markdown text** in one Bedrock call; no JSON wrapper and
+  no `citations` in the external response.
+- **No chat LLM repair loop.** Use deterministic post-LLM guards (sanitize,
+  action-boundary refuse, general-knowledge fallback) like on-prem. Analyzer JSON
+  repair remains a separate path on both platforms.
 - `CASE_QA_GENERAL_KNOWLEDGE_ENABLED=true` triggers fallback on empty retrieval
   or the standard insufficient-archive phrase, not on an embedding score
   threshold.
-- Cited sources may be persisted in chat history when enabled, but are not
-  required in the external chat response payload.
+- Chat history may be persisted when enabled, but prior turns are **not** replayed
+  into synthesis until post–Wave 3 multi-turn work ships (see
+  `PORTAL_CHATBOT_CAPABILITY_GAPS.md` item 2).
 
 ## IAM Requirements
 
@@ -982,6 +985,11 @@ Stop and ask before coding if any of these become necessary:
 - Vector lane: cosine similarity on Bedrock Titan embeddings at query time.
 - Merge with `_merge_rrf` using `CASE_QA_RRF_K=60`.
 - No OpenSearch, Kendra, or Bedrock Knowledge Base for case-archive retrieval.
+- **Wave 3 / Slice B:** Match on-prem per-query hybrid chunk ranking
+  (`case_chat._execute_chunk_retrieval` behavior). Runtime code must not stop at
+  bounded S3 list/load without question ranking.
+- **No rerank on case chunks:** Do not apply Bedrock or KB rerank models to case
+  archive chunks. Rerank is advisory-KB only when enabled (Decision 14).
 
 ### Decision 8: Chat history (v1)
 

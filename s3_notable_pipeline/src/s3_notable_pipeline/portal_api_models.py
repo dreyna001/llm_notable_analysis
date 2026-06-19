@@ -119,7 +119,6 @@ class ChatResponseModel(BaseModel):
 
     answer: str
     answer_status: str
-    citations: list[str]
     session_id: str | None = None
 
 

@@ -268,7 +268,6 @@ def _handle_chat_gate(config: Config, event: dict[str, Any]) -> dict[str, Any]:
         response_payload: dict[str, Any] = {
             "answer": answer.answer,
             "answer_status": answer.answer_status,
-            "citations": answer.citations,
             "session_id": None,
         }
         if config.CASE_QA_CHAT_HISTORY_ENABLED:

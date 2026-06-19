@@ -64,4 +64,32 @@ Wave 2 implementation (landed on `main`):
 
 ---
 
-_Last updated: Wave 2 complete; real-AWS deploy validation remains an operator step outside this repo._
+## Wave 3 (runtime parity gaps) — open
+
+Wave 1 and Wave 2 checklists are closed, but **on-prem and AWS behavior still
+differ** in portal chat prompts, general-knowledge fallback, query-specific
+retrieval, API contracts, and related areas.
+
+**Current-state gap index (not a commitment backlog):**
+[`AWS_ONPREM_RUNTIME_PARITY_GAPS.md`](AWS_ONPREM_RUNTIME_PARITY_GAPS.md)
+
+**Portal chat Wave 3 (summary):**
+
+- **Slice A — prompt/API parity:** Match on-prem prompts, API shape, guards, and
+  Markdown answers (W3-1 through W3-8).
+- **Slice B — hybrid retrieval:** AWS must implement Decision 7 (BM25 + Titan +
+  RRF per question) to match on-prem case-chunk pick — **not** list-order S3
+  load. Do **not** add rerank on case chunks; rerank stays KB-only (Decision 14).
+
+**Post–Wave 3 (committed, not Wave 3):**
+
+- **Multi-turn synthesis** on both platforms — ChatGPT-style follow-ups with
+  prior turns in the model context. See
+  [`PORTAL_CHATBOT_CAPABILITY_GAPS.md`](PORTAL_CHATBOT_CAPABILITY_GAPS.md) item 2
+  and parity gaps doc **P3-1**.
+
+**Not pursuing:** holistic / full-case inject; analyst-visible retrieval debug UI.
+
+---
+
+_Last updated: Wave 2 complete; Wave 3 gap index added; real-AWS deploy validation remains an operator step outside this repo._
