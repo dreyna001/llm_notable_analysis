@@ -49,13 +49,22 @@ class FakeS3Client:
                 "case_id": "case-1",
                 "chunk_id": "chunk-1",
                 "search_text": "alert.summary $ suspicious login",
+                "embedding": [0.01] * 1024,
             }
             return {"Body": io.BytesIO(json.dumps(chunk).encode("utf-8"))}
         return {"Body": io.BytesIO(json.dumps(case_envelope()).encode("utf-8"))}
 
 
 class FakeBedrockClient:
-    """Fake Bedrock client returning Markdown chat answers."""
+    """Fake Bedrock client for chat synthesis and Titan embeddings."""
+
+    dimensions = 1024
+
+    def invoke_model(self, **_kwargs):
+        import io
+
+        body = json.dumps({"embedding": [0.01] * self.dimensions}).encode("utf-8")
+        return {"body": io.BytesIO(body)}
 
     def converse(self, **_kwargs):
         return {

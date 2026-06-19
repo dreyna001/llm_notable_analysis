@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from .aws_clients import bedrock_agent_runtime_client
-from .case_index import get_case_metadata
+from .case_chunk_retrieval import (
+    load_all_case_chunks,
+    retrieve_case_chunks_for_question,
+    trim_chunks_list_order,
+)
 from .config import Config
 from .portal_chat import PortalAnswer, synthesize_case_answer, trim_sources
 from .portal_chat_kb import build_chat_knowledge_sources
@@ -37,11 +40,13 @@ def answer_selected_case_question(
             answer_status="unknown",
         )
 
-    case_chunks = retrieve_selected_case_chunks(
+    case_chunks = retrieve_case_chunks_for_question(
         case_id=selected_case_id,
+        question=normalized_question,
         config=config,
         dynamodb_client=dynamodb_client,
         s3_client=s3_client,
+        bedrock_client=bedrock_client,
     )
     sources: list[dict[str, Any]] = [
         {
@@ -77,45 +82,12 @@ def retrieve_selected_case_chunks(
     dynamodb_client: Any,
     s3_client: Any,
 ) -> list[dict[str, Any]]:
-    """Return bounded chunk objects only when retrieval_status is ready."""
+    """Return chunks in storage order without query ranking (deprecated helper)."""
 
-    metadata = get_case_metadata(
+    chunks = load_all_case_chunks(
+        case_id=case_id,
         config=config,
         dynamodb_client=dynamodb_client,
-        case_id=case_id,
+        s3_client=s3_client,
     )
-    if not metadata:
-        raise LookupError("case not found")
-    if str(metadata.get("retrieval_status", "")).lower() != "ready":
-        return []
-    prefix = f"{config.CASE_ARCHIVE_CHUNKS_PREFIX}/{case_id}/"
-    chunks: list[dict[str, Any]] = []
-    token: str | None = None
-    while len(chunks) < config.CASE_QA_MAX_TOTAL_CHUNKS:
-        kwargs: dict[str, Any] = {"Bucket": config.CASE_ARCHIVE_BUCKET, "Prefix": prefix}
-        if token:
-            kwargs["ContinuationToken"] = token
-        response = s3_client.list_objects_v2(**kwargs)
-        for item in response.get("Contents", []):
-            key = item.get("Key")
-            if not key:
-                continue
-            chunk = _load_chunk(config.CASE_ARCHIVE_BUCKET, str(key), s3_client)
-            if str(chunk.get("case_id", "")) != case_id:
-                continue
-            chunks.append(chunk)
-            if len(chunks) >= config.CASE_QA_MAX_TOTAL_CHUNKS:
-                break
-        if len(chunks) >= config.CASE_QA_MAX_TOTAL_CHUNKS or not response.get("IsTruncated"):
-            break
-        token = response.get("NextContinuationToken")
-    return chunks
-
-
-def _load_chunk(bucket: str, key: str, s3_client: Any) -> dict[str, Any]:
-    response = s3_client.get_object(Bucket=bucket, Key=key)
-    body = response["Body"].read()
-    chunk = json.loads(body.decode("utf-8") if isinstance(body, bytes) else body)
-    if not isinstance(chunk, dict):
-        raise ValueError("case chunk must be a JSON object")
-    return chunk
+    return trim_chunks_list_order(chunks, config)
