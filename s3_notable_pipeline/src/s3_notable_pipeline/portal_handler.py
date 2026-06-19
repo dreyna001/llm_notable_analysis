@@ -78,6 +78,8 @@ def _route(
         return _json_response(200 if ready else 503, {"status": "ready" if ready else "not_ready"})
     if path == "/api/capabilities":
         return _model_response(PortalCapabilitiesResponse, _capabilities(config))
+    if path == "/api/diagnostics/chat-readiness":
+        return _handle_chat_readiness(config)
     if path == "/api/cases":
         query = event.get("queryStringParameters") or {}
         payload = list_cases(
@@ -312,6 +314,34 @@ def _get_chat_semaphore(limit: int) -> threading.BoundedSemaphore:
         _chat_semaphore = threading.BoundedSemaphore(limit)
         _chat_semaphore_limit = limit
     return _chat_semaphore
+
+
+def _handle_chat_readiness(config: Config) -> dict[str, Any]:
+    if not config.CASE_QA_ENABLED:
+        return _json_response(
+            503,
+            {
+                "status": "not_ready",
+                "reason": "Case Q&A is disabled in portal configuration.",
+                "dependencies": {
+                    "embeddings": "unavailable",
+                    "archive_retrieval": "unavailable",
+                    "llm_gateway": "unavailable",
+                },
+            },
+        )
+    dependencies = _probe_chat_dependencies(config)
+    ready = all(value == "ready" for value in dependencies.values())
+    if ready:
+        return _json_response(200, {"status": "ready"})
+    return _json_response(
+        503,
+        {
+            "status": "not_ready",
+            "dependencies": dependencies,
+            "reason": "One or more chat dependencies are unavailable.",
+        },
+    )
 
 
 def _capabilities(config: Config) -> dict[str, Any]:

@@ -16,6 +16,8 @@ import boto3
 from botocore.exceptions import ClientError
 from botocore.config import Config
 
+from .verdicts import ALLOWED_VERDICTS, normalize_verdict
+
 # Configure logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -140,12 +142,7 @@ ANALYZE_NOTABLE_TOOL = {
                         "properties": {
                             "verdict": {
                                 "type": "string",
-                                "enum": [
-                                    "likely_true_positive",
-                                    "likely_benign",
-                                    "likely_false_positive",
-                                    "unknown",
-                                ],
+                                "enum": list(ALLOWED_VERDICTS),
                             },
                             "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                             "one_sentence_summary": {"type": "string"},
@@ -326,9 +323,9 @@ Additional constraints:
 - URLs are only allowed in ioc_extraction.urls[]; no URLs elsewhere.
 - Leave arrays empty [] when no items apply.
 - alert_reconciliation: object with verdict, confidence, one_sentence_summary, decision_drivers (list), recommended_actions (list).
-- alert_reconciliation.verdict MUST be exactly one of: "likely_true_positive", "likely_benign", "likely_false_positive", "unknown".
-- Use "likely_true_positive" when direct alert evidence supports adversary activity or a true-positive security concern.
-- Use "likely_benign" or "likely_false_positive" when direct alert evidence supports benign, administrative, expected, or false-positive activity.
+- alert_reconciliation.verdict MUST be exactly one of: "likely_benign", "likely_malicious", "unknown".
+- Use "likely_malicious" when direct alert evidence supports adversary activity or a true-positive security concern.
+- Use "likely_benign" when direct alert evidence supports benign, administrative, expected, or false-positive activity.
 - Use "unknown" when the evidence is insufficient, conflicting, missing critical context, or only supports competing benign/adversary hypotheses.
 - ATT&CK techniques are behavior labels, not verdicts; do not mark a verdict true-positive solely because a technique can be mapped.
 - alert_reconciliation.confidence is confidence in the selected verdict, not an independent probability that the alert is malicious.
@@ -388,7 +385,15 @@ def validate_response_schema(result: Dict[str, Any]) -> Tuple[bool, Optional[str
             return False, f"Missing required key: {key}"
         if not isinstance(result[key], expected_type):
             return False, f"Key '{key}' must be {expected_type.__name__}, got {type(result[key]).__name__}"
-    
+
+    verdict = result["alert_reconciliation"].get("verdict")
+    if verdict not in ALLOWED_VERDICTS:
+        return (
+            False,
+            "alert_reconciliation.verdict must be one of: "
+            + ", ".join(ALLOWED_VERDICTS),
+        )
+
     return True, None
 
 
@@ -720,7 +725,7 @@ def _normalize_and_fill_defaults(parsed: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(ar, dict):
         ar = {}
     out["alert_reconciliation"] = {
-        "verdict": str(ar.get("verdict", "")) if ar.get("verdict") is not None else "",
+        "verdict": normalize_verdict(ar.get("verdict")),
         "confidence": str(ar.get("confidence", ""))
         if ar.get("confidence") is not None
         else "",
@@ -1119,7 +1124,7 @@ class BedrockAnalyzer:
         output_schema = OUTPUT_SCHEMA if use_tool else OUTPUT_SCHEMA_RAW_JSON
         if advisory_context and advisory_context.strip():
             soc_context_block = (
-                "SOC_OPERATIONAL_CONTEXT (advisory only; not direct alert evidence):\n"
+                "SOC_OPERATIONAL_CONTEXT\n"
                 f"{advisory_context.strip()}\n"
             )
         else:

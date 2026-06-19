@@ -11,6 +11,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from .config import Config
+from .verdicts import normalize_verdict
 
 FINDING_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 IDENTIFIER_FIELDS = ("finding_id", "notable_id", "sid")
@@ -272,10 +273,23 @@ def _bounded_archive_values(
     if alert_missing and analysis_missing:
         return "markdown_only", None, None
     if alert_missing:
-        return "missing_alert", None, archived_analysis
+        return "missing_alert", None, _with_normalized_verdict(archived_analysis)
     if analysis_missing:
         return "missing_analysis", archived_alert, None
-    return "complete", archived_alert, archived_analysis
+    return "complete", archived_alert, _with_normalized_verdict(archived_analysis)
+
+
+def _with_normalized_verdict(analysis: Any) -> Any:
+    """Return analysis with a normalized alert_reconciliation.verdict when present."""
+    if not isinstance(analysis, dict):
+        return analysis
+    stored = dict(analysis)
+    reconciliation = stored.get("alert_reconciliation")
+    if isinstance(reconciliation, dict):
+        normalized = dict(reconciliation)
+        normalized["verdict"] = normalize_verdict(reconciliation.get("verdict"))
+        stored["alert_reconciliation"] = normalized
+    return stored
 
 
 def _bounded_value(value: Any, max_bytes: int) -> Any | None:
@@ -334,7 +348,7 @@ def _build_case_index_item(
         "processed_at_case_id": f"{_format_utc(processed_at)}#{case_id}",
         "expires_at": _format_utc(expires_at),
         "expires_at_epoch": int(expires_at.timestamp()),
-        "verdict": str(reconciliation.get("verdict", "unknown") or "unknown"),
+        "verdict": normalize_verdict(reconciliation.get("verdict")),
         "confidence": str(reconciliation.get("confidence", "unknown") or "unknown"),
         "search_name": _extract_search_name(alert_payload),
         "risk_score": _extract_risk_score(alert_payload),

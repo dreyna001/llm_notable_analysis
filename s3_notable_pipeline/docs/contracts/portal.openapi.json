@@ -35,6 +35,18 @@
         }
       }
     },
+    "/api/diagnostics/chat-readiness": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Chat dependencies ready"
+          },
+          "503": {
+            "description": "Chat dependencies unavailable"
+          }
+        }
+      }
+    },
     "/api/cases": {
       "get": {
         "responses": {

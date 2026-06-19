@@ -270,6 +270,55 @@ class PortalHandlerTests(unittest.TestCase):
         self.assertTrue(body["chat_ready"])
         self.assertEqual(body["chat_dependency_status"]["embeddings"], "ready")
 
+    def test_chat_readiness_returns_ready_when_dependencies_available(self) -> None:
+        config = portal_config(
+            PORTAL_ENABLED=True,
+            CASE_ARCHIVE_ENABLED=True,
+            CASE_QA_ENABLED=True,
+            CASE_EMBED_LAMBDA_NAME="notable-case-embed",
+        )
+        with (
+            patch.object(portal_handler, "load_config", return_value=config),
+            patch.object(portal_handler, "dynamodb_client", return_value=FakeDynamoDbClient()),
+            patch.object(portal_handler, "bedrock_runtime_client", return_value=object()),
+        ):
+            response = portal_handler.handler(
+                event("/api/diagnostics/chat-readiness"),
+                None,
+            )
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(json.loads(response["body"]), {"status": "ready"})
+
+    def test_chat_readiness_returns_503_when_dependencies_unavailable(self) -> None:
+        config = portal_config(
+            PORTAL_ENABLED=True,
+            CASE_ARCHIVE_ENABLED=True,
+            CASE_QA_ENABLED=True,
+            CASE_EMBED_LAMBDA_NAME="notable-case-embed",
+        )
+        with (
+            patch.object(portal_handler, "load_config", return_value=config),
+            patch.object(
+                portal_handler,
+                "_probe_chat_dependencies",
+                return_value={
+                    "embeddings": "unavailable",
+                    "archive_retrieval": "ready",
+                    "llm_gateway": "ready",
+                },
+            ),
+        ):
+            response = portal_handler.handler(
+                event("/api/diagnostics/chat-readiness"),
+                None,
+            )
+
+        body = json.loads(response["body"])
+        self.assertEqual(response["statusCode"], 503)
+        self.assertEqual(body["status"], "not_ready")
+        self.assertEqual(body["dependencies"]["embeddings"], "unavailable")
+
     def test_chat_concurrency_limit_returns_429(self) -> None:
         semaphore = threading.BoundedSemaphore(1)
         semaphore.acquire()

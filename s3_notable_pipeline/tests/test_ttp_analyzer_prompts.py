@@ -38,7 +38,9 @@ class TTPAnalyzerPromptTests(unittest.TestCase):
         self.assertLess(prompt.index("TASK:"), prompt.index("ANALYST DOCTRINE"))
         self.assertLess(prompt.index("OUTPUT CONTRACT:"), prompt.index("ANALYST DOCTRINE"))
         self.assertIn("SOC CONTEXT RULES:", prompt)
-        self.assertIn("likely_true_positive", prompt)
+        self.assertIn("likely_malicious", prompt)
+        self.assertIn("SOC_OPERATIONAL_CONTEXT\nUse index main", prompt)
+        self.assertNotIn("advisory only; not direct alert evidence", prompt)
         self.assertIn("Direct alert evidence must come only from SECURITY ALERT INPUT", prompt)
 
     def test_build_prompt_is_contract_first_for_raw_json_mode(self) -> None:
@@ -50,7 +52,7 @@ class TTPAnalyzerPromptTests(unittest.TestCase):
 
         self.assertIn("OUTPUT CONTRACT:", prompt)
         self.assertIn("SOC_OPERATIONAL_CONTEXT\n(none)", prompt)
-        self.assertIn("likely_false_positive", prompt)
+        self.assertIn("likely_benign", prompt)
 
     def test_repair_templates_are_contract_aware(self) -> None:
         self.assertIn("{contract}", REPAIR_PROMPT_TEMPLATE)

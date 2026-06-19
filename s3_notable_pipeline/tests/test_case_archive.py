@@ -195,7 +195,7 @@ class CaseArchiveTests(unittest.TestCase):
         self.assertTrue(s3.puts[0]["Key"].startswith("cases/2026/06/15/abc-123-"))
         envelope = json.loads(s3.puts[0]["Body"].decode("utf-8"))
         self.assertEqual(envelope["alert_payload"]["finding_id"], "abc-123")
-        self.assertEqual(envelope["analysis"]["alert_reconciliation"]["verdict"], "likely_true_positive")
+        self.assertEqual(envelope["analysis"]["alert_reconciliation"]["verdict"], "likely_malicious")
         self.assertEqual(envelope["artifacts"]["report_markdown_key"], "reports/example.md")
         self.assertNotIn("markdown", envelope)
         self.assertNotIn("html", envelope)
@@ -208,7 +208,7 @@ class CaseArchiveTests(unittest.TestCase):
         item = dynamodb.puts[0]["Item"]
         self.assertEqual(item["archive_partition"]["S"], "default")
         self.assertEqual(item["retrieval_status"]["S"], "pending")
-        self.assertEqual(item["verdict"]["S"], "likely_true_positive")
+        self.assertEqual(item["verdict"]["S"], "likely_malicious")
         self.assertEqual(len(lambda_client.invocations), 1)
         self.assertEqual(
             lambda_client.invocations[0]["FunctionName"],
