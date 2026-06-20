@@ -21,9 +21,8 @@ assistant. The only committed post–Wave 3 enhancement (multi-turn synthesis) i
 **Related contracts:**
 
 - On-prem chat: `llm_notable_analysis_onprem_systemd/docs/technical_specs/analyst_portal_case_archive_technical_spec.md`
-- On-prem chat security: `llm_notable_analysis_onprem_systemd/docs/operations/ANALYST_PORTAL_CHAT_SECURITY.md`
-- AWS portal parity: `s3_notable_pipeline/docs/planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md`
-- Runtime parity gaps and Wave 3 decisions: [`AWS_ONPREM_RUNTIME_PARITY_GAPS.md`](AWS_ONPREM_RUNTIME_PARITY_GAPS.md)
+- On-prem chat security: `llm_notable_analysis_onprem_systemd/docs/operations/analyst_portal/ANALYST_PORTAL_CHAT_SECURITY.md`
+- AWS portal parity: `s3_notable_pipeline/docs/technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md`
 
 ## What We Ship Today (Baseline)
 
@@ -55,10 +54,6 @@ follow-ups work naturally ("expand on that", "what about hypothesis 2?",
 Retrieval still runs on each turn; transcript context supplements, not replaces,
 case-chunk evidence.
 
-**Out of scope for this item:** Holistic "summarize the entire case" modes,
-full-case inject, raised chunk budgets as a separate product lane, streaming,
-regenerate, and file upload.
-
 ---
 
 ## Intentional Differences (Not Treated as Defects)
@@ -74,15 +69,6 @@ These are product choices aligned with a **read-only SOC case archive assistant*
 | Default-off server chat history | Optional transcript feature; enable when multi-turn synthesis is desired |
 | Fixed temperature 0.0 | More deterministic analyst-facing answers |
 
-## Priority Lens
-
-| Item | Status |
-| --- | --- |
-| Multi-turn memory in synthesis (P3-1) | **Shipped** on both platforms |
-| Holistic / full-case inject / higher budgets as a separate mode | **Not pursuing** — stay retrieval-bound |
-| Analyst-visible retrieval debug in the portal UI | **Not pursuing** — removed from planning docs |
-| Streaming, regenerate, file upload | **Not pursuing** for v1 read-only assistant |
-
 ## Platform Parity Notes
 
 | Capability | On-prem | AWS |
@@ -93,14 +79,16 @@ These are product choices aligned with a **read-only SOC case archive assistant*
 | Chat history store | Postgres | DynamoDB |
 | General-knowledge fallback | Configurable | Configurable (Wave 3 Slice A) |
 
-Runtime parity checklist: [`AWS_ONPREM_RUNTIME_PARITY_GAPS.md`](AWS_ONPREM_RUNTIME_PARITY_GAPS.md).
+Runtime parity contract:
+[`s3_notable_pipeline/docs/technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md`](s3_notable_pipeline/docs/technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md).
 
 ## Revision
 
 | Date | Change |
 | --- | --- |
-| 2026-06-18 | Committed multi-turn synthesis (item 2); dropped holistic Q&A and retrieval-debug tracking |
+| 2026-06-18 | Committed multi-turn synthesis (P3-1) |
 | 2026-06-19 | Marked P3-1 shipped; refreshed baseline and parity notes after Wave 3 closeout |
+| 2026-06-19 | Removed deferred non-goal topics from this index |
 
 Update this document when portal chat behavior or API contracts change. Do not
 duplicate detailed implementation specs here — link to the technical specs above.

@@ -1,25 +1,45 @@
-# AWS Notable Pipeline Technical Spec
+# AWS / On-Prem Parity Technical Spec
 
 ## Status
 
-Implementation contract for the AWS notable pipeline. **Wave 1 sections**
-(profiles through idempotency below) and **Wave 2 sections** (analyst portal
-block at end) describe implemented behavior as of Diff 1 through Diff 5 on
-`main`. Normative design detail remains in
-[`../planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md`](../planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md).
+Normative implementation contract for optional AWS notable-pipeline capabilities
+and on-prem behavioral parity. **Wave 1** (profiles through idempotency),
+**Wave 2** (analyst portal block, Diff 1-5), **Wave 3** (runtime parity gaps),
+and **P3-1** (multi-turn synthesis) are **shipped on `main`**.
+
+**Not shipped in this repo:** real-AWS deploy validation in a staging account;
+customer front-door wiring (JWT issuer/audience, CORS, DNS/WAF). Those are
+operator closeout steps.
+
+Operator runbooks: [`../operations/README.md`](../operations/README.md).
+
+On-prem normative counterpart:
+[`../../../llm_notable_analysis_onprem_systemd/docs/technical_specs/feature_enhancements_technical_spec.md`](../../../llm_notable_analysis_onprem_systemd/docs/technical_specs/feature_enhancements_technical_spec.md)
+(analyzer) and
+[`../../../llm_notable_analysis_onprem_systemd/docs/technical_specs/analyst_portal_case_archive_technical_spec.md`](../../../llm_notable_analysis_onprem_systemd/docs/technical_specs/analyst_portal_case_archive_technical_spec.md)
+(portal / archive / chat).
 
 ## Normative Source
 
-Primary (wave 2 — portal, archive, Case Q&A, Decisions 1-36):
+This document is the single normative AWS/on-prem parity contract. Historical
+Wave 1–3 planning notes were removed after runtime parity landed on `main`.
 
-[`../planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md`](../planning/AWS_ONPREM_PARITY_REQUIREMENTS_AND_DESIGN.md)
+## Operator Runbooks
 
-Background (wave 1 — profiles, RAG, SPL, Elastic, ServiceNow, idempotency):
+Category index: [`../operations/README.md`](../operations/README.md).
 
-[`../planning/AWS_ONPREM_PARITY_PLAN.md`](../planning/AWS_ONPREM_PARITY_PLAN.md)
+| Category | Guide |
+| --- | --- |
+| Deployment | [`../operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`](../operations/deployment/DEPLOYMENT_IMAGE_STEPS.md) |
+| Platform | [`../operations/platform/CAPABILITY_PROFILES.md`](../operations/platform/CAPABILITY_PROFILES.md), [`../operations/platform/FILE_DROP_AND_RETENTION_OPERATIONS.md`](../operations/platform/FILE_DROP_AND_RETENTION_OPERATIONS.md), [`../operations/platform/MITRE_TTP_OPERATIONS.md`](../operations/platform/MITRE_TTP_OPERATIONS.md), [`../operations/platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`](../operations/platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md) |
+| Analyst portal | [`../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md) |
+| LLM inference | [`../operations/llm/LLM_INFERENCE_OPERATIONS.md`](../operations/llm/LLM_INFERENCE_OPERATIONS.md) |
+| RAG / KB | [`../operations/rag/KNOWLEDGE_BASE_OPERATIONS.md`](../operations/rag/KNOWLEDGE_BASE_OPERATIONS.md), [`../operations/rag/RAG_OPERATIONS.md`](../operations/rag/RAG_OPERATIONS.md) |
+| Investigation | [`../operations/investigation/SPL_OPERATIONS.md`](../operations/investigation/SPL_OPERATIONS.md), [`../operations/investigation/ELASTICSEARCH_OPERATIONS.md`](../operations/investigation/ELASTICSEARCH_OPERATIONS.md) |
+| Integrations | [`../operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md`](../operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md), [`../operations/integrations/SERVICENOW_OPERATIONS.md`](../operations/integrations/SERVICENOW_OPERATIONS.md) |
+| Security | [`../operations/security/SECURITY_OPERATIONS.md`](../operations/security/SECURITY_OPERATIONS.md) |
 
-If this spec conflicts with REQUIREMENTS_AND_DESIGN, stop and resolve before
-coding. Wave 1 PLAN content applies only where wave 2 does not supersede it.
+Testing: [`../testing/TESTING.md`](../testing/TESTING.md).
 
 ## Deployment Target (v1)
 
@@ -40,13 +60,13 @@ flow. Do not move orchestration to Step Functions as part of this parity block.
 
 ## Diff 1 Contract
 
-Diff 1 adds (wave 2 portal block):
+Diff 1 adds (Wave 2 portal block):
 
 - `analyst_portal` capability profile parsing and validation in `config.py`.
 - Portal/archive/chunk/index runtime settings in `config.env.example` and
   SAM/CloudFormation parameter scaffolding (default-off; no behavior change for
   `core` only).
-- This technical spec wave 2 sections below.
+- This technical spec Wave 2 sections below.
 
 Diff 1 must preserve current default behavior:
 
@@ -70,7 +90,7 @@ Supported profile names:
 - `elastic_readonly`
 - `ticket_draft`
 - `action_gated`
-- `analyst_portal` (wave 2; enables case archive, portal API, and Case Q&A per
+- `analyst_portal` (Wave 2; enables case archive, portal API, and Case Q&A per
   REQUIREMENTS_AND_DESIGN)
 
 Rules:
@@ -166,8 +186,8 @@ Rules:
 - `INVESTIGATION_QUERY_EXECUTOR=mcp` calls a configured HTTPS MCP bridge
   endpoint. This has no Cursor MCP dependency.
 - REST and MCP execution return the same normalized result shape and are stored
-  under `investigation_query_results` until deterministic enrichment is added in
-  Diff 4.
+  under `investigation_query_results` for deterministic enrichment and optional
+  interpretation.
 
 ## Elasticsearch Generation, Grounding, And Execution Contract
 
@@ -269,7 +289,7 @@ Rules:
 ## Wave 2: Analyst Portal Block (Diff 1-5)
 
 Normative detail: REQUIREMENTS_AND_DESIGN Decisions 1-36 and diff sequence.
-Implement only the diff scope active in the current change.
+Wave 3 sections below supersede Wave 2 portal chat items where they conflict.
 
 ### Analyzer And Portal Bedrock Model Contract (Decisions 28, 29)
 
@@ -321,17 +341,18 @@ customer overrides `BEDROCK_MODEL_ID`.
 
 - Read-only portal handler; no case mutations from the portal.
 - Pinned-case chat only (`selected_case_id` required on every chat request).
-- Hybrid retrieval in portal Lambda over **S3 case chunk objects**: in-memory
-  BM25 on `search_text`, cosine similarity on Bedrock Titan query embeddings,
-  merged with RRF (`CASE_QA_RRF_K=60`). No OpenSearch, Kendra, or Bedrock KB for
-  case-archive retrieval (Decision 7).
+- Per-query hybrid retrieval in portal Lambda over **S3 case chunk objects**
+  (`case_chunk_retrieval.py`): in-memory BM25 on `search_text`, cosine
+  similarity on Bedrock Titan query embeddings, merged with RRF
+  (`CASE_QA_RRF_K=60`). No OpenSearch, Kendra, or Bedrock KB for case-archive
+  retrieval (Decision 7).
 - Optional advisory KB context when `rag`, `spl_readonly`, or `elastic_readonly`
-  profiles are also enabled (Decision 12).
+  profiles are also enabled (`portal_chat_kb.py`; Decision 12).
 - Chat synthesis in `portal_chat.py`; do not import `ttp_analyzer.py`
   (Decision 33).
 - Response shapes follow `docs/contracts/portal.openapi.json` and
-  `portal_api_models.py` (Pydantic); pin `pydantic` in `requirements.txt` per
-  Decision 35.
+  `portal_api_models.py` (Pydantic); `pydantic` is pinned in `requirements.txt`
+  (Decision 35).
 - `archive_notices` on case list and detail; full `chat_dependency_status` when
   `CASE_QA_ENABLED=true` (Decisions 21-22).
 - Chat concurrency: each portal Lambda instance handles at most
@@ -351,9 +372,89 @@ customer overrides `BEDROCK_MODEL_ID`.
 - Default-off: `CASE_QA_CHAT_HISTORY_ENABLED=false`.
 - When enabled: DynamoDB `CHAT_SESSIONS_TABLE` and `CHAT_MESSAGES_TABLE`; portal
   Lambda read/write only.
+- When enabled, bounded prior turns are included in synthesis (P3-1).
 
 ### Python Dependencies (Decision 35)
 
-- Add `pydantic` (pinned to on-prem resolved version) when Diff 3 ships.
+- `pydantic` is pinned in `requirements.txt` (shipped with Diff 3).
 - Do not deploy `fastapi` or `uvicorn` on the portal Lambda.
 - Do not port local ML/RAG stack packages; AWS uses Bedrock for embed and chat.
+
+---
+
+## Wave 3: Runtime Parity (Portal Chat And Analyzer)
+
+On-prem is the source of truth unless noted below.
+
+### Portal Chat Prompt And API Contract
+
+- Bedrock chat synthesis returns **plain Markdown text** in `answer`, not JSON
+  from the model.
+- External API shape: `answer`, `answer_status`, `session_id` only. **No
+  `citations` field** in `ChatResponseModel` or handler responses.
+- `answer_status` is **`answered`**, **`unknown`**, or **`refused`** only. Do
+  not emit `insufficient_context` in new responses; map legacy stored values at
+  read time if needed.
+- Prompt builders in `portal_chat.py` mirror on-prem `_build_prompt` and
+  `_build_general_knowledge_prompt` (adapted for AWS chunk dicts only).
+- Context packaging uses `<CONTEXT_BLOCK>` plus
+  `UNTRUSTED_TEXT_JSON: <json.dumps(chunk_text)>` per source. Do not use
+  numbered `[1] chunk_id=...` source blocks in prompts.
+- General-knowledge fallback follows on-prem `answer_case_chat()` branching when
+  `CASE_QA_GENERAL_KNOWLEDGE_ENABLED=true` (default `true` on AWS).
+- Post-LLM guards: `sanitize_portal_chat_answer`,
+  `synthesized_answer_crosses_action_boundary` -> `refused`,
+  `_should_fallback_to_general_knowledge` -> general-knowledge path.
+- Advisory KB snippets merge into chat sources before synthesis when `rag`,
+  `spl_readonly`, or `elastic_readonly` profiles/flags are on
+  (`portal_chat_kb.py`).
+
+### Portal Diagnostics Contract
+
+- `GET /api/diagnostics/chat-readiness` probes chat dependencies and exposes
+  `chat_history_enabled`, `general_knowledge_enabled`, and related readiness
+  fields per OpenAPI.
+
+### Analyzer Verdict And SOC Context Contract
+
+- `alert_reconciliation.verdict` uses on-prem enum only:
+  `likely_benign`, `likely_malicious`, `unknown`.
+- Legacy archived AWS values (`likely_true_positive`, `likely_false_positive`)
+  map at portal read/list time until cases age out.
+- SOC context header format matches on-prem:
+
+```text
+SOC_OPERATIONAL_CONTEXT
+<retrieved advisory text>
+```
+
+When absent:
+
+```text
+SOC_OPERATIONAL_CONTEXT
+(none)
+```
+
+Advisory semantics stay in shared `SOC_CONTEXT_RULES`; do not add AWS-only inline
+suffixes on the header line.
+
+### Structured Output Transport And Parsing
+
+- Bedrock Converse (AWS) and OpenAI-compatible HTTP (on-prem) remain
+  platform-specific adapters.
+- Both paths must produce the same validated analysis dict before
+  markdown/report/archive generation: same schema, validators, repair-once
+  policy, and fallback behavior.
+
+### Shipped Vs Planned (Post-Wave 3)
+
+| Item | Status |
+| --- | --- |
+| Waves 1-3 and P3-1 code on `main` | Shipped |
+| Real-AWS staging deploy validation | Planned (operator; not in repo) |
+| Customer JWT/CORS/DNS/WAF front door | Planned (operator per environment) |
+| Case-chunk reranker beyond BM25+vector+RRF | Not planned (parity with on-prem) |
+| Freeform analyzer entrypoint on AWS | Not planned (batch structured path only) |
+
+Intentional chat non-goals and SOTA backlog:
+[`../../../PORTAL_CHATBOT_CAPABILITY_GAPS.md`](../../../PORTAL_CHATBOT_CAPABILITY_GAPS.md).

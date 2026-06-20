@@ -175,7 +175,8 @@ fi
     -e "$REPO_ROOT/onprem_rag_notable_analysis" \
     -e "$REPO_ROOT/llm_notable_analysis_onprem_systemd" \
     pytest \
-    nodeenv
+    nodeenv \
+    boto3==1.37.38
 
 if [[ "$SKIP_NODE" != true ]]; then
     if [[ ! -x "$VENV_DIR/bin/node" ]]; then

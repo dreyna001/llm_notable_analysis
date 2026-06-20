@@ -33,15 +33,16 @@ The application controls this sequence. The model does not freely choose goals,
 select arbitrary tools, plan unbounded actions, or iterate until it decides the
 task is complete.
 
-## Future Notable Archive Assistant
+## Notable Archive Assistant (Case Q&A)
 
-The planned Notable Archive Assistant / Case Q&A surface is still consistent
-with this position when implemented as a bounded read-only assistant workflow.
-One user question may coordinate several application-controlled retrieval steps,
-but those steps should be explicit and constrained:
+The shipped Notable Archive Assistant / Case Q&A surface is consistent with this
+position as a bounded read-only assistant workflow. One user question may
+coordinate several application-controlled retrieval steps, but those steps are
+explicit and constrained:
 
 1. Retrieve retained case metadata, reports, snippets, or validated JSON from
-   the 90-day case archive.
+   the configured case archive (default **30 days** on-prem; operator-tunable;
+   AWS uses S3 case envelopes plus DynamoDB CaseIndex).
 2. Retrieve advisory customer context from the existing RAG/SPL knowledge base,
    such as SOPs, Splunk index/field/macro references, detection notes, and
    threat-hunting playbooks.
@@ -55,6 +56,12 @@ retrieval agent. It should not be described as an open-ended autonomous SOC
 agent. The assistant must not execute SPL, call external systems, re-run
 analysis, create tickets, trigger SOAR, update cases, or answer from broad model
 memory.
+
+Normative contracts:
+[`llm_notable_analysis_onprem_systemd/docs/technical_specs/analyst_portal_case_archive_technical_spec.md`](llm_notable_analysis_onprem_systemd/docs/technical_specs/analyst_portal_case_archive_technical_spec.md)
+(on-prem) and
+[`s3_notable_pipeline/docs/technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md`](s3_notable_pipeline/docs/technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md)
+(AWS portal block).
 
 ## What Harnesses Exist
 

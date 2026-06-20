@@ -1,196 +1,149 @@
 # On-Prem Readiness Assessment
 
-This is the detailed readiness assessment for the on-prem notable analysis stack.
+Detailed readiness checklist for the host-native on-prem notable analysis stack.
+Start with [`AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.md`](AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.md)
+for the executive gateway; use this document for technical prerequisites,
+integration decisions, and validation expectations.
 
-Use `AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.md` as the front-door summary. Use this document when you need the full technical rationale, host and runtime assumptions, and integration framing.
+**Related runbooks:** [`../operations/deployment/INSTALL.md`](../operations/deployment/INSTALL.md),
+[`../operations/deployment/OFFLINE_PRESTAGE_GUIDE.md`](../operations/deployment/OFFLINE_PRESTAGE_GUIDE.md),
+[`../operations/deployment/AIRGAPPED_DEPLOYMENT.md`](../operations/deployment/AIRGAPPED_DEPLOYMENT.md),
+[`../operations/platform/CAPABILITY_PROFILES.md`](../operations/platform/CAPABILITY_PROFILES.md).
 
 ## What Ready Looks Like
-For the on-prem notable analysis stack, readiness means an org can take the package, provide a small number of environment-specific values, stage approved model artifacts, run one documented deployment path, and get to a successful end-to-end test without opening code or designing the runtime from scratch during deployment.
 
-This readiness view assumes the host-native GPU deployment shape represented in this repo:
+Ready means the org can run one documented install path (`scripts/install.sh`),
+stage approved artifacts, set environment-specific values in
+`/etc/notable-analyzer/config.env`, and pass end-to-end smoke tests without
+designing the runtime during deployment.
 
-- analyzer service from `llm_notable_analysis_onprem_systemd/`
-- `vLLM` serving the default example model `gemma-4-31B-it` on `127.0.0.1:8000`
-- `LiteLLM` acting as the caller-facing proxy on `127.0.0.1:4000`
-- optional KB / RAG indexing from `onprem_rag_notable_analysis/`
+Default stack shape:
 
-An org is genuinely ready for this deployment when all of this is already true:
+- analyzer from `llm_notable_analysis_onprem_systemd/` (`notable-analyzer.service`)
+- `vLLM` on `127.0.0.1:8000`, `LiteLLM` on `127.0.0.1:4000`
+- default example model `gemma-4-31B-it` (alternate local models require aligned
+  weights, served name, and config)
+- optional KB / RAG from `onprem_rag_notable_analysis/` when the `rag` profile
+  is selected
 
-- it has a target Linux host chosen for the service, with ownership for the host and GPU
-- it has an NVIDIA RTX PRO 6000 (96 GB) or greater, with driver and runtime compatibility for this project's pinned `vllm==0.21.0` deployment shape
-- it knows whether the deployment is connected or air-gapped, and it already knows how artifacts from the internet get onto the host
-- it has approved `gemma-4-31B-it` model artifacts staged or an approved process to stage them
-- it has decided that either `LiteLLM` is the control plane for callers or callers will point directly to `vLLM`
-- it has an operator who owns `systemd`, logs, smoke tests, and rollback on the host
-- if Splunk writeback is enabled, it has a Splunk REST API token that has read and write access to notables
-- it knows whether RAG / KB grounding is enabled and, if so, already has a rebuild and content ownership process
+The org is not deployment-ready until all of the following are settled:
 
-If those decisions are still undecided, the org is not deployment-ready even if it already has a server.
+| Area | Must be decided before install |
+| --- | --- |
+| Host | Target Linux host, owner, connected vs air-gapped delivery |
+| Platform | `systemd`, Python 3.12, admin access, storage for repo + model + reports |
+| GPU | Approved profile (baseline: RTX PRO 6000 96 GB class or equivalent), healthy `nvidia-smi`, CUDA/runtime match for pinned `vllm==0.21.0` |
+| Model | Full `gemma-4-31B-it` tree staged under `/opt/models/gemma-4-31B-it` or approved staging process |
+| Control plane | Callers use `LiteLLM` on loopback (recommended) or direct `vLLM` with matching analyzer config |
+| Features | `CAPABILITY_PROFILES` chosen (`core` only to start; add `rag`, `spl_readonly`, `action_gated`, `analyst_portal`, etc. one at a time) |
+| Integrations | If writeback/search/tickets/portal are in scope: Splunk, ServiceNow, Postgres, and secret owners identified |
+| Operations | Owner for smoke tests, journal triage, service restart, and rollback |
 
-## Practical Readiness Checklist
+## Readiness Checklist
 
-### 1. Host And Platform Readiness
-They need:
+### 1. Host and platform
 
-- a supported Linux host with `systemd`
-- Python 3.12 available for the analyzer and `vLLM` runtime paths
-- a recommended compute baseline of an Intel Xeon Gold-class server CPU (or equivalent), with `128 GB` of server-grade ECC RAM (`DDR5` if the approved platform supports it; otherwise equivalent ECC server RAM); `256 GB` is better if the org wants more headroom for KB, concurrency, and host responsiveness
-- root or equivalent admin access for service install, users, directories, and unit management
-- enough local storage for the repo, Python environments, logs, reports, and the configured model tree: `500 GB` NVMe is the documented minimum, but `1 TB NVMe` is the practical baseline when operators choose a larger alternate model because model weights, venvs, logs, and report paths add additional headroom requirements
-- a clear decision on connected-host versus offline or transfer-bundle workflow
+- Linux host with `systemd` and Python 3.12 for analyzer and vLLM paths
+- Recommended baseline: 128 GB RAM (256 GB for heavy KB/concurrency), 1 TB NVMe
+  (500 GB minimum), 16+ vCPU; see
+  [`../operations/deployment/deployment_profiles/README.md`](../operations/deployment/deployment_profiles/README.md)
+- Connected install or offline transfer bundle per
+  [`../operations/deployment/OFFLINE_PRESTAGE_GUIDE.md`](../operations/deployment/OFFLINE_PRESTAGE_GUIDE.md)
 
-This matches the host-native deployment material in `llm_notable_analysis_onprem_systemd/docs/operations/INSTALL.md`.
+### 2. GPU and inference
 
-### 2. GPU And Inference Readiness
-This is the biggest hidden blocker.
+- NVIDIA driver healthy; CUDA/runtime compatible with staged `vllm==0.21.0`
+- vLLM starts and advertises the configured served model name
+- Analyzer, LiteLLM, and vLLM agree on the model contract:
 
-They need:
+```ini
+LLM_API_URL=http://127.0.0.1:4000/v1/chat/completions
+LLM_MODEL_NAME=gemma-4-31B-it
+LLM_API_TOKEN=<matches LiteLLM master key in /etc/litellm/config.yaml>
+```
 
-- NVIDIA driver installed and healthy on the host, with `nvidia-smi` working cleanly
-- a CUDA stack compatible with the staged `vllm==0.21.0` wheel, the target Linux and Python 3.12 environment, and the approved GPU profile
-- confirmation that the target GPU profile is approved for the configured model, defaulting to `gemma-4-31B-it`
-- `vLLM` installed in the expected runtime path and able to start
-- a clear served model name, with analyzer and proxy config aligned to it
+### 3. Artifacts and packaging
 
-For this package, inference readiness must be explicit, because the stack only works when these values agree:
+The repo does not ship model weights. Before go-live, resolve:
 
-- `vLLM` serves `gemma-4-31B-it`
-- `LiteLLM` maps callers to that same upstream model
-- the analyzer sends `LLM_MODEL_NAME=gemma-4-31B-it`
+- vLLM wheelhouse / `VLLM_PIP_SPEC` delivery (default `vllm==0.21.0`)
+- LiteLLM and analyzer Python dependencies (`scripts/install.sh` or offline wheelhouse)
+- Model weights at the path used by `vllm.service`
+- Optional KB source docs, embedding model, and Postgres RAG setup when `rag` is enabled
 
-If the GPU, model path, or served model name differs from what operators configure, services may start but runtime will fail.
+### 4. Runtime contract
 
-### 3. Artifact And Packaging Readiness
-For low-friction deployment, the org should not have to invent how runtime artifacts appear on the host.
+- `INGEST_MODE=file_drop` only; one file per analysis run (`.json` or `.txt`)
+- Outputs under `REPORT_DIR`; successful inputs move to `PROCESSED_DIR`, failures to `QUARANTINE_DIR`
+- Application LLM traffic goes to LiteLLM (`127.0.0.1:4000`), not directly to vLLM, unless deliberately configured otherwise
+- Enable optional behavior through `CAPABILITY_PROFILES`, not ad-hoc flag sprawl; see
+  [`../operations/platform/CAPABILITY_PROFILES.md`](../operations/platform/CAPABILITY_PROFILES.md)
 
-Right now, the package still assumes they can resolve:
+### 5. Secrets and integrations
 
-- how `vLLM` wheels and dependencies get to the target
-- how `LiteLLM` and related Python packages get installed
-- how configured model weights get staged under the expected host path
-- how optional KB artifacts get staged or rebuilt
+**LiteLLM:** strong master key in `/etc/litellm/config.yaml`; matching `LLM_API_TOKEN` in `config.env`; loopback-only unless edge exposure is approved.
 
-That is a readiness dependency, because the repo does not contain the model weights and many environments will need either a connected-host install path or an offline transfer bundle. If the org does not already know how it will stage wheels, model artifacts, and service configs onto the host, it is not truly ready to deploy.
+**Splunk writeback** (profile `action_gated`): `SPLUNK_BASE_URL`, `SPLUNK_API_TOKEN`, endpoint path, and filename-stem-to-notable mapping confirmed with the Splunk owner. See [`../operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md`](../operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md).
 
-### 4. Runtime Contract Readiness
-The org needs to understand exactly what the on-prem stack expects and produces.
+**Splunk read-only investigation** (profile `spl_readonly`): separate from writeback; index/command allowlists and search token scope per [`../operations/investigation/SPL_OPERATIONS.md`](../operations/investigation/SPL_OPERATIONS.md).
 
-They should already agree on:
+**ServiceNow** (profiles `ticket_draft` / `action_gated`): credentials and approval boundaries per [`../operations/integrations/SERVICENOW_OPERATIONS.md`](../operations/integrations/SERVICENOW_OPERATIONS.md).
 
-- the analyzer ingests files from the configured incoming directory
-- one dropped object or file equals one analysis run
-- `.json` and `.txt` are both valid input forms
-- processed outputs land in the reports directory
-- if Splunk writeback is enabled, the filename stem becomes the writeback identifier
-- if `LiteLLM` is the intended control plane, application traffic goes to `127.0.0.1:4000`, not directly to `vLLM` on `8000`
+**Analyst portal** (profile `analyst_portal`): Postgres, `portal.env`, and network rollout per [`../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md).
 
-For the default GPU + `gemma-4-31B-it` + `LiteLLM` profile, the critical runtime alignment is:
+### 6. Knowledge base and RAG
 
-- `LLM_API_URL=http://127.0.0.1:4000/v1/chat/completions`
-- `LLM_MODEL_NAME=gemma-4-31B-it`
-- `LLM_API_TOKEN` equals the `LiteLLM` master key
+If retrieval grounding is in scope:
 
-If operators cannot state those values clearly, they are not ready.
+- add `rag` to `CAPABILITY_PROFILES` (profile overrides legacy `RAG_ENABLED` lab flags)
+- stage embedding model and KB sources offline when needed
+- assign an owner for source content and rebuild cadence (`scripts/setup_postgres_rag.sh`, `ingest_report.json`)
 
-### 5. Secrets And External Integration Readiness
-If they want anything beyond local file-to-report generation, they need the surrounding integration prepared before go-live.
+If undecided, keep `CAPABILITY_PROFILES=core`.
 
-For the `LiteLLM` layer:
+### 7. Operational validation
 
-- a strong `LiteLLM` master key is set in `/etc/litellm/config.yaml`
-- the analyzer has the matching `LLM_API_TOKEN`
-- loopback-only exposure is preserved unless a deliberate edge pattern is approved
+Primary smoke path:
 
-For Splunk writeback:
+```bash
+sudo bash scripts/smoke_service_chain.sh --config-env /etc/notable-analyzer/config.env
+```
 
-- `SPLUNK_SINK_ENABLED=true` only when the feature is intentionally enabled
-- `SPLUNK_BASE_URL` is correct for the target Splunk deployment
-- `SPLUNK_API_TOKEN` is approved and has the right write scope
-- the team has confirmed the endpoint path and identifier mapping with the Splunk owner
+Also confirm:
 
-If they do not already know where these secrets live, who rotates them, and how they are injected into `config.env` or host-owned config, they are not ready.
+- `journalctl` access for `vllm`, `litellm`, and `notable-analyzer`
+- ability to distinguish GPU/runtime, proxy auth, and analyzer failures
+- rollback plan for units, `config.env`, venvs, and model artifacts
 
-### 6. Knowledge Base And RAG Readiness
-If they want retrieval grounding, they need the KB process prepared before deployment.
+## Green-State Questions
 
-They need:
+The org is in true green status when it can answer immediately:
 
-- a clear decision whether `RAG_ENABLED` is on
-- a staged embedding model if the environment is offline
-- known paths for KB source docs, ingest artifacts, and the configured Postgres RAG table
-- someone responsible for KB source content and rebuild cadence
+1. Target host class and who owns it?
+2. Approved GPU, driver, and CUDA/runtime for `vllm==0.21.0`?
+3. Full `gemma-4-31B-it` model tree staged and verified?
+4. Served model name and analyzer `LLM_MODEL_NAME` aligned?
+5. Analyzer pointed at LiteLLM on `127.0.0.1:4000`?
+6. LiteLLM master key stored and rotated by whom?
+7. Which `CAPABILITY_PROFILES` are enabled (writeback, RAG, SPL, portal)?
+8. Incoming, processed, quarantine, reports, and archive paths on disk?
+9. Who owns smoke testing and host troubleshooting?
+10. Rollback plan if model, proxy, or analyzer update breaks the stack?
 
-If none of that is decided, RAG should stay off.
+If these need a workshop, deployment is not yet low-friction.
 
-### 7. Operational Readiness
-A low-issue deployment also requires basic day-2 readiness:
+## Engineer-Led Integration Split
 
-- someone knows to check the systemd journal for `vllm`, `litellm`, and `notable-analyzer`
-- if KB is enabled, someone knows how to run `scripts/setup_postgres_rag.sh` and review `ingest_report.json`
-- someone can run a health check against `127.0.0.1:8000/health`
-- someone can run a chat completion smoke test through `LiteLLM`
-- someone can drop a known-good notable file and verify a report is produced
-- someone can tell the difference between GPU/runtime failure, proxy auth failure, and analyzer failure
-- there is a rollback path for Python envs, service units, config files, and model or image tags where applicable
-
-Without this, install may succeed but the org will still feel blocked.
-
-## The Real "Green State"
-For the on-prem GPU notable analysis stack, an org is in true green status when it can answer these questions immediately:
-
-1. What exact host or host class is this going onto?
-2. What GPU, driver, and CUDA/runtime combination is approved there?
-3. Do we have the full `gemma-4-31B-it` model tree staged and verified?
-4. What exact `vLLM` served model name are we using?
-5. Is the analyzer pointed at `LiteLLM` on `127.0.0.1:4000` or directly at `vLLM`?
-6. What is the `LiteLLM` master key and where is it stored?
-7. Are Splunk writeback and RAG enabled or intentionally off?
-8. Where do the incoming, processed, quarantine, reports, and archive paths live on disk?
-9. Who owns smoke testing, service restart, and host-level troubleshooting?
-10. What is the rollback plan if the model, proxy, or analyzer update breaks the stack?
-
-If they cannot answer those without a workshop, they are not ready for low-friction deployment.
-
-## How To Think About Engineer-Led Integration
-This section does not add new requirements. It reorganizes the same readiness points above into three buckets: what must already be true before engineer-led work starts, what an engineer can execute once access is available, and what may still require customer or external-team action during the work.
-
-### 1. What Must Be True Before Engineer-Led Integration Starts
-- the target Linux host is chosen and the org knows who owns the host and GPU
-- the deployment model is decided: connected host or air-gapped / transfer-bundle workflow
-- the host has the expected platform baseline: `systemd`, Python 3.12, root/admin access, recommended CPU/RAM, and enough storage for the repo, runtime files, and the configured model tree
-- the approved GPU profile is chosen, with NVIDIA driver health and CUDA/runtime compatibility for this pinned `vllm==0.21.0` deployment shape
-- the org has already decided whether callers will use `LiteLLM` or go directly to `vLLM`
-- the full `gemma-4-31B-it` model tree is staged, or there is an approved and understood process to stage it
-- if Splunk writeback is in scope, the team already has the correct endpoint and a Splunk REST API token with the needed rights
-- if RAG is in scope, the team already knows where KB artifacts come from and who owns rebuild cadence
-- someone is identified to own smoke testing, runtime support, and rollback on the host
-
-### 2. What An Engineer Can Do Once Access Is Available
-- verify host prerequisites such as Python, storage, `nvidia-smi`, service paths, and systemd access
-- install or standardize the analyzer, `vLLM`, `LiteLLM`, and optional KB components along the documented on-prem path
-- align runtime values such as `LLM_API_URL`, `LLM_MODEL_NAME`, `LLM_API_TOKEN`, and the served model name
-- validate that `vLLM`, `LiteLLM`, and the analyzer agree on the configured model runtime contract
-- check the systemd journal for `vllm`, `litellm`, and `notable-analyzer`
-- if RAG is enabled, run the configured KB rebuild helper and validate the ingest report
-- run health checks, a chat completion smoke test, and a known-good file-drop test
-- verify report generation and, if enabled, Splunk writeback behavior
-- document or hand off the exact commands, paths, and values needed for rerun and rollback
-
-### 3. What May Still Require Customer Or External-Team Action During Integration
-- final approval of the target host, GPU profile, and runtime stack if those are still under review
-- staging or transfer of the configured model artifacts if they are not yet present on the host
-- issuance, storage, rotation, and access review for the `LiteLLM` master key
-- issuance and governance of the Splunk REST API token if Splunk writeback is enabled
-- confirmation from the Splunk owner that the endpoint path and writeback identifier mapping are correct
-- approval of loopback-only versus broader exposure if the org wants anything other than the local-host control-plane pattern
-- customer ownership of KB source content and rebuild decisions if RAG is enabled
+| Phase | Owner | Examples |
+| --- | --- | --- |
+| Before start | Customer / platform team | Host and GPU approval, air-gap vs connected, model staging, profile scope, Splunk/ServiceNow/Postgres governance, ops owner |
+| During integration | Engineer | `install.sh`, config alignment, `smoke_service_chain.sh`, profile-by-profile validation, handoff doc with paths and rollback |
+| May block mid-flight | Customer / external teams | Late GPU approval, model transfer, token issuance, Splunk endpoint confirmation, KB content ownership |
 
 ## Current Package Friction
-For this on-prem stack specifically, these are the main sources of deployment friction today:
 
-- the base `llm_notable_analysis_onprem_systemd/config.env.example` defaults to the LiteLLM endpoint and `gemma-4-31B-it`; alternate model deployments still require operator edits to model names and model artifacts
-- the package installer now includes analyzer + `vLLM` + `LiteLLM`; KB/PostgreSQL RAG setup remains a separate operator-managed step
-- model artifacts are not in the repo and remain a major staging dependency
-- `LiteLLM` master key creation and downstream analyzer token alignment are still operator-managed, not standardized by one shared install path
-- Splunk writeback is implemented, but customers still need to supply and govern the right REST endpoint, token, and identifier mapping
-
+- Model weights and offline wheelhouses remain customer staging work
+- `scripts/install.sh` covers analyzer + vLLM + LiteLLM; Postgres RAG and analyst portal need separate setup steps
+- LiteLLM master key and analyzer token alignment are operator-managed
+- Alternate models require coordinated edits to weights, vLLM flags, LiteLLM config, and `LLM_MODEL_NAME`
+- Splunk writeback and ServiceNow create paths need customer tokens, mapping validation, and explicit `action_gated` approval

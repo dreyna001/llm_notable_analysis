@@ -26,19 +26,19 @@ python -m pytest tests/test_idempotency.py tests/test_servicenow.py
 python -m pytest tests/test_elastic_query_generation.py tests/test_elasticsearch_investigation.py
 ```
 
-Wave 2 portal slices use the stdlib test runner in this repository layout:
+Wave 2 portal slices use the stdlib test runner (same working directory as above):
 
 ```bash
-python -m unittest discover -s s3_notable_pipeline/tests -p "test_portal_handler.py" -v
-python -m unittest discover -s s3_notable_pipeline/tests -p "test_case_chat.py" -v
-python -m unittest discover -s s3_notable_pipeline/tests -p "test_portal_chat.py" -v
+python -m unittest discover -s tests -p "test_portal_handler.py" -v
+python -m unittest discover -s tests -p "test_case_chat.py" -v
+python -m unittest discover -s tests -p "test_portal_chat.py" -v
 ```
 
 Portal frontend checks do not call real AWS:
 
 ```bash
-npm --prefix s3_notable_pipeline/frontend/analyst-portal test
-npm --prefix s3_notable_pipeline/frontend/analyst-portal run build
+npm --prefix frontend/analyst-portal test
+npm --prefix frontend/analyst-portal run build
 ```
 
 ## Smoke Validation
@@ -70,29 +70,32 @@ Start LocalStack from `s3_notable_pipeline`:
 docker compose up -d
 ```
 
-Load the local env and bootstrap local resources.
+Set local AWS emulator env vars, bootstrap local resources, then run integration
+tests (they skip unless `RUN_LOCALSTACK_INTEGRATION=true` and
+`AWS_ENDPOINT_URL` points at LocalStack):
 
 PowerShell:
 
 ```powershell
-Get-Content .env.local | ForEach-Object {
-  if ($_ -and -not $_.StartsWith("#")) {
-    $name, $value = $_.Split("=", 2)
-    Set-Item -Path "env:$name" -Value $value
-  }
-}
+$env:AWS_ENDPOINT_URL = "http://localhost:4566"
+$env:AWS_ACCESS_KEY_ID = "test"
+$env:AWS_SECRET_ACCESS_KEY = "test"
+$env:AWS_REGION = "us-east-1"
+$env:RUN_LOCALSTACK_INTEGRATION = "true"
 .\scripts\localstack_bootstrap.ps1
-python -m pytest tests/integration -m integration
+python -m pytest tests/integration -m integration -v
 ```
 
 Bash:
 
 ```bash
-set -a
-source .env.local
-set +a
+export AWS_ENDPOINT_URL=http://localhost:4566
+export AWS_ACCESS_KEY_ID=test
+export AWS_SECRET_ACCESS_KEY=test
+export AWS_REGION=us-east-1
+export RUN_LOCALSTACK_INTEGRATION=true
 bash scripts/localstack_bootstrap.sh
-python -m pytest tests/integration -m integration
+python -m pytest tests/integration -m integration -v
 ```
 
 The integration test creates its own S3 bucket, DynamoDB table, and Secrets
@@ -158,8 +161,10 @@ Helper script (live AWS, optional):
 
 Manual follow-ups still required for **action_gated** idempotency replay, signed
 ServiceNow create approval, and Splunk `notable_rest` writeback. See
-`docs/operations/CAPABILITY_PROFILES.md`, `SERVICENOW_OPERATIONS.md`, and
-`SPLUNK_WRITEBACK_OPERATIONS.md`.
+[`../operations/platform/CAPABILITY_PROFILES.md`](../operations/platform/CAPABILITY_PROFILES.md),
+[`../operations/integrations/SERVICENOW_OPERATIONS.md`](../operations/integrations/SERVICENOW_OPERATIONS.md),
+and
+[`../operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md`](../operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md).
 
 ### Wave 2 portal staging checklist
 
@@ -170,4 +175,4 @@ dev/staging/prod account.
 | --- | --- | --- |
 | **analyst_portal** | `CapabilityProfiles=core,analyst_portal`; `CaseArchiveBucketName`; `CaseIndexTableName`; JWT issuer/audience; portal CORS origin; optional `PortalUiBucketName` | After deploy, record `PortalBrowserApiBaseUrl`, `PortalApiUrl`, and `PortalChatFunctionUrl`; upload a representative notable; confirm archive envelope, chunks, and CaseIndex `retrieval_status=ready`; load `/`, `/cases`, and `/cases/{case_id}` through the SPA; ask a selected-case question and confirm cited answer |
 
-See [`../operations/ANALYST_PORTAL_OPERATIONS.md`](../operations/ANALYST_PORTAL_OPERATIONS.md).
+See [`../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md).

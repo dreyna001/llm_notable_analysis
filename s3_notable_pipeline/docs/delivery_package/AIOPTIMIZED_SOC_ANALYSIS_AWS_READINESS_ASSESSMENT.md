@@ -5,6 +5,11 @@ This is the detailed readiness assessment for deploying `s3_notable_pipeline` on
 
 Use `AIOPTIMIZED_SOC_ANALYSIS_AWS_READINESS_OVERVIEW.md` as the front-door summary. Use this document when you need the full technical rationale, operational implications, and integration framing.
 
+**Related runbooks:** [`../operations/README.md`](../operations/README.md),
+[`../operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`](../operations/deployment/DEPLOYMENT_IMAGE_STEPS.md),
+[`../operations/platform/CAPABILITY_PROFILES.md`](../operations/platform/CAPABILITY_PROFILES.md),
+[`../operations/llm/LLM_INFERENCE_OPERATIONS.md`](../operations/llm/LLM_INFERENCE_OPERATIONS.md).
+
 ## What Ready Looks Like
 
 For `s3_notable_pipeline`, readiness means an org can take the package, provide a small number of approved environment-specific values, follow one documented deployment path, and get to a successful end-to-end test without opening code or making AWS design decisions during deployment.
@@ -36,7 +41,7 @@ They need:
 - permission to create S3 buckets with globally unique names
 - if `action_gated` is enabled, permission to create or reference a DynamoDB idempotency table
 
-This matches the stated fast path in `s3_notable_pipeline/README.md` and `s3_notable_pipeline/setup-and-deploy.ps1`.
+This matches the stated fast path in `s3_notable_pipeline/README.md` and `s3_notable_pipeline/scripts/setup-and-deploy.ps1` (or `scripts/setup-and-deploy.sh`).
 
 ### 2. Bedrock Readiness
 
@@ -50,7 +55,7 @@ They need:
 - if `rag` or query-grounding profiles are enabled, IAM permission for `bedrock:Retrieve` on the configured Knowledge Bases
 - confirmation that org-level controls like SCPs (AWS Organizations guardrails that can deny actions even when IAM allows them) are not blocking the model or KB access
 
-For this package, Bedrock readiness must be explicit, because `s3_notable_pipeline/template-sam.yaml` ties Bedrock to a configurable inference profile ARN. If the customer account, region, or approved model differs from what they deploy, deployment may succeed but runtime will fail.
+For this package, Bedrock readiness must be explicit, because `s3_notable_pipeline/deploy/aws/template-sam.yaml` ties Bedrock to a configurable inference profile ARN. If the customer account, region, or approved model differs from what they deploy, deployment may succeed but runtime will fail. Operator tuning is in `docs/operations/llm/LLM_INFERENCE_OPERATIONS.md`.
 
 ### 3. Artifact And Packaging Readiness
 
@@ -62,7 +67,7 @@ Right now, the package still assumes they can resolve:
 - how to publish the Lambda image to ECR
 - what `ImageUri` to pass to SAM
 
-SAM expects an `ImageUri` pointing at an image already in ECR. Until that image exists, deploy is blocked. The repo `Dockerfile` uses a placeholder or org-specific base image, so many teams cannot build it unchanged. In practice, "ready to deploy" implicitly requires "we already know how to build and publish this Lambda image."
+SAM expects an `ImageUri` pointing at an image already in ECR. Until that image exists, deploy is blocked. The repo `deploy/docker/Dockerfile` uses a placeholder or org-specific base image, so many teams cannot build it unchanged. In practice, "ready to deploy" implicitly requires "we already know how to build and publish this Lambda image." Step-by-step build and push guidance is in `docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`.
 
 ### 4. Data And Runtime Contract Readiness
 
@@ -72,7 +77,8 @@ They should already agree on:
 
 - input arrives as S3 objects under `incoming/`
 - one object equals one analysis run
-- each object or file can arrive as a `.txt` or a `.json`
+- each object can arrive as plain `.txt`/`.json` or single-payload gzip (for example `.json.gz`, `.txt.gz`, or S3 `ContentEncoding: gzip`); ZIP and multi-file archives are not supported
+- decompressed gzip payloads must stay within `MaxDecompressedInputBytes` (default `1048576`)
 - empty objects and placeholders are skipped
 - output lands under `reports/` as markdown and JSON; HTML when `html_reports` is enabled
 - optional read-only investigation and ServiceNow draft content appear in JSON when those profiles are enabled
@@ -80,21 +86,21 @@ They should already agree on:
 - if using ServiceNow create, a signed `servicenow_create_approval` object must be present in the incoming payload
 - `spl_readonly` and `elastic_readonly` are mutually exclusive per deployment
 
-Those behaviors are defined in `s3_notable_pipeline/README.md`, `docs/operations/CAPABILITY_PROFILES.md`, and `s3_notable_pipeline/lambda_handler.py`. If the customer upstream SOAR or Splunk workflow does not match those assumptions, they will hit blockers even if AWS deployment itself works.
+Those behaviors are defined in `s3_notable_pipeline/README.md`, `docs/operations/platform/FILE_DROP_AND_RETENTION_OPERATIONS.md`, `docs/operations/platform/CAPABILITY_PROFILES.md`, and `src/s3_notable_pipeline/lambda_handler.py`. If the customer upstream SOAR or Splunk workflow does not match those assumptions, they will hit blockers even if AWS deployment itself works.
 
 ### 5. Capability Profile Readiness
 
 Before enabling optional profiles beyond `core`, the org should have profile-specific inputs ready:
 
 - `html_reports` — no additional secrets; acceptance of a third S3 report artifact.
-- `rag` — curated SOC Knowledge Base, `RAG_BEDROCK_KB_ID`, retrieve IAM, advisory-context approval.
+- `rag` — curated SOC Knowledge Base, `RAG_BEDROCK_KB_ID`, retrieve IAM, advisory-context approval; see `docs/operations/rag/RAG_OPERATIONS.md` and `docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md`.
 - `spl_readonly` — Splunk owner approval, executor choice (`rest` or `mcp`), index/command/field allowlists, secrets, optional SPL grounding KB.
 - `elastic_readonly` — Elasticsearch owner approval, HTTPS base URL, API key secret, index allowlist, optional grounding KB.
 - `ticket_draft` — ServiceNow assignment group for draft payloads (no POST).
 - `action_gated` — write approval, `SIDE_EFFECT_IDEMPOTENCY_TABLE`, Splunk and/or ServiceNow secrets, signed create approval workflow.
 - `analyst_portal` — case archive bucket, CaseIndex table, embed Lambda target, portal JWT issuer/audience, CORS origins, SPA build API base URL, and customer API front-door routing.
 
-Recommended order: `core` + `s3` first, then one profile at a time in non-production. Add `analyst_portal` only after base analyzer output is validated. Full operator workflow is in `docs/operations/CAPABILITY_PROFILES.md`.
+Recommended order: `core` + `s3` first, then one profile at a time in non-production. Add `analyst_portal` only after base analyzer output is validated. Full operator workflow is in `docs/operations/platform/CAPABILITY_PROFILES.md`.
 
 ### 6. Secrets And External Integration Readiness
 
@@ -106,21 +112,24 @@ For `notable_rest` writeback:
 - `SplunkApiTokenSecretArn` (Secrets Manager ARN pointing to the Splunk REST bearer token)
 - optional `SplunkApiTokenSecretField` if the secret is JSON (default `token`)
 - agreement that the target endpoint and `finding_id` mapping are correct
+- operator detail in `docs/operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md`
 
 For `spl_readonly`:
 
 - Splunk REST or MCP endpoint and auth secret ARN
 - approved search allowlists and timeouts
+- operator detail in `docs/operations/investigation/SPL_OPERATIONS.md`
 
 For `elastic_readonly`:
 
 - `ELASTICSEARCH_BASE_URL` (HTTPS when execution is enabled)
 - `ELASTICSEARCH_API_KEY_SECRET_ARN` and index allowlist
+- operator detail in `docs/operations/investigation/ELASTICSEARCH_OPERATIONS.md`
 
 For ServiceNow (`ticket_draft` or `action_gated` create):
 
 - `SERVICENOW_BASE_URL`, token secret, and for create, `SERVICENOW_APPROVAL_HMAC_SECRET_ARN`
-- documented signed approval workflow (`docs/operations/SERVICENOW_OPERATIONS.md`)
+- documented signed approval workflow (`docs/operations/integrations/SERVICENOW_OPERATIONS.md`)
 
 If they do not already know where these secrets live, who manages them, and how they will be injected into runtime, they are not ready for that profile.
 
@@ -135,7 +144,7 @@ A low-issue deployment also requires basic day-2 readiness:
 - there is a rollback path to the last known-good image
 - if `action_gated` is enabled, someone understands idempotency keys and duplicate side-effect behavior
 
-Without this, deployment might succeed but the org will still feel blocked.
+Without this, deployment might succeed but the org will still feel blocked. Day-two failure semantics and ownership boundaries are in `docs/operations/platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`; IAM, secrets, and endpoint validation are in `docs/operations/security/SECURITY_OPERATIONS.md`.
 
 ### 8. Analyst Portal Readiness (Wave 2)
 
@@ -168,7 +177,7 @@ What remains **customer/environment wiring**:
 - SPA build/upload and CORS origin alignment with the browser URL analysts use
 
 Operator detail:
-[`../operations/ANALYST_PORTAL_OPERATIONS.md`](../operations/ANALYST_PORTAL_OPERATIONS.md).
+[`../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md).
 
 Staging validation for Wave 2 is documented in
 [`../testing/TESTING.md`](../testing/TESTING.md) under the Wave 2 portal checklist.
@@ -239,9 +248,9 @@ This section does not add new requirements. It reorganizes the same readiness po
 
 For `s3_notable_pipeline` specifically, these are the main sources of deployment friction today:
 
-- `s3_notable_pipeline/template-sam.yaml` and `template-cfn.yaml` parameterize account ID, but customers must still align the selected model/profile, region, and optional profile settings with approvals
-- `s3_notable_pipeline/Dockerfile` uses a placeholder or private-style base image, so many orgs cannot build it unchanged
-- `s3_notable_pipeline/setup-and-deploy.ps1` checks for either Nova models or Claude Sonnet 4.6 inference profiles, but operators still need to verify the exact deploy-time model/profile and region match template and runtime settings
+- `s3_notable_pipeline/deploy/aws/template-sam.yaml` and `deploy/aws/template-cfn.yaml` parameterize account ID, but customers must still align the selected model/profile, region, and optional profile settings with approvals
+- `s3_notable_pipeline/deploy/docker/Dockerfile` uses a placeholder or private-style base image, so many orgs cannot build it unchanged
+- `s3_notable_pipeline/scripts/setup-and-deploy.ps1` checks for either Nova models or Claude Sonnet 4.6 inference profiles, but operators still need to verify the exact deploy-time model/profile and region match template and runtime settings
 - optional profiles add integration surface area (Knowledge Bases, Splunk/MCP, Elasticsearch, ServiceNow, DynamoDB); each requires owner approval and secrets before enablement
 - Splunk integration has a template-driven `notable_rest` path; new production rollouts should pair it with `action_gated`, and operators still need an approved secret lifecycle and write approval boundaries
 

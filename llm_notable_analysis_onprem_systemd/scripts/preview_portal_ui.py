@@ -26,7 +26,6 @@ Optional live chat synthesis for UI testing (via ``config.portal-preview.env``):
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import urllib.error
 import urllib.request
@@ -54,8 +53,12 @@ from preview_synthetic_pipeline import (  # noqa: E402
     preview_scenario_count,
 )
 from preview_bedrock_llm import (  # noqa: E402
-    build_preview_bedrock_synthesizers,
+    bedrock_preview_chat_complete,
     resolve_bedrock_preview_settings,
+)
+from preview_fake_db import (  # noqa: E402
+    PreviewFakeEmbeddingModel,
+    build_preview_connect_factory,
 )
 
 _PREVIEW_HOST = "127.0.0.1"
@@ -108,117 +111,6 @@ def preview_chat_mode_label() -> str:
         ).strip()
         return f"OpenAI ({model or _DEFAULT_OPENAI_MODEL})"
     return "stub (configure Bedrock or OpenAI in config.portal-preview.env)"
-
-
-class _FakeResult:
-    def __init__(self, rows=None, row=None):
-        self.rows = rows or []
-        self.row = row
-
-    def fetchall(self):
-        return self.rows
-
-    def fetchone(self):
-        return self.row
-
-
-class _FakeConnection:
-    def __init__(
-        self,
-        *,
-        summary_rows: list[tuple],
-        details_by_case_id: dict[str, tuple],
-        chunk_rows: list[tuple],
-        ready: bool = True,
-    ):
-        self.summary_rows = summary_rows
-        self.details_by_case_id = details_by_case_id
-        self.chunk_rows = chunk_rows
-        self.ready = ready
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, traceback):
-        return False
-
-    def execute(self, sql, params=None):
-        if not self.ready and "set_config" not in sql:
-            raise OSError("database unavailable")
-        if "set_config" in sql:
-            return _FakeResult()
-        if "to_regclass" in sql:
-            return _FakeResult(row=(self.ready, self.ready))
-        if "case_chunks" in sql:
-            rows = list(self.chunk_rows)
-            if "ch.case_id = %s" in sql and params:
-                case_id = str(params[1])
-                rows = [row for row in rows if row[1] == case_id]
-            if "ch.case_id <> %s" in sql and params:
-                case_id = str(params[1])
-                rows = [row for row in rows if row[1] != case_id]
-            limit = int(params[-1]) if params else 1
-            return _FakeResult(rows=rows[:limit], row=rows[0] if rows else None)
-        if "WHERE case_id = %s" in sql:
-            case_id = str((params or ("",))[0])
-            return _FakeResult(row=self.details_by_case_id.get(case_id))
-        if (
-            "ORDER BY processed_at DESC, case_id ASC" in sql
-            and "LIMIT %s" in sql
-            and "OFFSET %s" not in sql
-            and params
-        ):
-            limit = int(params[-1])
-            rows = list(self.summary_rows)
-            filter_params = list(params[:-1])
-            param_index = 0
-            if "processed_at >= %s" in sql:
-                processed_from = filter_params[param_index]
-                param_index += 1
-                rows = [row for row in rows if row[3] >= processed_from]
-            if "processed_at <= %s" in sql:
-                processed_to = filter_params[param_index]
-                param_index += 1
-                rows = [row for row in rows if row[3] <= processed_to]
-            if "verdict = %s" in sql:
-                verdict = filter_params[param_index]
-                param_index += 1
-                rows = [row for row in rows if row[5] == verdict]
-            if "search_name ILIKE %s" in sql:
-                pattern = filter_params[param_index]
-                param_index += 1
-                needle = str(pattern)[1:-1]
-                needle = (
-                    needle.replace("\\%", "%")
-                    .replace("\\_", "_")
-                    .replace("\\\\", "\\")
-                )
-                rows = [
-                    row
-                    for row in rows
-                    if row[7] and needle.lower() in str(row[7]).lower()
-                ]
-            if "processed_at < %s OR (processed_at = %s AND case_id > %s)" in sql:
-                cursor_processed_at = filter_params[param_index]
-                cursor_case_id = filter_params[param_index + 2]
-                rows = [
-                    row
-                    for row in rows
-                    if row[3] < cursor_processed_at
-                    or (
-                        row[3] == cursor_processed_at
-                        and str(row[0]) > str(cursor_case_id)
-                    )
-                ]
-            rows.sort(key=lambda row: str(row[0]))
-            rows.sort(key=lambda row: row[3], reverse=True)
-            return _FakeResult(rows=rows[:limit])
-        return _FakeResult(rows=self.summary_rows)
-
-
-class _FakeEmbeddingModel:
-    def encode(self, values, **_kwargs):
-        return [[1.0] + [0.0] * 767 for _value in values]
 
 
 def _minimal_analysis(*, verdict: str, confidence: str) -> dict:
@@ -289,84 +181,25 @@ def _build_preview_records(config: Config):
     return records
 
 
-def _summary_row(record):
-    return (
-        record.case_id,
-        record.finding_id,
-        record.source_filename,
-        record.processed_at,
-        record.expires_at,
-        record.verdict,
-        record.confidence,
-        record.search_name,
-        record.risk_score,
-        record.retrieval_status,
-        record.source_completeness,
-        record.report_md_path,
-        record.report_html_path,
-    )
-
-
-def _detail_row(record):
-    return (
-        record.case_id,
-        record.finding_id,
-        record.source_filename,
-        record.processed_at,
-        record.expires_at,
-        record.correlation_id,
-        json.dumps(record.capability_snapshot),
-        json.dumps(record.archive_metadata),
-        json.dumps(record.alert_payload),
-        json.dumps(record.analysis),
-        record.case_schema_version,
-        record.analysis_schema_version,
-        record.verdict,
-        record.confidence,
-        record.search_name,
-        record.risk_score,
-        record.report_md_path,
-        record.report_html_path,
-        record.retrieval_status,
-        record.backfill_status,
-        record.source_completeness,
-    )
-
-
-def _chunk_row(record):
-    analysis = record.analysis or {}
-    reconciliation = analysis.get("alert_reconciliation", {})
-    if not isinstance(reconciliation, dict):
-        reconciliation = {}
-    summary = str(reconciliation.get("one_sentence_summary") or "").strip()
-    if not summary:
-        summary = (
-            f"{record.search_name or record.case_id}: verdict={record.verdict or 'unknown'} "
-            f"confidence={record.confidence if record.confidence is not None else 'unknown'}"
-        )
-    text = (
-        f"Case {record.case_id}. Search name: {record.search_name or 'unknown'}. "
-        f"Verdict: {record.verdict or 'unknown'}. Summary: {summary}"
-    )
-    return (
-        f"{record.case_id}:case_analysis:analysis.alert_reconciliation:0",
-        record.case_id,
-        "case_analysis",
-        "analysis.alert_reconciliation",
-        "$.alert_reconciliation",
-        text,
-        json.dumps({"preview_synthetic": True}),
-        1.0,
-    )
-
-
 def _preview_config() -> Config:
     kwargs: dict[str, object] = {
         "PORTAL_ENABLED": True,
         "CASE_ARCHIVE_ENABLED": True,
         "CASE_QA_ENABLED": True,
+        "CASE_RETENTION_DAYS": 30,
+        "CASE_QA_CHAT_HISTORY_ENABLED": True,
+        "CASE_QA_MAX_SESSIONS_PER_USER": 10,
+        "CASE_QA_CHAT_HISTORY_RETENTION_DAYS": 30,
+        "CASE_QA_MAX_CHUNKS_PER_LANE": 6,
+        "CASE_QA_MAX_TOTAL_CHUNKS": 18,
+        "CASE_QA_CONTEXT_BUDGET_CHARS": 12000,
+        "CASE_QA_MAX_QUESTION_CHARS": 2000,
+        "CASE_QA_MAX_ANSWER_TOKENS": 800,
+        "CASE_QA_GENERAL_KNOWLEDGE_ENABLED": True,
+        "CASE_QA_VECTOR_DIMENSIONS": 1024,
         "PORTAL_BIND_HOST": _PREVIEW_HOST,
         "PORTAL_PAGE_SIZE": 50,
+        "PORTAL_CHAT_MAX_CONCURRENCY": 18,
         "PORTAL_TRUSTED_USER_HEADER": "X-Forwarded-User",
         "PORTAL_PROXY_SECRET_HEADER": "X-Notable-Portal-Proxy-Secret",
         "PORTAL_PROXY_SECRET": _PROXY_SECRET,
@@ -376,22 +209,6 @@ def _preview_config() -> Config:
     if openai_llm is not None:
         kwargs.update(openai_llm)
     return Config(**kwargs)
-
-
-def _fake_connect_factory(records):
-    summary_rows = [_summary_row(record) for record in records]
-    details_by_case_id = {record.case_id: _detail_row(record) for record in records}
-    chunk_rows = [_chunk_row(record) for record in records]
-
-    def connect(_dsn: str):
-        del _dsn
-        return _FakeConnection(
-            summary_rows=summary_rows,
-            details_by_case_id=details_by_case_id,
-            chunk_rows=chunk_rows,
-        )
-
-    return connect
 
 
 def _preview_chat_synthesizer(question, sources):
@@ -563,10 +380,16 @@ def build_preview_app(*, inject_loopback_auth: bool | None = None):
     records = _build_preview_records(config)
     openai_llm = resolve_openai_preview_llm()
     bedrock_settings = resolve_bedrock_preview_settings()
+    chat_text_complete = None
     if bedrock_settings is not None:
-        synthesizer, general_synthesizer = build_preview_bedrock_synthesizers(
-            bedrock_settings,
-            max_answer_tokens=config.CASE_QA_MAX_ANSWER_TOKENS,
+        synthesizer = None
+        general_synthesizer = None
+        chat_text_complete = (
+            lambda prompt, max_tokens: bedrock_preview_chat_complete(
+                bedrock_settings,
+                prompt=prompt,
+                max_tokens=max_tokens,
+            )
         )
     elif openai_llm is not None:
         synthesizer = None
@@ -574,16 +397,17 @@ def build_preview_app(*, inject_loopback_auth: bool | None = None):
     else:
         synthesizer = _preview_chat_synthesizer
         general_synthesizer = _preview_general_synthesizer
-    # Preview injects Bedrock/stub synthesizers; skip localhost LLM gateway probe.
+    # Preview skips localhost LLM gateway probe when Bedrock or stub chat is used.
     llm_gateway_ready = None
     if bedrock_settings is not None or openai_llm is None:
         llm_gateway_ready = True
     app = build_portal_app(
         config,
-        connect=_fake_connect_factory(records),
-        chat_embedding_model=_FakeEmbeddingModel(),
+        connect=build_preview_connect_factory(records, config),
+        chat_embedding_model=PreviewFakeEmbeddingModel(),
         chat_synthesizer=synthesizer,
         chat_general_synthesizer=general_synthesizer,
+        chat_text_complete=chat_text_complete,
         chat_llm_gateway_ready=llm_gateway_ready,
     )
 

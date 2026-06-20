@@ -117,7 +117,7 @@ docker run --rm --entrypoint python notable-analyzer-service \
 
 - Docker example: `config.env.docker.example`
 - Full contract: `llm_notable_analysis_onprem_systemd/config.env.example`
-- Capability bundles: `llm_notable_analysis_onprem_systemd/docs/operations/CAPABILITY_PROFILES.md`
+- Capability bundles: `llm_notable_analysis_onprem_systemd/docs/operations/platform/CAPABILITY_PROFILES.md`
 
 Use compose DNS names (`litellm`, `postgres`) or `host.docker.internal` instead
 of `127.0.0.1` for in-container endpoints.

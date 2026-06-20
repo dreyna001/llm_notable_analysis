@@ -21,6 +21,7 @@ from .case_chat import (
     CaseNotFoundError,
     GeneralSynthesizeFn,
     SynthesizeFn,
+    TextCompleteFn,
     answer_case_chat,
     evaluate_case_chat_readiness,
 )
@@ -528,6 +529,7 @@ def build_portal_app(
     connect: ConnectionFactory | None = None,
     chat_synthesizer: SynthesizeFn | None = None,
     chat_general_synthesizer: GeneralSynthesizeFn | None = None,
+    chat_text_complete: TextCompleteFn | None = None,
     chat_embedding_model: Any = None,
     chat_knowledge_base_provider: Any = None,
     chat_llm_gateway_ready: bool | None = None,
@@ -916,6 +918,9 @@ def build_portal_app(
             general_synthesize=chat_general_synthesizer,
             knowledge_base_provider=chat_knowledge_base_provider,
             user_id=_TRUSTED_USER_CTX.get(),
+            text_complete=(
+                chat_text_complete if chat_synthesizer is None else None
+            ),
         )
 
     @app.post("/api/chat", response_model=ChatResponseModel)

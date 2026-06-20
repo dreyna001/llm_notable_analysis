@@ -6,7 +6,7 @@ analyzer output; only the **chatbot** calls a live LLM (Bedrock, OpenAI, or
 stub).
 
 For preview setup, see
-[`llm_notable_analysis_onprem_systemd/docs/operations/ANALYST_PORTAL_PREVIEW.md`](llm_notable_analysis_onprem_systemd/docs/operations/ANALYST_PORTAL_PREVIEW.md).
+[`llm_notable_analysis_onprem_systemd/docs/operations/analyst_portal/ANALYST_PORTAL_PREVIEW.md`](llm_notable_analysis_onprem_systemd/docs/operations/analyst_portal/ANALYST_PORTAL_PREVIEW.md).
 
 ## Before you start
 

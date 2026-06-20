@@ -45,15 +45,17 @@ flowchart TB
     BD[Bedrock Converse<br/>base analysis + optional<br/>query generation / interpretation]
     VAL["Hallucination controls:<br/>required keys, parse + repair,<br/>content rules, ATT&CK v17.1 allowlist<br/>raw fallback for human review"]
     QRY[Optional read-only investigation:<br/>Splunk REST/MCP or Elasticsearch _search<br/>policy validated and bounded]
-    MD[Markdown report assembly]
-    OUT[("Output bucket<br/>reports/{stem}.md")]
+    MD[Report assembly:<br/>markdown + JSON + optional HTML]
+    OUT[("Output bucket<br/>reports/{stem}.*")]
+    ARCH{{Optional case archive:<br/>S3 envelope + CaseIndex<br/>analyst_portal profile}}
+    PAPI{{Optional analyst portal:<br/>API Gateway + portal Lambda<br/>+ SPA via CloudFront}}
     SPLK{{Splunk REST<br/>notable comment?}}
     SN{{ServiceNow<br/>incident create?}}
     DDB[(DynamoDB<br/>side-effect idempotency)]
   end
 
   subgraph Consume["E. Who consumes the output"]
-    REV[Analyst review:<br/>S3 markdown and/or SIEM comment]
+    REV[Analyst review:<br/>S3 reports, optional portal,<br/>and/or SIEM comment]
   end
 
   DE --> NR
@@ -76,11 +78,15 @@ flowchart TB
   QRY --> MD
   VAL --> MD
   MD --> OUT
+  MD -. analyst_portal .-> ARCH
+  ARCH -. browse + pinned-case Q&A .-> PAPI
   MD -. optional: SplunkSinkMode notable_rest .-> SPLK
   MD -. optional: ServiceNow approval .-> SN
   SPLK -. idempotency .-> DDB
   SN -. idempotency .-> DDB
   OUT --> REV
+  ARCH --> REV
+  PAPI --> REV
   SPLK --> REV
   SN --> REV
   ANA -. human parallel path .-> REV
@@ -90,7 +96,8 @@ flowchart TB
 
 **Contract reminders:**
 
-- One upload under `incoming/` ⇒ one Lambda run ⇒ one report (unless the object is skipped as empty, folder marker, or placeholder filename).
+- One upload under `incoming/` ⇒ one Lambda run ⇒ one report set under `reports/` (markdown + JSON, plus HTML when `html_reports` is enabled), unless the object is skipped as empty, folder marker, or placeholder filename.
+- With `analyst_portal`, the analyzer also archives a bounded case envelope to S3 and upserts CaseIndex metadata for the read-only portal API; portal chat Q&A uses Bedrock over retrieved case evidence only.
 - For **Splunk `notable_rest` writeback**, `finding_id` comes from the **filename stem**: e.g. `incoming/abc-123.json` ⇒ `finding_id=abc-123`.
 - Optional `spl_readonly` and `elastic_readonly` profiles are mutually exclusive; one read-only investigation backend is active per deployment.
 
@@ -100,7 +107,7 @@ flowchart TB
 
 **Operations note:** S3 event notifications can **retry** Lambda; customers should expect **at-least-once** delivery semantics and treat **object key** as the natural idempotency boundary for a single analysis run. External side effects such as Splunk writeback and ServiceNow create use DynamoDB reservations when action-gated idempotency is enabled.
 
-**Network:** Lambda calls **Bedrock** and optional **Bedrock Knowledge Bases** via AWS service APIs. Read-only investigation and writeback features use **HTTPS** to customer-configured Splunk, MCP, Elasticsearch, or ServiceNow endpoints from the function execution environment.
+**Network:** Lambda calls **Bedrock** and optional **Bedrock Knowledge Bases** via AWS service APIs. Read-only investigation and writeback features use **HTTPS** to customer-configured Splunk, MCP, Elasticsearch, or ServiceNow endpoints from the analyzer execution environment. With `analyst_portal`, analysts reach the portal API through **API Gateway** (and optional **CloudFront**); portal Case Q&A may also use a dedicated **Lambda Function URL** when enabled.
 
 ---
 
@@ -111,7 +118,7 @@ flowchart LR
   subgraph Inputs["Inputs the customer must have or configure"]
     I1[(Per-notable bundle:<br/>threshold alert + correlation context)]
     I2[("S3 input bucket<br/>prefix: incoming/")]
-    I3[Deploy-time params:<br/>bucket names, ImageUri, AwsAccountId,<br/>SplunkSinkMode, optional Splunk + secret ARN]
+    I3[Deploy-time params:<br/>bucket names, ImageUri, AwsAccountId,<br/>CapabilityProfiles, SplunkSinkMode,<br/>optional Splunk + secret ARN]
     I4[Runtime: Bedrock access in account]
     I5[Container image in ECR<br/>before sam deploy]
   end
@@ -120,14 +127,15 @@ flowchart LR
     M1[S3 notifies Lambda]
     M2[Lambda reads object body]
     M3[Assemble bounded prompt + tool schema - Bedrock Converse]
-    M4[Validate, allowlist TTPs, repair, policies - markdown]
-    M5[Markdown generator]
+    M4[Validate, allowlist TTPs, repair, policies]
+    M5[Report generator]
   end
 
   subgraph Outputs["Outputs"]
-    O1[("Markdown reports under S3 prefix reports/, all sink modes")]
-    O2[("Splunk notable comment, notable_rest mode only")]
+    O1[("Markdown + JSON reports under S3 prefix reports/;<br/>optional HTML when html_reports")]
+    O2[("Splunk notable comment, notable_rest + action_gated")]
     O3[CloudWatch Logs - traceability]
+    O4{{Optional analyst portal:<br/>CaseIndex browse + pinned-case Q&A<br/>analyst_portal profile}}
   end
 
   I1 --> I2
@@ -139,13 +147,14 @@ flowchart LR
   M5 --> O1
   M5 -. notable_rest .-> O2
   M5 --> O3
+  M5 -. analyst_portal archive .-> O4
 ```
 
 ---
 
 ## 3. AWS runtime architecture (what the stack provisions)
 
-Aligned with `../../../deploy/aws/template-sam.yaml`: two buckets, image-based Lambda, `incoming/` notifications, IAM for S3/Bedrock/logs, optional Secrets Manager. **Pick the AWS region** that fits policy and Bedrock access; if you change it, keep **Bedrock inference ARNs, IAM, and ECR** in `../../../deploy/aws/template-sam.yaml` **in that region** (`../../operations/DEPLOYMENT_IMAGE_STEPS.md`).
+Aligned with `../../../deploy/aws/template-sam.yaml`: S3 input and output buckets, container Lambda (`notable-analyzer-s3`), `incoming/` notifications, Amazon Bedrock inference, CloudWatch Logs, and optional Secrets Manager, DynamoDB side-effect idempotency, read-only investigation HTTPS egress, and Wave 2 portal resources when `analyst_portal` is enabled (CaseIndex, case archive, embed Lambda, portal API Lambda, API Gateway HTTP API, optional CloudFront SPA). **Pick the AWS region** that fits policy and Bedrock access; if you change it, keep **Bedrock inference ARNs, IAM, and ECR** in `../../../deploy/aws/template-sam.yaml` **in that region** (`../../operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`).
 
 ```mermaid
 flowchart TB
@@ -165,9 +174,18 @@ flowchart TB
       KB[Bedrock Knowledge Bases<br/>SOC, SPL, Elastic context]
     end
 
-    subgraph Secret["Optional"]
+    subgraph Secret["Optional integrations"]
       SM[Secrets Manager<br/>Splunk, MCP, Elastic,<br/>ServiceNow tokens]
       DDB[(DynamoDB<br/>side-effect idempotency)]
+    end
+
+    subgraph Portal["Optional analyst_portal"]
+      CIDX[(DynamoDB CaseIndex)]
+      CARC[(Case archive S3<br/>envelopes + chunks)]
+      PEMB[Lambda: notable-case-embed]
+      PLAM[Lambda: notable-portal-api]
+      APIGW[API Gateway HTTP API]
+      CF[CloudFront + SPA bucket<br/>optional]
     end
 
     subgraph Ops["Operations"]
@@ -185,6 +203,16 @@ flowchart TB
     FN -. optional HTTPS .-> SPL[Splunk REST / MCP]
     FN -. optional HTTPS .-> ES[Elasticsearch _search]
     FN -. optional HTTPS .-> SN[ServiceNow REST]
+    FN -. analyst_portal archive .-> CARC
+    FN -. CaseIndex upsert .-> CIDX
+    FN -. async embed invoke .-> PEMB
+    PEMB --> CARC
+    PEMB --> CIDX
+    PLAM -->|read| CIDX
+    PLAM -->|read| CARC
+    PLAM -. pinned-case Q&A .-> BR
+    APIGW --> PLAM
+    CF -. /api/* .-> APIGW
     FN --> CW
     CFN -. provisions .-> BIN
     CFN -. provisions .-> BOUT
@@ -216,16 +244,16 @@ sequenceDiagram
   Eng->>ECR: Create or choose repository
   Eng->>SAM: docker build + tag + push image to ECR
   Eng->>SAM: sam build -t deploy/aws/template-sam.yaml
-  Eng->>CFN: sam deploy guided, ParameterOverrides buckets AwsAccountId ImageUri sink mode
+  Eng->>CFN: sam deploy guided, ParameterOverrides buckets AwsAccountId ImageUri CapabilityProfiles sink mode
   CFN->>S3: Create buckets, notifications, lifecycle
   CFN->>CFN: Create Lambda function + IAM policies
   Eng->>S3: Upload test notable to prefix incoming
   S3-->>Eng: Verify report under reports/ + CloudWatch logs
 ```
 
-**Important:** The SAM template **references** a pre-published `ImageUri`; it does not build or push the image for the customer. See `../../operations/DEPLOYMENT_IMAGE_STEPS.md`.
+**Important:** The SAM template **references** a pre-published `ImageUri`; it does not build or push the image for the customer. See `../../operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`.
 
-**Documentation** shipped with the solution includes, among others: **`../../../README.md`** (deploy, sinks, test path), **`../EXECUTIVE_AWS_WORKFLOW.md`** (end-to-end narrative), **`../../operations/DEPLOYMENT_IMAGE_STEPS.md`** (ECR and Lambda image order), **`../../integrations/SOAR_PLAYBOOK_PHANTOM.md`** (SOAR → S3 pattern), **`../../security/ATTACK_LLM_ANALYSIS.md`** (ATT&CK grounding and validation posture), and **`../../../deploy/aws/template-sam.yaml`** (infrastructure contract).
+**Documentation** shipped with the solution includes, among others: **`../../../README.md`** (deploy, sinks, test path), **`../EXECUTIVE_AWS_WORKFLOW.md`** (end-to-end narrative), **`../../operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`** (ECR and Lambda image order), **`../../operations/platform/CAPABILITY_PROFILES.md`** (feature bundles including `analyst_portal`), **`../../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`** (portal stack and day-two ops), **`../../integrations/SOAR_PLAYBOOK_PHANTOM.md`** (SOAR → S3 pattern), **`../../security/ATTACK_LLM_ANALYSIS.md`** (ATT&CK grounding and validation posture), and **`../../../deploy/aws/template-sam.yaml`** (infrastructure contract).
 
 ---
 
@@ -233,6 +261,8 @@ sequenceDiagram
 
 - `../../../README.md` — quick deploy and sink modes
 - `../EXECUTIVE_AWS_WORKFLOW.md` — narrative executive overview
-- `../../operations/DEPLOYMENT_IMAGE_STEPS.md` — ECR and Lambda image order of operations
+- `../../operations/deployment/DEPLOYMENT_IMAGE_STEPS.md` — ECR and Lambda image order of operations
+- `../../operations/platform/CAPABILITY_PROFILES.md` — supported feature bundles (`core`, `analyst_portal`, and others)
+- `../../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md` — optional portal stack, archive, and Case Q&A
 - `../../integrations/SOAR_PLAYBOOK_PHANTOM.md` — SOAR → S3 payload pattern
 - `../../security/ATTACK_LLM_ANALYSIS.md` — ATT&CK grounding, validation, and LLM trust boundaries

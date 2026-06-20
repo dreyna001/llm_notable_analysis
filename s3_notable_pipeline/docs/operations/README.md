@@ -1,41 +1,101 @@
 # AWS Operations Guide Index
 
-Use this folder for customer-facing AWS operations decisions: which settings to
-enable, what deployment parameters should differ by environment, and how to
-validate a safe configuration without changing application code.
+Customer-facing AWS tuning guides: SAM/CloudFormation parameters, Lambda environment
+variables, and validation steps without code changes.
+
+Start with [`platform/CAPABILITY_PROFILES.md`](platform/CAPABILITY_PROFILES.md) and
+[`../../README.md`](../../README.md) deploy parameters. Set SAM `CapabilityProfiles`
+(Lambda `CAPABILITY_PROFILES`); profiles are additive and `core` is included when
+omitted. Then open the category that matches your task.
 
 ## Common Guide Shape
 
-Area guides should generally use this pattern:
+- **What This Controls** — runtime behavior on AWS.
+- **Recommended Starting Posture** — conservative defaults for first rollout.
+- **Customer Decisions** — per-environment choices.
+- **Config Quick Reference** — SAM parameters and Lambda env vars.
+- **Validation And Rollout** — safe proof steps.
+- **Related Docs** — deployment, security, parity, and testing context.
 
-- **What This Controls**: the runtime behavior covered by the page.
-- **Recommended Starting Posture**: conservative defaults for first rollout.
-- **Customer Decisions**: questions operators must answer for each deployment.
-- **Config Quick Reference**: relevant SAM/CloudFormation parameters and Lambda
-  environment variables.
-- **Validation And Rollout**: how to prove the configuration is safe.
-- **Related Docs**: where to go for deeper deployment, architecture, or security
-  context.
+## Deployment
 
-The guides are not feature specs. They help customers tune shipped behavior
-within supported config bounds.
+Lambda container image, ECR, and SAM deploy flow.
 
-## Area Guides
+| Guide | Purpose |
+|-------|---------|
+| [`deployment/DEPLOYMENT_IMAGE_STEPS.md`](deployment/DEPLOYMENT_IMAGE_STEPS.md) | Build, push, and deploy the Lambda image via SAM. |
+| [`../../README.md`](../../README.md) | Fast-path deploy and test scripts. |
 
-| Area | Guide | Purpose |
-|------|-------|---------|
-| Capability profiles | [`CAPABILITY_PROFILES.md`](CAPABILITY_PROFILES.md) | Supported AWS feature bundles and profile-first configuration. |
-| LLM inference | [`LLM_INFERENCE_OPERATIONS.md`](LLM_INFERENCE_OPERATIONS.md) | Bedrock model id, Lambda timeout, model-call budgets, and rollout. |
-| Knowledge base content | [`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md) | Bedrock Knowledge Base ownership, source content, and lifecycle. |
-| RAG retrieval | [`RAG_OPERATIONS.md`](RAG_OPERATIONS.md) | General SOC RAG enablement, failure mode, snippets, and context budgets. |
-| SPL generation and execution | [`SPL_OPERATIONS.md`](SPL_OPERATIONS.md) | SPL generation, Bedrock KB grounding, Splunk REST/MCP execution policy. |
-| Elasticsearch generation and execution | [`ELASTICSEARCH_OPERATIONS.md`](ELASTICSEARCH_OPERATIONS.md) | Query DSL generation, Elastic grounding, `_search` execution policy. |
-| Splunk writeback | [`SPLUNK_WRITEBACK_OPERATIONS.md`](SPLUNK_WRITEBACK_OPERATIONS.md) | Optional notable comment writeback and idempotency. |
-| ServiceNow | [`SERVICENOW_OPERATIONS.md`](SERVICENOW_OPERATIONS.md) | Incident draft/create, Secrets Manager token, and approval payload. |
-| Analyst portal | [`ANALYST_PORTAL_OPERATIONS.md`](ANALYST_PORTAL_OPERATIONS.md) | S3 case archive, DynamoDB CaseIndex, JWT portal API, static SPA, and pinned-case Q&A. |
-| S3 intake and retention | [`FILE_DROP_AND_RETENTION_OPERATIONS.md`](FILE_DROP_AND_RETENTION_OPERATIONS.md) | S3 prefixes, gzip handling, lifecycle rules, size limits, and report outputs. |
-| Security | [`SECURITY_OPERATIONS.md`](SECURITY_OPERATIONS.md) | IAM, secrets, TLS, endpoint validation, and action gates. |
-| MITRE ATT&CK/TTP | [`MITRE_TTP_OPERATIONS.md`](MITRE_TTP_OPERATIONS.md) | Bundled TTP ID data, refresh workflow, and validation expectations. |
-| Recovery | [`RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`](RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md) | Failure behavior, retry semantics, ownership, and recovery duties. |
-| Lambda image deployment | [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md) | Lambda container image build and ECR deployment notes. |
-| Testing | [`../testing/TESTING.md`](../testing/TESTING.md) | Unit, smoke, and optional integration validation commands. |
+## Platform
+
+Capability profiles (`core` default, optional `html_reports`), S3 intake/retention,
+MITRE validation, recovery.
+
+| Guide | Purpose |
+|-------|---------|
+| [`platform/CAPABILITY_PROFILES.md`](platform/CAPABILITY_PROFILES.md) | Supported feature bundles (`CapabilityProfiles` / `CAPABILITY_PROFILES`). |
+| [`platform/FILE_DROP_AND_RETENTION_OPERATIONS.md`](platform/FILE_DROP_AND_RETENTION_OPERATIONS.md) | S3 prefixes, gzip, lifecycle, size limits, report artifacts. |
+| [`platform/MITRE_TTP_OPERATIONS.md`](platform/MITRE_TTP_OPERATIONS.md) | Bundled TTP IDs and refresh workflow. |
+| [`platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`](platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md) | Failure behavior, retries, ownership. |
+
+## Analyst Portal
+
+Requires `analyst_portal` and non-empty `CaseIndexTableName`. S3 case archive,
+DynamoDB CaseIndex, read-only portal API, pinned-case Q&A, optional static SPA.
+
+| Guide | Purpose |
+|-------|---------|
+| [`analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](analyst_portal/ANALYST_PORTAL_OPERATIONS.md) | Portal stack, archive, chat, and day-two ops. |
+
+## LLM Inference
+
+Part of `core` on every stack: Bedrock model id, Lambda timeout, inference budgets.
+
+| Guide | Purpose |
+|-------|---------|
+| [`llm/LLM_INFERENCE_OPERATIONS.md`](llm/LLM_INFERENCE_OPERATIONS.md) | Bedrock routing, timeouts, structured output, rollout. |
+
+## RAG and Knowledge Base
+
+Requires `rag` profile. Bedrock Knowledge Base lifecycle and retrieval tuning.
+
+| Guide | Purpose |
+|-------|---------|
+| [`rag/KNOWLEDGE_BASE_OPERATIONS.md`](rag/KNOWLEDGE_BASE_OPERATIONS.md) | KB source content and sync lifecycle. |
+| [`rag/RAG_OPERATIONS.md`](rag/RAG_OPERATIONS.md) | RAG enablement, failure mode, snippets, budgets. |
+
+## Investigation
+
+Requires `spl_readonly` or `elastic_readonly` (mutually exclusive).
+
+| Guide | Purpose |
+|-------|---------|
+| [`investigation/SPL_OPERATIONS.md`](investigation/SPL_OPERATIONS.md) | SPL generation, KB grounding, Splunk REST/MCP execution. |
+| [`investigation/ELASTICSEARCH_OPERATIONS.md`](investigation/ELASTICSEARCH_OPERATIONS.md) | Query DSL generation and read-only `_search`. |
+
+## Integrations
+
+`ticket_draft` for ServiceNow drafts in JSON reports (no POST); `action_gated` for
+Splunk writeback when `SplunkSinkMode=notable_rest`, approval-gated ServiceNow
+create, and DynamoDB side-effect idempotency.
+
+| Guide | Purpose |
+|-------|---------|
+| [`integrations/SPLUNK_WRITEBACK_OPERATIONS.md`](integrations/SPLUNK_WRITEBACK_OPERATIONS.md) | Notable comment writeback when `action_gated` and `SplunkSinkMode=notable_rest`. |
+| [`integrations/SERVICENOW_OPERATIONS.md`](integrations/SERVICENOW_OPERATIONS.md) | Incident draft/create and approval payload. |
+
+## Security
+
+IAM, secrets, TLS, and action gates regardless of profiles.
+
+| Guide | Purpose |
+|-------|---------|
+| [`security/SECURITY_OPERATIONS.md`](security/SECURITY_OPERATIONS.md) | IAM, Secrets Manager, endpoint validation, hardening. |
+
+Deeper threat-model notes: [`../security/ATTACK_LLM_ANALYSIS.md`](../security/ATTACK_LLM_ANALYSIS.md).
+
+## Testing
+
+| Guide | Purpose |
+|-------|---------|
+| [`../testing/TESTING.md`](../testing/TESTING.md) | Unit, smoke, and optional integration commands. |

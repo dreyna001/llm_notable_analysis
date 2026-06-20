@@ -5,57 +5,175 @@ settings, install steps, and customer-facing runbooks stay in `docs/operations/`
 this page explains how the code is shaped and where to start when adding a new
 capability.
 
+Local dev bootstrap, venv layout, and portal preview workflow:
+[`DEVELOPING.md`](../../../DEVELOPING.md).
+
 ## Runtime Shape
 
 The default service is a file-drop analyzer:
 
 ```text
-incoming file
+incoming file (*.json / *.txt)
+  -> ingest.discover_files / read_notable_text / normalize_notable
   -> onprem_main.process_notable
-  -> local_llm_client.LocalLLMClient
+  -> local_llm_client.LocalLLMClient (SDK-backed default)
   -> validation / enrichment / optional integrations
   -> markdown report
-  -> optional HTML report
+  -> optional HTML report (html_reports profile)
+  -> optional Postgres case archive (analyst_portal profile)
+  -> optional Splunk writeback / ServiceNow draft-create (action_gated profile)
   -> processed or quarantine movement
+  -> periodic retention (notable-retention.service)
 ```
 
-The systemd entrypoint is:
+Separate long-lived service for the analyst portal:
+
+```text
+nginx (443) -> portal_app (127.0.0.1:8080)
+  -> case_index / case_store / case_chat
+  -> Postgres case archive + derived chunks
+```
+
+Systemd entrypoints (installed host):
 
 ```text
 python -m llm_notable_analysis_onprem_systemd.onprem_service.onprem_main
+python -m llm_notable_analysis_onprem_systemd.onprem_service.portal_app
 ```
 
-The main package lives under `src/llm_notable_analysis_onprem_systemd/`.
-Tests live under `tests/onprem_service/` and should import package paths with
-`PYTHONPATH=llm_notable_analysis_onprem_systemd/src` when running from the repo
-root.
+Alternate analyzer entrypoint for SDK-free smoke or debugging:
+
+```text
+python -m llm_notable_analysis_onprem_systemd.onprem_service.onprem_main_nonsdk
+```
+
+Production units use the SDK-backed `onprem_main` path
+(`deploy/systemd/notable-analyzer.service`).
+
+## Repository Layout
+
+```text
+llm_notable_analysis_onprem_systemd/
+  config.env.example          # Analyzer runtime contract template
+  config.portal.env.example   # Portal-only env template
+  deploy/                     # systemd, nginx, LiteLLM assets
+  docs/                       # Operator, testing, internal docs
+  frontend/analyst-portal/    # React SPA (built into dist/ on install)
+  scripts/                    # install, smoke, RAG setup, preview helpers
+  src/llm_notable_analysis_onprem_systemd/
+    onprem_service/           # Analyzer + portal Python modules
+    soar_playbook/            # Phantom/SOAR template scripts (not imported at runtime)
+  tests/
+    onprem_service/           # Primary unit + contract tests
+    onprem_rag_notable_analysis/
+    soar_playbook/
+    scripts/
+```
+
+Related editable packages installed by dev bootstrap (repo root):
+
+- `onprem-llm-sdk` — shared HTTP/SDK wrapper used by `local_llm_client.py`
+- `onprem_rag_notable_analysis` — Postgres/pgvector RAG retrieval and ingest helpers
+
+Run tests from the **repository root** with the shared `.venv` activated. See
+[`docs/testing/TESTING.md`](../testing/TESTING.md).
 
 ## Code Boundaries
 
-- `onprem_main.py` orchestrates one notable: ingest, analysis, optional query
-  execution, optional ServiceNow, report writing, movement to processed or
-  quarantine.
+### Orchestration and ingest
+
+- `onprem_main.py` / `onprem_main_nonsdk.py` orchestrate one notable: ingest,
+  analysis, optional query execution, optional ServiceNow, report writing,
+  optional case archive, movement to processed or quarantine.
+- `ingest.py` owns file-drop discovery, size limits, normalization, and atomic
+  movement to processed/quarantine.
+- `config.py` defines runtime flags, capability profiles, and defaults. Any new
+  runtime contract belongs in `Config`, `load_config`, `config.env.example`,
+  docs, and tests.
+
+### LLM analysis
+
 - `local_llm_client.py` is the SDK-backed structured analyzer path. It owns
   prompt assembly, RAG context use, structured output validation, repair, and
   LLM calls.
 - `local_llm_client_nonsdk.py` mirrors the analyzer path without the shared
   `onprem-llm-sdk` wrapper.
-- `openai_transport_nonsdk.py` is the direct OpenAI-compatible HTTP transport:
-  request payloads, headers, timeouts, response parsing, and HTTP error
-  translation.
-- `spl_query_generation.py`, `splunk_investigation.py`, `servicenow.py`,
-  `markdown_generator.py`, and `html_generator.py` keep feature-specific logic
-  out of the entrypoint.
-- `config.py` defines runtime flags and defaults. Any new runtime contract
-  belongs in `Config`, `load_config`, `config.env.example`, docs, and tests.
+- `openai_transport_nonsdk.py` is the direct OpenAI-compatible HTTP transport
+  for tool-call mode: request payloads, headers, timeouts, response parsing, and
+  HTTP error translation. The SDK client imports it for tool-call requests.
+
+### Query generation, execution, and enrichment
+
+- `spl_query_generation.py` — SPL generation schema, prompts, merge/validate.
+- `spl_query_grounding.py` — SPL-dedicated RAG context wiring.
+- `splunk_investigation.py` — read-only Splunk search execution and policy gates.
+- `elastic_query_generation.py` — Elasticsearch query generation schema/prompts.
+- `elasticsearch_query_grounding.py` — Elasticsearch KB grounding wiring.
+- `elasticsearch_investigation.py` — read-only Elasticsearch execution.
+- `query_result_enrichment.py` — merges deterministic query results into analysis.
+- `query_result_interpretation.py` — optional narrative interpretation contract.
+
+### Integrations, validation, and artifacts
+
+- `servicenow.py` — draft/create adapters and approval extraction.
+- `sinks.py` — markdown/HTML/report writes and Splunk writeback transport.
+- `markdown_generator.py` / `html_generator.py` — deterministic report renderers.
+- `ttp_validator.py` / `verdicts.py` — ATT&CK validation helpers.
+- `idempotency.py` — side-effect dedupe for writeback/create paths.
+- `retention.py` — filesystem and case retention sweeps.
+
+### Analyst portal and case archive
+
+- `case_archive_flow.py` — analyzer-side archive hook after successful analysis.
+- `case_store.py`, `case_db.py`, `case_index.py`, `case_search.py` — Postgres
+  persistence, listing, and hybrid retrieval.
+- `case_chat.py`, `case_chat_history.py` — archive-backed Q&A synthesis and
+  optional session history.
+- `portal_app.py`, `portal_api_models.py`, `portal_case_detail_view.py` —
+  FastAPI routes and bounded API response shaping.
+- `case_archive_notices.py` — operator-visible archive failure notices.
+
+### SOAR templates
+
+- `soar_playbook/phantom_notable_to_analyzer.py` — container-triggered SFTP drop.
+- `soar_playbook/phantom_notable_index_to_analyzer.py` — scheduled
+  `index=notable` polling pattern.
+
+These are operator-copy templates, not imported by the analyzer service.
 
 Keep adapters thin. External systems should be transport and normalization
 layers; workflow and policy decisions should stay in orchestration or validator
 code.
 
+## Capability Profiles
+
+Customer-facing optional behavior is usually enabled through
+`CAPABILITY_PROFILES` rather than ad hoc env toggles.
+
+Profiles are defined in `config.py` (`_CAPABILITY_PROFILE_FLAGS`) and documented
+in [`docs/operations/platform/CAPABILITY_PROFILES.md`](../operations/platform/CAPABILITY_PROFILES.md).
+
+Current shipped profiles:
+
+| Profile | Primary effect |
+|---------|----------------|
+| `core` | Baseline analyzer (always included) |
+| `html_reports` | `HTML_REPORT_ENABLED=true` |
+| `rag` | analysis RAG grounding |
+| `spl_readonly` | SPL generation + Splunk read-only execution |
+| `elastic_readonly` | Elasticsearch generation + read-only execution |
+| `ticket_draft` | ServiceNow draft section |
+| `action_gated` | Splunk writeback, ServiceNow create, idempotency |
+| `analyst_portal` | case archive, portal API, case Q&A |
+
+Individual env vars still exist for tuning and advanced overrides, but new
+optional features should prefer a profile flag mapping unless there is a strong
+reason not to.
+
 ## Tool-Call Structured Output
 
-The on-prem analyzer supports two structured-output modes:
+The on-prem analyzer supports two structured-output modes via
+`LLM_STRUCTURED_OUTPUT_MODE`:
 
 - `prompt_json`: conservative default; prompt for JSON, parse, validate, repair.
 - `tool_call`: ask the OpenAI-compatible server for function/tool-call shaped
@@ -101,17 +219,21 @@ parse, normalize, validate, and either repair once or degrade explicitly.
 
 Start with the smallest end-to-end slice:
 
-1. Add a runtime flag only if the behavior is optional or risky.
-2. Add the flag to `Config`, `load_config`, `config.env.example`, and a runtime
-   contract test.
-3. Keep entrypoint changes in `onprem_main.py` limited to orchestration.
-4. Put feature logic in a focused helper module when it has parsing, validation,
+1. Decide whether the behavior belongs in an existing profile or needs a new
+   profile entry in `_CAPABILITY_PROFILE_FLAGS`.
+2. Add a runtime flag only if the behavior is optional or risky.
+3. Add the flag to `Config`, `load_config`, `config.env.example`, and a runtime
+   contract test (`tests/onprem_service/test_config_runtime_contract.py` and/or
+   `test_deployment_contract.py` when install/docs assets change).
+4. Keep entrypoint changes in `onprem_main.py` / `onprem_main_nonsdk.py` limited
+   to orchestration.
+5. Put feature logic in a focused helper module when it has parsing, validation,
    external calls, or report rendering.
-5. Add deterministic validators before any generated query, writeback, or
+6. Add deterministic validators before any generated query, writeback, or
    action reaches an external system.
-6. Add tests for the happy path, disabled path, malformed input, and expected
+7. Add tests for the happy path, disabled path, malformed input, and expected
    degradation path.
-7. Update operator docs only for values or behavior the customer must operate.
+8. Update operator docs only for values or behavior the customer must operate.
 
 Prefer this shape:
 
@@ -126,6 +248,9 @@ normalize input
   -> optional bounded execution
   -> summarize / report / write back
 ```
+
+Portal-only features should stay out of `onprem_main` except for explicit archive
+hooks (`case_archive_flow.py`) that the analyzer calls after successful analysis.
 
 ## Adding Another Tool Call
 
@@ -177,7 +302,8 @@ they use the same vendor API.
 ## Report Rendering
 
 Markdown remains the default operator artifact. HTML dashboard reports are an
-optional second artifact controlled by `HTML_REPORT_ENABLED`.
+optional second artifact controlled by the `html_reports` profile
+(`HTML_REPORT_ENABLED`).
 
 - Markdown rendering belongs in `markdown_generator.py`.
 - HTML rendering belongs in `html_generator.py`.
@@ -189,18 +315,40 @@ objects and escape untrusted content before writing output.
 
 ## Validation Commands
 
-Run focused on-prem tests from the repo root:
+Primary test guide: [`docs/testing/TESTING.md`](../testing/TESTING.md).
+
+From the repo root with `.venv` activated:
+
+```bash
+pytest llm_notable_analysis_onprem_systemd/tests/onprem_service -q
+```
+
+Focused suites:
+
+```bash
+pytest llm_notable_analysis_onprem_systemd/tests/onprem_rag_notable_analysis -q
+pytest llm_notable_analysis_onprem_systemd/tests/soar_playbook -q
+```
+
+Legacy unittest entrypoint (also valid):
 
 ```bash
 PYTHONPATH=llm_notable_analysis_onprem_systemd/src \
-python -m unittest discover -s llm_notable_analysis_onprem_systemd/tests/onprem_service
+python -m unittest discover -s llm_notable_analysis_onprem_systemd/tests/onprem_service -p "test_*.py"
 ```
 
+Contract tests to run when changing runtime env, profiles, or deployment assets:
+
+- `tests/onprem_service/test_config_runtime_contract.py`
+- `tests/onprem_service/test_deployment_contract.py`
+- `tests/onprem_service/test_local_llm_client_contract.py`
+
 Noisy warnings during negative-path tests are expected when the test is proving
-degraded behavior. The pass/fail signal is the final unittest result.
+degraded behavior. The pass/fail signal is the final pytest/unittest result.
 
 For docs-only changes, review links and headings manually. For runtime contract
-changes, run the focused tests above and any affected smoke tests.
+changes, run the focused tests above and any affected smoke tests listed in
+`TESTING.md`.
 
 ## What Not To Do
 
@@ -211,3 +359,12 @@ changes, run the focused tests above and any affected smoke tests.
 - Do not commit secrets, customer data, model weights, wheelhouses, RAG indexes,
   generated production reports, or host-local logs.
 - Do not enable risky features by default.
+
+## Related Docs
+
+- [`docs/testing/TESTING.md`](../testing/TESTING.md) — unit, smoke, and integration commands
+- [`docs/operations/platform/CAPABILITY_PROFILES.md`](../operations/platform/CAPABILITY_PROFILES.md) — customer profile bundles
+- [`docs/technical_specs/feature_enhancements_technical_spec.md`](../technical_specs/feature_enhancements_technical_spec.md) — normative enhancement contracts
+- [`docs/integrations/SOAR_PLAYBOOK_PHANTOM.md`](../integrations/SOAR_PLAYBOOK_PHANTOM.md) — container-triggered SOAR template
+- [`docs/integrations/SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md`](../integrations/SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md) — notable-index polling template
+- [`DEVELOPING.md`](../../../DEVELOPING.md) — shared dev venv and portal preview workflow

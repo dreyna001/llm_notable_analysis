@@ -10,7 +10,7 @@
 # or LITELLM_MASTER_KEY in /etc/systemd/system/litellm.service.d/*.conf
 # Login: username admin, password = master key value.
 # Full Admin UI login also requires a LiteLLM PostgreSQL DATABASE_URL.
-# See docs/operations/LLM_INFERENCE_OPERATIONS.md#how-do-i-use-the-litellm-admin-ui
+# See docs/operations/llm/LLM_INFERENCE_OPERATIONS.md#how-do-i-use-the-litellm-admin-ui
 
 model_list:
   - model_name: gemma-4-31B-it

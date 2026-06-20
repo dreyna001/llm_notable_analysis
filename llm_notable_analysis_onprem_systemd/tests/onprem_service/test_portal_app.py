@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from llm_notable_analysis_onprem_systemd.onprem_service.case_chat import RetrievedSource
 from llm_notable_analysis_onprem_systemd.onprem_service.case_store import (
     build_case_archive_record,
 )
@@ -95,7 +96,7 @@ class _FakeConnection:
 class _FakeEmbeddingModel:
     def encode(self, texts, show_progress_bar=False, convert_to_numpy=True):
         del texts, show_progress_bar, convert_to_numpy
-        return [[1.0] + [0.0] * 767]
+        return [[1.0] + [0.0] * 1023]
 
 
 class _BadEmbeddingModel:
@@ -1187,6 +1188,81 @@ class TestPortalApp(unittest.TestCase):
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()["detail"], "LLM service unavailable.")
+
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat._finalize_chat_response",
+        side_effect=lambda **kwargs: kwargs["response"],
+    )
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat.validate_chat_history_request",
+        return_value=None,
+    )
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat.load_session_transcript",
+        return_value=[
+            {"role": "user", "content": "What is the verdict?"},
+            {"role": "assistant", "content": "Likely malicious based on evidence."},
+        ],
+    )
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat.retrieve_case_sources",
+        return_value=[
+            RetrievedSource(
+                source_lane="current_case",
+                text="Evidence text.",
+            )
+        ],
+    )
+    def test_api_chat_text_complete_receives_prompt_with_history(
+        self,
+        _mock_sources,
+        _mock_transcript,
+        _mock_validate,
+        _mock_finalize,
+    ) -> None:
+        captured: dict[str, object] = {}
+        record = _record(self._config())
+
+        def _text_complete(prompt: str, max_tokens: int) -> str:
+            captured["prompt"] = prompt
+            captured["max_tokens"] = max_tokens
+            return "Follow-up answer."
+
+        client = TestClient(
+            build_portal_app(
+                Config(
+                    PORTAL_ENABLED=True,
+                    CASE_ARCHIVE_ENABLED=True,
+                    CASE_QA_ENABLED=True,
+                    CASE_QA_CHAT_HISTORY_ENABLED=True,
+                    PORTAL_PROXY_SECRET="portal-secret",
+                ),
+                connect=lambda _dsn: _FakeConnection(
+                    row=_detail_row(record),
+                    row_pages=[[_chunk_row(record)], []],
+                ),
+                chat_embedding_model=_FakeEmbeddingModel(),
+                chat_text_complete=_text_complete,
+            )
+        )
+
+        response = client.post(
+            "/api/chat",
+            json={
+                "mode": "selected_case",
+                "question": "Expand on that.",
+                "selected_case_id": "case-1",
+                "session_id": "session-existing",
+            },
+            headers=_AUTH_HEADERS,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        prompt = str(captured["prompt"])
+        self.assertIn("CONVERSATION HISTORY:", prompt)
+        self.assertIn("What is the verdict?", prompt)
+        self.assertIn("Likely malicious", prompt)
+        self.assertEqual(captured["max_tokens"], 800)
 
 
 if __name__ == "__main__":

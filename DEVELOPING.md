@@ -48,9 +48,10 @@ This installs editable copies of:
 - `onprem_rag_notable_analysis`
 - `llm_notable_analysis_onprem_systemd`
 
-It also installs `pytest`, embeds **Node.js 22** into `.venv` with `nodeenv`, runs
-`npm install` for `llm_notable_analysis_onprem_systemd/frontend/analyst-portal`, and
-downloads **Playwright Chromium** for portal E2E tests.
+It also installs `pytest`, `boto3==1.37.38` (Bedrock preview chat), embeds **Node.js 22**
+into `.venv` with `nodeenv`, runs `npm install` for
+`llm_notable_analysis_onprem_systemd/frontend/analyst-portal`, and downloads
+**Playwright Chromium** for portal E2E tests.
 
 Do **not** copy `.venv` from Windows to a Linux VM (or vice versa). Sync the repo
 with git, then run `bootstrap_dev_venv.sh` on the VM so Node, npm, Playwright, and
@@ -100,16 +101,10 @@ npm --prefix llm_notable_analysis_onprem_systemd/frontend/analyst-portal run dev
 Open http://127.0.0.1:5173/ (UI) with the API on http://127.0.0.1:8765/.
 
 Full preview setup (Bedrock chat, stored cases 1-5, troubleshooting) is in
-[`llm_notable_analysis_onprem_systemd/docs/operations/ANALYST_PORTAL_PREVIEW.md`](llm_notable_analysis_onprem_systemd/docs/operations/ANALYST_PORTAL_PREVIEW.md).
+[`llm_notable_analysis_onprem_systemd/docs/operations/analyst_portal/ANALYST_PORTAL_PREVIEW.md`](llm_notable_analysis_onprem_systemd/docs/operations/analyst_portal/ANALYST_PORTAL_PREVIEW.md).
 
 Recommended analyst questions for preview case investigation are in
 [`PREVIEW_CASE_INVESTIGATION_GUIDE.md`](PREVIEW_CASE_INVESTIGATION_GUIDE.md).
-
-After bootstrap, install Bedrock support for preview chat:
-
-```powershell
-pip install boto3==1.37.38
-```
 
 ### Portal E2E (Playwright)
 

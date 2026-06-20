@@ -1,302 +1,187 @@
-# Executive On-Prem Workflow Overview
+# Executive On-Prem Workflow
 
-## Purpose
+How a notable moves from customer detection and SOAR handoff through local AI
+analysis to analyst-ready outputs on a single on-prem host. This is the
+**workflow companion** to
+[`EXECUTIVE_ONPREM_BUILD_WRITEUP.md`](EXECUTIVE_ONPREM_BUILD_WRITEUP.md), which
+summarizes what the build provides and what rollout assumes.
 
-This document explains the on-premises notable-analysis workflow end to end for executive and program stakeholders. It covers the file-drop operating model, local LLM inference through LiteLLM routing to vLLM, optional RAG grounding, optional SPL generation and read-only execution, optional Splunk writeback, and optional ServiceNow incident draft/create behavior.
-
-The workflow is designed for a customer-controlled environment where notable data can remain on premises or in an air-gapped enclave. The default model configuration is `gemma-4-31B-it`, and the same service can be pointed at a GPT-OSS model when it is served through a compatible local OpenAI-style endpoint.
+For visual flowcharts, see
+[`end_to_end_diagrams/END_TO_END_DIAGRAMS.md`](end_to_end_diagrams/END_TO_END_DIAGRAMS.md).
+For operator tuning, see [`../operations/README.md`](../operations/README.md).
 
 ## Executive Summary
 
-The on-prem workflow provides a bounded local analysis path for security notables:
+When a correlation search or SOAR workflow produces a notable, the customer
+delivers one bundled alert file to the analyzer host. The on-prem service reads
+that file, runs local inference through LiteLLM and vLLM, and produces a
+structured investigation report: verdict, evidence, competing hypotheses, IOCs,
+and validated ATT&CK mappings.
 
-1. SOAR, SFTP, NFS, or an operator drops one `.json` or `.txt` notable into the incoming directory.
-2. A `systemd` service polls the directory and processes eligible files in FIFO order.
-3. The service normalizes the notable as JSON or text and sends it to a local LiteLLM endpoint.
-4. The local model produces structured alert analysis, including verdict, evidence, hypotheses, IOCs, and ATT&CK mappings.
-5. The service parses, repairs when possible, validates, and filters the model output.
-6. Optional RAG injects SOC operating context from local SOPs, data dictionaries, Splunk index references, and related knowledge-base documents.
-7. Optional SPL generation adds one investigation query per hypothesis (second bounded LLM call when `SPL_QUERY_GENERATION_ENABLED=true`). When `SPL_QUERY_RAG_ENABLED=true`, Splunk-focused retrieval adds `SPL_QUERY_GROUNDING_CONTEXT` for that SPL call only.
-8. Optional read-only Splunk query execution validates and runs bounded investigation searches, then summarizes deterministic results in the report.
-9. Optional query-result interpretation adds a third bounded LLM call that explains whether those deterministic results support, weaken, or leave hypotheses inconclusive.
-10. Optional ServiceNow logic builds incident drafts and can create incidents only when enabled and approved.
-11. The service writes a markdown report, moves successful input files to processed storage, and quarantines failed inputs.
+Optional profiles can add knowledge-base context, read-only hunt queries,
+ticketing drafts, Splunk writeback, and a read-only analyst portal with case
+archive. Those steps are additive; the base path is file in, report out.
 
-The design keeps the LLM focused on synthesis and explanation. File movement, validation, ATT&CK filtering, query policy, writeback, approval checks, retention, and service operation remain deterministic.
+This is analyst-assist only. It does not autonomously close, suppress,
+escalate, or contain alerts.
 
-## Business Outcome
+## End-to-End Flow
 
-The workflow gives analysts an on-prem first-pass investigation package without sending notable content to a cloud LLM. It can produce:
+### 1. Upstream: detection and handoff
 
-- A direct alert reconciliation verdict with confidence.
-- Evidence separated from inference.
-- Six competing benign/adversary hypotheses with recommended pivots.
-- Extracted indicators of compromise.
-- Validated MITRE ATT&CK techniques and confidence scores.
-- Optional SPL queries tied to specific hypotheses.
-- Optional deterministic query result summaries from read-only Splunk execution.
-- Optional query-result interpretation when enabled.
-- Optional ServiceNow incident draft or approved incident creation result.
+Customers typically alert on thresholds per user or host. When a threshold
+trips, correlation searches gather nearby context and Splunk ES or SOAR produces
+one bundled notable payload. The on-prem pipeline does not replace that stack; it
+processes what the customer already decided is worth analyzing.
 
-The system supports analyst decision-making. It is not intended to autonomously close, suppress, escalate, or contain alerts.
+Common handoff paths:
 
-## End-to-End Workflow
+- SOAR or Splunk workflow writes one file per notable to the host incoming area
+- An operator drops a file manually for replay or pilot validation
 
-### 1. Notable Intake
+Preferred delivery is one complete payload per notable, uploaded atomically so
+the analyzer never reads a partial file.
 
-The analyzer runs in `file_drop` mode. It watches `INCOMING_DIR`, which defaults to:
+### 2. Intake and queueing
 
-```text
-/var/notables/incoming
-```
+The analyzer watches the incoming directory and picks up new `.json` or `.txt`
+files in order. Each file represents one notable. Malformed, empty, or
+oversized inputs are moved aside for operator review rather than silently
+processed.
 
-The preferred integration pattern is SOAR-to-analyzer file delivery over SFTP. SOAR packages one notable plus supporting context into a JSON payload and writes it to the incoming directory. Text input is also supported for simpler integrations or fallback workflows.
+By default the host processes one notable at a time. Larger deployments can
+enable bounded parallel processing after baseline behavior is accepted.
 
-The service processes only `.json` and `.txt` files and does not recurse into subdirectories. This keeps the intake contract simple and predictable.
+### 3. Local analysis
 
-### 2. Local Service Loop
+The service sends the normalized alert to a local model served on the same host.
+The model returns a structured investigation package:
 
-The `notable-analyzer` `systemd` service loads `/etc/notable-analyzer/config.env`, ensures the required directories exist, initializes the ATT&CK validator, initializes the local LLM client, and then polls for incoming files.
+- Alert reconciliation with confidence
+- Direct evidence separated from inference
+- Six competing hypotheses with investigation pivots
+- IOCs and MITRE ATT&CK technique mappings
 
-The default processing mode is sequential. Optional bounded concurrency can be enabled with `CONCURRENCY_ENABLED`, `MAX_WORKERS`, and `MAX_QUEUE_DEPTH` when the host has enough CPU/GPU headroom.
+Structured output is validated before use. Technique IDs are checked against an
+approved local allowlist. When validation fails, the run is contained and the
+input is quarantined rather than promoted as a trusted report.
 
-### 3. Local Inference Runtime
+AI is used for synthesis and explanation. Ingest rules, validation, query
+policy, writeback gates, retention, and file movement stay deterministic.
 
-The inference layer is a local OpenAI-compatible endpoint, normally served by LiteLLM on loopback and routed to vLLM:
+### 4. Optional enrichment (customer-selected profiles)
 
-```text
-http://127.0.0.1:4000/v1/chat/completions
-```
+Customers enable optional behavior one profile at a time after non-production
+validation. Default deployment is core analysis only.
 
-The default systemd unit serves:
+| Profile | What it adds to the workflow |
+| --- | --- |
+| `html_reports` | A static HTML dashboard alongside the markdown report |
+| `rag` | Advisory SOC knowledge-base context in the analysis prompt (not alert evidence) |
+| `spl_readonly` | Generated Splunk queries and bounded read-only search against approved indexes |
+| `elastic_readonly` | Generated Elasticsearch queries and bounded read-only search (one investigation backend per deployment) |
+| `ticket_draft` | ServiceNow incident draft content in the report |
+| `action_gated` | Splunk notable comment writeback and approval-gated ServiceNow create |
+| `analyst_portal` | Postgres case archive, read-only portal, and Case Q&A over archived cases |
 
-```text
-gemma-4-31B-it
-```
+Important boundaries:
 
-GPT-OSS can be used when the local inference server exposes the same OpenAI-compatible chat-completions contract. Operators must keep these values aligned:
+- Knowledge-base and query-grounding content is advisory; it does not replace
+  facts from the alert or approved query results.
+- Read-only investigation stays within customer-approved scope, timeouts, and
+  row limits.
+- Splunk and Elasticsearch remain authoritative on permissions and query behavior.
+- ServiceNow create and Splunk writeback require explicit customer approval
+  before enablement.
 
-- vLLM model path.
-- LiteLLM model alias and vLLM served model name.
-- `LLM_MODEL_NAME` in `/etc/notable-analyzer/config.env`.
-- Tool-call parser or chat template settings when `LLM_STRUCTURED_OUTPUT_MODE=tool_call`.
+### 5. Outputs and file lifecycle
 
-For Gemma, the current package defaults to prompt-JSON mode. For GPT-OSS or Gemma tool-call mode, vLLM must be launched with compatible parser/template settings. If tool-call parsing fails for a request, the service falls back to prompt-JSON behavior for that request.
+Each successful run produces at minimum a markdown report on disk. When enabled,
+an HTML report, Splunk comment, ServiceNow draft or ticket, and archived case
+record may also be written.
 
-### 4. Structured LLM Analysis
+After processing:
 
-The service sends the notable to the local model with a bounded cybersecurity analysis prompt. The prompt requires the model to:
+- Successful inputs move to a processed area for audit and retention
+- Failed inputs move to quarantine for operator review
+- Reports and archived artifacts follow customer retention policy
 
-- Use only direct alert facts for current-case evidence.
-- Separate evidence from inference.
-- Return a structured output contract.
-- Generate exactly six competing hypotheses.
-- Use MITRE ATT&CK v17 technique IDs.
-- State uncertainty instead of inventing missing context.
-- Leave unknown facts as `unknown`.
+An optional read-only analyst portal lets reviewers browse archived cases and
+ask bounded questions over stored analysis. It does not drive autonomous
+response actions.
 
-The base output contract includes alert reconciliation, competing hypotheses, evidence versus inference, IOC extraction, and TTP analysis.
+## What the Analyst Receives
 
-### 5. RAG Grounding
+A complete first-pass investigation package without sending alert content to an
+external LLM:
 
-When the `rag` capability profile is selected, the service attempts to initialize a local RAG provider. The default production-oriented backend is PostgreSQL with PostgreSQL FTS, pgvector, Mixedbread embeddings, and optional Mixedbread reranking. SQLite FTS5 + FAISS remains available as a local fallback for smaller or lab deployments. The knowledge base can include SOPs, index and sourcetype references, field mapping notes, investigation playbooks, query examples, and local operating guidance.
+- Reconciled verdict and confidence guidance
+- Evidence vs inference clearly separated
+- Competing hypotheses and pivots for follow-up
+- IOCs and validated ATT&CK mappings
+- Optional hunt-query results and narrative interpretation
+- Optional ticketing draft or approved ticket creation
+- Optional Splunk notable comment for SIEM-side review
 
-RAG context is rendered into a `SOC_OPERATIONAL_CONTEXT` block. It is advisory context only. The workflow explicitly prevents retrieved guidance from being treated as current-alert evidence unless the same fact appears in the notable itself.
+Analysts remain accountable for triage, escalation, and closure decisions.
 
-`SOC_OPERATIONAL_CONTEXT` informs analyst wording and reasoning, but **it does not authorize environment-specific SPL tokens** in generated queries (`index=`, `sourcetype=`, macros, datamodel names). Splunk-environment tokens must come from **the notable text** or, when enabled, from the separate SPL query grounding block (`SPL_QUERY_GROUNDING_CONTEXT`; see SPL query RAG settings in [`config.env.example`](../../config.env.example)).
-
-If RAG initialization or retrieval fails, the analyzer continues without RAG rather than stopping the service.
-
-### 6. SPL Query Generation
-
-When the `spl_readonly` capability profile is selected, the service performs a second bounded LLM call after the base analysis. This second call is dedicated to generating SPL query fields for the six hypotheses.
-
-Each generated query must be tied to a hypothesis and include:
-
-- Query strategy.
-- Primary SPL query.
-- Rationale for the query.
-- Result pattern that would support the hypothesis.
-- Result pattern that would weaken the hypothesis.
-
-When `SPL_QUERY_RAG_ENABLED=true`, retrieval from the **Splunk-focused SPL knowledge base** renders a **`SPL_QUERY_GROUNDING_CONTEXT`** block only for this second SPL call (separate Postgres table from general KB). Operators curate indexes, sourcetypes, macros, datamodel notes, fields, saved searches, and example queries into that SPL KB (`SPL_QUERY_RAG_*` paths in [`config.env.example`](../../config.env.example)).
-
-The model must not invent environment-specific indexes, sourcetypes, macros, or CIM data models unless they appear in the **alert** or **`SPL_QUERY_GROUNDING_CONTEXT`**. Validator checks strip or reject SPL that cites tokens not grounded there. Structured results can include **`primary_spl_query_grounding_refs`** (`source_file`, `section_path`) when SPL KB snippets supported the emitted tokens.
-
-For per-customer tuning (SPL query KB, ingestion, failure mode, Splunk investigation policy), see **[`../operations/SPL_OPERATIONS.md`](../operations/SPL_OPERATIONS.md)** and **[`../operations/KNOWLEDGE_BASE_OPERATIONS.md`](../operations/KNOWLEDGE_BASE_OPERATIONS.md)**.
-
-### 7. Read-Only Splunk Query Execution
-
-When the `spl_readonly` capability profile is selected, the service extracts generated hypothesis queries and attempts bounded read-only execution through the configured executor.
-
-The REST executor uses the Splunk oneshot search endpoint by default:
+## Architecture (single host)
 
 ```text
-/services/search/jobs/oneshot
+notable file drop
+  -> on-prem analyzer
+  -> local LiteLLM -> local vLLM
+  -> validated structured report
+  -> processed or quarantine
+  -> optional Splunk / ServiceNow / case archive / portal
 ```
 
-Before execution, each query is checked against deterministic policy:
+Runtime configuration, paths, and service layout are documented in the install
+and operations guides. Model weights and customer secrets stay outside the
+source repository.
 
-- An explicit `index=...` is required.
-- Indexes must be in the configured allowlist.
-- Denied commands such as destructive, writeback, script, or REST operations are blocked.
-- Query time range, row count, timeout, and number of queries are capped.
+## Security and Trust Model
 
-Execution results are summarized separately in the report. Query results are not promoted into direct evidence for the original notable.
+- Inference stays on the customer host; alert content does not egress to a cloud LLM
+- Integration credentials and mapping rules are customer-owned
+- Generated queries and writebacks pass policy checks before execution
+- Failed validation quarantines input instead of silently accepting bad output
+- Enabled profiles should each have a named owner and rollback plan
 
-When `QUERY_RESULT_INTERPRETATION_ENABLED=true`, the service runs a separate
-bounded LLM call after deterministic query-result enrichment. That call receives
-only compact query facts and produces a distinct **Query Result Interpretation**
-section. It may label whether results support or weaken a hypothesis, but its
-`confidence_delta` is prose guidance only; it does **not** change existing
-confidence scores, ATT&CK scores, query status, result counts, or search
-references.
+## Recommended Rollout
 
-Operator-facing guidance on allowlists, load limits, and staged enablement lives in **[`../operations/SPL_OPERATIONS.md`](../operations/SPL_OPERATIONS.md)**.
+Mirror the build writeup: prove the base path before adding optional profiles.
 
-### 8. Report Generation
-
-The service generates a markdown report under `REPORT_DIR`, which defaults to:
-
-```text
-/var/notables/reports
-```
-
-The report can include:
-
-- Alert reconciliation.
-- Competing hypotheses and pivots.
-- Optional SPL query details per hypothesis. When SPL query RAG is enabled, `primary_spl_query_grounding_refs` are attached to the **structured** result only (not rendered into markdown); optional future exposure via logs/metadata is described in [`SPL_OPERATIONS.md`](../operations/SPL_OPERATIONS.md).
-- Optional deterministic query result summaries.
-- Optional query-result interpretation; the deterministic `Query Results` section remains the audit trail.
-- Optional ServiceNow draft/create status.
-- Evidence versus inference.
-- Indicators of compromise.
-- Scored ATT&CK techniques grouped by confidence.
-- Raw model output only when structured validation failed and human review is needed.
-
-### 9. Splunk Writeback
-
-When the `action_gated` capability profile is selected, the service can post the generated markdown report back to Splunk ES as a notable comment. The writeback identifier is derived from the input filename stem and sent as `finding_id`.
-
-This writeback is separate from read-only investigation query execution. Splunk writeback updates the notable comment; investigation query execution runs bounded searches and summarizes results.
-
-### 10. ServiceNow Draft and Create
-
-When the `ticket_draft` or `action_gated` capability profile is selected, the service can build a ServiceNow incident draft payload from the analysis result. The draft includes short description, description, assignment group, category, impact, urgency, correlation ID, and work notes.
-
-When the `action_gated` capability profile is selected, the service can create an incident through the ServiceNow REST API. By default, create is approval-gated with `SERVICENOW_CREATE_REQUIRES_APPROVAL=true`. Approval metadata must be present in the incoming JSON payload before the create operation is allowed.
-
-If approval is missing or invalid, create fails closed and the report records the denied status.
-
-### 11. File Movement and Retention
-
-Successful inputs are moved to `PROCESSED_DIR`. Failed, empty, invalid, or unprocessable inputs are moved to `QUARANTINE_DIR` with a logged reason.
-
-Retention is two-stage:
-
-1. Processed files, quarantined files, and reports are moved into `ARCHIVE_DIR`.
-2. Archived files are deleted after the configured archive retention window.
-
-Retention can run inside the analyzer service or be moved to a systemd timer.
-
-## On-Prem Architecture
-
-The core deployment uses a single-host RHEL-oriented architecture:
-
-- `vllm.service` serves the local model on loopback, with `litellm.service` exposing the analyzer-facing OpenAI-compatible gateway.
-- `notable-analyzer.service` polls for notable files and orchestrates analysis.
-- `/etc/notable-analyzer/config.env` controls runtime capabilities.
-- `/var/notables/incoming` receives inputs.
-- `/var/notables/reports` stores generated markdown reports.
-- `/var/notables/processed`, `/var/notables/quarantine`, and `/var/notables/archive` support operations and retention.
-- Optional RAG source documents and ingest reports live under `/opt/llm-notable-analysis/knowledge_base`; production retrieval uses the configured PostgreSQL/pgvector table (`RAG_POSTGRES_CHUNKS_TABLE`). Optional SPL query KB source and index dirs use `SPL_QUERY_RAG_*` (default table `spl_query_chunks`).
-- Optional Splunk and ServiceNow integrations use outbound HTTPS from the analyzer host.
-
-## Operating Modes
-
-### Base Analysis Mode
-
-Base mode runs local LLM analysis, validates ATT&CK IDs, writes a markdown report, and moves the input file to processed or quarantine. This is the safest first deployment mode.
-
-### RAG-Grounded Analysis Mode
-
-RAG mode adds local operational context from SOPs, Splunk references, and other knowledge-base documents. It improves environment awareness but remains advisory.
-
-### SPL Generation Mode
-
-SPL generation mode adds one query per hypothesis for analyst investigation. It does not execute the queries by itself. Optionally, **SPL query RAG** (`SPL_QUERY_RAG_ENABLED=true`) adds `SPL_QUERY_GROUNDING_CONTEXT` from a dedicated Splunk fact corpus before that second LLM call.
-
-### Read-Only Investigation Mode
-
-Read-only investigation mode executes policy-approved generated queries and adds compact deterministic query result summaries to the report. Optional query-result interpretation can add a model-written narrative after those results, without changing scores or deterministic query facts.
-
-### Splunk Writeback Mode
-
-Splunk writeback posts the markdown report to the originating Splunk notable as a comment.
-
-### ServiceNow Mode
-
-ServiceNow mode creates incident drafts and can optionally create incidents through an approval-gated REST call.
-
-## Security and Control Posture
-
-The current workflow includes controls appropriate for on-prem deployment:
-
-- vLLM binds to loopback by default.
-- Services run as dedicated users.
-- systemd hardening limits filesystem and process privileges.
-- The analyzer writes only to configured data paths.
-- Secrets and runtime settings live in `/etc/notable-analyzer/config.env`, not in code.
-- Splunk TLS verification is enabled by default and can use an internal CA bundle.
-- ServiceNow create requires HTTPS and, by default, explicit payload-level approval.
-- Query execution is read-only, allowlisted, denylisted, time-bounded, row-bounded, and timeout-bounded.
-- RAG content is advisory and not direct evidence.
-- ATT&CK technique IDs are filtered through a local allowlist.
-- Failed inputs are quarantined instead of silently discarded.
-
-## Observability and Validation
-
-Operators validate and monitor the service with standard Linux tooling:
-
-- `systemctl status notable-analyzer`
-- `systemctl status vllm`
-- `journalctl -u notable-analyzer -f`
-- `journalctl -u vllm -f`
-- Report files under `/var/notables/reports`
-- Processed and quarantined input files under `/var/notables`
-- Optional Splunk notable comments
-- Optional ServiceNow incident numbers and sys_ids in the report
-
-Automated unit tests cover ingestion, formatting, LLM contracts, SPL generation, query execution policy, ServiceNow behavior, markdown rendering, and main-loop integration paths. They do not require vLLM or the analyzer service to be running.
-
-## Key Readiness Constraints
-
-Before production rollout, the customer environment must validate:
-
-- The selected local model is present and approved for use.
-- vLLM model path, served model name, and `LLM_MODEL_NAME` match.
-- GPU, CPU, RAM, and disk sizing match expected notable volume and latency needs.
-- SFTP or other file-drop transport is hardened and audited.
-- RAG source documents are curated, current, and approved for analyst use.
-- Splunk index allowlists, denied commands, time bounds, and REST endpoint paths match customer policy.
-- Splunk writeback identifier mapping is confirmed with the Splunk team.
-- ServiceNow assignment group, token, endpoint, and approval workflow are confirmed before enabling create.
-- Retention settings match data-handling and audit requirements.
+1. **Core path** — install, drop representative notables, confirm report quality
+   and correct processed vs quarantine behavior.
+2. **Grounding** — enable knowledge-base context with curated customer SOPs and
+   reference material; validate advisory quality.
+3. **Investigation aids** — enable Splunk or Elasticsearch read-only search with
+   platform-owner approval on scope and load.
+4. **Actions** — enable ticketing drafts, then writeback and create only after
+   Splunk and ServiceNow owners sign off.
+5. **Portal (optional)** — enable case archive and portal access after database
+   and network rollout are accepted.
 
 ## Success Criteria
 
-A successful end-to-end run is complete when:
+A production-ready workflow means:
 
-1. A `.json` or `.txt` notable lands in the incoming directory.
-2. The analyzer picks it up during the next poll cycle.
-3. Local LLM analysis completes or produces a reviewable fallback.
-4. ATT&CK IDs are validated and invalid techniques are filtered.
-5. Optional RAG, SPL, Splunk execution, Splunk writeback, and ServiceNow steps run only when enabled.
-6. A markdown report appears in the report directory.
-7. The input file is moved to processed or quarantine.
-8. Operators can trace the run through journald logs and output files.
+- A known-good notable produces a complete report on disk
+- Bad inputs land in quarantine with observable operator signals
+- Every enabled profile has an owner, validation plan, and rollback plan
+- Splunk, ServiceNow, and portal integrations match customer approval boundaries
+- Retention and audit expectations are agreed with security and SOC leadership
 
-## Current Recommended Rollout Path
+Pre-production checklist:
+[`AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_ASSESSMENT.md`](AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_ASSESSMENT.md).
 
-Start with base analysis mode using local Gemma or GPT-OSS through vLLM. Validate report quality, service stability, file movement, retention, and logs with representative notables. Then enable RAG with curated SOP and Splunk reference documents. After RAG quality is validated, enable SPL generation. Optionally ingest **[`KNOWLEDGE_BASE_OPERATIONS.md`](../operations/KNOWLEDGE_BASE_OPERATIONS.md)** SPL query KB docs and enable `SPL_QUERY_RAG_*` once Splunk owners approve grounded indexes and macros for generated SPL. Enable read-only Splunk execution only after query policy has been reviewed with the Splunk team. Enable Splunk writeback and ServiceNow draft/create as separate steps, with ServiceNow create left approval-gated.
+## Where to Go Next
+
+| Need | Document |
+| --- | --- |
+| What the build includes and assumes | [`EXECUTIVE_ONPREM_BUILD_WRITEUP.md`](EXECUTIVE_ONPREM_BUILD_WRITEUP.md) |
+| Readiness gateway and ownership | [`AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.md`](AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.md) |
+| Visual end-to-end diagrams | [`end_to_end_diagrams/END_TO_END_DIAGRAMS.md`](end_to_end_diagrams/END_TO_END_DIAGRAMS.md) |
+| Install and day-two operations | [`../operations/deployment/INSTALL.md`](../operations/deployment/INSTALL.md), [`../operations/README.md`](../operations/README.md) |
+| Capability profile detail | [`../operations/platform/CAPABILITY_PROFILES.md`](../operations/platform/CAPABILITY_PROFILES.md) |

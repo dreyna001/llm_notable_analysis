@@ -1,31 +1,122 @@
 # On-Prem Test Guide
 
-Run commands from the repository root. Use the shared dev virtualenv at `.venv/`
-(see [`DEVELOPING.md`](../../../DEVELOPING.md)).
+Run commands from the **monorepo root**. Use the shared dev virtualenv at
+`.venv/` (see [`DEVELOPING.md`](../../../DEVELOPING.md) for bootstrap, daily
+workflow, and portal E2E).
 
-## Unit Tests
+## Test layout
+
+| Path under `llm_notable_analysis_onprem_systemd/tests/` | Focus |
+| --- | --- |
+| `onprem_service/` | Analyzer service, portal API, case archive, deployment contracts, integrations (mocked) |
+| `onprem_rag_notable_analysis/` | Postgres RAG SQL, ingest, retrieval, config |
+| `soar_playbook/` | Phantom notable-index playbook helpers |
+| `scripts/` | Preview portal and synthetic pipeline operator scripts |
+| `test_benchmark_inference_server.py` | Inference benchmark helper (top-level module) |
+
+Pytest `pythonpath` is set in [`pyproject.toml`](../../pyproject.toml)
+(`tests`, `src`). `test_portal_chat_history_http.py` imports sibling helpers as
+`test_case_chat_history`; add `tests/onprem_service` to `PYTHONPATH` when
+running pytest (see commands below).
+
+## Unit tests (pytest)
+
+Activate the venv, then from the monorepo root:
 
 ```bash
-source .venv/bin/activate
+source .venv/bin/activate   # Windows: .\.venv\Scripts\Activate.ps1
+
+export PYTHONPATH="llm_notable_analysis_onprem_systemd/tests/onprem_service:llm_notable_analysis_onprem_systemd/src:onprem-llm-sdk/src"
+# Windows PowerShell:
+# $env:PYTHONPATH = "llm_notable_analysis_onprem_systemd/tests/onprem_service;llm_notable_analysis_onprem_systemd/src;onprem-llm-sdk/src"
+```
+
+Primary service suite:
+
+```bash
 pytest llm_notable_analysis_onprem_systemd/tests/onprem_service -q
 ```
 
-Legacy unittest entrypoint:
+Focused suites:
 
 ```bash
-.venv/bin/python -m unittest discover \
-  -s llm_notable_analysis_onprem_systemd/tests/onprem_service -p "test_*.py"
+pytest llm_notable_analysis_onprem_systemd/tests/onprem_rag_notable_analysis -q
+pytest llm_notable_analysis_onprem_systemd/tests/soar_playbook -q
+pytest llm_notable_analysis_onprem_systemd/tests/scripts -q
+pytest llm_notable_analysis_onprem_systemd/tests/test_benchmark_inference_server.py -q
 ```
 
-Expected result for the on-prem service suite: `152 passed`.
-Expected result for the full on-prem package suite: `190 passed`.
+Full on-prem package:
 
-The unit suite uses mocks for vLLM, LiteLLM, Splunk, ServiceNow, and Postgres.
-It covers analyzer contracts, RAG SQL construction, Postgres ingest/retrieval
-branches, deployment files, installer contracts, query-result interpretation,
-and operator helper scripts.
+```bash
+pytest llm_notable_analysis_onprem_systemd/tests -q
+```
 
-## Shell Checks
+`tests/scripts/` imports preview helpers that optionally use Bedrock; install
+preview chat support before that suite:
+
+```bash
+pip install boto3==1.37.38
+```
+
+Expected pytest collection (Linux validation host, current tree):
+
+| Suite | Collected |
+| --- | --- |
+| `tests/onprem_service` | 432 |
+| `tests/onprem_rag_notable_analysis` | 36 |
+| `tests/soar_playbook` | 4 |
+| `tests/scripts` | 8 (with `boto3`) |
+| `tests/test_benchmark_inference_server.py` | 5 |
+| **Full `tests/`** | **485** |
+
+Pass/fail on a healthy Linux dev host or CI: all collected tests pass. Noisy
+warnings during negative-path tests are expected; trust the final pytest result.
+
+Contract tests to run when changing runtime env, profiles, or deployment assets:
+
+- `tests/onprem_service/test_config_runtime_contract.py`
+- `tests/onprem_service/test_deployment_contract.py`
+- `tests/onprem_service/test_local_llm_client_contract.py`
+
+## Legacy unittest entrypoints
+
+CI (`.github/workflows/pylint.yml`) runs the service suite with unittest:
+
+```bash
+export PYTHONPATH=".:llm_notable_analysis_onprem_systemd/src:onprem-llm-sdk/src"
+python -m unittest discover \
+  -s llm_notable_analysis_onprem_systemd/tests/onprem_service \
+  -p "test_*.py"
+```
+
+Full-tree unittest (used in install and air-gap docs):
+
+```bash
+export PYTHONPATH="llm_notable_analysis_onprem_systemd/src:onprem-llm-sdk/src"
+python -m unittest discover \
+  -s llm_notable_analysis_onprem_systemd/tests \
+  -p "test*.py" -v
+```
+
+Unittest and pytest counts can differ slightly (subtests); prefer pytest
+collection above for current totals.
+
+## Portal E2E (Playwright)
+
+Browser tests for the analyst portal React UI are not part of the pytest tree.
+After bootstrap, run from the repo root:
+
+```bash
+bash scripts/dev_portal_e2e.sh
+```
+
+See [`DEVELOPING.md`](../../../DEVELOPING.md) and
+[`frontend/analyst-portal/README.md`](../../frontend/analyst-portal/README.md).
+
+## Shell checks
+
+Syntax-check shell scripts in the on-prem package and LLM SDK:
 
 ```bash
 find llm_notable_analysis_onprem_systemd/scripts onprem-llm-sdk/scripts \
@@ -34,12 +125,12 @@ find llm_notable_analysis_onprem_systemd/scripts onprem-llm-sdk/scripts \
   while IFS= read -r script; do bash -n "$script" || exit 1; done
 ```
 
-## Docker-Backed pgvector Smoke
+## Docker-backed pgvector smoke
 
-Run this when Docker is available on a validation workstation or release host:
+Run when Docker is available on a validation workstation or release host:
 
 ```bash
-llm_notable_analysis_onprem_systemd/scripts/smoke_postgres_rag.sh
+bash llm_notable_analysis_onprem_systemd/scripts/smoke_postgres_rag.sh
 ```
 
 The smoke starts a disposable `pgvector/pgvector:pg16` container, runs the real
@@ -50,14 +141,16 @@ Postgres schema/ingest/retrieval path twice (general KB snippets into the defaul
 removes the container afterward. Override table names via `SMOKE_TABLE` /
 `SMOKE_SPL_TABLE` if needed.
 
+Options: `--python PATH`, `--port PORT`, `--keep-container` (see script `--help`).
+
 Docker is only the test harness; production uses the configured host
 PostgreSQL/pgvector service.
 
 This proves the database, pgvector extension, schema/table DDL, insert/upsert,
-and both retrieval-context code paths used by analyzers (`SOC_OPERATIONAL_CONTEXT`
-and SPL query grounding). It does not prove Mixedbread model loading or reranking.
+and both retrieval-context code paths used by analyzers. It does not prove
+Mixedbread model loading or reranking.
 
-## Full Service Chain
+## Full service chain
 
 After vLLM, LiteLLM, and `notable-analyzer` are running on a host:
 
@@ -65,3 +158,20 @@ After vLLM, LiteLLM, and `notable-analyzer` are running on a host:
 sudo bash llm_notable_analysis_onprem_systemd/scripts/smoke_service_chain.sh \
   --config-env /etc/notable-analyzer/config.env
 ```
+
+`--skip-file-drop` checks only vLLM and LiteLLM HTTP paths. See script
+`--help` for `CONFIG_ENV`, timeout, and `ALLOW_NON_LOOPBACK_HTTP` overrides.
+
+## Related docs
+
+| Topic | Doc |
+| --- | --- |
+| Dev venv and portal preview | [`DEVELOPING.md`](../../../DEVELOPING.md) |
+| Maintainer validation commands | [`internal/DEVELOPER_MAINTAINER_GUIDE.md`](../internal/DEVELOPER_MAINTAINER_GUIDE.md) |
+| Operations index | [`operations/README.md`](../operations/README.md) |
+| Host install and post-install checks | [`operations/deployment/INSTALL.md`](../operations/deployment/INSTALL.md) |
+| Air-gap acceptance | [`operations/deployment/AIRGAPPED_DEPLOYMENT.md`](../operations/deployment/AIRGAPPED_DEPLOYMENT.md) |
+| LLM inference ops | [`operations/llm/LLM_INFERENCE_OPERATIONS.md`](../operations/llm/LLM_INFERENCE_OPERATIONS.md) |
+| RAG tuning | [`operations/rag/RAG_OPERATIONS.md`](../operations/rag/RAG_OPERATIONS.md) |
+| Analyst portal ops | [`operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md) |
+| Phantom SOAR playbook tests | [`integrations/SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md`](../integrations/SOAR_PLAYBOOK_PHANTOM_NOTABLE_INDEX.md) |

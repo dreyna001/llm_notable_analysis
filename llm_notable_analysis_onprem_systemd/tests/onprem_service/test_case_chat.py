@@ -70,7 +70,7 @@ class _FakeEmbeddingModel:
     def encode(self, texts, show_progress_bar=False, convert_to_numpy=True):
         del show_progress_bar, convert_to_numpy
         self.encoded_texts.extend(texts)
-        return [[1.0] + [0.0] * 767 for _text in texts]
+        return [[1.0] + [0.0] * 1023 for _text in texts]
 
 
 class _BadEmbeddingModel:
@@ -717,8 +717,9 @@ class TestCaseChat(unittest.TestCase):
             sources,
             session=None,
             conversation_history=None,
+            text_complete=None,
         ) -> str:
-            del config, sources, session
+            del config, sources, session, text_complete
             captured["question"] = question
             captured["history"] = str(conversation_history)
             return "Follow-up answer."
@@ -742,6 +743,64 @@ class TestCaseChat(unittest.TestCase):
         self.assertEqual(response["answer_status"], "answered")
         self.assertIn("What is the verdict?", captured["history"])
         self.assertIn("Likely malicious", captured["history"])
+
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat._finalize_chat_response",
+        side_effect=lambda **kwargs: kwargs["response"],
+    )
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat.validate_chat_history_request",
+        return_value=None,
+    )
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat.load_session_transcript",
+        return_value=[
+            {"role": "user", "content": "What is the verdict?"},
+            {"role": "assistant", "content": "Likely malicious based on evidence."},
+        ],
+    )
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat.retrieve_case_sources",
+        return_value=[
+            RetrievedSource(
+                source_lane="current_case",
+                text="Evidence text.",
+            )
+        ],
+    )
+    def test_answer_case_chat_text_complete_receives_prompt_with_history(
+        self,
+        _mock_sources,
+        _mock_transcript,
+        _mock_validate,
+        _mock_finalize,
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def _text_complete(prompt: str, max_tokens: int) -> str:
+            captured["prompt"] = prompt
+            captured["max_tokens"] = max_tokens
+            return "Follow-up answer."
+
+        response = answer_case_chat(
+            payload={
+                "mode": "selected_case",
+                "question": "Expand on that.",
+                "selected_case_id": "case-1",
+                "session_id": "session-existing",
+            },
+            config=_config(CASE_QA_CHAT_HISTORY_ENABLED=True),
+            connect=lambda _dsn: _FakeConnection(row_pages=[[_chunk_row()], []]),
+            user_id="analyst@example.com",
+            text_complete=_text_complete,
+        )
+
+        self.assertEqual(response["answer_status"], "answered")
+        prompt = str(captured["prompt"])
+        self.assertIn("CONVERSATION HISTORY:", prompt)
+        self.assertIn("What is the verdict?", prompt)
+        self.assertIn("Likely malicious", prompt)
+        self.assertEqual(captured["max_tokens"], 800)
 
 
 if __name__ == "__main__":

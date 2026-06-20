@@ -1,6 +1,17 @@
 # On-Prem Notable Analysis Enhancements
 
-**Single source of truth:** the shared backlog for threat-intel adapters (including the canonical VirusTotal pattern), bounded investigative querying posture (Splunk-delivered paths plus roadmap SIEM/backend parity), CMDB/asset context, planner vs policy gates, **SOC-defined SOAR playbook invocation** (curated catalog, policy-gated adapter; tool-call proposal surface under evaluation), **LLM observability and tracing** (Langfuse-class / OpenTelemetry at the LLM transport edge—see **[LLM observability and tracing](./llm_notable_analysis_onprem_systemd/docs/architecture/feature_enhancements_architecture.md#llm-observability-and-tracing-langfuse-class-roadmap)**), **browse-only analyst portal and ~90-day case archive** (see **[Browse-only analyst portal and case archive](./llm_notable_analysis_onprem_systemd/docs/architecture/feature_enhancements_architecture.md#browse-only-analyst-portal-and-case-archive-90-day-retention-roadmap)**), ticketing breadth beyond SNOW, SPL/LLM pass layering, observability, quotas, analyst feedback, evaluation, and hallucination hygiene—under **`llm_notable_analysis_onprem_systemd/docs/architecture/feature_enhancements_architecture.md`**, **[Cross-cutting context roadmap (single source)](./llm_notable_analysis_onprem_systemd/docs/architecture/feature_enhancements_architecture.md#cross-cutting-context-roadmap-single-source)** (see **[SOC-defined SOAR playbook invocation](./llm_notable_analysis_onprem_systemd/docs/architecture/feature_enhancements_architecture.md#soc-defined-soar-playbook-invocation-roadmap)**) and **[Deployment instantiation (On-prem vs AWS)](./llm_notable_analysis_onprem_systemd/docs/architecture/feature_enhancements_architecture.md#deployment-instantiation-on-prem-vs-aws)**—each aligning **on-prem** instantiation (systemd analyzer host, `RAG_*`, Splunk MCP/REST, case SQLite index + `notable-portal` read service, etc.) beside **AWS** mapping rows.
-Rolling workflow & phased enablement sequencing: **`llm_notable_analysis_onprem_systemd/docs/delivery_package/EXECUTIVE_ONPREM_WORKFLOW.md`**. Locked implementation contracts for the bounded enhancement block: **`llm_notable_analysis_onprem_systemd/docs/technical_specs/feature_enhancements_technical_spec.md`**.
+**Single source of truth:** the shared future-capability backlog lives in
+[`llm_notable_analysis_onprem_systemd/docs/planning/FUTURE_ENHANCEMENTS_ROADMAP.md`](./llm_notable_analysis_onprem_systemd/docs/planning/FUTURE_ENHANCEMENTS_ROADMAP.md)
+(threat-intel adapters, SOC-defined SOAR playbook invocation, LLM observability,
+ticketing breadth, evaluation, and related themes).
 
-Do **not** maintain parallel bullet inventories here—the architecture sections above subsume legacy repo-root backlog text.
+**Shipped implementation contracts:**
+[`llm_notable_analysis_onprem_systemd/docs/technical_specs/feature_enhancements_technical_spec.md`](./llm_notable_analysis_onprem_systemd/docs/technical_specs/feature_enhancements_technical_spec.md)
+(analyzer enhancements) and
+[`llm_notable_analysis_onprem_systemd/docs/technical_specs/analyst_portal_case_archive_technical_spec.md`](./llm_notable_analysis_onprem_systemd/docs/technical_specs/analyst_portal_case_archive_technical_spec.md)
+(portal / archive / chat).
+
+Rolling workflow and phased enablement:
+[`llm_notable_analysis_onprem_systemd/docs/delivery_package/EXECUTIVE_ONPREM_WORKFLOW.md`](./llm_notable_analysis_onprem_systemd/docs/delivery_package/EXECUTIVE_ONPREM_WORKFLOW.md).
+
+Do **not** maintain parallel bullet inventories here.

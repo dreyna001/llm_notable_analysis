@@ -2,100 +2,157 @@
 
 ## Status
 
-Planning document for how analysts reach the on-prem portal over the internal
-network. It records the expected deployment shape for the first portal slice.
+Design rationale for how analysts reach the on-prem portal over the internal
+network. **Shipped.**
 
-**Operator rollout steps:** use the consolidated runbook
-[`operations/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](../operations/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md).
+**Rollout steps are superseded** by the operator runbook
+[`operations/analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](../operations/analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md).
+Use that doc for install, TLS, htpasswd, DNS, firewall, and browser validation.
+
+This plan records why v1 is shaped this way and points at shipped artifacts.
+It does not duplicate step-by-step cutover.
 
 ## Goal
 
-Analysts should open a normal internal HTTPS URL in their browser, such as:
+Analysts open a normal internal HTTPS URL in a browser:
 
 ```text
 https://notable-portal.<internal-domain>
 ```
 
-They should not SSH into the analyzer host or manually browse local files to use
-the portal.
+They do not SSH into the analyzer host or browse local files to use the portal.
 
-## Recommended V1 Network Shape
+## Shipped V1 Network Shape
 
 ```text
-Analyst browser
--> internal DNS name: notable-portal.<internal-domain>
--> nginx listening on TCP 443
--> FastAPI / Uvicorn on 127.0.0.1:8080
--> Postgres notable_cases schema
+Analyst browser (allowed subnets)
+  -> internal DNS: notable-portal.<internal-domain>  (TCP 443)
+  -> nginx on portal host (TLS, basic auth, React SPA, API proxy)
+  -> FastAPI on 127.0.0.1:8080 (loopback only; not on analyst network)
+  -> Postgres notable_cases schema on 127.0.0.1:5432
 ```
 
-Use nginx as the first documented reverse proxy path. FastAPI/Uvicorn stays
-bound to loopback and is not exposed directly to the network.
+nginx terminates HTTPS, serves the built React SPA from disk, and proxies
+`/api/*`, `/health`, and `/ready` to loopback FastAPI. Case routes fail closed
+without nginx auth and the shared proxy-secret header.
+
+## Design Rationale (Still Current)
+
+| Decision | Rationale |
+|----------|-----------|
+| nginx as the documented front door | TLS, auth, static SPA, rate limits, and access logs stay out of FastAPI |
+| FastAPI on loopback only | Analyst subnets never reach Uvicorn directly; `PORTAL_ALLOW_NON_LOOPBACK_BIND=false` by default |
+| nginx basic auth for v1 | Simple internal rollout; customer SSO can replace auth at nginx later |
+| Shared `PORTAL_PROXY_SECRET` | nginx sets `X-Notable-Portal-Proxy-Secret` on API routes so direct loopback callers cannot impersonate authenticated users |
+| Trusted user from nginx only | `PORTAL_TRUSTED_USER_HEADER=X-Forwarded-User`; set by nginx after basic auth |
+| Flat case visibility in v1 | All authenticated analysts see all retained cases; no per-case RBAC yet |
+| Same host as analyzer (default) | `install.sh` assumes co-located nginx; a separate internal web host is OK if the proxy path and secrets are preserved |
+
+## Shipped Artifacts
+
+| Artifact | Role |
+|----------|------|
+| [`scripts/install.sh`](../../scripts/install.sh) with `INSTALL_ANALYST_PORTAL=true` | Opt-in portal bring-up: `analyst_portal` profile, `portal.env`, Postgres schema, SPA build, nginx site + proxy-secret include, `notable-portal.service` |
+| [`deploy/nginx/notable-portal.conf`](../../deploy/nginx/notable-portal.conf) | Authoritative nginx example (SPA root, API locations, chat rate limit, TLS paths) |
+| [`config.portal.env.example`](../../config.portal.env.example) | Portal env contract (`PORTAL_BIND_HOST`, `PORTAL_PROXY_SECRET`, DSN, LLM URL) |
+| [`deploy/systemd/notable-portal.service`](../../deploy/systemd/notable-portal.service) | Portal systemd unit |
+
+**Installer automates:** portal env and generated proxy secret, nginx config copy
+(when nginx is present), frontend build to
+`/opt/notable-analyzer/frontend/analyst-portal/dist`, Postgres case-archive
+setup, and best-effort service start.
+
+**Operator still required after install:** TLS certificate and key, htpasswd
+users, `server_name` and cert paths in nginx, internal DNS, firewall, and
+analyst-workstation validation. See the network deployment runbook.
+
+Skip flags when assets are pre-staged: `INSTALL_PORTAL_SKIP_OS_PACKAGES=true`,
+`INSTALL_PORTAL_SKIP_FRONTEND_BUILD=true`, or
+`INSTALL_PORTAL_ALLOW_PARTIAL=true` (files only, no DB).
 
 ## Required Operator Inputs
 
-Before deployment, operators need to provide or approve:
+Before cutover, operators provide or approve:
 
-- Internal hostname, for example `notable-portal.soc.local`.
-- Portal host IP address.
-- Internal DNS record mapping the hostname to the portal host.
-- TLS certificate and private key for the hostname.
-- Auth method for v1, defaulting to nginx basic auth unless customer SSO is
-  already available.
-- Analyst source networks allowed to reach TCP `443`.
-- Whether nginx runs on the analyzer host or on a separate internal web host.
+- Internal hostname (nginx `server_name`, TLS SAN).
+- Portal host IP (DNS A record target).
+- TLS certificate and private key.
+- Analyst subnets allowed to reach TCP `443`.
+- Auth method (nginx basic auth is v1 default).
+- nginx placement (same host as analyzer, or separate internal web host).
 
-## DNS
+## DNS And Firewall
 
-Production should use internal DNS, usually AD DNS or the customer’s internal
-DNS platform:
+Internal DNS (AD or customer DNS platform):
 
 ```text
 notable-portal.soc.local -> 10.10.20.15
 ```
 
-Hosts-file entries are acceptable only for local/lab validation.
+Hosts-file entries are lab-only, not production.
 
-## TLS
-
-Nginx terminates HTTPS. Certificate options:
-
-- Internal corporate CA certificate for the portal hostname.
-- Existing internal wildcard certificate.
-- Self-signed certificate for lab-only testing.
-
-Expected nginx paths can be customer-specific, but examples may use:
+Minimum connectivity:
 
 ```text
-/etc/ssl/notable-portal/fullchain.pem
-/etc/ssl/notable-portal/privkey.pem
+analyst subnets  -> portal host TCP 443
+portal host      -> Postgres TCP 5432 (loopback or local)
+nginx            -> FastAPI 127.0.0.1:8080 (loopback only)
 ```
 
-## Firewall And Routing
+Do not expose TCP `8080` to analyst subnets.
 
-Minimum access:
+## TLS And Auth (Shipped Paths)
+
+nginx terminates HTTPS. Shipped example paths (customer paths may differ):
 
 ```text
-analyst subnets -> portal host TCP 443
-portal service -> Postgres TCP 5432
-nginx -> FastAPI loopback 127.0.0.1:8080
+/etc/nginx/tls/notable-portal.crt
+/etc/nginx/tls/notable-portal.key
+/etc/nginx/htpasswd/notable-portal
 ```
 
-FastAPI should not listen directly on the analyst network.
+Certificate sources: internal CA, internal wildcard, or self-signed (lab only).
 
-## Nginx Responsibilities
+Basic-auth users are **not** created by `install.sh`; operators create htpasswd
+entries through their credential process. nginx forwards the authenticated
+username as `X-Forwarded-User`.
 
-Nginx owns:
+API routes include `/etc/nginx/notable-portal-proxy-secret.conf`, which must
+match `PORTAL_PROXY_SECRET` in `/etc/notable-analyzer/portal.env`.
 
-- External/internal listener on `443`.
-- TLS termination.
-- First documented auth path, likely basic auth.
-- Optional customer SSO handoff later.
-- Request size limits.
-- Reverse proxy to FastAPI loopback.
-- Access logs.
+## FastAPI Boundaries
 
-Conceptual config:
+FastAPI owns portal API routes, health/readiness, chat validation, and Postgres
+reads from `notable_cases`. Default bind:
+
+```text
+PORTAL_BIND_HOST=127.0.0.1
+PORTAL_PORT=8080
+```
+
+Production UI is the React SPA served by nginx, not FastAPI templates.
+
+## Local Development
+
+Local dev may skip nginx and hit loopback directly (`http://127.0.0.1:8080`).
+That path is development-only. For workstation preview without production Postgres
+or nginx, see
+[`operations/analyst_portal/ANALYST_PORTAL_PREVIEW.md`](../operations/analyst_portal/ANALYST_PORTAL_PREVIEW.md).
+
+## Superseded By Shipped Rollout
+
+The following early-plan details are **superseded**. Do not copy them for new
+deployments; use the shipped nginx config and network deployment runbook instead.
+
+| Superseded (planning draft) | Shipped replacement |
+|-----------------------------|---------------------|
+| Single `location /` proxy to FastAPI | nginx serves SPA at `root`; separate `/api/`, `/api/chat`, `/health`, `/ready` proxy blocks — see [`deploy/nginx/notable-portal.conf`](../../deploy/nginx/notable-portal.conf) |
+| TLS under `/etc/ssl/notable-portal/` | `/etc/nginx/tls/notable-portal.{crt,key}` in shipped nginx example |
+| htpasswd at `/etc/nginx/notable-portal.htpasswd` | `/etc/nginx/htpasswd/notable-portal` |
+| Conceptual nginx snippet below | Full shipped config (HTTP->HTTPS redirect, chat rate limit, `$http_host` on API routes, proxy-secret include) |
+
+<details>
+<summary>Superseded conceptual nginx snippet (historical only)</summary>
 
 ```nginx
 server {
@@ -120,49 +177,21 @@ server {
 }
 ```
 
-## FastAPI Responsibilities
-
-FastAPI owns:
-
-- Portal API routes and health/readiness probes.
-- Case list/detail API.
-- Chat request validation and responses.
-- Postgres reads from `notable_cases`.
-- Optional bounded chat-history writes if enabled.
-
-Default bind:
-
-```text
-PORTAL_BIND_HOST=127.0.0.1
-PORTAL_PORT=8080
-```
-
-## Auth Decision For V1
-
-Assume all authenticated analysts can see all retained notables.
-
-First documented path:
-
-- nginx basic auth for lab/simple internal deployments.
-- Customer SSO/reverse-proxy auth can replace basic auth later without changing
-  the FastAPI app shape.
-
-## Local Development
-
-Local dev can skip nginx and run FastAPI directly on loopback:
-
-```text
-http://127.0.0.1:8080
-```
-
-This is for development only. Production/staging portal access should go through
-nginx and HTTPS.
+</details>
 
 ## Out Of Scope For V1
 
 - Public internet exposure.
-- Per-case RBAC.
-- Analyst self-service account management.
+- Per-case RBAC or analyst self-service account management.
 - Portal-triggered Splunk, ServiceNow, SOAR, or remediation actions.
-- Direct Uvicorn exposure to the analyst network.
+- Direct Uvicorn exposure on the analyst network.
+- SSO nginx example in-repo (basic auth documented first; customer SSO at nginx
+  is a later operator swap).
 
+## Related Docs
+
+- [`operations/analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](../operations/analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md) — rollout runbook (authoritative for cutover)
+- [`operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md) — day-two portal ops
+- [`operations/analyst_portal/ANALYST_PORTAL_CHAT_SECURITY.md`](../operations/analyst_portal/ANALYST_PORTAL_CHAT_SECURITY.md) — LLM boundaries
+- [`operations/deployment/INSTALL.md`](../operations/deployment/INSTALL.md) — base host install
+- [`technical_specs/analyst_portal_case_archive_technical_spec.md`](../technical_specs/analyst_portal_case_archive_technical_spec.md) — implementation contract

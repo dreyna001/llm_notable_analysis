@@ -331,7 +331,11 @@ class TestDeploymentContract(unittest.TestCase):
     def test_analyst_portal_operations_doc_covers_delivery_contract(self) -> None:
         """Portal operations doc should cover enablement, maintenance, and safety."""
         doc_text = (
-            PROJECT_ROOT / "docs" / "operations" / "ANALYST_PORTAL_OPERATIONS.md"
+            PROJECT_ROOT
+            / "docs"
+            / "operations"
+            / "analyst_portal"
+            / "ANALYST_PORTAL_OPERATIONS.md"
         ).read_text(encoding="utf-8")
 
         self.assertIn("CAPABILITY_PROFILES=core,analyst_portal", doc_text)
@@ -435,7 +439,11 @@ class TestDeploymentContract(unittest.TestCase):
     def test_kb_operations_doc_covers_document_lifecycle(self) -> None:
         """KB operations doc should explain content updates and rebuilds."""
         doc_text = (
-            PROJECT_ROOT / "docs" / "operations" / "KNOWLEDGE_BASE_OPERATIONS.md"
+            PROJECT_ROOT
+            / "docs"
+            / "operations"
+            / "rag"
+            / "KNOWLEDGE_BASE_OPERATIONS.md"
         ).read_text(encoding="utf-8")
 
         self.assertIn("Add Or Update Documents", doc_text)
@@ -451,7 +459,11 @@ class TestDeploymentContract(unittest.TestCase):
             PROJECT_ROOT / "docs" / "operations" / "README.md"
         ).read_text(encoding="utf-8")
         profile_doc = (
-            PROJECT_ROOT / "docs" / "operations" / "CAPABILITY_PROFILES.md"
+            PROJECT_ROOT
+            / "docs"
+            / "operations"
+            / "platform"
+            / "CAPABILITY_PROFILES.md"
         ).read_text(encoding="utf-8")
 
         self.assertIn("CAPABILITY_PROFILES.md", docs_index)
@@ -461,6 +473,7 @@ class TestDeploymentContract(unittest.TestCase):
             "html_reports",
             "rag",
             "spl_readonly",
+            "elastic_readonly",
             "ticket_draft",
             "action_gated",
             "analyst_portal",
@@ -479,13 +492,14 @@ class TestDeploymentContract(unittest.TestCase):
 
         self.assertEqual(offenders, [])
 
-    def test_architecture_doc_uses_module_entrypoint(self) -> None:
-        """Architecture doc should not show the obsolete script-style entrypoint."""
+    def test_airgapped_doc_uses_module_entrypoint(self) -> None:
+        """Air-gap doc should not show the obsolete script-style entrypoint."""
         doc_text = (
             PROJECT_ROOT
             / "docs"
-            / "architecture"
-            / "s3_notable_pipeline_onprem_airgapped_workflow.md"
+            / "operations"
+            / "deployment"
+            / "AIRGAPPED_DEPLOYMENT.md"
         ).read_text(encoding="utf-8")
 
         self.assertIn(

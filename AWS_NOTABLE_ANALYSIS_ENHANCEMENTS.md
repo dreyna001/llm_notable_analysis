@@ -1,7 +1,14 @@
 # AWS Notable Analysis Enhancements
 
-**Single source of truth:** AWS and on‑prem share **the same capability backlog**, maintained in **`llm_notable_analysis_onprem_systemd/docs/architecture/feature_enhancements_architecture.md`**—specifically **[Cross-cutting context roadmap (single source)](./llm_notable_analysis_onprem_systemd/docs/architecture/feature_enhancements_architecture.md#cross-cutting-context-roadmap-single-source)** (threat intelligence, VirusTotal canon, Athena/Security Lake investigative parity intent, deterministic risk cues, **SOC-defined SOAR playbook invocation**—see **[SOC-defined SOAR playbook invocation](./llm_notable_analysis_onprem_systemd/docs/architecture/feature_enhancements_architecture.md#soc-defined-soar-playbook-invocation-roadmap)**—**LLM observability and tracing** (Langfuse-class / OpenTelemetry—see **[LLM observability and tracing](./llm_notable_analysis_onprem_systemd/docs/architecture/feature_enhancements_architecture.md#llm-observability-and-tracing-langfuse-class-roadmap)**), **browse-only analyst portal and ~90-day case archive** (DynamoDB case index + S3 md/html artifacts + read-only API—see **[Browse-only analyst portal and case archive](./llm_notable_analysis_onprem_systemd/docs/architecture/feature_enhancements_architecture.md#browse-only-analyst-portal-and-case-archive-90-day-retention-roadmap)**), ticketing breadth, observability, quality loops, replay caches, degraded-mode semantics, SPL/LLM layering, etc.) and **[Deployment instantiation (On-prem vs AWS)](./llm_notable_analysis_onprem_systemd/docs/architecture/feature_enhancements_architecture.md#deployment-instantiation-on-prem-vs-aws)** (tables map each theme to Lambda / DynamoDB & S3 envelopes / Bedrock quotas / Secrets Manager posture vs systemd host equivalents).
+**Single source of truth:** AWS and on-prem share the same future-capability backlog in
+[`llm_notable_analysis_onprem_systemd/docs/planning/FUTURE_ENHANCEMENTS_ROADMAP.md`](./llm_notable_analysis_onprem_systemd/docs/planning/FUTURE_ENHANCEMENTS_ROADMAP.md)
+(including the **Deployment instantiation (On-prem vs AWS)** table).
 
-Operational deploy/run/diagram specificity for **`s3_notable_pipeline`**: **`s3_notable_pipeline/docs/delivery_package/end_to_end_diagrams/END_TO_END_DIAGRAMS.md`** (with SVG exports in the same folder), plus **`docs/`** runbooks—these describe hosts and wiring rather than backlog semantics.
+Operational deploy/run/diagram specificity for **`s3_notable_pipeline`**:
+[`s3_notable_pipeline/docs/delivery_package/end_to_end_diagrams/END_TO_END_DIAGRAMS.md`](./s3_notable_pipeline/docs/delivery_package/end_to_end_diagrams/END_TO_END_DIAGRAMS.md)
+and [`s3_notable_pipeline/docs/`](./s3_notable_pipeline/docs/) runbooks.
 
-Assume eventual **feature-parity aspiration** versus the flagged on‑prem enhancement block (`SPL_QUERY_GENERATION_*`, Splunk MCP/REST investigation, deterministic `query_result` enrichment, ServiceNow adapters, `RAG_ENABLED`, structured output contracts)—but track **parity gaps** via code + **`s3_notable_pipeline`** README/specs, **not** by duplicating backlog bullets in this stub.
+**Shipped parity status:**
+[`s3_notable_pipeline/docs/technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md`](./s3_notable_pipeline/docs/technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md).
+
+Do **not** duplicate backlog bullets in this stub.

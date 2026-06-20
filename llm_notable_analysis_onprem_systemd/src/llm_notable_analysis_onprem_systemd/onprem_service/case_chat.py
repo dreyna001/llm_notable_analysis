@@ -62,6 +62,7 @@ _LLM_READINESS_ERRORS = (
 ConnectionFactory = Callable[[str], Any]
 SynthesizeFn = Callable[[str, list["RetrievedSource"]], str]
 GeneralSynthesizeFn = Callable[[str], str]
+TextCompleteFn = Callable[[str, int], str]
 KnowledgeBaseProvider = Callable[[str], list["RetrievedSource"]]
 ChatMode = Literal["selected_case"]
 
@@ -979,12 +980,16 @@ def _default_synthesize_general_knowledge(
     question: str,
     session: Any = None,
     conversation_history: Sequence[ChatTurn] | None = None,
+    text_complete: TextCompleteFn | None = None,
 ) -> str:
     """Call the configured local LLM for bounded technology answers."""
     prompt = _build_general_knowledge_prompt(
         question,
         conversation_history=conversation_history,
     )
+    max_tokens = config.CASE_QA_MAX_ANSWER_TOKENS
+    if text_complete is not None:
+        return text_complete(prompt, max_tokens).strip()
     if session is not None:
         answer, _latency = openai_chat_complete(
             session,
@@ -1019,6 +1024,7 @@ def _finalize_general_knowledge_response(
     general_synthesize: GeneralSynthesizeFn | None,
     llm_session: Any,
     conversation_history: Sequence[ChatTurn] | None = None,
+    text_complete: TextCompleteFn | None = None,
 ) -> dict[str, Any] | None:
     """Return a sanitized technology response, or None when disabled/unusable."""
     if not bool(config.CASE_QA_GENERAL_KNOWLEDGE_ENABLED):
@@ -1031,6 +1037,7 @@ def _finalize_general_knowledge_response(
             question=question,
             session=llm_session,
             conversation_history=conversation_history,
+            text_complete=text_complete,
         )
     answer = sanitize_portal_chat_answer(answer)
     if not answer:
@@ -1118,6 +1125,7 @@ def _default_synthesize_answer(
     sources: Sequence[RetrievedSource],
     session: Any = None,
     conversation_history: Sequence[ChatTurn] | None = None,
+    text_complete: TextCompleteFn | None = None,
 ) -> str:
     """Call the configured local LLM for bounded answer synthesis."""
     prompt = _build_prompt(
@@ -1125,6 +1133,9 @@ def _default_synthesize_answer(
         sources,
         conversation_history=conversation_history,
     )
+    max_tokens = config.CASE_QA_MAX_ANSWER_TOKENS
+    if text_complete is not None:
+        return text_complete(prompt, max_tokens).strip()
     if session is not None:
         answer, _latency = openai_chat_complete(
             session,
@@ -1191,6 +1202,7 @@ def answer_case_chat(
     knowledge_base_provider: KnowledgeBaseProvider | None = None,
     llm_session: Any = None,
     user_id: str | None = None,
+    text_complete: TextCompleteFn | None = None,
 ) -> dict[str, Any]:
     """Answer one portal chat request with retrieval-bound synthesis."""
     if not bool(config.CASE_QA_ENABLED):
@@ -1237,6 +1249,7 @@ def answer_case_chat(
             general_synthesize=general_synthesize,
             llm_session=llm_session,
             conversation_history=conversation_history,
+            text_complete=text_complete,
         )
         if general_response is not None:
             return _finalize_chat_response(
@@ -1266,6 +1279,7 @@ def answer_case_chat(
             sources=sources,
             session=llm_session,
             conversation_history=conversation_history,
+            text_complete=text_complete,
         )
     answer = sanitize_portal_chat_answer(answer)
     if not answer or _should_fallback_to_general_knowledge(answer):
@@ -1278,6 +1292,7 @@ def answer_case_chat(
             general_synthesize=general_synthesize,
             llm_session=llm_session,
             conversation_history=conversation_history,
+            text_complete=text_complete,
         )
         if general_response is not None:
             return _finalize_chat_response(

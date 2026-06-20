@@ -47,7 +47,8 @@ $editableInstall = @(
     "-e", (Join-Path $RepoRoot "onprem_rag_notable_analysis"),
     "-e", (Join-Path $RepoRoot "llm_notable_analysis_onprem_systemd"),
     "pytest",
-    "nodeenv"
+    "nodeenv",
+    "boto3==1.37.38"
 )
 Invoke-VenvPip @editableInstall
 

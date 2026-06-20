@@ -68,7 +68,7 @@ class _FakeEmbeddingModel:
     def encode(self, texts, show_progress_bar=False, convert_to_numpy=True):
         del show_progress_bar, convert_to_numpy
         self.encoded_texts.extend(texts)
-        return [[1.0] + [0.0] * 767 for _text in texts]
+        return [[1.0] + [0.0] * 1023 for _text in texts]
 
 
 class _BadDimensionEmbeddingModel:
@@ -212,7 +212,7 @@ class TestCaseSearch(unittest.TestCase):
         insert_sql, rows = connection.executemany_calls[0]
         self.assertIn('INSERT INTO "notable_cases".case_chunks', insert_sql)
         self.assertTrue(rows[0][6].startswith("[1.00000000,0.00000000"))
-        self.assertEqual(rows[0][6].count(","), 767)
+        self.assertEqual(rows[0][6].count(","), 1023)
         self.assertIn(
             (
                 'UPDATE "notable_cases".cases SET retrieval_status = %s WHERE case_id = %s',

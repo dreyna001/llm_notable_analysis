@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from llm_notable_analysis_onprem_systemd.onprem_service.config import Config
 from llm_notable_analysis_onprem_systemd.onprem_service.portal_app import build_portal_app
 
-from test_case_chat_history import _HistoryFakeConnection
+from .test_case_chat_history import _HistoryFakeConnection
 
 _USER_HEADERS = {"X-Forwarded-User": "analyst@example.com"}
 _AUTH_HEADERS = {
@@ -26,7 +26,7 @@ _OTHER_AUTH_HEADERS = {
 class _FakeEmbeddingModel:
     def encode(self, texts, show_progress_bar=False, convert_to_numpy=True):
         del show_progress_bar, convert_to_numpy
-        return [[1.0] + [0.0] * 767 for _text in texts]
+        return [[1.0] + [0.0] * 1023 for _text in texts]
 
 
 def _history_config(**overrides: object) -> Config:

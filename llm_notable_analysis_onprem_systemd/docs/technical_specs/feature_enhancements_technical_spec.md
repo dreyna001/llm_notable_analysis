@@ -2,106 +2,152 @@
 
 ## Status
 
-This document is the normative implementation contract for the feature-enhancement block in `llm_notable_analysis_onprem_systemd`.
+Normative implementation contract for optional investigation, enrichment,
+interpretation, ServiceNow, HTML reports, and side-effect idempotency in
+`llm_notable_analysis_onprem_systemd`. Modules listed below are **shipped**;
+this spec wins over older planning notes when they conflict.
 
-If wording conflicts with `../architecture/feature_enhancements_architecture.md`, this spec wins for implementation detail.
+Operator runbooks: [`docs/operations/README.md`](../operations/README.md).
 
 ## 1. Purpose
 
-Implement optional read-only Splunk investigation, deterministic query-result enrichment, optional query-result interpretation, and ServiceNow draft/create support in the existing on-prem `systemd` analyzer.
+Preserve the default file-drop analysis path while adding optional:
 
-This block must preserve the current default file-drop analysis path.
+- Splunk SPL query generation and read-only investigation (REST or MCP)
+- Elasticsearch Query DSL generation and read-only `_search` execution (REST only)
+- Deterministic query-result enrichment and optional bounded LLM interpretation
+- ServiceNow incident draft/create with explicit approval
+- Static HTML dashboard reports (`html_reports` profile)
+- File-backed idempotency for external side effects (`action_gated` profile)
+
+Parity is required in `onprem_main.py` and `onprem_main_nonsdk.py`.
 
 ## 2. Scope
 
-### In scope
+### In scope (shipped)
 
-- extract SPL generation helpers from `local_llm_client.py`
-- add read-only Splunk REST investigation execution
-- add read-only Splunk MCP investigation execution
-- add deterministic query-result enrichment before markdown rendering
-- add optional bounded LLM interpretation of deterministic query results
-- add ServiceNow incident draft building
-- add ServiceNow incident create with explicit approval
-- keep parity in `onprem_main_nonsdk.py` and `local_llm_client_nonsdk.py`
-- add optional local tool-call structured-output mode for analysis and SPL calls
-- add env flags to `config.env.example` and `src/llm_notable_analysis_onprem_systemd/onprem_service/config.py`
-- add deterministic unit tests with fake responses
+- `spl_query_generation.py`, `spl_query_grounding.py`, `splunk_investigation.py`
+- `elastic_query_generation.py`, `elasticsearch_query_grounding.py`, `elasticsearch_investigation.py`
+- `query_result_enrichment.py`, `query_result_interpretation.py`
+- `servicenow.py`, `idempotency.py`, `sinks.py`, `html_generator.py`
+- Capability profiles in `config.py` (`CAPABILITY_PROFILES`)
+- Env contract in `config.env.example` and `config.py`
+- Deterministic unit tests under `tests/onprem_service/`
 
 ### Out of scope
 
-- gzip file-drop intake (planned on-prem; implemented in AWS
-  `s3_notable_pipeline` — see
-  [`s3_notable_pipeline/docs/operations/FILE_DROP_AND_RETENTION_OPERATIONS.md`](../../../s3_notable_pipeline/docs/operations/FILE_DROP_AND_RETENTION_OPERATIONS.md))
-- broad refactor of `local_llm_client.py`
-- creating `query_models.py`, `query_policy.py`, or `writeback_policy.py` as separate files
-- introducing capability profiles, customer bundles, shared cores, registries, or plugin systems
-- changing existing RAG behavior
-- enabling any new feature by default
-- live Splunk, MCP, or ServiceNow calls in tests
+- **Gzip file-drop intake** — **planned on-prem** (not in `ingest.py`); **shipped in AWS**
+  `s3_notable_pipeline` (`.json.gz` / `.txt.gz`, S3 `ContentEncoding: gzip`,
+  `MAX_DECOMPRESSED_INPUT_BYTES`). See
+  [on-prem file-drop ops](../operations/platform/FILE_DROP_AND_RETENTION_OPERATIONS.md)
+  and
+  [AWS file-drop ops](../../../s3_notable_pipeline/docs/operations/platform/FILE_DROP_AND_RETENTION_OPERATIONS.md).
+- Broad refactor of `local_llm_client.py`
+- Separate `query_models.py`, `query_policy.py`, or `writeback_policy.py` modules
+- Changing default RAG behavior or enabling new features by default
+- Live Splunk, Elasticsearch, MCP, ServiceNow, or LLM calls in unit tests
 
-## 3. Baseline Assumptions
+## 3. Capability Profiles
 
-- The current service remains a file-drop `systemd` analyzer.
-- The `rag` capability profile injects local SOC context into the prompt.
-- The `spl_readonly` capability profile runs a second bounded LLM call for SPL query fields and bounded read-only execution.
-- When the `rag` profile is selected, `SOC_OPERATIONAL_CONTEXT` may include runbooks/SOP/schema-style guidance used for **general** analyst reasoning; deterministic SPL grounding for environment-specific tokens uses **`SPL_QUERY_RAG_ENABLED`** plus **`SPL_QUERY_GROUNDING_CONTEXT`** into that same SPL call (separate Postgres table).
-- Existing Splunk notable writeback through `SPLUNK_SINK_ENABLED` remains separate from read-only investigation.
-- All new behavior is optional and off by default.
+Authoritative mapping lives in `config.py` (`_CAPABILITY_PROFILE_FLAGS`) and
+[`CAPABILITY_PROFILES.md`](../operations/platform/CAPABILITY_PROFILES.md).
 
-## 4. Baseline Constraints
+| Profile | Enables (summary) |
+|---------|-------------------|
+| `core` | Base file-drop path (no feature flags) |
+| `html_reports` | `HTML_REPORT_ENABLED` |
+| `rag` | `RAG_ENABLED` |
+| `spl_readonly` | `SPL_QUERY_GENERATION_ENABLED`, `INVESTIGATION_QUERY_EXECUTION_ENABLED`, `INVESTIGATION_QUERY_BACKEND=splunk` |
+| `elastic_readonly` | `ELASTIC_QUERY_GENERATION_ENABLED`, `INVESTIGATION_QUERY_EXECUTION_ENABLED`, `INVESTIGATION_QUERY_BACKEND=elasticsearch` |
+| `ticket_draft` | `SERVICENOW_DRAFT_ENABLED` |
+| `action_gated` | Splunk writeback, ServiceNow draft/create, create approval, `SIDE_EFFECT_IDEMPOTENCY_ENABLED` |
+| `analyst_portal` | Case archive, portal, Case Q&A (separate from this block) |
 
-- Keep the existing direct modular style.
-- Keep `onprem_main.py` and `onprem_main_nonsdk.py` as orchestration points.
-- Add new files only when an existing module would become harder to read or test.
-- Keep query execution read-only.
-- Do not treat query results as direct alert evidence.
-- Do not create ServiceNow incidents without explicit approval metadata.
+Rules:
 
-## 5. Required File Shape
+- `spl_readonly` and `elastic_readonly` are mutually exclusive.
+- Profile-controlled flags override legacy direct env when the profile sets them.
+- `SPL_QUERY_RAG_ENABLED`, `ELASTICSEARCH_GROUNDING_ENABLED`, and
+  `QUERY_RESULT_INTERPRETATION_ENABLED` are **not** profile-controlled.
 
-Required new implementation files:
+## 4. Baseline Assumptions
 
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/spl_query_generation.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/spl_query_grounding.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/splunk_investigation.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/query_result_enrichment.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/query_result_interpretation.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/servicenow.py`
+- Default ingest is plain `.json` / `.txt` file-drop (`INGEST_MODE=file_drop`).
+- Splunk notable writeback (`SPLUNK_SINK_ENABLED`) is separate from read-only investigation.
+- Query results are advisory; they must not populate `evidence_vs_inference.evidence`.
+- ServiceNow create requires payload approval when `SERVICENOW_CREATE_REQUIRES_APPROVAL=true`.
+- All new behavior is optional and off by default (`CAPABILITY_PROFILES=core`).
 
-Expected modified files:
+## 5. Module and File Contract
 
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/local_llm_client.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/local_llm_client_nonsdk.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/markdown_generator.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/onprem_main.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/onprem_main_nonsdk.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/config.py`
-- `config.env.example`
-- `README.md`
+### Shipped modules
 
-Required test files:
+| Module | Responsibility |
+|--------|----------------|
+| `spl_query_generation.py` | SPL contract, validation, normalization, merge-by-position, prompt schema |
+| `spl_query_grounding.py` | Postgres retrieval for `SPL_QUERY_GROUNDING_CONTEXT` |
+| `splunk_investigation.py` | SPL policy validation, REST oneshot, MCP `run_search`, parallel fan-out |
+| `elastic_query_generation.py` | Elastic Query DSL contract, validation, normalization, merge-by-position |
+| `elasticsearch_query_grounding.py` | Postgres retrieval for Elastic grounding context |
+| `elasticsearch_investigation.py` | DSL policy validation, HTTPS `_search`, process-wide concurrency guard |
+| `query_result_enrichment.py` | Adds `query_result_section`; annotates hypotheses; no evidence mutation |
+| `query_result_interpretation.py` | Bounded interpretation schema/validation; no score mutation |
+| `servicenow.py` | Draft builder, approval gate, create POST, idempotent create |
+| `idempotency.py` | File-backed side-effect reservations (`begin_side_effect`, markers, locks) |
+| `sinks.py` | Markdown/HTML filesystem writes; Splunk notable update with idempotency |
+| `html_generator.py` | Static HTML dashboard including query, interpretation, ServiceNow tabs |
 
-- `tests/onprem_service/test_spl_query_generation.py`
-- `tests/onprem_service/test_splunk_investigation.py`
-- `tests/onprem_service/test_query_result_enrichment.py`
-- `tests/onprem_service/test_query_result_interpretation.py`
-- `tests/onprem_service/test_servicenow.py`
-- updates to existing orchestration and markdown tests as needed
+### Orchestration and rendering
+
+- `local_llm_client.py` / `local_llm_client_nonsdk.py` — transport, main analysis, optional second call for SPL or Elastic query fields, optional interpretation call, `LLM_STRUCTURED_OUTPUT_MODE` (`prompt_json` \| `tool_call`)
+- `markdown_generator.py` — Query Results and Query Result Interpretation sections
+- `onprem_main.py` / `onprem_main_nonsdk.py` — wiring below
+- `config.py`, `config.env.example`
+
+### Tests (required coverage areas)
+
+`test_spl_query_generation.py`, `test_splunk_investigation.py`,
+`test_elastic_query_generation.py`, `test_elasticsearch_investigation.py`,
+`test_query_result_enrichment.py`, `test_query_result_interpretation.py`,
+`test_servicenow.py`, `test_idempotency.py`, `test_html_generator.py`,
+`test_markdown_generator.py`, `test_onprem_main_investigation.py`,
+`test_onprem_main_servicenow.py`, `test_config_runtime_contract.py`.
+
+Run:
+
+```bash
+python -m unittest discover -s llm_notable_analysis_onprem_systemd/tests/onprem_service -p "test*.py" -v
+```
 
 ## 6. Runtime Config Contract
 
-### 6.1 New optional env vars
+### 6.1 Shared investigation flags
 
 ```env
+CAPABILITY_PROFILES=core
 INVESTIGATION_QUERY_EXECUTION_ENABLED=false
-INVESTIGATION_QUERY_EXECUTOR=rest
+INVESTIGATION_QUERY_BACKEND=splunk
 INVESTIGATION_MAX_QUERIES_PER_ALERT=6
 INVESTIGATION_MAX_CONCURRENT_QUERIES=6
 QUERY_RESULT_INTERPRETATION_ENABLED=false
 QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS=4000
 QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS=3
 QUERY_RESULT_INTERPRETATION_MAX_TOKENS=768
+LLM_STRUCTURED_OUTPUT_MODE=prompt_json
+```
+
+Validation highlights:
+
+- `INVESTIGATION_QUERY_BACKEND` must be `splunk` or `elasticsearch`.
+- `INVESTIGATION_QUERY_EXECUTOR` must be `rest` or `mcp` (**Splunk only**; Elastic is REST-only).
+- Positive integer bounds on concurrency, interpretation budgets, timeouts, max rows.
+- Do **not** add `QUERY_RESULT_ENRICHMENT_ENABLED` (enrichment is deterministic whenever execution returns results).
+
+### 6.2 Splunk (when `INVESTIGATION_QUERY_BACKEND=splunk`)
+
+```env
+SPL_QUERY_GENERATION_ENABLED=false
+INVESTIGATION_QUERY_EXECUTOR=rest
 SPLUNK_SEARCH_ENDPOINT_PATH=/services/search/jobs/oneshot
 SPLUNK_SEARCH_ALLOWED_INDEXES=main,notable,risk
 SPLUNK_SEARCH_ALLOWED_COMMANDS=search,stats,table,fields,where,head
@@ -110,7 +156,40 @@ SPLUNK_SEARCH_MAX_TIME_RANGE=24h
 SPLUNK_SEARCH_MAX_ROWS=100
 SPLUNK_SEARCH_TIMEOUT_SECONDS=30
 SPLUNK_MCP_TOOL_NAME=splunk_search
+SPL_QUERY_RAG_ENABLED=false
+SPL_QUERY_RAG_FAILURE_MODE=suppress
+```
 
+Splunk REST credentials (`SPLUNK_BASE_URL`, `SPLUNK_API_TOKEN`) are required for REST execution, not for generation-only mode.
+
+Operator guide: [`SPL_OPERATIONS.md`](../operations/investigation/SPL_OPERATIONS.md).
+
+### 6.3 Elasticsearch (when `INVESTIGATION_QUERY_BACKEND=elasticsearch`)
+
+```env
+ELASTIC_QUERY_GENERATION_ENABLED=false
+ELASTICSEARCH_BASE_URL=
+ELASTICSEARCH_API_KEY=
+ELASTICSEARCH_INDEX_ALLOWLIST=
+ELASTICSEARCH_ALLOW_WILDCARD_INDEXES=false
+ELASTICSEARCH_TIMESTAMP_FIELD=@timestamp
+ELASTICSEARCH_ALLOWED_FIELDS=
+ELASTICSEARCH_GROUNDING_ENABLED=false
+ELASTICSEARCH_GROUNDING_FAILURE_MODE=suppress
+ELASTICSEARCH_MAX_TIME_RANGE=24h
+ELASTICSEARCH_MAX_ROWS=100
+ELASTICSEARCH_TIMEOUT_SECONDS=30
+```
+
+When generation or execution is enabled: non-empty `ELASTICSEARCH_INDEX_ALLOWLIST`.
+When execution is enabled: HTTPS `ELASTICSEARCH_BASE_URL`, `ELASTICSEARCH_API_KEY`,
+and non-empty `ELASTICSEARCH_ALLOWED_FIELDS` (unless grounding supplies field policy).
+
+Operator guide: [`ELASTICSEARCH_OPERATIONS.md`](../operations/investigation/ELASTICSEARCH_OPERATIONS.md).
+
+### 6.4 ServiceNow and side effects
+
+```env
 SERVICENOW_DRAFT_ENABLED=false
 SERVICENOW_CREATE_ENABLED=false
 SERVICENOW_CREATE_REQUIRES_APPROVAL=true
@@ -119,123 +198,50 @@ SERVICENOW_CREATE_PATH=/api/now/table/incident
 SERVICENOW_API_TOKEN=
 SERVICENOW_ASSIGNMENT_GROUP=
 SERVICENOW_TIMEOUT_SECONDS=15
-LLM_STRUCTURED_OUTPUT_MODE=prompt_json
-
-# Optional SPL-dedicated Postgres KB grounding (defaults off).
-SPL_QUERY_RAG_ENABLED=false
-SPL_QUERY_RAG_SOURCE_DIR=/opt/llm-notable-analysis/knowledge_base/spl_query_source_docs
-SPL_QUERY_RAG_INDEX_DIR=/opt/llm-notable-analysis/knowledge_base/spl_query_index
-SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE=spl_query_chunks
-SPL_QUERY_RAG_MAX_SNIPPETS=4
-SPL_QUERY_RAG_CONTEXT_BUDGET_CHARS=1600
-SPL_QUERY_RAG_FAILURE_MODE=suppress
+SIDE_EFFECT_IDEMPOTENCY_ENABLED=false
+SIDE_EFFECT_IDEMPOTENCY_DIR=/var/notables/idempotency
 ```
 
-### 6.2 Config validation rules
+Validation: HTTPS base URL and non-empty token/path when create is enabled;
+non-empty assignment group when draft is enabled.
 
-- `INVESTIGATION_QUERY_EXECUTOR` must be `rest` or `mcp`.
-- `INVESTIGATION_MAX_QUERIES_PER_ALERT` must be a positive integer and default to `6`.
-- `INVESTIGATION_MAX_CONCURRENT_QUERIES` must be a positive integer and default to `6`.
-- `QUERY_RESULT_INTERPRETATION_ENABLED` defaults to `false` and is effective only when query execution returns a `query_result_section`.
-- `QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS`, `QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS`, and `QUERY_RESULT_INTERPRETATION_MAX_TOKENS` must be positive integers within bounded operator limits.
-- Search timeout and max rows must be positive integers.
-- Allowed indexes and commands must parse to non-empty lists when query execution is enabled.
-- Denied commands must parse to a list.
-- `SERVICENOW_BASE_URL` must be HTTPS when create is enabled.
-- `SERVICENOW_CREATE_PATH` must be non-empty and start with `/` when create is enabled.
-- ServiceNow assignment group must be non-empty when draft is enabled.
-- ServiceNow base URL and token must be non-empty when create is enabled.
-- `LLM_STRUCTURED_OUTPUT_MODE` must be `prompt_json` or `tool_call`.
+Operator guides:
+[`SERVICENOW_OPERATIONS.md`](../operations/integrations/SERVICENOW_OPERATIONS.md),
+[`SPLUNK_WRITEBACK_OPERATIONS.md`](../operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md).
 
-Do not add `QUERY_RESULT_ENRICHMENT_ENABLED`.
+### 6.5 HTML reports
 
-## 7. Diff 1: SPL Generation Extraction
+```env
+HTML_REPORT_ENABLED=false
+```
 
-### Objective
+Enabled by `html_reports` profile. Renders query, interpretation, and ServiceNow sections when present.
 
-Move self-contained SPL generation pieces out of `local_llm_client.py` without changing behavior.
+## 7. SPL Query Generation
 
-### Files
+**Module:** `spl_query_generation.py`
 
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/spl_query_generation.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/local_llm_client.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/local_llm_client_nonsdk.py`
-- `tests/onprem_service/test_spl_query_generation.py`
-- existing LLM client tests as needed
+- Constants: `SPL_QUERY_GENERATION_RULES`, `SPL_QUERY_FIELDS`, `SPL_QUERY_STRATEGIES`
+- Contract validation rejects placeholders, invented `index=` / `sourcetype` / macros / datamodel tokens (unless grounding context authorizes)
+- Second bounded LLM call when `SPL_QUERY_GENERATION_ENABLED=true` and backend is `splunk`
+- Merge generated fields onto six hypotheses by position; one repair attempt; fail-soft suppression on contract failure
+- `LLM_STRUCTURED_OUTPUT_MODE=tool_call`: local tool `generate_spl_queries`; fallback to prompt JSON on parse failure
 
-### Implementation
+## 8. Splunk Investigation Execution
 
-Move these into `spl_query_generation.py`:
+**Module:** `splunk_investigation.py`
 
-- `SPL_QUERY_GENERATION_RULES`
-- SPL query field names
-- allowed SPL query strategies
-- SPL query contract validation
-- SPL query field normalization and suppression helpers
-- SPL-only prompt builder (alert + 6 hypotheses + SOC/RAG context in, query fields out)
-- deterministic merge-by-position helper to attach generated query fields back to hypotheses
+Policy (`validate_splunk_query_policy`) requires:
 
-When `LLM_STRUCTURED_OUTPUT_MODE=tool_call`:
+- non-empty query with explicit `index=` in allowlist
+- no denied commands; piped commands strictly allowlisted
+- at least one allowed command
+- `time_range`, `max_rows`, `timeout_seconds` within configured maxima
 
-- main analysis call should request a local function/tool call for the analysis JSON contract
-- SPL-only second call should request a local function/tool call for SPL query fields
-- if tool-call parsing fails for a request, fallback to prompt-json behavior for that request
+Execution:
 
-Leave these in `local_llm_client.py`:
-
-- LLM transport
-- RAG setup and context retrieval
-- prompt assembly
-- repair loop
-- TTP filtering
-- metadata annotation
-
-Mirror the same split behavior in `local_llm_client_nonsdk.py`.
-
-### Acceptance criteria
-
-- Behavior is unchanged when `SPL_QUERY_GENERATION_ENABLED=false`.
-- Main alert-analysis prompt does not include SPL query-generation instructions.
-- When the `spl_readonly` profile is selected, SPL query generation runs in a second bounded LLM call.
-- SPL output merges onto hypotheses by position and passes SPL contract validation.
-- SPL contract failure after one repair attempt suppresses SPL fields without failing base analysis output.
-- Existing SPL generation tests still pass.
-- New tests cover valid SPL fields, placeholder rejection, index/sourcetype/macro rejection, suppression when disabled, and second-call split behavior.
-- New tests cover tool-call mode for main + SPL calls and tool-call fallback-to-prompt-json behavior.
-
-## 8. Diff 2: Splunk Investigation Execution
-
-### Objective
-
-Add read-only Splunk investigation execution through REST and MCP in one concrete module.
-
-### Files
-
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/splunk_investigation.py`
-- `tests/onprem_service/test_splunk_investigation.py`
-
-### Implementation
-
-`splunk_investigation.py` must include:
-
-- a small query-result evidence shape
-- read-only SPL policy validation
-- REST execution through Splunk oneshot search
-- MCP execution through an injected client with `run_search(payload: dict) -> dict`
-- response normalization shared by REST and MCP paths
-- bounded parallel execution for up to `INVESTIGATION_MAX_CONCURRENT_QUERIES` searches
-
-Policy validation must check:
-
-- query is non-empty
-- query references an allowed `index=...`
-- query does not contain denied commands
-- query contains at least one allowed command
-- time range is present and within max
-- max rows is present and within max
-- timeout is present and within max
-
-MCP payload shape:
+- **REST:** `POST {SPLUNK_BASE_URL}{SPLUNK_SEARCH_ENDPOINT_PATH}` oneshot
+- **MCP:** injected client `run_search(payload) -> dict` with tool payload:
 
 ```python
 {
@@ -248,219 +254,98 @@ MCP payload shape:
 }
 ```
 
-MCP response must be a mapping and include either:
+MCP response mapping must expose `raw_result_ref`, `search_id`, `job_id`, or `sid`.
 
-- `raw_result_ref`
-- `search_id`
-- `job_id`
-- `sid`
+Fan-out: up to `INVESTIGATION_MAX_QUERIES_PER_ALERT` (default 6) per alert;
+`INVESTIGATION_MAX_CONCURRENT_QUERIES` (default **6**) parallel workers.
+Normalized results include compact sample rows (max 5); raw row bodies are not stored in report metadata by default.
 
-### Acceptance criteria
+## 9. Elasticsearch Query Generation and Execution
 
-- Disabled query execution performs no external call.
-- Valid REST request builds the expected path and payload.
-- Valid MCP request builds the expected tool payload.
-- Policy denial prevents REST and MCP calls.
-- Up to 6 generated hypothesis queries may be attempted per alert.
-- At most 3 searches run concurrently by default.
-- Malformed REST or MCP responses return structured failure metadata.
-- Raw row bodies are not stored in report metadata by default.
+**Modules:** `elastic_query_generation.py`, `elasticsearch_investigation.py`
 
-## 9. Diff 3: Query-Result Enrichment
+Generation mirrors SPL: second LLM call when `ELASTIC_QUERY_GENERATION_ENABLED=true`;
+fields include `primary_elastic_query` (`index_pattern` + `_search` body),
+`query_strategy`, `why_this_query`, `supports_if`, `weakens_if`.
 
-### Objective
+Execution validates DSL against index allowlist, denied DSL keys, allowed field
+policy, bounded time range and `size`, then POSTs to
+`{ELASTICSEARCH_BASE_URL}/{index}/_search` with API key auth. **No MCP path.**
 
-Deterministically enrich the existing LLM response object with query-result evidence before markdown rendering.
+Shared enrichment and interpretation consume the same `query_result_section` shape.
 
-### Files
+## 10. Query-Result Enrichment
 
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/query_result_enrichment.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/markdown_generator.py`
-- `tests/onprem_service/test_query_result_enrichment.py`
-- `tests/onprem_service/test_markdown_generator.py`
+**Module:** `query_result_enrichment.py`
 
-### Implementation
+- Adds `query_result_section.summary` and `query_result_section.queries`
+- Per-query status: `executed`, `denied`, `skipped`, `failed` (maps REST `success` -> `executed`)
+- Hypothesis annotations: `query_result_status`, `query_result_summary`, optional `query_result_reference`
+- Does not modify `evidence_vs_inference.evidence` or baseline report fields
 
-Enrichment must:
+**Rendering:** `markdown_generator.py` and `html_generator.py` render Query Results when the section exists.
 
-- add a `query_result_section`
-- append one entry per attempted query
-- record executed, denied, skipped, and failed query states
-- annotate matching hypotheses with query-result support or gaps where practical
-- preserve existing report fields
-- keep query-result evidence separate from `evidence_vs_inference.evidence`
-- summarize aggregate results and include only compact samples when needed
-- store normalized output under `query_result_section`
+## 11. Query-Result Interpretation (optional)
 
-Markdown rendering must:
+**Module:** `query_result_interpretation.py`
 
-- include a compact "Query Results" section when query results exist
-- preserve current report output when no query results exist
+When `QUERY_RESULT_INTERPRETATION_ENABLED=true` and `query_result_section` exists:
 
-### Acceptance criteria
+- One bounded LLM call; output key `query_result_interpretation` (list of per-hypothesis items)
+- Allowed `assessment`: `supports`, `weakens`, `inconclusive`, `unknown`
+- Allowed `confidence_delta`: `increase`, `decrease`, `unchanged`, `unknown` — **interpretation only**; must not mutate `alert_reconciliation.confidence`, TTP scores, query status, counts, or search references
+- Validator rejects invalid hypothesis indexes, enum values, and source refs not in deterministic results
+- Malformed output fails soft; deterministic section preserved
+- Markdown/HTML render **Query Result Interpretation** after **Query Results**
 
-- Successful query results appear in `query_result_section`.
-- Denied query attempts appear without execution evidence.
-- Adapter failures do not remove the baseline report.
-- Markdown renders query results.
-- Existing markdown tests still pass.
+## 12. ServiceNow Draft and Create
 
-## 9A. Optional Query-Result Interpretation
+**Module:** `servicenow.py`
 
-### Objective
+Draft fields (standard Incident table; no custom fields v1):
 
-Add a third, optional LLM call that interprets deterministic query execution
-results without changing the deterministic source record.
+- `short_description`, `description`, `assignment_group`, `category`, `subcategory`, `impact`, `urgency`, `correlation_id`, `correlation_display`, `work_notes`
 
-### Files
+Create: `POST {SERVICENOW_BASE_URL}{SERVICENOW_CREATE_PATH}` with `Authorization: Bearer <token>`; tokens must not be logged.
 
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/query_result_interpretation.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/local_llm_client.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/local_llm_client_nonsdk.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/onprem_main.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/onprem_main_nonsdk.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/markdown_generator.py`
-- focused tests under `tests/onprem_service/`
+Normalized create result: `status`, `sys_id`, `number`, `message`, approval metadata.
 
-### Implementation
+Report payload: `servicenow_section.draft|create` with status, message, number, sys_id, approval.
 
-When `QUERY_RESULT_INTERPRETATION_ENABLED=true` and deterministic query results
-exist, the service calls the model with a bounded prompt containing alert text,
-hypotheses, `supports_if` / `weakens_if`, and compact `query_result_section`
-facts. The model returns only `query_result_interpretation`.
+Idempotency (when `SIDE_EFFECT_IDEMPOTENCY_ENABLED=true`): operation `servicenow_incident_create`, key = `correlation_id` or `correlation_display`.
 
-The model may produce:
+## 13. Side Effects, Sinks, and Idempotency
 
-- `assessment`: `supports`, `weakens`, `inconclusive`, or `unknown`
-- `confidence_delta`: `increase`, `decrease`, `unchanged`, or `unknown`
-- rationale, key observations, remaining gaps, and source query references
+**Modules:** `idempotency.py`, `sinks.py`
 
-`confidence_delta` is an interpretation-only label. It must not mutate
-`alert_reconciliation.confidence`, `ttp_analysis[].score`,
-`ttp_analysis[].confidence_score`, hypothesis ordering, query status, result
-counts, or search references.
+Idempotent operations:
 
-Markdown must keep the deterministic **Query Results** section and render
-**Query Result Interpretation** separately after it.
+| Operation | Key | Used by |
+|-----------|-----|---------|
+| `splunk_notable_update` | `finding_id` | `sinks.update_splunk_notable` |
+| `servicenow_incident_create` | correlation id | `servicenow.create_servicenow_incident` |
 
-### Acceptance criteria
+Duplicate completed markers return `status=skipped` without re-posting.
 
-- Default deterministic-only behavior is unchanged.
-- Enabled interpretation adds one bounded LLM call after query-result enrichment.
-- Malformed interpretation output fails soft and keeps deterministic query results.
-- Validator rejects invalid hypothesis indexes, unsupported enum values, and
-  source refs not present in deterministic query results.
-- Tests prove `confidence_delta` renders as confidence movement only and never
-  changes existing confidence/scoring fields.
+Filesystem sinks write `{notable_id}.md` and optional `{notable_id}.html` to `REPORT_DIR`.
 
-## 10. Diff 4: ServiceNow Draft And Create
+## 14. Processing Order (`onprem_main.py`)
 
-### Objective
+1. Read and normalize alert; run main LLM analysis (`analyze_alert`), including optional second call for SPL or Elastic query fields when generation is enabled (with optional grounding retrieval).
+2. If `INVESTIGATION_QUERY_EXECUTION_ENABLED=true`, execute up to six eligible queries via Splunk or Elasticsearch backend.
+3. Enrich with `query_result_enrichment.enrich_analysis_with_query_results`.
+4. If `QUERY_RESULT_INTERPRETATION_ENABLED=true`, run bounded interpretation.
+5. If ServiceNow draft/create enabled, build draft and optionally create with approval.
+6. Render markdown; optionally HTML when `HTML_REPORT_ENABLED=true`.
+7. Optionally archive case (`analyst_portal` profile).
+8. Optionally Splunk notable writeback when `SPLUNK_SINK_ENABLED=true`.
+9. Move input to processed/quarantine per existing behavior.
 
-Add ServiceNow draft and approved create behavior in one concrete module.
+Default config performs steps 1, 6 (markdown only), and 9.
 
-### Files
+## 15. Approval Input
 
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/servicenow.py`
-- `tests/onprem_service/test_servicenow.py`
-
-### Implementation
-
-`servicenow.py` must include:
-
-- draft builder
-- draft payload validation
-- create approval validation
-- ServiceNow create request to `POST {SERVICENOW_BASE_URL}{SERVICENOW_CREATE_PATH}`
-- ServiceNow response normalization
-
-Draft fields:
-
-- `short_description`
-- `description`
-- `assignment_group`
-- `category`
-- `impact`
-- `urgency`
-- `correlation_id`
-- `correlation_display`
-- `work_notes`
-
-These are standard ServiceNow Incident fields. The app must not create custom ServiceNow fields for v1.
-
-Auth:
-
-- use `Authorization: Bearer <SERVICENOW_API_TOKEN>`
-- do not log tokens or full auth headers
-
-Create response normalization:
-
-- `status`
-- `sys_id`
-- `number`
-- `message`
-- metadata with operation and source record reference
-- approval metadata when present
-
-When ServiceNow logic runs, local report payload should include `servicenow_section`:
-
-- `servicenow_section.draft.status|message`
-- `servicenow_section.create.status|message|number|sys_id|approval`
-
-### Acceptance criteria
-
-- Draft creation has no network side effect.
-- Draft creation fails closed when assignment group is missing.
-- Oversized summary/body fields are bounded.
-- Create is denied when disabled.
-- Create is denied when approval metadata is missing.
-- Approved create posts expected payload and normalizes response.
-- ServiceNow error response is normalized without crashing the service flow.
-- Draft/create metadata is recorded locally even when create is skipped, denied, or fails.
-
-## 11. Diff 5: Service Wiring
-
-### Objective
-
-Wire enabled optional features into the existing processing flow.
-
-### Files
-
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/onprem_main.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/onprem_main_nonsdk.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/config.py`
-- `config.env.example`
-- `README.md`
-- relevant tests under `tests/onprem_service/`
-
-### Implementation
-
-Processing order:
-
-1. Run current LLM analysis.
-2. If `SPL_QUERY_GENERATION_ENABLED=true`, run second LLM call to generate SPL query fields for the 6 hypotheses. If `SPL_QUERY_RAG_ENABLED=true`, retrieval adds `SPL_QUERY_GROUNDING_CONTEXT` before that SPL call using `SPL_QUERY_RAG_*` Postgres table settings (fail-soft per `SPL_QUERY_RAG_FAILURE_MODE`).
-3. If query execution is enabled, validate and execute up to 6 eligible generated SPL queries.
-4. Enrich the LLM response with deterministic query results.
-5. If `QUERY_RESULT_INTERPRETATION_ENABLED=true`, add bounded LLM interpretation of query results.
-6. Render markdown.
-7. If ServiceNow draft is enabled, build a draft.
-8. If ServiceNow create is enabled, require approval and create the incident.
-9. Write report and preserve existing processed/quarantine behavior.
-
-### Acceptance criteria
-
-- Default config does not execute queries or ServiceNow writes.
-- Enabled REST path executes an approved query and enriches the report.
-- Enabled MCP path executes an approved query and enriches the report.
-- Denied query records denial and does not call Splunk.
-- ServiceNow draft-only path records draft metadata.
-- ServiceNow create path requires approval.
-- Existing file processing behavior remains unchanged.
-- `onprem_main_nonsdk.py` preserves the same optional feature behavior and ordering.
-
-## 12. Approval Input
-
-For the first implementation, approval metadata should come from the incoming JSON payload:
+ServiceNow create approval from incoming JSON root:
 
 ```json
 {
@@ -473,54 +358,21 @@ For the first implementation, approval metadata should come from the incoming JS
 }
 ```
 
-If missing, create is denied.
+Missing or incomplete approval denies create when `SERVICENOW_CREATE_REQUIRES_APPROVAL=true`.
 
-## 13. Test Requirements
+## 16. Open Customer Unknowns
 
-Tests must be deterministic and require no live Splunk, MCP server, ServiceNow, vLLM, or systemd.
+Confirm before production enablement:
 
-Run:
+- ServiceNow table, auth, or field requirements differ from standard Incident Table API
+- Splunk MCP client cannot expose `run_search(payload: dict) -> dict`
+- Elasticsearch index patterns, field allowlists, or API gateway auth differ from defaults
+- Splunk ES `notable_update` contract for writeback (`SPLUNK_NOTABLE_UPDATE_PATH`)
 
-```bash
-python -m unittest discover -s llm_notable_analysis_onprem_systemd/tests/onprem_service -p "test*.py" -v
-```
+## 17. Rollback
 
-Required coverage:
+Additive block. Set profiles/flags to off, or remove profile entries; default file-drop analysis remains intact.
 
-- SPL generation extraction regression
-- query policy allow and deny cases
-- REST request construction and response normalization
-- MCP payload construction and response normalization
-- bounded query fan-out and concurrency
-- query-result enrichment success, denial, and failure cases
-- markdown rendering with and without query results
-- ServiceNow draft success and validation failures
-- ServiceNow create approval denied and approved cases
-- default-off end-to-end service behavior
+## 18. Summary
 
-## 14. Hard Stops Before Coding
-
-Ask before implementation if any of these remain unknown:
-
-- customer-specific ServiceNow table, auth, or field requirements differ from the standard Incident Table API
-- customer-specific Splunk MCP client cannot expose `run_search(payload: dict) -> dict`
-
-## 15. Rollback Note
-
-This block is additive.
-
-Rollback is straightforward:
-
-- set new flags to false
-- remove or ignore new modules
-- current default file-drop analysis path remains intact
-
-## 16. Recommended First Coding Step
-
-Start with Diff 1 only: extract `spl_query_generation.py` and prove existing SPL generation behavior is unchanged.
-
-Do not wire query execution into `onprem_main.py` until SPL generation extraction and `splunk_investigation.py` tests pass.
-
-## 17. One-Line Summary
-
-Implement the feature enhancements as optional env-flagged additions to the existing on-prem analyzer, using a few concrete helper modules and deterministic tests while preserving the current default runtime path.
+Optional env- and profile-flagged investigation, enrichment, interpretation, ServiceNow, HTML, and idempotent side effects extend the on-prem analyzer via concrete helper modules and deterministic tests without changing the default runtime path.

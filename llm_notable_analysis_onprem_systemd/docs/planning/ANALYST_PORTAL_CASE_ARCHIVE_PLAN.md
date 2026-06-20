@@ -1,19 +1,51 @@
-# Analyst Portal And 90-Day Case Archive Plan
+# Analyst Portal And Case Archive Plan
 
 ## Status
 
-Living planning document. This captures the current scope while the portal,
-case archive, and chatbot design is refined. Do not treat this as an
-implementation contract until the open decisions are resolved and a technical
-spec is split out.
+Living planning document. Use
+[`../technical_specs/analyst_portal_case_archive_technical_spec.md`](../technical_specs/analyst_portal_case_archive_technical_spec.md)
+as the implementation contract for shipped behavior. This plan captures design
+rationale, deferred work, and open product decisions.
 
-Draft implementation detail now lives in
-[`../technical_specs/analyst_portal_case_archive_technical_spec.md`](../technical_specs/analyst_portal_case_archive_technical_spec.md).
+Operator runbooks:
+
+- [`../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md)
+- [`../operations/analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](../operations/analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md)
+- [`ANALYST_PORTAL_NETWORKING_PLAN.md`](ANALYST_PORTAL_NETWORKING_PLAN.md)
+
+### Shipped on-prem (verified)
+
+| Area | Shipped behavior |
+|------|------------------|
+| Capability profile | `analyst_portal` sets `CASE_ARCHIVE_ENABLED`, `PORTAL_ENABLED`, `CASE_QA_ENABLED` (`config.py`) |
+| Archive writes | `case_store.py` upserts `notable_cases.cases`; bounded retries; identity-collision guard |
+| Archive orchestration | `case_archive_flow.py` writes case row, indexes chunks, marks `retrieval_status=failed` on chunk failure |
+| Ingest coupling | Archive failure is logged and non-blocking; analysis still moves to processed (`onprem_main.py`) |
+| Retention | `CASE_RETENTION_DAYS=30` default; expired case + chunk delete via retention loop (`retention.py`) |
+| Schema | `deploy/postgres/notable_cases_schema.sql` — `cases`, `case_chunks`, optional chat tables, pgvector HNSW, lexical `search_vector` |
+| Chunk rebuild | `scripts/rebuild_case_chunks.py` |
+| Legacy backfill | `scripts/backfill_case_archive.py` (markdown-only imports as `legacy_summary`) |
+| Portal API | `portal_app.py` — list/detail/raw sections, chat, capabilities, readiness probes, bounded chat-history CRUD when enabled |
+| Chat mode | `selected_case` only; requires `selected_case_id` (`case_chat.py`, React types) |
+| Chat response | API returns `answer`, `answer_status`, optional `session_id` only — no citations in API/UI |
+| Chat history | Off by default (`CASE_QA_CHAT_HISTORY_ENABLED=false`); bounded sessions/messages when enabled |
+| Frontend | React SPA `frontend/analyst-portal/`; server-rendered pages in `portal_app.py` retired |
+| Deploy artifacts | `deploy/systemd/notable-portal.service`, `deploy/nginx/notable-portal.conf`, `install.sh` portal path |
+
+### Remaining / deferred
+
+- `global_archive` chat mode (cross-case retrieval without a pinned case).
+- Prior-case retrieval as a tertiary chat lane in production chat paths.
+- Cooperative backend chat cancellation (client-side Stop only today).
+- AWS portal/archive implementation.
+- Threat-intel, CMDB, SOAR, golden-eval harness (see Deferred Roadmap Items).
+- Per-case RBAC.
+- Portal-triggered actions (rerun, writeback, tickets, suppressions).
 
 ## Current Goal
 
 Build the on-prem version first: a read-only analyst portal backed by a tunable
-case archive, defaulting to 30 days. The portal includes a chatbot that can help
+case archive, defaulting to 30 days. The portal includes a chatbot that helps
 an analyst iterate on alerts using retained case evidence plus approved SOC
 context.
 
@@ -38,16 +70,15 @@ generic adapter frameworks or action surfaces now.
 ### In Scope
 
 - On-prem case archive with configurable retention, default `30` days.
-- Read-only analyst portal with global search/chat over retained cases.
+- Read-only analyst portal with case browse/search and selected-case chat over
+  retained cases.
 - Full-fidelity storage of the original notable / alert payload.
 - One canonical stored analysis output per case in Postgres as structured JSONB.
 - Retrieval over:
-  - the selected or referenced alert payload,
+  - the selected alert payload,
   - the stored validated analysis output,
-  - approved SOC context already used by RAG / SPL grounding, such as SOPs,
-    runbooks, SPL index/field/macro documentation, detection notes, and
-    escalation guidance,
-  - other retained case records as a tertiary source.
+  - approved SOC context already used by RAG / SPL grounding,
+  - other retained case records as a tertiary source (deferred for chat).
 - Chat history can be disabled. If enabled, it must have retention limits,
   size limits, and redaction rules.
 
@@ -61,97 +92,61 @@ generic adapter frameworks or action surfaces now.
 - Using raw model output as authoritative case state unless validation failed;
   if stored for troubleshooting, it must be explicitly flagged.
 
-## Current Storage Decision
+## Storage Decision (shipped)
 
-Do **not** store pre-rendered HTML in the archive. It is a human display artifact
-and does not help retrieval enough to justify another retained copy.
+Do **not** store pre-rendered HTML in the archive.
 
-Use Postgres as the primary archive store. The canonical case record should
-store:
+Postgres `notable_cases.cases` is the canonical store:
 
-- Full-fidelity original notable / alert payload.
-- Validated structured analysis output.
-- Metadata needed for list/filter/search, such as `case_id`, `finding_id`,
-  `processed_at`, verdict, confidence, search name, risk score, active
-  capability profiles, source filename, and correlation id.
-- Pointers to any existing markdown report if the current report writer remains
-  in place for compatibility.
+- Full-fidelity original notable / alert payload (`alert_payload` JSONB).
+- Validated structured analysis (`analysis` JSONB), or NULL when POC fallback.
+- Metadata for list/filter/search: `case_id`, `finding_id`, `processed_at`,
+  `expires_at`, `verdict`, `confidence`, `search_name`, `risk_score`,
+  `correlation_id`, `capability_snapshot`, `archive_metadata`.
+- Operational fields: `retrieval_status`, `backfill_status`,
+  `source_completeness`.
+- Optional compatibility pointers: `report_md_path`, `report_html_path`.
 
-Preferred v1 posture:
-
-- **Canonical archive:** Postgres tables with JSONB case envelope columns.
-- **Existing report output:** markdown may continue for current operator
-  workflows, but it is not the long-term retrieval source of truth.
-- **No archive HTML.**
-
-Open detail views in the portal should render from the Postgres case record.
-Markdown and HTML can still be generated by the existing analyzer when their
-settings are enabled, but the portal and chatbot should not depend on filesystem
-artifacts.
+Portal detail views render from the Postgres case record. Markdown and HTML
+continue when analyzer settings enable them; the portal and chatbot do not depend
+on filesystem artifacts.
 
 ### Why JSON Is The Canonical Case Format
 
-The portal and chatbot should read from structured JSON, not markdown, because
 JSON preserves alert fields, validated analysis sections, metadata, and source
-references in a machine-readable shape. Markdown and HTML are display formats
-for people; they are harder to parse cleanly and can lose structure that the
-portal needs for filters, citations, and retrieval.
-
-The existing markdown and optional HTML outputs should still be generated when
-their current settings are enabled. The archive decision only says they are not
-the canonical long-term source of truth. Postgres JSONB, markdown, and HTML can
-coexist: Postgres powers the portal and retrieval; markdown/HTML remain
-human-facing artifacts and compatibility outputs.
+references in a machine-readable shape. Markdown and HTML are display formats;
+Postgres JSONB powers filters, citations (internal), and retrieval.
 
 ## Existing Infrastructure To Reuse
 
 Current on-prem storage/retrieval pieces:
 
-- `REPORT_DIR` stores markdown reports today; optional HTML exists when
-  `html_reports` is enabled.
-- General RAG uses `RAG_BACKEND=postgres` by default, with Postgres / pgvector
-  settings under `RAG_POSTGRES_*`.
-- A `sqlite_faiss` RAG backend exists as a fallback shape with `RAG_SQLITE_PATH`
-  and `RAG_FAISS_PATH`, but the portal/archive feature will not use it.
-- SPL query grounding uses a dedicated Postgres table such as
-  `SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE`.
-- Elasticsearch grounding follows the same Postgres RAG provider pattern with a
-  separate table.
-- Side-effect idempotency uses filesystem JSON markers, not a database.
-- There is no durable case archive database yet.
+- `REPORT_DIR` stores markdown reports; optional HTML when `html_reports` profile
+  or `HTML_REPORT_ENABLED` is on.
+- General RAG uses `RAG_BACKEND=postgres` by default (`RAG_POSTGRES_*`).
+- `sqlite_faiss` RAG backend exists as a fallback; portal/archive does not use
+  it.
+- SPL and Elasticsearch grounding use dedicated Postgres tables in the RAG
+  schema.
+- Side-effect idempotency uses filesystem JSON markers.
+- **Case archive:** Postgres `notable_cases` schema (`CASE_POSTGRES_DSN`,
+  `CASE_POSTGRES_SCHEMA=notable_cases`).
 
 ### Deconfliction Principle
 
-Keep the canonical case archive separate from the RAG/SPL grounding corpora,
-while storing all portal/archive data in Postgres.
-
-The archive owns durable case records and retention. The vector/RAG layer owns
-derived retrieval chunks and embeddings. Re-indexing the archive into a vector
-store must be repeatable from the canonical Postgres case records.
-
-In simple terms: keep the full case JSONB row as the source of truth, then make
-smaller searchable chunks from it for pgvector. If the chunking logic or
-embedding model changes, delete and rebuild those chunks from the saved
-Postgres case row instead of treating the vector index as the permanent record.
-
-Required on-prem v1:
-
-- Use Postgres for case metadata, canonical JSONB case records, chat metadata,
-  and derived retrieval chunks.
-- Use pgvector for retained-case retrieval.
-- Do not add a SQLite/FAISS or filesystem-backed fallback for portal/archive
-  storage.
-- Use separate tables or namespaces for case-derived chunks so SOP/SPL grounding
-  documents do not mix with retained alert evidence.
-
-Example separation:
+Keep the canonical case archive separate from RAG/SPL grounding corpora. The
+archive owns durable case records and retention; pgvector chunks are derived and
+rebuildable from `cases` rows.
 
 | Data | Canonical store | Retrieval/index store |
 |------|-----------------|-----------------------|
-| Original alert + validated analysis | Postgres `cases` table with JSONB envelope | Postgres/pgvector case chunks table derived from envelope |
+| Original alert + validated analysis | `notable_cases.cases` JSONB | `notable_cases.case_chunks` (pgvector + lexical) |
 | SOP/runbooks | Existing RAG source docs | Existing general RAG table/index |
 | SPL docs | Existing SPL query source docs | Existing SPL grounding table/index |
-| Chat history | Optional bounded Postgres tables | Not used as retrieval memory by default |
+| Chat history | Optional `chat_sessions` / `chat_messages` | Not used as retrieval memory |
+
+Chunk `source_lane` values in storage: `alert_payload`, `case_analysis`,
+`legacy_summary`. Chat assembly uses `current_case` and `knowledge_base` lanes.
 
 ## Chatbot Boundary
 
@@ -159,12 +154,10 @@ The portal chatbot is read-only and retrieval-bound.
 
 It may:
 
-- Answer global questions across the retained case window.
-- Answer questions about a selected case.
-- Compare the selected alert to retained notables as a tertiary source.
-- Use approved SOC context to explain recommended investigation or response
-  steps.
-- Cite source lanes and source ids.
+- Answer questions about a selected case (shipped).
+- Use approved SOC / Knowledge Base context (`CASE_QA_GENERAL_KNOWLEDGE_ENABLED`
+  defaults true).
+- Answer global archive questions (deferred — `global_archive` mode not enabled).
 
 It must not:
 
@@ -175,293 +168,171 @@ It must not:
   playbooks.
 - Answer from broad model memory when retrieval is weak.
 
-Source lanes should be explicit:
-
-- `current_alert`
-- `case_analysis`
-- `knowledge_base`
-- `prior_case`
-
-Answers should separate:
-
-- facts from the current alert,
-- facts from retained prior cases,
-- advisory Knowledge Base guidance,
-- model inference,
-- unknowns.
+Internal prompt lanes: `current_case`, `knowledge_base`; `prior_case` reserved
+for future cross-case retrieval. Answers should separate current alert facts,
+Knowledge Base guidance, model inference, and unknowns.
 
 ## Retention And Limits
 
 Default archive retention: `CASE_RETENTION_DAYS=30`.
 
-Retention must be configurable. The 30-day default exists to bound storage,
-retrieval scope, and chatbot answers.
+Shipped limits (config defaults in `config.py`):
 
-Planned limits:
+| Setting | Default |
+|---------|---------|
+| `CASE_QA_MAX_CHUNKS_PER_LANE` | `6` |
+| `CASE_QA_MAX_TOTAL_CHUNKS` | `18` |
+| `CASE_QA_CONTEXT_BUDGET_CHARS` | `12000` |
+| `CASE_QA_MAX_QUESTION_CHARS` | `2000` |
+| `CASE_QA_MAX_ANSWER_TOKENS` | `800` |
+| `CASE_QA_CHAT_HISTORY_ENABLED` | `false` |
+| `CASE_QA_CHAT_HISTORY_RETENTION_DAYS` | `7` when enabled |
+| `CASE_QA_MAX_MESSAGES_PER_SESSION` | `30` |
+| `CASE_QA_MAX_SESSIONS_PER_USER` | `10` |
+| `CASE_QA_MAX_STORED_MESSAGE_BYTES` | `4000` |
 
-- Maximum retrieved cases per chat request.
-- Maximum snippets per source lane.
-- Maximum context budget per lane.
-- Maximum chat request size.
-- Maximum answer token budget.
-- Optional chat-history retention, default off.
-- Optional transcript storage with retention and redaction, if audit is enabled.
-
-Initial chat-history posture:
-
-- `CHAT_HISTORY_ENABLED=false` by default.
-- If enabled, retain only bounded transcripts, for example
-  `CHAT_HISTORY_RETENTION_DAYS=7` to start unless a customer explicitly chooses
-  a longer audit window.
-- Store transcript metadata, source ids, and final answers before storing full
-  retrieved context. Full prompt/context capture should require an explicit lab
-  or audit setting because it can contain sensitive alert details.
-- Cap messages per session and maximum stored bytes per conversation.
-- Do not use prior chat history as an unbounded memory source for future
-  answers; retrieval should still come from case/SOC sources.
-
-Deleting or expiring a case must remove:
-
-- case metadata,
-- canonical Postgres case record,
-- derived case retrieval chunks / embeddings,
-- optional chat transcript references if they exist and policy requires cleanup.
+Expired cases cascade-delete chunks. Expired chat sessions delete via the
+retention loop when chat history is enabled.
 
 ## Portal Shape
 
-The portal is read-only interactive, not action-capable.
+Read-only interactive portal; analyzer remains the only case writer.
 
-Minimum user flows:
+Shipped user flows:
 
-- List cases sorted by newest first.
-- Filter by date range and basic metadata.
-- Open a case detail view.
-- Ask global archive questions.
-- Ask selected-case questions with the selected case pinned as primary context.
+- List cases (newest first, cursor pagination, date/verdict/search_name filters).
+- Open case detail (structured JSON; paginated raw sections).
+- Selected-case chat from case detail / dashboard.
+- Optional bounded chat-history persistence.
 
-The analyzer remains the only writer. The portal should not have write access to
-`INCOMING_DIR`, action secrets, Splunk writeback, ServiceNow create, or SOAR
-credentials.
+The portal must not have write access to `INCOMING_DIR`, action secrets,
+Splunk writeback, ServiceNow create, or SOAR credentials.
 
 ### Operational Control
 
-Operational control means operators can turn the portal, archive, chatbot,
-global case retrieval, and chat-history persistence on or off explicitly through
-configuration or a capability profile. Defaults should be conservative:
+Without the `analyst_portal` profile, archive/portal/chat default off. Profile
+on enables archive, portal, and case Q&A together. Additional gates:
 
-- archive and portal disabled until configured,
-- chat disabled separately from browse/list/detail,
-- global archive retrieval disabled separately from selected-case chat,
-- chat history disabled separately from chat itself,
-- retention and context budgets explicit and documented.
+- `CASE_QA_CHAT_HISTORY_ENABLED` — transcript persistence.
+- `PORTAL_PROXY_SECRET` required when `PORTAL_ENABLED=true` (nginx shared secret).
+- `PORTAL_BIND_HOST=127.0.0.1` by default; nginx is the documented front door.
+
+See [`../operations/platform/CAPABILITY_PROFILES.md`](../operations/platform/CAPABILITY_PROFILES.md).
 
 ### Future Action Boundary
 
-V1 is read-only so the portal can be deployed safely. This does not permanently
-close the door on future actions. Any future portal-triggered rerun, writeback,
-ticket, SOAR playbook, or suppression flow must be a separate design with its
-own capability flag, policy gate, approval metadata, audit trail, tests, and
-least-privilege credentials. The v1 portal should not receive those credentials
-or mutation permissions.
+V1 is read-only. Future rerun, writeback, ticket, SOAR, or suppression flows
+require separate capability flags, policy gates, approval metadata, audit trail,
+tests, and least-privilege credentials.
 
 ## Access And Authentication
 
-V1 assumes all authenticated analysts can see all retained notables. Do not add
-case-level RBAC in the first portal slice.
+V1: all authenticated analysts see all retained notables; no per-case RBAC.
 
-Use the simplest production-shaped authentication boundary:
+Shipped boundary:
 
-- Bind FastAPI to loopback or an internal interface.
-- Put nginx/Apache or the customer's reverse proxy in front of it.
-- Let the proxy handle SSO/basic auth/mTLS according to the customer
-  environment.
-- Pass a trusted user header only if audit needs it; otherwise the portal can
-  treat users as authenticated analysts.
+- FastAPI binds loopback by default.
+- nginx terminates TLS, serves React SPA, proxies `/api/*`, `/health`, `/ready`.
+- nginx basic auth is the first documented path; customer SSO can replace auth at
+  the proxy.
+- `PORTAL_TRUSTED_USER_HEADER` (default `X-Forwarded-User`) for audit identity;
+  portal fails closed when required headers or proxy secret are missing.
 
-The portal itself should still fail closed when auth headers are required but
-missing, and it should log the authenticated user id when available.
+## Case Schema (shipped DDL summary)
 
-## Case Schema Draft
-
-Store canonical cases in Postgres. The exact DDL belongs in the technical spec,
-but the working v1 shape is:
+Authoritative DDL: `deploy/postgres/notable_cases_schema.sql`.
 
 ### `cases`
 
 | Column | Purpose |
 |--------|---------|
-| `case_id` | Stable primary key, usually the sanitized input filename stem |
+| `case_id` | Primary key; native id from alert identity or filename stem |
 | `finding_id` | Splunk/customer finding id when available |
 | `source_filename` | Original dropped filename |
-| `processed_at` | UTC timestamp when analysis completed |
-| `expires_at` | UTC timestamp used by retention cleanup |
+| `processed_at`, `expires_at` | Analysis time and retention cutoff |
 | `correlation_id` | Join to service logs |
-| `capability_snapshot` | JSONB list/settings for profiles enabled during analysis |
-| `alert_payload` | Full-fidelity original alert/notable JSONB or text wrapper |
-| `analysis` | Validated structured analysis JSONB |
-| `analysis_schema_version` | Version for future migrations |
-| `verdict` | Stored column copied from analysis for fast filters |
-| `confidence` | Stored column copied from analysis for fast filters |
-| `search_name` | Optional alert facet |
-| `risk_score` | Optional alert facet |
-| `threat_category` | Optional alert facet |
-| `report_md_path` | Optional compatibility artifact pointer |
-| `report_html_path` | Optional compatibility artifact pointer |
-| `created_at`, `updated_at` | Audit timestamps |
+| `capability_snapshot`, `archive_metadata` | JSONB audit/context |
+| `alert_payload`, `analysis` | Full-fidelity JSONB envelope |
+| `case_schema_version`, `analysis_schema_version` | Migration versions |
+| `verdict`, `confidence`, `search_name`, `risk_score` | Filter facets |
+| `report_md_path`, `report_html_path` | Optional compatibility pointers |
+| `retrieval_status` | `pending`, `ready`, `failed`, `not_indexed` |
+| `backfill_status` | `native`, `backfilled`, `legacy_summary` |
+| `source_completeness` | `complete`, `missing_alert`, `missing_analysis`, `markdown_only` |
+
+Alert facets such as `threat_category` live inside `alert_payload`, not as top-level columns.
 
 ### `case_chunks`
 
 | Column | Purpose |
 |--------|---------|
-| `chunk_id` | Primary key |
-| `case_id` | Foreign key to `cases` |
-| `source_lane` | `current_alert`, `case_analysis`, or `prior_case` |
-| `section` | Stable section name such as `alert.summary`, `analysis.hypotheses`, `analysis.evidence`, `analysis.iocs`, `analysis.ttps`, `analysis.query_results` |
-| `field_path` | JSON path or structured reference into `cases.alert_payload` / `cases.analysis` |
-| `text` | Chunk text sent to retrieval |
-| `embedding` | pgvector embedding |
-| `metadata` | JSONB for citation labels, timestamps, technique ids, etc. |
-| `created_at` | Chunk build timestamp |
+| `chunk_id`, `case_id` | Keys; cascade delete with case |
+| `source_lane` | `alert_payload`, `case_analysis`, `legacy_summary` |
+| `section`, `field_path`, `text` | Deterministic chunk identity and content |
+| `embedding` | pgvector(1024) |
+| `search_vector` | Generated tsvector for lexical retrieval |
+| `metadata`, `chunk_schema_version`, `embedding_model` | Citation and rebuild metadata |
 
-### Optional Chat Tables
+### Optional chat tables (when `CASE_QA_CHAT_HISTORY_ENABLED`)
 
-Only create/use these when chat history is enabled:
-
-- `chat_sessions`: session id, user id if available, created/updated timestamps,
-  retention expiry.
-- `chat_messages`: session id, role, bounded content, source ids, created time.
+- `chat_sessions`: session id, user id, mode, selected case, expiry.
+- `chat_messages`: role, bounded content, internal `cited_sources`, `answer_status`.
 
 ## Chunking Policy
 
-The chatbot should be able to retrieve across the whole meaningful analysis.
-That does **not** mean storing one embedding for one giant rendered report.
-Instead, store the full alert and full validated analysis in Postgres JSONB, then
-create embeddings for deterministic chunks that cover every useful section.
+Store full alert and analysis in JSONB; embed deterministic section chunks.
+Section-level chunks cover alert summary, verdict/reasoning, hypotheses,
+evidence, IOCs, ATT&CK, query-result summaries, ServiceNow status summaries
+(no secrets).
 
-A single embedding for the whole report would be too coarse: retrieval would know
-"this case is somewhat related" but would not reliably find the exact evidence,
-hypothesis, IOC, TTP, query result, or recommendation needed for a precise
-answer. Section-level chunks preserve the whole analysis while giving the
-retriever smaller, citable pieces.
+Do not embed by default: credentials, huge raw blobs, boilerplate, markdown/HTML
+renderings, chat transcripts.
 
-Initial chunks should include:
+## Chat Source Metadata (shipped)
 
-- alert summary and key fields,
-- normalized notable context,
-- verdict / confidence / reasoning summary,
-- competing hypotheses,
-- direct evidence and evidence-vs-inference sections,
-- IOCs,
-- ATT&CK mappings,
-- query-result summaries when present,
-- ServiceNow draft/create status summary when present, not raw secrets or auth
-  material.
-
-The intent is full analysis coverage through chunks. If a new validated analysis
-section becomes part of the product, the chunk builder should either index it or
-explicitly document why it is excluded from retrieval.
-
-Do not embed by default:
-
-- raw tokens, credentials, headers, or secrets if they appear in the alert,
-- huge raw event blobs without summarization,
-- repeated boilerplate,
-- full markdown/HTML renderings,
-- chat transcripts.
-
-The implementation should use deterministic chunk builders from JSON fields,
-not ad hoc markdown parsing.
-
-## Chat Source Metadata
-
-Retrieved chunks still carry internal section metadata (`section`, `field_path`,
-`case_id`, stored lane) for hybrid retrieval and bounded prompt assembly.
-
-Decision: portal chat does **not** expose citations, source links, or
+Retrieved chunks carry internal section metadata for hybrid retrieval and prompt
+assembly. Portal chat does **not** expose citations, source links, or
 `retrieved_case_ids` in the API or UI. Responses return `answer`,
-`answer_status`, and optional `session_id` only.
+`answer_status`, and optional `session_id` only. `cited_sources` may persist
+internally when chat history is enabled.
 
-## Failure Behavior
+## Failure Behavior (shipped)
 
-Fail-visible means the system does not silently pretend the archive/chat path
-worked when it did not.
+Fail-visible for portal operators; ingest remains resilient:
 
-For `analyst_portal` enabled deployments:
+- Transient Postgres write errors retry (`CASE_ARCHIVE_WRITE_MAX_ATTEMPTS=3`).
+- Archive or chunk failure logs the error and returns non-success from
+  `archive_case_for_portal`; ingest still completes unless analysis itself failed.
+- Chunk failure after case row write keeps the row and sets
+  `retrieval_status=failed` for rebuild.
+- Portal chat retrieval failure returns clear errors or `unknown`/`refused`
+  `answer_status`, not model-memory answers.
+- Identity collisions (`CaseArchiveConflictError`) log and skip archive write.
 
-- If Postgres is unavailable while processing a notable, the analyzer should use
-  a small bounded retry policy for transient database errors before failing the
-  archive path.
-- If the base analysis succeeded but case archive write failed, the failure
-  should be visible in logs and processing status; do not silently continue as
-  if portal state is complete.
-- If chunk creation fails after the case row is written, keep the case row and
-  mark retrieval status as failed/pending so a rebuild job can retry.
-- If portal chat retrieval fails, return a clear error or `unknown`/no-source
-  response rather than answering from model memory.
+## Backfill Path (shipped)
 
-Initial retry posture:
+`scripts/backfill_case_archive.py`:
 
-- Retry Postgres writes for transient connection/timeout errors.
-- Do not retry validation errors, schema errors, or malformed case data.
-- Use a short bounded policy such as 3 attempts with small backoff.
-- If retries fail, mark the analyzer attempt as failed for `analyst_portal`
-  mode. Optional markdown/HTML compatibility output may exist, but the case is
-  not considered successfully processed for portal/archive purposes.
-
-## Backfill Path
-
-Assume one-time backfill is needed.
-
-Backfill should:
-
-- prefer processed original notables plus existing analysis artifacts when both
-  are available,
-- import only what can be represented honestly in the case schema,
-- mark incomplete historical cases with `backfill_status` /
-  `source_completeness`,
-- rebuild chunks from imported Postgres case rows,
-- be idempotent by `case_id`,
-- support dry-run and bounded batch size.
-
-In simpler terms: a complete backfill case has the original alert plus the
-structured analysis. An incomplete backfill case is missing one of those pieces,
-for example old markdown exists but the original alert payload is gone. Old
-markdown-only reports are second-class because they do not preserve the full
-alert payload or structured analysis cleanly. They may be imported as legacy
-summary cases, but must be marked incomplete.
+- Idempotent by `backfill:<sha256-prefix>` case ids.
+- Complete imports need original alert plus structured analysis.
+- Markdown-only imports become `legacy_summary` / incomplete cases.
+- Dry-run and bounded batch size supported.
 
 ## Postgres Operations
 
-Portal/archive makes Postgres a required dependency for the `analyst_portal`
-profile.
+Portal/archive requires Postgres when `CASE_ARCHIVE_ENABLED=true`.
 
-Operational work to plan:
+Shipped:
 
-- migrations for `cases`, `case_chunks`, optional chat tables, indexes, and
-  pgvector extension checks,
-- backup/restore guidance for case tables and vector chunks,
-- retention delete job for expired cases/chunks/chat records,
-- indexes for `processed_at`, `expires_at`, `verdict`, `confidence`,
-  `search_name`, and vector similarity,
-- database roles: analyzer writer, portal reader, optional chat-history writer,
-  migration/admin role,
-- statement timeouts for portal list/search/chat retrieval,
-- health checks for database connectivity and extension availability,
-- rebuild command for `case_chunks`.
+- Schema SQL and install-time apply path.
+- Retention delete for expired cases (and chat sessions when history enabled).
+- Indexes: `processed_at`, `expires_at`, `verdict`, `search_name`, HNSW, GIN on
+  `search_vector`.
+- `CASE_POSTGRES_DSN` separate from `RAG_POSTGRES_DSN` (may share server).
+- `scripts/rebuild_case_chunks.py` for manual chunk rebuild after schema/model
+  changes.
 
-Use a dedicated `CASE_POSTGRES_DSN` setting for the portal/archive schema.
-Default assumption: it points to the same Postgres database server used by
-`RAG_POSTGRES_DSN`, with separate portal/archive tables or schema. Keep the
-setting separate so operators can later move portal data to another database or
-assign different privileges without changing code.
-
-Chunk rebuild lifecycle, in simple terms: `cases` is the permanent archive.
-`case_chunks` is the search index. When chunking rules, schema versions, or the
-embedding model change, run a manual operator script that deletes old chunks and
-re-makes them from the saved `cases` rows. This should be scripted and
-repeatable, but not automatic in v1.
-
-Diff 2 rebuild command examples:
+Operator examples:
 
 ```bash
 python scripts/rebuild_case_chunks.py --case-id CASE-123 --dry-run
@@ -470,238 +341,81 @@ python scripts/rebuild_case_chunks.py --all --dry-run --batch-size 100
 python scripts/rebuild_case_chunks.py --all --batch-size 100
 ```
 
-Use `--config-env /etc/notable-analyzer/config.env` when running outside the
-systemd environment. Keep batch size conservative until database and embedding
-latency are measured.
+Use `--config-env /etc/notable-analyzer/config.env` outside systemd.
 
-The case chunk migration must include the derived `search_vector`, a GIN index
-for lexical retrieval, a pgvector HNSW index for semantic retrieval, and a
-`cases(processed_at DESC, case_id ASC)` index for paged rebuild scans.
+## FastAPI Portal (shipped)
 
-## FastAPI Portal Shape
+Separate `notable-portal.service`; Uvicorn on loopback; nginx in front.
 
-FastAPI is acceptable for the portal service.
+Shipped endpoints:
 
-Recommended v1:
+- `GET /health`, `GET /ready`
+- `GET /api/capabilities`, `GET /api/diagnostics/chat-readiness`
+- `GET /api/cases`, `GET /api/cases/{case_id}`,
+  `GET /api/cases/{case_id}/raw/{section}`
+- `POST /api/chat` (query transport only; no case mutation)
+- Chat history when enabled: `GET/DELETE /api/chat/sessions`, message fetch,
+  `DELETE .../turns/last`
 
-- Add FastAPI and Uvicorn only when implementation starts and dependency
-  approval is explicit.
-- Run as a separate `notable-portal.service`.
-- Bind to `127.0.0.1` by default.
-- Put nginx in front for TLS, authentication, and network exposure.
-- Keep API routes read-only except optional chat-history persistence.
+Implementation map:
 
-Initial endpoints:
+- `portal_app.py` — routes, auth/proxy boundary, probes.
+- `case_store.py` — analyzer-side Postgres writes.
+- `case_index.py` — read-only list/detail queries.
+- `case_search.py` — chunk creation and hybrid retrieval.
+- `case_chat.py`, `case_chat_history.py` — chat synthesis and optional history.
+- `scripts/rebuild_case_chunks.py`, `scripts/backfill_case_archive.py`.
 
-- `GET /health`
-- `GET /api/cases`
-- `GET /api/cases/{case_id}`
-- `POST /api/chat` for selected-case and global archive questions; `POST` is
-  allowed as query transport only and must not mutate case state.
+### Frontend And Network (shipped)
 
-The FastAPI app should use a read-only Postgres role for case browsing and
-retrieval. If chat history is enabled, use a narrowly scoped write role only for
-chat tables.
+React analyst portal (`frontend/analyst-portal/`) is the production UI. nginx
+serves the built SPA and proxies API routes. See networking plan and network
+deployment runbook for TLS, basic auth, DNS, and firewall.
 
-### Frontend Delivery Sequence
-
-Finalize the React analyst portal (`frontend/analyst-portal/`) as the primary UI
-before wiring production deployment through nginx.
-
-Current sequence:
-
-1. **Frontend stack first** — complete the React routes, case detail views,
-   chat UX, citation links, filters, and local dev workflow (`dev_portal_ui.ps1`
-   + Vite proxy).
-   - Optional: embed `ChatPanel` on `CaseDetailPage` in addition to the home
-     dashboard. Home-page chat with a pinned selected case is sufficient for v1.
-2. **Production wiring second** — after the React UI is stable, add:
-   - `npm run build` artifact packaging in install/deploy docs,
-   - nginx `root`/`try_files` for the SPA,
-   - nginx proxy rules for `/api`, `/health`, and `/ready`.
-3. **Cutover** — the React build is the documented operator path; FastAPI
-   remains the API/probe service behind nginx.
-
-The earlier temporary server-rendered pages in `portal_app.py` have been retired.
-They are not part of the production analyst UI.
-
-### Network Serving Decision
-
-Nginx and Apache are separate web servers/reverse proxies. Use **nginx** for the
-first on-prem portal path so implementation and operations docs have one clear
-target.
-
-Detailed network, DNS, TLS, firewall, and nginx assumptions are tracked in
-[`ANALYST_PORTAL_NETWORKING_PLAN.md`](ANALYST_PORTAL_NETWORKING_PLAN.md).
-
-Target request path:
+Target path:
 
 ```text
-analyst browser
--> https://notable-portal.<internal-domain>
--> nginx on the analyzer host or approved internal web host
--> http://127.0.0.1:<PORTAL_PORT> FastAPI / Uvicorn
--> Postgres `notable_cases` schema
+analyst browser -> https://notable-portal.<internal-domain> -> nginx -> http://127.0.0.1:8080 -> Postgres notable_cases
 ```
-
-Nginx owns:
-
-- listening on the internal network interface,
-- TLS certificate termination,
-- basic auth for the first documented deployment path,
-- optional handoff to customer SSO later,
-- request size limits,
-- proxying to loopback FastAPI,
-- access logs.
-
-FastAPI / Uvicorn owns:
-
-- portal API responses,
-- chatbot request validation,
-- Postgres reads and optional bounded chat-history writes.
-
-Default network/config choices:
-
-| Setting | Initial value |
-|---------|---------------|
-| `PORTAL_BIND_HOST` | `127.0.0.1` |
-| `PORTAL_PORT` | `8080` |
-| Public URL | `https://notable-portal.<internal-domain>` |
-| External listener | nginx on `443` |
-| First auth example | nginx basic auth |
-| Preferred enterprise auth | customer reverse-proxy SSO when available |
-
-Analysts should never SSH into the analyzer host to use the portal. They open
-the internal HTTPS URL in a browser. Operators/admins manage the systemd
-services and nginx configuration.
-
-### Implementation Clarity For Coding
-
-When implementation starts, target these concrete files/components unless the
-technical spec changes them:
-
-- `portal_app.py`: FastAPI app, API routes, auth/proxy boundary, health probes.
-- `case_store.py`: analyzer-side Postgres writes into `notable_cases.cases`.
-- `case_index.py`: read-only case list/detail queries.
-- `case_search.py`: pgvector chunk creation and retrieval.
-- `scripts/rebuild_case_chunks.py`: manual operator script for rebuilding
-  `case_chunks`.
-- `deploy/systemd/notable-portal.service`: Uvicorn systemd unit.
-- `deploy/nginx/notable-portal.conf`: nginx reverse-proxy example.
-- `docs/operations/ANALYST_PORTAL_OPERATIONS.md`: deployment, auth, TLS,
-  backup/restore, retention, and troubleshooting.
 
 ## Chat Guardrails
 
-Chat should be structured enough that code can validate it.
-
-The chatbot input should include:
-
-- question,
-- optional selected `case_id`,
-- retrieval mode: selected case or global archive,
-- max source limits and context budgets from config.
-
-The chatbot output should include:
-
-- answer text,
-- cited sources,
-- unknowns / gaps,
-- source lane usage,
-- refusal or no-match reason when applicable.
-
-Rules:
-
-- Use retrieval before generation.
-- Do not answer from broad model memory.
-- Keep current alert facts, prior case facts, Knowledge Base guidance, and inference
-  separate.
-- Return `unknown` or no-match when retrieval is weak.
-- Never produce action execution claims.
-- Never claim a Splunk/SNOW/SOAR action happened unless the stored case evidence
-  says it happened.
+Retrieval before generation. Structured input: question, `mode`, optional
+`selected_case_id`, session id when history enabled. Structured output:
+`answer`, `answer_status` (`answered`, `unknown`, `refused`).
 
 ### Chat Modes
 
-These modes are both UX and backend behavior:
-
-| Mode | UX meaning | Backend retrieval behavior |
-|------|------------|----------------------------|
-| `selected_case` | Analyst asks about one case with Knowledge Base support | Search the selected case and configured Knowledge Base context |
-| `global_archive` | Analyst asks across retained cases with Knowledge Base support | Search retained case chunks and configured Knowledge Base context; no pinned case |
+| Mode | Status | Behavior |
+|------|--------|----------|
+| `selected_case` | Shipped | Pinned case chunks + Knowledge Base context; requires `selected_case_id` |
+| `global_archive` | Deferred | Cross-case retrieval without a pinned case |
 
 ### Chat Cancellation
 
-**v1 (current): client-side stop only**
+**Shipped:** client-side Stop aborts fetch; best-effort session/turn cleanup via
+delete endpoints. Backend does not cooperatively cancel in-flight LLM work.
 
-- React `Stop` aborts the browser `fetch` to `POST /api/chat` and clears the
-  in-flight turn from the thread, composer, local session store, and sidebar
-  (empty unused sessions are removed when other chats exist).
-- If the backend still finishes and returns a response after Stop, the UI
-  ignores it and runs best-effort cleanup:
-  - delete the server session when the cancelled turn was the first message in
-    the conversation, or
-  - delete the last persisted user/assistant pair via
-    `DELETE /api/chat/sessions/{session_id}/turns/last` for follow-up turns.
-- The portal API does **not** stop in-flight retrieval, synthesis, or upstream
-  LLM work when the client disconnects. The chat concurrency slot remains held
-  until the handler returns.
-
-**Deferred: cooperative backend cancellation**
-
-Add true cooperative cancellation in a later block when chat latency and
-concurrency pressure justify the complexity. Target behavior:
-
-- Detect client disconnect (`request.is_disconnected()` or equivalent) between
-  retrieval, synthesis, and history-persist steps.
-- Stop bounded work cooperatively: skip `_finalize_chat_response` / history
-  writes when the client is gone; release `chat_semaphore` promptly.
-- Propagate cancel to the upstream LLM HTTP call where the provider supports
-  abort/close (optional; depends on LiteLLM/vLLM behavior).
-- Define operator-visible logging/metrics for cancelled vs completed chat
-  requests.
-
-Out of scope for the deferred block unless explicitly reopened: streaming
-responses, WebSocket cancel tokens, or a separate cancel-by-request-id API.
-
-### Default Limits
-
-Initial conservative defaults:
-
-| Limit | Default |
-|-------|---------|
-| `CASE_QA_MAX_RETRIEVED_CASES` | `5` |
-| `CASE_QA_MAX_CHUNKS_PER_LANE` | `6` |
-| `CASE_QA_MAX_TOTAL_CHUNKS` | `18` |
-| `CASE_QA_CONTEXT_BUDGET_CHARS` | `12000` |
-| `CASE_QA_MAX_QUESTION_CHARS` | `2000` |
-| `CASE_QA_MAX_ANSWER_TOKENS` | `800` |
-| `CASE_QA_CHAT_HISTORY_ENABLED` | `false` |
-| `CASE_QA_CHAT_HISTORY_RETENTION_DAYS` | `7` when enabled |
-
-Tune these only after measuring latency, answer quality, and prompt size.
+**Deferred:** cooperative disconnect handling and upstream abort.
 
 ## Schema Versioning
 
-Store versions on durable and derived data:
+Stored on durable and derived data: `case_schema_version`,
+`analysis_schema_version` on `cases`; `chunk_schema_version`, `embedding_model`
+on `case_chunks`. Rebuild chunks when versions or embedding model change.
 
-- `analysis_schema_version` on `cases`.
-- `case_schema_version` on `cases`.
-- `chunk_schema_version` and `embedding_model` on `case_chunks`.
+## End-To-End Slice Status
 
-When any of these change, the technical spec must define whether to migrate old
-rows, support multiple versions, or rebuild derived chunks.
-
-## Smallest End-To-End Slice
-
-1. Store a canonical Postgres case record after a successful analysis.
-2. Add 30-day retention configuration for case records and derived chunks.
-3. Add a read-only portal list/detail view over Postgres case records.
-4. Add a centralized dashboard chatbot that can pin a selected case from the
-   case detail view.
-5. Add global archive retrieval over retained Postgres case records/chunks plus
-   configured Knowledge Base context.
-6. Add optional bounded chat-history persistence.
+| Step | Status |
+|------|--------|
+| Canonical Postgres case record after analysis | Shipped |
+| 30-day retention configuration and delete job | Shipped |
+| Read-only portal list/detail over Postgres | Shipped |
+| Selected-case chat with Knowledge Base context | Shipped |
+| Global archive chat | Deferred |
+| Optional bounded chat-history persistence | Shipped (off by default) |
+| Legacy markdown backfill | Shipped |
+| Prior-case tertiary retrieval in chat | Deferred |
 
 ## Open Decisions
 
@@ -709,8 +423,10 @@ rows, support multiple versions, or rebuild derived chunks.
   artifact while the portal renders from Postgres JSONB?
 - Should case-derived retrieval chunks include full alert fields, selected
   fields, or redacted field subsets?
-- Which customer proxy/auth pattern should the first deployment guide document:
-  basic auth, SSO header, mTLS, or all as examples?
+- Which customer proxy/auth pattern should the first deployment guide emphasize
+  beyond nginx basic auth: SSO header, mTLS, or all as examples?
+- When to enable `global_archive` and prior-case retrieval without weakening
+  source boundaries?
 
 ## Current Assumptions
 
@@ -718,10 +434,8 @@ rows, support multiple versions, or rebuild derived chunks.
 - Original notable / alert payload is stored full fidelity.
 - HTML is not stored as part of the archive.
 - All authenticated analysts can see all retained notables in v1.
-- FastAPI is the portal API framework.
-- Chat history is disabled by default and only persisted when an explicit audit
-  or transcript setting enables it.
-- Chat should be global, not only selected-case, but selected-case chat should be
-  the first implementation slice because it has clearer source boundaries.
+- FastAPI is the portal API framework; React is the portal UI.
+- Chat history is disabled by default.
+- Selected-case chat is the shipped chat slice; global archive chat is deferred.
 - Prior retained cases are useful but tertiary behind current alert facts and SOC
   context.

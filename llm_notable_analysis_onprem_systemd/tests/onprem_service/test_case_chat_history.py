@@ -232,7 +232,7 @@ class _HistoryFakeConnection:
 class _FakeEmbeddingModel:
     def encode(self, texts, show_progress_bar=False, convert_to_numpy=True):
         del show_progress_bar, convert_to_numpy
-        return [[1.0] + [0.0] * 767 for _text in texts]
+        return [[1.0] + [0.0] * 1023 for _text in texts]
 
 
 def _config(*, history_enabled: bool = True) -> Config:

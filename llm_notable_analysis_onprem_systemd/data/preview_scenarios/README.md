@@ -4,8 +4,8 @@ Cases 1-5 in the analyst portal preview UI are backed by this directory.
 
 ## Related docs
 
-- [`docs/operations/ANALYST_PORTAL_PREVIEW.md`](../docs/operations/ANALYST_PORTAL_PREVIEW.md)
-- [`docs/operations/ANALYST_PORTAL_CHAT_SECURITY.md`](../docs/operations/ANALYST_PORTAL_CHAT_SECURITY.md)
+- [`docs/operations/analyst_portal/ANALYST_PORTAL_PREVIEW.md`](../docs/operations/analyst_portal/ANALYST_PORTAL_PREVIEW.md)
+- [`docs/operations/analyst_portal/ANALYST_PORTAL_CHAT_SECURITY.md`](../docs/operations/analyst_portal/ANALYST_PORTAL_CHAT_SECURITY.md)
 
 Analyst investigation questions (case 1 example):
 [`PREVIEW_CASE_INVESTIGATION_GUIDE.md`](../../PREVIEW_CASE_INVESTIGATION_GUIDE.md)

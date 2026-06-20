@@ -2,16 +2,31 @@
 
 ## Status
 
-Living planning document for prompt text improvements across the analyst portal
-chat path and the notable analyzer LLM path, plus one related analyzer pipeline
-enhancement for post-query reconciliation.
+Living planning document for prompt text and related analyzer/portal LLM paths.
+Verified against `onprem_service/case_chat.py`, `local_llm_client.py`,
+`local_llm_client_nonsdk.py`, `spl_query_generation.py`, `spl_query_grounding.py`,
+`elastic_query_generation.py`, `elasticsearch_query_grounding.py`, and
+`query_result_interpretation.py`.
 
-Items marked **Approved** are agreed for implementation; **Planned** items are
-agreed direction but need a separate design/implementation block (including
-post-query reconciliation). Others remain under review.
+| Item | Status | Notes |
+|------|--------|-------|
+| Portal chat prompts (`_build_prompt`, `_build_general_knowledge_prompt`) | **Shipped** | `case_chat.py` |
+| Main alert analysis prompt (`LocalLLMClient._build_prompt`) | **Shipped** | Contract-first order; schema constraints in `OUTPUT_SCHEMA_RAW_JSON` |
+| Structured repair template (`REPAIR_PROMPT_TEMPLATE_RAW_JSON`) | **Shipped** | Contract-aware per call type |
+| SPL query generation prompt | **Shipped** | `spl_query_generation.py` |
+| Elastic query generation prompt | **Shipped** | `elastic_query_generation.py` |
+| Query-result interpretation + repair prompts | **Shipped** | `query_result_interpretation.py` |
+| Freeform analyzer removal | **Shipped** | No `freeform_*` modules or systemd unit remain |
+| SPL query RAG baseline (retrieval, context block, failure modes, token validation) | **Shipped** | `spl_query_grounding.py`; prompt rules in `SPL_QUERY_CONTEXT_RULES` |
+| Elasticsearch grounding baseline | **Shipped** | `elasticsearch_query_grounding.py`; prompt rules in `ELASTIC_QUERY_CONTEXT_RULES` |
+| Portal case-archive retrieval (chat RAG) | **Shipped** | Postgres chunk retrieval in `case_chat.py` |
+| SPL/Elastic grounding quality program (tuning, eval, measurement) | **Planned** | Ops runbooks exist; golden harness not built |
+| Bounded post-query reconciliation pass | **Planned** | Not in code; no `QUERY_RESULT_RECONCILIATION_*` config |
 
-This document does not change runtime contracts until the corresponding code and
-tests land.
+**Under review:** none.
+
+This document does not change runtime contracts until corresponding code and tests
+land.
 
 ## Goal
 
@@ -27,563 +42,246 @@ unless explicitly called out. Prompts should:
 
 ## Platform note (investigation queries)
 
-SPL prompt work in this plan is **Splunk-only**. The analyzer already selects one
-read-only investigation backend via `INVESTIGATION_QUERY_BACKEND` (`splunk` or
-`elasticsearch`). CrowdStrike, Security Onion, and a shared backend-agnostic query
-prompt layer are **out of scope** for this document.
+SPL prompt work here is **Splunk-only**. The analyzer selects one read-only
+investigation backend via `INVESTIGATION_QUERY_BACKEND` (`splunk` or
+`elasticsearch`). CrowdStrike, Security Onion, and a shared backend-agnostic
+query prompt layer are **out of scope**.
 
-## Approved Changes
+---
 
-The following items are **implemented** on branch `feature/prompt-enhancements` unless
-noted otherwise. Post-query reconciliation remains **Planned** only.
+## Shipped — portal chat (`case_chat.py`)
 
-### `_build_general_knowledge_prompt` — portal chat fallback
+### `_build_general_knowledge_prompt`
 
-**Status:** Implemented.
-
-**Module:** `onprem_service/case_chat.py`
-
-**When used:** Archive retrieval is empty or insufficient and
+**When:** Archive retrieval is empty or insufficient and
 `CASE_QA_GENERAL_KNOWLEDGE_ENABLED=true`.
 
-**Change:** Add a flexible answer-shape instruction:
+**Key instruction:** flexible answer shape — short answer, assumptions,
+reasoning, recommended steps, draft queries/examples, validation checks,
+caveats, next questions — without forcing every section every time.
 
-```text
-Prefer clear, analyst-friendly structure. Use sections such as short answer,
-assumptions, reasoning, recommended steps, draft queries or examples, validation
-checks, caveats, and next questions when they help. Do not force every section
-into every answer.
-```
+### `_build_prompt`
 
-**Why:** Improves consistency across cyber, IT, cloud, coding, and troubleshooting
-questions without rigid templates.
+**When:** Portal chat finds relevant archived case chunks.
 
----
+**Key instruction:** retrieved archive is the only source of **case facts**;
+general cyber/MITRE/IR knowledge may interpret facts and suggest validation;
+clearly separate case-supported facts from inference, guidance, and draft queries.
 
-### `_build_prompt` — case-grounded portal chat
+Optional sections when useful: Grounded answer, Unknowns, Suggested next steps,
+Draft query/example.
 
-**Status:** Implemented.
-
-**Module:** `onprem_service/case_chat.py`
-
-**When used:** Portal chat finds relevant archived case chunks for the analyst
-question.
-
-**Change:** Replace overly strict “answer only from archive” wording with:
-
-```text
-Use the retrieved archive context as the only source of case facts. You may use
-general cybersecurity knowledge, adversary tradecraft, MITRE ATT&CK, detection
-engineering, and incident response expertise to interpret those facts and suggest
-validation steps. Clearly separate case-supported facts from inference, general
-guidance, and draft queries.
-```
-
-Optional answer shape when useful:
-
-```text
-- Grounded answer: facts supported by retrieved archive context
-- Unknowns: what the archive does not establish
-- Suggested next steps: analyst actions or pivots
-- Draft query/example: unvalidated draft text for human review
-```
-
-**Why:** Analysts need model expertise on top of case evidence; the portal must
-not blur generated guidance with retained case facts.
+**Related:** portal archive retrieval uses Postgres chunk search in the same
+module; SOC/SPL/Elastic KB lanes are optional advisory sources when configured.
 
 ---
 
-### `LocalLLMClient._build_prompt` — main alert analysis prompt
+## Shipped — main alert analysis (`local_llm_client.py`, `local_llm_client_nonsdk.py`)
 
-**Status:** Implemented.
+### `LocalLLMClient._build_prompt`
 
-**Modules:** `onprem_service/local_llm_client.py`,
-`onprem_service/local_llm_client_nonsdk.py`
+**When:** First LLM call in the notable analyzer pipeline.
 
-**When used:** First LLM call in the notable analyzer pipeline (structured JSON
-analysis of a single alert).
+**Changes verified in code:**
 
-**Change 1 — contract-first prompt order:** Move the output contract earlier in
-the prompt, after a short task statement:
+1. **Contract-first order** — `TASK` then `OUTPUT CONTRACT:` with
+   `{OUTPUT_SCHEMA_RAW_JSON}` before doctrine, evidence gate, and alert input.
+   No duplicate schema block at the bottom.
+2. **Strengthened schema constraints** in `OUTPUT_SCHEMA_RAW_JSON`:
+   - mandatory contract; omit unsupported facts
+   - direct evidence only from `SECURITY ALERT INPUT`
+   - `SOC_OPERATIONAL_CONTEXT` may inform pivots but must not create findings,
+     verdicts, IOCs, or TTP evidence
+   - keep evidence, inference, and next steps separate
 
-```text
-You are a cybersecurity expert producing a structured SOC analysis from a single alert.
+**Not in scope:** JSON schema, parsers, or validator shape changes.
 
-TASK:
-Analyze one alert only. Produce a verdict, separate direct evidence from inference,
-extract supported IOCs, map MITRE ATT&CK only when direct evidence supports it,
-and generate competing benign/adversary hypotheses for analyst validation.
+### `REPAIR_PROMPT_TEMPLATE_RAW_JSON`
 
-OUTPUT CONTRACT:
-{OUTPUT_SCHEMA_RAW_JSON}
+**When:** Single repair attempt after structured JSON parse/validation failure
+(base analysis, SPL generation, Elastic generation).
 
----
-(doctrine, evidence gate, scoring, hypotheses, procedure, alert input, SOC context, rules)
-```
-
-Remove the duplicate `{OUTPUT_SCHEMA_RAW_JSON}` block from the bottom of the
-prompt after the reorder.
-
-**Change 2 — strengthen `OUTPUT_SCHEMA_RAW_JSON` constraints:**
-
-```text
-- This contract is mandatory; omit unsupported facts rather than inventing values.
-- Direct alert evidence must come only from SECURITY ALERT INPUT.
-- SOC_OPERATIONAL_CONTEXT may inform analyst pivots and recommended validation
-  steps, but it must not create findings, verdicts, IOCs, or TTP evidence by itself.
-- Keep direct evidence, inference, and recommended next steps separate.
-```
-
-**Why in simple terms:**
-
-- `OUTPUT_SCHEMA_RAW_JSON` is the detailed rulebook for required JSON output.
-- `OUTPUT CONTRACT:` is a prompt heading that puts that rulebook upfront so the
-  model knows the destination before reading doctrine and evidence rules.
-
-**Not in scope for this item:** changing the JSON schema, parsers, or validators.
+**Verified rules:** repair structure only; no new facts; `"unknown"` / `[]`
+fallbacks; include per-call `{contract}`; preserve valid prior fields; return one
+JSON object only.
 
 ---
 
-### `build_spl_query_generation_prompt` — Splunk query generation (second LLM call)
+## Shipped — SPL query generation (`spl_query_generation.py`)
 
-**Status:** Implemented.
+**When:** `INVESTIGATION_QUERY_BACKEND=splunk` and
+`SPL_QUERY_GENERATION_ENABLED=true`.
 
-**Module:** `onprem_service/spl_query_generation.py`
+**Verified prompt rules (`SPL_QUERY_GENERATION_RULES` + `SPL_QUERY_CONTEXT_RULES`):**
 
-**When used:** After main alert analysis, when `INVESTIGATION_QUERY_BACKEND=splunk`
-and `SPL_QUERY_GENERATION_ENABLED=true`. Produces draft SPL per competing
-hypothesis. Execution and interpretation are separate downstream steps.
+- draft-only SPL; do not claim execution or observed results
+- one query per hypothesis; tie to hypothesis uncertainty and alert fields
+- bounded time window when `ALERT_TIME` is set
+- no invented indexes/sourcetypes/macros/CIM unless in alert or
+  `SPL_QUERY_GROUNDING_CONTEXT`
+- `SPL_QUERY_GROUNDING_CONTEXT` and `SOC_OPERATIONAL_CONTEXT` are advisory only
 
-**Change 1 — generation layer is draft-only:**
-
-```text
-Generated SPL is unvalidated draft investigation guidance. Do not claim the query
-was executed or that results were observed.
-```
-
-This keeps output valid whether or not `INVESTIGATION_QUERY_EXECUTION_ENABLED` is
-on. When execution is enabled, deterministic results and interpretation carry
-actual findings; generation must not pre-judge them.
-
-**Change 2 — bounded time window when `ALERT_TIME` is provided:**
-
-```text
-When ALERT_TIME is provided, include an explicit bounded time window around it
-using earliest/latest or an equivalent SPL time constraint.
-```
-
-**Change 3 — no invented Splunk environment tokens:**
-
-```text
-If no index, sourcetype, macro, or CIM data model is available in SECURITY ALERT
-INPUT or SPL_QUERY_GROUNDING_CONTEXT, write the query without invented environment
-tokens and focus on observable fields from the alert.
-```
-
-**Change 4 — tie each query to hypothesis and alert evidence:**
-
-```text
-Each query must name the hypothesis uncertainty it is testing and use exact alert
-fields or values where available.
-```
-
-**Why:** Safer, more operational SPL that works with or without execution, and
-aligns with the generation-only layer boundary.
-
-**Deferred — SPL query RAG (follow-up block):**
-
-**Status:** Approved direction (planning + ops runbook; engineering not implemented).
-
-Ops onboarding, KB templates, quality checks, and retrieval tuning:
-[`KNOWLEDGE_BASE_OPERATIONS.md`](../operations/KNOWLEDGE_BASE_OPERATIONS.md),
-[`SPL_OPERATIONS.md`](../operations/SPL_OPERATIONS.md).
-
-The prompt already accepts `SPL_QUERY_GROUNDING_CONTEXT` from
-`SPL_QUERY_RAG_*` config. Improve quality in five layers:
-
-| Layer | Owner | Focus |
-|-------|-------|--------|
-| 1. KB content | Ops | Curate indexes, sourcetypes, macros, field hints, examples |
-| 2. Retrieval | Ops + engineering | Snippet selection, budgets, rerank (`SPL_QUERY_RAG_*`, shared `RAG_*`) |
-| 3. Prompt labeling | Engineering | Grounding is advisory env context only, not alert evidence |
-| 4. Validation + failure modes | Engineering | Ungrounded token rejection; `suppress` vs `fallback_to_ungrounded` |
-| 5. Measurement | Ops + engineering | Representative notables, golden cases, post-ingest checklist |
-
-Engineering follow-up topics (layers 2–5 code/prompt work):
-
-- when to include vs omit SPL grounding in the prompt
-- retrieval query shaping beyond alert + hypotheses text
-- clearer labeling of grounding as advisory Splunk-environment context only
-- eval cases for grounded vs ungrounded token emission
-- alignment with `primary_spl_query_grounding_refs` validation
+**Shipped validation:** `validate_spl_query_contract` rejects placeholders and,
+when grounding context is present, ungrounded environment tokens; merges
+`primary_spl_query_grounding_refs` deterministically.
 
 ---
 
-### `build_elastic_query_generation_prompt` — Elasticsearch query generation (second LLM call)
+## Shipped — Elasticsearch query generation (`elastic_query_generation.py`)
 
-**Status:** Implemented.
+**When:** `INVESTIGATION_QUERY_BACKEND=elasticsearch` and
+`ELASTIC_QUERY_GENERATION_ENABLED=true`.
 
-**Module:** `onprem_service/elastic_query_generation.py`
+**Verified prompt rules:** mirrors SPL generation-layer boundaries plus
+Elastic-specific constraints — read-only `_search` Query DSL only; bounded
+timestamp range; `bool.filter` / term / range patterns; no invented indexes or
+fields; one index pattern per query; advisory `ELASTICSEARCH_GROUNDING_CONTEXT`.
 
-**When used:** After main alert analysis, when
-`INVESTIGATION_QUERY_BACKEND=elasticsearch` and
-`ELASTIC_QUERY_GENERATION_ENABLED=true`. Produces draft Elasticsearch `_search`
-Query DSL per competing hypothesis. Execution and interpretation are separate
-downstream steps.
-
-**Mirror Splunk generation-layer rules:**
-
-```text
-Generated Elasticsearch Query DSL is unvalidated draft investigation guidance.
-Do not claim the query was executed or that results were observed.
-```
-
-```text
-Each query must name the hypothesis uncertainty it is testing and use exact alert
-fields or values where available.
-```
-
-**Elastic-specific prompt additions:**
-
-```text
-Use only read-only Elasticsearch _search Query DSL. Do not generate KQL, Lucene,
-ES|QL, SQL, Kibana API calls, or prose queries.
-```
-
-```text
-When ALERT_TIME is provided, build a bounded range filter around it on the
-configured timestamp field. Otherwise stay within ELASTICSEARCH_MAX_TIME_RANGE.
-```
-
-```text
-Prefer bool.filter, must_not, term, terms, exists, and range clauses for
-evidence filtering. Avoid relevance-scoring patterns; security hunts should be
-decision filters, not text-ranking searches.
-```
-
-```text
-Do not invent index patterns, ECS/vendor dotted fields, or timestamp fields.
-Use only fields and indexes from SECURITY ALERT INPUT or
-ELASTICSEARCH_GROUNDING_CONTEXT.
-```
-
-```text
-Use one index or index pattern per query, respect wildcard policy, and do not
-emit comma-separated multi-index strings.
-```
-
-**Why:** Keeps Elastic output aligned with current validators and config
-(`ELASTICSEARCH_INDEX_ALLOWLIST`, `ELASTICSEARCH_ALLOWED_FIELDS`,
-`ELASTICSEARCH_TIMESTAMP_FIELD`, `ELASTICSEARCH_MAX_TIME_RANGE`) while preserving
-the same generation-only boundary as SPL.
-
-**Deferred — Elasticsearch grounding (follow-up block):**
-
-**Status:** Approved direction (planning + ops runbook; engineering not implemented).
-
-Ops onboarding and KB curation:
-[`KNOWLEDGE_BASE_OPERATIONS.md`](../operations/KNOWLEDGE_BASE_OPERATIONS.md),
-[`ELASTICSEARCH_OPERATIONS.md`](../operations/ELASTICSEARCH_OPERATIONS.md).
-
-The prompt already accepts `ELASTICSEARCH_GROUNDING_CONTEXT` from
-`ELASTICSEARCH_GROUNDING_*` config. Use the same five-layer quality program as
-SPL (KB content, retrieval, prompt labeling, validation/failure modes,
-measurement). Elastic additionally requires operator config for
-`ELASTICSEARCH_INDEX_ALLOWLIST`, `ELASTICSEARCH_ALLOWED_FIELDS`, and
-`ELASTICSEARCH_TIMESTAMP_FIELD` before generation or execution.
-
-Engineering follow-up topics:
-
-- snippet selection and retrieval query shaping
-- allowed-field coverage vs grounding context
-- failure modes and `primary_elastic_query_grounding_refs` validation
-- eval cases for grounded vs ungrounded index patterns and fields
+**Shipped validation:** `validate_elastic_query_contract` and
+`primary_elastic_query_grounding_refs` alignment in the same module.
 
 ---
 
-### `build_query_result_interpretation_prompt` — query result interpretation (post-execution LLM call)
+## Shipped — query-result interpretation (`query_result_interpretation.py`)
 
-**Status:** Implemented.
+**When:** After deterministic execution and `query_result_section` enrichment,
+with `QUERY_RESULT_INTERPRETATION_ENABLED=true`.
 
-**Module:** `onprem_service/query_result_interpretation.py`
+**Verified rules:**
 
-**When used:** After deterministic query execution and `query_result_section`
-enrichment, when `QUERY_RESULT_INTERPRETATION_ENABLED=true`. Interprets executed
-query facts per hypothesis; does not run queries or change deterministic result
-fields.
+- zero results not automatically exculpatory
+- `supports` / `weakens` rationale must cite `result_count` and
+  `source_query_ref`
+- `sample_rows` are bounded examples
+- denied/failed/skipped queries -> `assessment="unknown"` unless another executed
+  query supports the hypothesis
+- scope limited to `query_result_interpretation`; must not mutate
+  `alert_reconciliation` or other analysis fields
+- backend-neutral opener (not Splunk-specific)
 
-**Change 1 — zero-result semantics:**
-
-```text
-A zero-result query is not automatically exculpatory. Interpret zero results
-against the query intent, supports_if, weakens_if, query status, and known coverage.
-```
-
-**Change 2 — grounded supports/weakens rationale:**
-
-```text
-For assessment="supports" or "weakens", rationale must mention the relevant
-result_count and at least one source_query_ref from QUERY_RESULT_INTERPRETATION_INPUT.
-```
-
-**Change 3 — sample rows are bounded examples:**
-
-```text
-Treat sample_rows as bounded examples from the executed query, not a complete
-record of all matching telemetry.
-```
-
-**Change 4 — failed/denied/skipped queries:**
-
-```text
-If a query was denied, failed, skipped, or has no usable result_count, use
-assessment="unknown" unless another executed query directly supports the same
-hypothesis.
-```
-
-**Change 5 — explicit output scope (no forward references):**
-
-```text
-Scope for this step:
-- Output only query_result_interpretation entries for each hypothesis.
-- Do not output or modify alert_reconciliation, evidence_vs_inference,
-  ioc_extraction, ttp_analysis, competing_hypotheses ordering, query status,
-  result_count, or search_reference values.
-- confidence_delta is a label for this interpretation only; it is not a numeric
-  score update to any other field.
-```
-
-**Change 6 — backend-neutral wording:**
-
-Replace “Splunk query execution results” with:
-
-```text
-You are interpreting deterministic read-only investigation query results for a
-SOC notable.
-```
-
-**Why:** Keeps interpretation tied to executed query evidence, works for Splunk
-or Elastic normalized results, and avoids ambiguous references to other pipeline
-steps.
+**Repair prompt:** scoped to interpretation JSON shape only; same no-new-facts
+rules as general repair.
 
 ---
 
-### `REPAIR_PROMPT_TEMPLATE_RAW_JSON` — structured output repair prompt
+## Shipped — investigation query RAG baseline
 
-**Status:** Implemented (contract-aware repair with per-call schema).
+Baseline retrieval plumbing and prompt injection are **implemented**. What
+remains is operator curation and engineering follow-up for quality measurement
+(see **Planned** below).
 
-**Modules:** `onprem_service/local_llm_client.py`,
-`onprem_service/local_llm_client_nonsdk.py`
+### SPL query RAG
 
-**When used:** Single repair attempt after a structured LLM call fails JSON
-parsing or validation. Used by base analysis, SPL generation, and Elastic
-generation paths.
+**Modules:** `spl_query_grounding.py`, wired from `local_llm_client*.py`.
 
-**Change 1 — repair structure, not substance:**
+**Shipped:**
 
-```text
-Repair only formatting, JSON validity, schema shape, enum values, and missing
-required containers. Do not improve, expand, reinterpret, or add new analysis.
-```
+- `SPL_QUERY_RAG_ENABLED` Postgres provider (`spl_query_chunks` table)
+- `build_spl_query_grounding_context` -> `SPL_QUERY_GROUNDING_CONTEXT` prompt block
+- `SPL_QUERY_RAG_FAILURE_MODE`: `suppress` | `fallback_to_ungrounded`
+- retrieval query from alert + hypotheses (`build_spl_query_grounding_query`)
+- prompt labeling in `SPL_QUERY_CONTEXT_RULES`
+- ungrounded token rejection and `primary_spl_query_grounding_refs`
 
-**Change 2 — forbid new facts:**
+**Ops:** [`KNOWLEDGE_BASE_OPERATIONS.md`](../operations/rag/KNOWLEDGE_BASE_OPERATIONS.md),
+[`SPL_OPERATIONS.md`](../operations/investigation/SPL_OPERATIONS.md).
 
-```text
-Do not add facts, IOCs, hosts, users, timestamps, verdict reasons, TTPs, queries,
-or result interpretations that were not present in the previous output or
-original prompt context.
-```
+### Elasticsearch grounding
 
-**Change 3 — define fallback values:**
+**Modules:** `elasticsearch_query_grounding.py`, wired from `local_llm_client*.py`.
 
-```text
-If a required field cannot be supported, use "unknown" for scalar fields and []
-for list fields where the schema allows it.
-```
+**Shipped:** same pattern as SPL — dedicated Postgres table, context block,
+`suppress` | `fallback_to_ungrounded`, prompt labeling, grounding refs,
+field/index allowlist validation in `elastic_query_generation.py`.
 
-**Change 4 — make repairs contract-aware:**
+**Ops:** [`KNOWLEDGE_BASE_OPERATIONS.md`](../operations/rag/KNOWLEDGE_BASE_OPERATIONS.md),
+[`ELASTICSEARCH_OPERATIONS.md`](../operations/investigation/ELASTICSEARCH_OPERATIONS.md).
 
-The repair prompt should include the relevant schema/contract for the failed
-call: base analysis, SPL generation, Elastic generation, or query interpretation.
-
-**Change 5 — preserve valid prior content:**
-
-```text
-Preserve valid fields from the previous output whenever they already satisfy the
-contract. Only change fields needed to pass validation.
-```
-
-**Change 6 — keep strict output rule:**
-
-```text
-Return only one valid JSON object. No markdown fences, comments, prose, or
-explanation.
-```
-
-**Why:** Repair should fix malformed structured output without becoming a second
-analysis attempt or inventing cleaner but unsupported content.
+Requires operator config for `ELASTICSEARCH_INDEX_ALLOWLIST`,
+`ELASTICSEARCH_ALLOWED_FIELDS`, and `ELASTICSEARCH_TIMESTAMP_FIELD` before
+generation or execution.
 
 ---
 
-### `build_query_result_interpretation_repair_prompt` — query interpretation repair prompt
+## Shipped — freeform analyzer removal
 
-**Status:** Implemented.
+All freeform analyzer code and deployment artifacts removed. Runtime requires
+structured SDK/client path and validated JSON contracts.
 
-**Module:** `onprem_service/query_result_interpretation.py`
-
-**When used:** Single repair attempt after the query-result interpretation LLM
-response fails parsing or validation.
-
-**Change:** Align this repair prompt with the general structured repair rules,
-but scope it only to `query_result_interpretation`.
-
-```text
-Repair only the query_result_interpretation JSON shape, enum values, required
-fields, and allowed source_query_refs. Do not reinterpret query results or add
-new analysis.
-```
-
-```text
-Use only QUERY_RESULT_INTERPRETATION_INPUT and the previous output. Do not add
-new facts, result counts, search references, hypotheses, verdict changes, TTPs,
-IOCs, users, hosts, timestamps, or telemetry claims.
-```
-
-```text
-Preserve valid prior content whenever it already satisfies the contract. Only
-change fields needed to pass validation.
-```
-
-```text
-Return only one valid JSON object containing query_result_interpretation. No
-markdown fences, comments, prose, or explanation.
-```
-
-**Why:** The repair call should fix malformed interpretation output without
-becoming another chance to reason over or expand the executed query evidence.
+Verified absent: `freeform_llm_client.py`, `freeform_main*.py`,
+`notable-analyzer-freeform.service` (see `test_deployment_contract.py`).
 
 ---
 
-### Freeform analyzer removal
+## Planned — grounding quality program
 
-**Status:** Implemented.
+**Status:** Approved direction; baseline code shipped; tuning and measurement
+not done.
 
-**Scope:** Remove all freeform analyzer code and deployment artifacts. The
-runtime analyzer should require the structured SDK/client path and validated JSON
-contracts.
+Five-layer program (KB content, retrieval, prompt labeling, validation/failure
+modes, measurement):
 
-Known files/artifacts to remove or replace references to:
+| Layer | Owner | Shipped baseline | Planned follow-up |
+|-------|-------|------------------|-------------------|
+| 1. KB content | Ops | Runbooks + ingest paths | Customer corpus curation |
+| 2. Retrieval | Ops + engineering | Postgres hybrid retrieval, budgets, rerank flags | Snippet selection tuning; retrieval query shaping beyond alert + hypotheses |
+| 3. Prompt labeling | Engineering | Advisory-context rules in SPL/Elastic modules | When to omit grounding blocks |
+| 4. Validation | Engineering | Token/index rejection; failure modes; grounding refs | Expanded eval cases for grounded vs ungrounded emission |
+| 5. Measurement | Ops + engineering | Unit/integration tests | Golden harness; representative notables ([`golden_eval_harness_todo.md`](golden_eval_harness_todo.md)) |
 
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/freeform_llm_client.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/freeform_main.py`
-- `src/llm_notable_analysis_onprem_systemd/onprem_service/freeform_main_nonsdk.py`
-- `deploy/systemd/notable-analyzer-freeform.service`
-- any install, README, ops, tests, or docs references that expose freeform mode
+Shared retrieval knobs: `RAG_*`, `SPL_QUERY_RAG_*`, `ELASTICSEARCH_GROUNDING_*`.
+Shared RAG package: `onprem_rag_notable_analysis`.
 
-**Why:** Freeform mode conflicts with the product direction: outputs are not
-schema-validated, are harder for analysts to scan consistently, and bypass the
-structured contracts used by the SDK/client analyzer path.
+---
 
-**Implementation note:** This is a code-removal block, not a prompt-tuning block.
-Remove dead imports, systemd references, docs references, and any runtime
-configuration paths in the same change.
+## Planned — bounded post-query reconciliation pass
 
-## Planned Pipeline Enhancement
+**Status:** Not approved for implementation. Not in code.
 
-### Bounded post-query reconciliation pass
+**Distinct from query-result interpretation:** interpretation adds per-hypothesis
+`supports` / `weakens` narrative and must not change `alert_reconciliation`.
+Reconciliation would optionally align the **case-level verdict** with hunt
+evidence after interpretation, preserving pre-query analysis for audit.
 
-**Status:** **Planned** — keep in this document as future work. Not Approved for
-implementation yet. Not prompt-only: needs orchestration, schema, validator, tests,
-and a product decision on rule-based vs LLM reconciliation.
+**Current pipeline (when execution + interpretation enabled):**
 
-**Distinct from query-result interpretation:** Interpretation (step 5 below) adds
-per-hypothesis `supports` / `weakens` narrative and must not change
-`alert_reconciliation`. Reconciliation would optionally align the **case-level
-verdict** with hunt evidence after interpretation, while preserving the
-pre-query analysis for audit.
-
-**Current behavior:** With execution and interpretation enabled, the pipeline is:
-
-1. Main analysis LLM (verdict, hypotheses, TTPs from alert only)
-2. SPL generation LLM
+1. Main analysis LLM
+2. SPL or Elastic query generation LLM
 3. Deterministic query execution (up to 6 hypothesis queries)
 4. Deterministic `query_result_section` enrichment
-5. Optional `query_result_interpretation` LLM (supports/weakens per hypothesis)
+5. Optional `query_result_interpretation` LLM
 
-Query results are **added alongside** the original analysis. They do **not**
-currently update `alert_reconciliation.verdict`, TTP scores, or
-`evidence_vs_inference`. Interpretation is explicitly forbidden from mutating
-those fields today.
+Query results are added alongside the original analysis; they do **not** update
+`alert_reconciliation.verdict`, TTP scores, or `evidence_vs_inference`.
 
-**Problem:** Analysts may see a verdict that ignores hunt results that were
-actually run, which feels inconsistent even when the conservative design is
-intentional.
+**Recommended direction:** optional final step after 4–5; cite
+`search_reference` / result counts; prefer `unknown` when queries fail or are
+inconclusive; preserve before/after; gate behind config such as
+`QUERY_RESULT_RECONCILIATION_ENABLED`.
 
-**Recommended direction:** Add an **optional final reconciliation step** after
-steps 4–5 above:
+**Open design questions (resolve before approval):**
 
-**Inputs:**
+- rule-based thresholds before any optional LLM synthesis
+- output shape: new `post_query_reconciliation` block vs in-place update with
+  immutable original
+- scope: verdict/summary only vs confidence, actions, TTP emphasis
+- portal/archive must expose pre-hunt vs post-hunt assessment if verdict can change
 
-- original structured analysis (preserved for audit)
-- deterministic `query_result_section`
-- validated `query_result_interpretation` (when available)
+**Out of scope until approved:** runtime config, capability profile flag, code
+changes, markdown rendering.
 
-**Output (new block or tightly scoped update):**
+See also [`FUTURE_ENHANCEMENTS_ROADMAP.md`](FUTURE_ENHANCEMENTS_ROADMAP.md).
 
-- revised verdict/summary only when query evidence clearly supports or weakens the
-  prior assessment
-- must cite `search_reference` and/or result counts
-- if queries were denied, failed, skipped, or inconclusive, prefer `unknown` or
-  leave verdict unchanged
-- preserve pre-query analysis alongside post-query reconciliation (before/after)
+---
 
-**Design rules:**
+## Related docs
 
-- do not fold query results into the first analysis call (queries do not exist yet)
-- do not silently overwrite the original analysis blob
-- deterministic query facts first, LLM reconciliation second
-- gate behind config (e.g. `QUERY_RESULT_RECONCILIATION_ENABLED`) and capability
-  profile when implemented
-
-**Why:** Gives analysts a final assessment that reflects hunts without letting
-weak or zero-result queries freely rewrite the alert-only verdict.
-
-**Open design questions (resolve before Approval):**
-
-- **Rule-based first vs LLM second** — prefer deterministic thresholds (e.g.
-  multiple `weakens` assessments with executed queries) before any optional LLM
-  synthesis pass.
-- **Output shape** — new `post_query_reconciliation` block with before/after
-  verdict fields vs tightly scoped in-place update with immutable original copy.
-- **Scope of change** — verdict and one-line summary only, or also confidence,
-  `recommended_actions`, and TTP emphasis.
-- **Zero-result semantics** — zero rows is not automatically exculpatory; align
-  with interpretation prompt rules.
-- **Portal and archive** — case chat and archived bundles must expose pre-hunt vs
-  post-hunt assessment clearly if verdict can change.
-
-**Out of scope until this item is Approved:** runtime config, capability profile
-flag, code in `local_llm_client*.py`, markdown rendering changes.
-
-## Under Review
-
-Review these by function in follow-up sessions before approving:
-
-| Function | Module | Topic |
-|----------|--------|-------|
-| (none) | — | SPL and Elastic grounding quality program moved to approved direction; see deferred blocks above and ops runbooks |
-
-## Completed (code, not prompt text)
-
-- Renamed Qwen-specific prompt helper names to generic structured-JSON hint
-  names in `local_llm_client.py` and `local_llm_client_nonsdk.py`
-  (`json_hint`, `_STRUCTURED_JSON_OUTPUT_HINT`, `_LLM_THINKING_TRACE_END`).
-- All **Approved Changes** above (prompt text, repair templates, freeform removal).
-- Ops runbooks for SPL/Elastic query KB onboarding in
-  `KNOWLEDGE_BASE_OPERATIONS.md`, `SPL_OPERATIONS.md`, `ELASTICSEARCH_OPERATIONS.md`.
-
-## Related Docs
-
-- [Analyst portal chat security](../operations/ANALYST_PORTAL_CHAT_SECURITY.md)
+- [Feature enhancements technical spec](../technical_specs/feature_enhancements_technical_spec.md)
+- [Analyst portal chat security](../operations/analyst_portal/ANALYST_PORTAL_CHAT_SECURITY.md)
 - [Analyst portal case archive plan](ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md)
 - [Golden evaluation harness TODO](golden_eval_harness_todo.md)
+- [Future enhancements roadmap](FUTURE_ENHANCEMENTS_ROADMAP.md)
+- [Knowledge base operations](../operations/rag/KNOWLEDGE_BASE_OPERATIONS.md)
+- [RAG operations](../operations/rag/RAG_OPERATIONS.md)
+- [SPL operations](../operations/investigation/SPL_OPERATIONS.md)
+- [Elasticsearch operations](../operations/investigation/ELASTICSEARCH_OPERATIONS.md)

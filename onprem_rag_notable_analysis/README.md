@@ -36,7 +36,7 @@ The command writes the retrieval artifacts into `--index-dir`.
 For operator steps on the systemd deployment path, including how to add KB
 documents, rebuild Postgres RAG, validate ingest reports, and roll back bad
 content, see
-`llm_notable_analysis_onprem_systemd/docs/operations/KNOWLEDGE_BASE_OPERATIONS.md`.
+`llm_notable_analysis_onprem_systemd/docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md`.
 
 ### 2. Load the context provider in your app
 
