@@ -15,7 +15,10 @@ if str(SRC_DIR) not in sys.path:
 
 from s3_notable_pipeline.config import Config
 from s3_notable_pipeline.portal_chat import (
+    ChatTurn,
+    bounded_conversation_history,
     build_case_grounded_prompt,
+    conversation_history_from_config,
     sanitize_portal_chat_answer,
     should_fallback_to_general_knowledge,
     synthesized_answer_crosses_action_boundary,
@@ -104,6 +107,45 @@ class PortalChatTests(unittest.TestCase):
 
         self.assertEqual(result.answer_status, "answered")
         self.assertIn("Grounded answer", result.answer)
+
+    def test_build_prompt_includes_bounded_conversation_history(self) -> None:
+        prompt = build_case_grounded_prompt(
+            question="Expand on that.",
+            sources=[{"search_text": "suspicious login", "text": "suspicious login"}],
+            conversation_history=[
+                ChatTurn(role="user", content="What happened?"),
+                ChatTurn(role="assistant", content="A suspicious login occurred."),
+            ],
+        )
+
+        self.assertIn("CONVERSATION HISTORY:", prompt)
+        self.assertIn("What happened?", prompt)
+        self.assertIn("suspicious login occurred", prompt.lower())
+
+    def test_bounded_conversation_history_keeps_recent_turns_within_budget(self) -> None:
+        turns = bounded_conversation_history(
+            [
+                {"role": "user", "content": "first"},
+                {"role": "assistant", "content": "second"},
+                {"role": "user", "content": "third"},
+            ],
+            max_turns=2,
+            max_chars=20,
+        )
+
+        self.assertEqual(len(turns), 2)
+        self.assertEqual(turns[0].content, "second")
+        self.assertEqual(turns[1].content, "third")
+
+    def test_conversation_history_from_config_is_empty_when_history_disabled(self) -> None:
+        config = Config(CASE_QA_CHAT_HISTORY_ENABLED=False)
+        self.assertEqual(
+            conversation_history_from_config(
+                config,
+                [{"role": "user", "content": "prior question"}],
+            ),
+            [],
+        )
 
 
 if __name__ == "__main__":

@@ -7,8 +7,11 @@ from unittest.mock import patch
 from llm_notable_analysis_onprem_systemd.onprem_service.case_chat import (
     CaseNotFoundError,
     ChatRequest,
+    ChatTurn,
     RetrievedSource,
+    _build_prompt,
     answer_case_chat,
+    bounded_conversation_history,
     build_lexical_chunk_query,
     build_vector_chunk_query,
     check_case_chat_ready,
@@ -644,6 +647,101 @@ class TestCaseChat(unittest.TestCase):
             readiness.degraded_reason,
             "Case chat is unavailable: Embeddings, Archive retrieval, LLM gateway are down.",
         )
+
+    def test_build_prompt_includes_bounded_conversation_history(self) -> None:
+        prompt = _build_prompt(
+            "Expand on that.",
+            [RetrievedSource(source_lane="current_case", text="Evidence text.")],
+            conversation_history=[
+                ChatTurn(role="user", content="What happened?"),
+                ChatTurn(role="assistant", content="A suspicious login occurred."),
+            ],
+        )
+
+        self.assertIn("CONVERSATION HISTORY:", prompt)
+        self.assertIn("What happened?", prompt)
+        self.assertIn("suspicious login occurred", prompt.lower())
+
+    def test_bounded_conversation_history_keeps_recent_turns_within_budget(self) -> None:
+        turns = bounded_conversation_history(
+            [
+                {"role": "user", "content": "first"},
+                {"role": "assistant", "content": "second"},
+                {"role": "user", "content": "third"},
+            ],
+            max_turns=2,
+            max_chars=20,
+        )
+
+        self.assertEqual(len(turns), 2)
+        self.assertEqual(turns[0].content, "second")
+        self.assertEqual(turns[1].content, "third")
+
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat._finalize_chat_response",
+        side_effect=lambda **kwargs: kwargs["response"],
+    )
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat.validate_chat_history_request",
+        return_value=None,
+    )
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat.load_session_transcript",
+        return_value=[
+            {"role": "user", "content": "What is the verdict?"},
+            {"role": "assistant", "content": "Likely malicious based on evidence."},
+        ],
+    )
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat.retrieve_case_sources",
+        return_value=[
+            RetrievedSource(
+                source_lane="current_case",
+                text="Evidence text.",
+            )
+        ],
+    )
+    def test_answer_case_chat_replays_prior_turns_when_session_id_is_provided(
+        self,
+        _mock_sources,
+        _mock_transcript,
+        _mock_validate,
+        _mock_finalize,
+    ) -> None:
+        captured: dict[str, str] = {}
+
+        def _capture_prompt(
+            config,
+            *,
+            question,
+            sources,
+            session=None,
+            conversation_history=None,
+        ) -> str:
+            del config, sources, session
+            captured["question"] = question
+            captured["history"] = str(conversation_history)
+            return "Follow-up answer."
+
+        with patch(
+            "llm_notable_analysis_onprem_systemd.onprem_service.case_chat._default_synthesize_answer",
+            side_effect=_capture_prompt,
+        ):
+            response = answer_case_chat(
+                payload={
+                    "mode": "selected_case",
+                    "question": "Expand on that.",
+                    "selected_case_id": "case-1",
+                    "session_id": "session-existing",
+                },
+                config=_config(CASE_QA_CHAT_HISTORY_ENABLED=True),
+                connect=lambda _dsn: _FakeConnection(row_pages=[[_chunk_row()], []]),
+                user_id="analyst@example.com",
+            )
+
+        self.assertEqual(response["answer_status"], "answered")
+        self.assertIn("What is the verdict?", captured["history"])
+        self.assertIn("Likely malicious", captured["history"])
 
 
 if __name__ == "__main__":

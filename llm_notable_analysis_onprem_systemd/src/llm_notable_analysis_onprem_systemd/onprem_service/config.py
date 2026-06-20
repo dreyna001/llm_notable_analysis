@@ -406,6 +406,8 @@ class Config:
     CASE_QA_MAX_MESSAGES_PER_SESSION: int = 30
     CASE_QA_MAX_SESSIONS_PER_USER: int = 10
     CASE_QA_MAX_STORED_MESSAGE_BYTES: int = 4000
+    CASE_QA_MAX_CONVERSATION_TURNS: int = 10
+    CASE_QA_MAX_CONVERSATION_CHARS: int = 6000
     CASE_QA_LEXICAL_TOP_K: int = 30
     CASE_QA_VECTOR_TOP_K: int = 30
     CASE_QA_RRF_K: int = 60
@@ -732,6 +734,12 @@ def load_config() -> Config:
         ),
         CASE_QA_MAX_STORED_MESSAGE_BYTES=_positive_int_env(
             "CASE_QA_MAX_STORED_MESSAGE_BYTES", 4000, max_value=100000
+        ),
+        CASE_QA_MAX_CONVERSATION_TURNS=_positive_int_env(
+            "CASE_QA_MAX_CONVERSATION_TURNS", 10, max_value=100
+        ),
+        CASE_QA_MAX_CONVERSATION_CHARS=_positive_int_env(
+            "CASE_QA_MAX_CONVERSATION_CHARS", 6000, max_value=65536
         ),
         CASE_QA_LEXICAL_TOP_K=_positive_int_env(
             "CASE_QA_LEXICAL_TOP_K", 30, max_value=1000

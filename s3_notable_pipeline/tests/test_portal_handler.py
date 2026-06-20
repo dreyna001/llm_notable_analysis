@@ -385,6 +385,68 @@ class PortalHandlerTests(unittest.TestCase):
         self.assertIn("suspicious", body["answer"])
         self.assertNotIn("citations", body)
 
+    def test_chat_replays_prior_turns_when_session_id_is_provided(self) -> None:
+        captured: dict[str, object] = {}
+
+        def _capture_answer(**kwargs):
+            captured["conversation_history"] = kwargs.get("conversation_history")
+            from s3_notable_pipeline.portal_chat import PortalAnswer
+
+            return PortalAnswer(answer="Follow-up answer.", answer_status="answered")
+
+        config = portal_config(
+            CASE_QA_ENABLED=True,
+            CASE_QA_CHAT_HISTORY_ENABLED=True,
+            CASE_EMBED_LAMBDA_NAME="notable-case-embed",
+            CHAT_SESSIONS_TABLE="chat-sessions",
+            CHAT_MESSAGES_TABLE="chat-messages",
+        )
+        with (
+            patch.object(portal_handler, "load_config", return_value=config),
+            patch.object(portal_handler, "dynamodb_client", return_value=FakeDynamoDbClient()),
+            patch.object(portal_handler, "s3_client", return_value=FakeS3Client()),
+            patch.object(portal_handler, "bedrock_runtime_client", return_value=FakeBedrockClient()),
+            patch.object(
+                portal_handler,
+                "validate_chat_history_request",
+                return_value=None,
+            ),
+            patch.object(
+                portal_handler,
+                "load_session_transcript",
+                return_value=[
+                    {"role": "user", "content": "What is the verdict?"},
+                    {"role": "assistant", "content": "Likely malicious."},
+                ],
+            ),
+            patch.object(
+                portal_handler,
+                "answer_selected_case_question",
+                side_effect=_capture_answer,
+            ),
+            patch.object(
+                portal_handler,
+                "persist_chat_history",
+                return_value="session-existing",
+            ),
+        ):
+            request = event("/api/chat", "POST")
+            request["body"] = json.dumps(
+                {
+                    "mode": "selected_case",
+                    "selected_case_id": "case-1",
+                    "question": "Expand on that.",
+                    "session_id": "session-existing",
+                }
+            )
+            response = portal_handler.handler(request, None)
+
+        self.assertEqual(response["statusCode"], 200)
+        history = captured["conversation_history"]
+        self.assertIsNotNone(history)
+        self.assertEqual(len(history), 2)
+        self.assertEqual(history[0].content, "What is the verdict?")
+
     def test_chat_sessions_list_returns_disabled_payload(self) -> None:
         with patch.object(portal_handler, "load_config", return_value=portal_config()):
             response = portal_handler.handler(event("/api/chat/sessions"), None)

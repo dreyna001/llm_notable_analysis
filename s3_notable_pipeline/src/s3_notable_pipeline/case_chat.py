@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
 from .aws_clients import bedrock_agent_runtime_client
 from .case_chunk_retrieval import (
@@ -11,7 +11,12 @@ from .case_chunk_retrieval import (
     trim_chunks_list_order,
 )
 from .config import Config
-from .portal_chat import PortalAnswer, synthesize_case_answer, trim_sources
+from .portal_chat import (
+    ChatTurn,
+    PortalAnswer,
+    synthesize_case_answer,
+    trim_sources,
+)
 from .portal_chat_kb import build_chat_knowledge_sources
 
 
@@ -23,6 +28,7 @@ def answer_selected_case_question(
     dynamodb_client: Any,
     s3_client: Any,
     bedrock_client: Any,
+    conversation_history: Sequence[ChatTurn] | None = None,
 ) -> PortalAnswer:
     """Answer one question using retrieval-bound synthesis for the selected case."""
 
@@ -72,6 +78,7 @@ def answer_selected_case_question(
         sources=sources,
         config=config,
         bedrock_client=bedrock_client,
+        conversation_history=conversation_history,
     )
 
 

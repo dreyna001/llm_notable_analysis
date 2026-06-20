@@ -28,7 +28,11 @@ from .case_db import (
     row_get as _row_get,
     set_statement_timeout as _set_statement_timeout,
 )
-from .case_chat_history import persist_chat_history, validate_chat_history_request
+from .case_chat_history import (
+    load_session_transcript,
+    persist_chat_history,
+    validate_chat_history_request,
+)
 from .case_index import case_exists
 from .case_store import quote_identifier
 from .config import Config
@@ -183,6 +187,14 @@ class ChatRequest:
     question: str
     selected_case_id: str | None = None
     session_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ChatTurn:
+    """One prior user or assistant turn for multi-turn synthesis."""
+
+    role: str
+    content: str
 
 
 @dataclass(frozen=True)
@@ -910,8 +922,13 @@ def _should_fallback_to_general_knowledge(answer: str) -> bool:
     return bool(_INSUFFICIENT_ARCHIVE_ANSWER_RE.search(answer or ""))
 
 
-def _build_general_knowledge_prompt(question: str) -> str:
+def _build_general_knowledge_prompt(
+    question: str,
+    *,
+    conversation_history: Sequence[ChatTurn] | None = None,
+) -> str:
     """Build a bounded prompt for broad technology answers."""
+    history_block = _render_conversation_history(conversation_history)
     return (
         "SYSTEM INSTRUCTIONS:\n"
         "You are a state-of-the-art technology assistant embedded in a read-only "
@@ -950,7 +967,8 @@ def _build_general_knowledge_prompt(question: str) -> str:
         "closing fences on their own lines, and do not place prose on the same "
         "line as a code fence. Put a blank line before and after headings, lists, "
         "and code blocks.\n\n"
-        "QUESTION_JSON:\n"
+        + history_block
+        + "QUESTION_JSON:\n"
         + json.dumps(question.strip(), ensure_ascii=True)
     )
 
@@ -960,9 +978,13 @@ def _default_synthesize_general_knowledge(
     *,
     question: str,
     session: Any = None,
+    conversation_history: Sequence[ChatTurn] | None = None,
 ) -> str:
     """Call the configured local LLM for bounded technology answers."""
-    prompt = _build_general_knowledge_prompt(question)
+    prompt = _build_general_knowledge_prompt(
+        question,
+        conversation_history=conversation_history,
+    )
     if session is not None:
         answer, _latency = openai_chat_complete(
             session,
@@ -996,6 +1018,7 @@ def _finalize_general_knowledge_response(
     question: str,
     general_synthesize: GeneralSynthesizeFn | None,
     llm_session: Any,
+    conversation_history: Sequence[ChatTurn] | None = None,
 ) -> dict[str, Any] | None:
     """Return a sanitized technology response, or None when disabled/unusable."""
     if not bool(config.CASE_QA_GENERAL_KNOWLEDGE_ENABLED):
@@ -1007,6 +1030,7 @@ def _finalize_general_knowledge_response(
             config,
             question=question,
             session=llm_session,
+            conversation_history=conversation_history,
         )
     answer = sanitize_portal_chat_answer(answer)
     if not answer:
@@ -1031,7 +1055,11 @@ def _finalize_general_knowledge_response(
     }
 
 
-def _build_prompt(question: str, sources: Sequence[RetrievedSource]) -> str:
+def _build_prompt(
+    question: str,
+    sources: Sequence[RetrievedSource],
+    conversation_history: Sequence[ChatTurn] | None = None,
+) -> str:
     """Build a bounded prompt for answer synthesis."""
     source_blocks = []
     for source in sources:
@@ -1041,6 +1069,7 @@ def _build_prompt(question: str, sources: Sequence[RetrievedSource]) -> str:
             + json.dumps(source.text.strip(), ensure_ascii=True)
             + "\n</CONTEXT_BLOCK>"
         )
+    history_block = _render_conversation_history(conversation_history)
     return (
         "SYSTEM INSTRUCTIONS:\n"
         "You are a read-only SOC case archive assistant. Use the retrieved "
@@ -1068,7 +1097,8 @@ def _build_prompt(question: str, sources: Sequence[RetrievedSource]) -> str:
         "with a language identifier, put the opening and closing fences on their "
         "own lines, and do not place prose on the same line as a code fence. Put "
         "a blank line before and after headings, lists, and code blocks.\n\n"
-        "QUESTION_JSON:\n"
+        + history_block
+        + "QUESTION_JSON:\n"
         + json.dumps(question.strip(), ensure_ascii=True)
         + "\n\n"
         "RETRIEVED CONTEXT:\n"
@@ -1087,9 +1117,14 @@ def _default_synthesize_answer(
     question: str,
     sources: Sequence[RetrievedSource],
     session: Any = None,
+    conversation_history: Sequence[ChatTurn] | None = None,
 ) -> str:
     """Call the configured local LLM for bounded answer synthesis."""
-    prompt = _build_prompt(question, sources)
+    prompt = _build_prompt(
+        question,
+        sources,
+        conversation_history=conversation_history,
+    )
     if session is not None:
         answer, _latency = openai_chat_complete(
             session,
@@ -1175,6 +1210,11 @@ def answer_case_chat(
         user_id=user_id,
         connect=connect,
     )
+    conversation_history = _conversation_history_for_request(
+        config=config,
+        session_id=request.session_id,
+        connect=connect,
+    )
 
     sources = retrieve_case_sources(
         request=request,
@@ -1196,6 +1236,7 @@ def answer_case_chat(
             question=request.question,
             general_synthesize=general_synthesize,
             llm_session=llm_session,
+            conversation_history=conversation_history,
         )
         if general_response is not None:
             return _finalize_chat_response(
@@ -1224,6 +1265,7 @@ def answer_case_chat(
             question=request.question,
             sources=sources,
             session=llm_session,
+            conversation_history=conversation_history,
         )
     answer = sanitize_portal_chat_answer(answer)
     if not answer or _should_fallback_to_general_knowledge(answer):
@@ -1235,6 +1277,7 @@ def answer_case_chat(
             question=request.question,
             general_synthesize=general_synthesize,
             llm_session=llm_session,
+            conversation_history=conversation_history,
         )
         if general_response is not None:
             return _finalize_chat_response(
@@ -1282,3 +1325,80 @@ def answer_case_chat(
             "answer_status": "answered",
         },
     )
+
+
+def _conversation_history_for_request(
+    *,
+    config: Config,
+    session_id: str | None,
+    connect: ConnectionFactory | None,
+) -> list[ChatTurn]:
+    """Load bounded prior transcript turns for synthesis when history is enabled."""
+    if not bool(config.CASE_QA_CHAT_HISTORY_ENABLED) or not session_id:
+        return []
+    messages = load_session_transcript(
+        config=config,
+        session_id=session_id,
+        connect=connect,
+    )
+    return bounded_conversation_history(
+        messages,
+        max_turns=config.CASE_QA_MAX_CONVERSATION_TURNS,
+        max_chars=config.CASE_QA_MAX_CONVERSATION_CHARS,
+    )
+
+
+def _render_conversation_history(
+    conversation_history: Sequence[ChatTurn] | None,
+) -> str:
+    """Render bounded prior turns for multi-turn synthesis."""
+    if not conversation_history:
+        return ""
+    blocks: list[str] = []
+    for turn in conversation_history:
+        role = str(turn.role or "").strip().lower()
+        content = str(turn.content or "").strip()
+        if role not in {"user", "assistant"} or not content:
+            continue
+        blocks.append(
+            "<CONVERSATION_TURN>\n"
+            f"ROLE_JSON: {json.dumps(role, ensure_ascii=True)}\n"
+            "UNTRUSTED_TEXT_JSON: "
+            + json.dumps(content, ensure_ascii=True)
+            + "\n</CONVERSATION_TURN>"
+        )
+    if not blocks:
+        return ""
+    return (
+        "CONVERSATION HISTORY:\n"
+        + "\n\n".join(blocks)
+        + "\n\nPrior turns provide conversational context only; case facts must "
+        "still come from RETRIEVED CONTEXT below when present.\n\n"
+    )
+
+
+def bounded_conversation_history(
+    messages: Sequence[dict[str, Any]],
+    *,
+    max_turns: int,
+    max_chars: int,
+) -> list[ChatTurn]:
+    """Return the most recent transcript turns within synthesis budgets."""
+    turns: list[ChatTurn] = []
+    used_chars = 0
+    for message in reversed(list(messages)):
+        if len(turns) >= max(0, max_turns):
+            break
+        role = str(message.get("role") or "").strip().lower()
+        content = str(message.get("content") or "").strip()
+        if role not in {"user", "assistant"} or not content:
+            continue
+        if used_chars + len(content) > max_chars:
+            remaining = max_chars - used_chars
+            if remaining <= 0:
+                break
+            content = content[:remaining]
+        turns.append(ChatTurn(role=role, content=content))
+        used_chars += len(content)
+    turns.reverse()
+    return turns

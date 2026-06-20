@@ -430,3 +430,17 @@ def bounded_conversation_history(
         used_chars += len(content)
     turns.reverse()
     return turns
+
+
+def conversation_history_from_config(
+    config: Config,
+    messages: Sequence[dict[str, Any]],
+) -> list[ChatTurn]:
+    """Return bounded prior turns when chat history is enabled."""
+    if not config.CASE_QA_CHAT_HISTORY_ENABLED:
+        return []
+    return bounded_conversation_history(
+        messages,
+        max_turns=config.CASE_QA_MAX_CONVERSATION_TURNS,
+        max_chars=config.CASE_QA_MAX_CONVERSATION_CHARS,
+    )

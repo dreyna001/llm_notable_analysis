@@ -15,11 +15,13 @@ from .case_chat_history import (
     delete_last_chat_turn,
     get_chat_session_messages,
     list_chat_sessions,
+    load_session_transcript,
     persist_chat_history,
     validate_chat_history_request,
 )
 from .case_index import get_case_detail, get_case_raw_section, list_cases
 from .config import Config, load_config
+from .portal_chat import conversation_history_from_config
 from .portal_jwt import resolve_portal_jwt_claims, resolve_portal_user_id
 from .portal_api_models import (
     CaseDetailResponse,
@@ -259,6 +261,16 @@ def _handle_chat_gate(config: Config, event: dict[str, Any]) -> dict[str, Any]:
                 requested_session_id=session_id,
                 user_id=user_id,
             )
+        conversation_history = None
+        if config.CASE_QA_CHAT_HISTORY_ENABLED and session_id:
+            conversation_history = conversation_history_from_config(
+                config,
+                load_session_transcript(
+                    config=config,
+                    dynamodb_client=dynamodb_client(),
+                    session_id=session_id,
+                ),
+            )
         answer = answer_selected_case_question(
             case_id=str(selected_case_id or ""),
             question=str(request.get("question", "")),
@@ -266,6 +278,7 @@ def _handle_chat_gate(config: Config, event: dict[str, Any]) -> dict[str, Any]:
             dynamodb_client=dynamodb_client(),
             s3_client=s3_client(),
             bedrock_client=bedrock_runtime_client(),
+            conversation_history=conversation_history,
         )
         response_payload: dict[str, Any] = {
             "answer": answer.answer,

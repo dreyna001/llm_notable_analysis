@@ -342,6 +342,34 @@ def get_chat_session_messages(
     }
 
 
+def load_session_transcript(
+    *,
+    config: Config,
+    session_id: str,
+    connect: ConnectionFactory | None = None,
+) -> list[dict[str, Any]]:
+    """Return stored transcript rows for synthesis after request validation."""
+    if not bool(config.CASE_QA_CHAT_HISTORY_ENABLED):
+        return []
+
+    normalized_id = _validate_session_id(session_id)
+    sql = build_list_chat_messages_query(config.CASE_POSTGRES_SCHEMA)
+    connect_fn = connect or _default_connect
+    with connect_fn(config.CASE_POSTGRES_DSN) as conn:
+        _set_statement_timeout(conn, config.CASE_POSTGRES_STATEMENT_TIMEOUT_MS)
+        rows = _fetchall(conn.execute(sql, (normalized_id,)))
+
+    messages: list[dict[str, Any]] = []
+    for row in rows:
+        messages.append(
+            {
+                "role": str(_row_get(row, 0, "role")),
+                "content": str(_row_get(row, 1, "content")),
+            }
+        )
+    return messages
+
+
 def delete_last_chat_turn(
     *,
     config: Config,

@@ -119,6 +119,22 @@ def get_chat_session_messages(
     }
 
 
+def load_session_transcript(
+    *,
+    config: Config,
+    dynamodb_client: Any,
+    session_id: str,
+) -> list[dict[str, Any]]:
+    """Return stored transcript rows for synthesis after request validation."""
+    if not config.CASE_QA_CHAT_HISTORY_ENABLED:
+        return []
+    return _list_messages(
+        config=config,
+        dynamodb_client=dynamodb_client,
+        session_id=_validate_session_id(session_id),
+    )
+
+
 def delete_chat_session(
     *,
     config: Config,

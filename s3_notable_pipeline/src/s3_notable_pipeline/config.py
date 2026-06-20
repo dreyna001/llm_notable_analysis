@@ -284,6 +284,8 @@ class Config:
     CASE_QA_MAX_SESSIONS_PER_USER: int = 10
     CASE_QA_MAX_MESSAGES_PER_SESSION: int = 30
     CASE_QA_MAX_STORED_MESSAGE_BYTES: int = 4_000
+    CASE_QA_MAX_CONVERSATION_TURNS: int = 10
+    CASE_QA_MAX_CONVERSATION_CHARS: int = 6_000
     CHAT_SESSIONS_TABLE: str = ""
     CHAT_MESSAGES_TABLE: str = ""
 
@@ -725,6 +727,12 @@ def load_config() -> Config:
         ),
         CASE_QA_MAX_STORED_MESSAGE_BYTES=_positive_int_env(
             "CASE_QA_MAX_STORED_MESSAGE_BYTES", 4_000, max_value=65_536
+        ),
+        CASE_QA_MAX_CONVERSATION_TURNS=_positive_int_env(
+            "CASE_QA_MAX_CONVERSATION_TURNS", 10, max_value=100
+        ),
+        CASE_QA_MAX_CONVERSATION_CHARS=_positive_int_env(
+            "CASE_QA_MAX_CONVERSATION_CHARS", 6_000, max_value=65_536
         ),
         CHAT_SESSIONS_TABLE=os.getenv("CHAT_SESSIONS_TABLE", ""),
         CHAT_MESSAGES_TABLE=os.getenv("CHAT_MESSAGES_TABLE", ""),
