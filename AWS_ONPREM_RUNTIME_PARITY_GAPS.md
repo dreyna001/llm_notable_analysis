@@ -9,11 +9,11 @@ This document lists **observed gaps between production behavior today** in:
 - **AWS:** `s3_notable_pipeline/` (portal Lambda, DynamoDB case index, S3 case
   chunks, Bedrock synthesis)
 
-It is a **current-state delta index** and **Wave 3 decision record** for closing
-runtime gaps. Wave 1 and Wave 2 are marked complete in
+It is a **Wave 3 decision record** and historical gap index. **Wave 3 and P3-1
+are complete on `main`.** Wave 1 and Wave 2 are also marked complete in
 [`TODO_AWS_PIPELINE_FEATURE_PARITY_WITH_ONPREM.md`](TODO_AWS_PIPELINE_FEATURE_PARITY_WITH_ONPREM.md).
 
-For post–Wave 3 chat UX (multi-turn synthesis) and intentional non-goals see
+For portal chat intentional non-goals and SOTA gap tracking see
 [`PORTAL_CHATBOT_CAPABILITY_GAPS.md`](PORTAL_CHATBOT_CAPABILITY_GAPS.md).
 
 **Related specs:**
@@ -641,34 +641,34 @@ sequence is possible — Slice A is smaller and unblocks UI/API tests.
 
 | ID | Item | Status | Notes |
 | --- | --- | --- | --- |
-| W3-1 | Port case-grounded + general-knowledge prompts | Open | From `case_chat.py` |
-| W3-2 | General-knowledge orchestration | Open | Mirror `answer_case_chat()` |
-| W3-3 | KB context in chat retrieval | Open | Bedrock KB retrieve |
-| W3-5 | Post-LLM guards | Open | Sanitize, refuse, fallback |
-| W3-6 | API: drop citations, match `answer_status` | Open | Locked |
-| W3-7 | Context packaging `UNTRUSTED_TEXT_JSON` | Open | Locked |
-| W3-8 | Bedrock text completion (not JSON from model) | Open | Locked |
-| W3-12 | OpenAPI sync | Open | After API shape change |
+| W3-1 | Port case-grounded + general-knowledge prompts | Done | From `case_chat.py` |
+| W3-2 | General-knowledge orchestration | Done | Mirror `answer_case_chat()` |
+| W3-3 | KB context in chat retrieval | Done | Bedrock KB retrieve |
+| W3-5 | Post-LLM guards | Done | Sanitize, refuse, fallback |
+| W3-6 | API: drop citations, match `answer_status` | Done | Locked |
+| W3-7 | Context packaging `UNTRUSTED_TEXT_JSON` | Done | Locked |
+| W3-8 | Bedrock text completion (not JSON from model) | Done | Locked |
+| W3-12 | OpenAPI sync | Done | After API shape change |
 
 ### Slice B — Hybrid retrieval parity
 
 | ID | Item | Status | Notes |
 | --- | --- | --- | --- |
-| W3-4 | Per-query BM25 + Titan vector + RRF over S3 chunks | Open | Decision 7; match `_execute_chunk_retrieval` |
+| W3-4 | Per-query BM25 + Titan vector + RRF over S3 chunks | Done | Decision 7; match `_execute_chunk_retrieval` |
 
 ### Other Wave 3
 
 | ID | Item | Status | Notes |
 | --- | --- | --- | --- |
-| W3-9 | Analyzer verdict enum | Open | Locked |
-| W3-10 | SOC context header format | Open | Locked |
-| W3-11 | `/api/diagnostics/chat-readiness` route | Open | Lower priority |
+| W3-9 | Analyzer verdict enum | Done | Locked |
+| W3-10 | SOC context header format | Done | Locked |
+| W3-11 | `/api/diagnostics/chat-readiness` route | Done | Lower priority |
 
 **Post–Wave 3 (not in Wave 3 checklist):**
 
 | ID | Item | Status | Notes |
 | --- | --- | --- | --- |
-| P3-1 | Multi-turn conversation memory in synthesis | Open | Both platforms; see `PORTAL_CHATBOT_CAPABILITY_GAPS.md` item 2 |
+| P3-1 | Multi-turn conversation memory in synthesis | Done | Both platforms; see `PORTAL_CHATBOT_CAPABILITY_GAPS.md` item 2 |
 
 **Cancelled / superseded:**
 
@@ -689,7 +689,7 @@ sequence is possible — Slice A is smaller and unblocks UI/API tests.
 | KB storage | Postgres RAG / SQLite+FAISS | Bedrock Knowledge Base |
 | Analyzer HTTP vs Converse | OpenAI-compatible | Bedrock Converse |
 
-These stay different; **behavior and contracts** converge via Wave 3.
+These stay different; **behavior and contracts** converged via Wave 3 and P3-1.
 
 ---
 
@@ -703,3 +703,4 @@ These stay different; **behavior and contracts** converge via Wave 3.
 | 2026-06-18 | Section 3: prompt/API vs hybrid retrieval workstreams; W3-4 implementation plan |
 | 2026-06-18 | Plain-language reranker vs case-chunk retrieval note in Section 3.3 |
 | 2026-06-18 | Committed multi-turn (P3-1); chat repair loop clarified (Section 1.7); dropped holistic and retrieval-debug tracking |
+| 2026-06-19 | Marked Wave 3 checklist and P3-1 complete on `main` |

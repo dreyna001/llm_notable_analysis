@@ -15,7 +15,8 @@ It covers both deployments:
   chunks, Bedrock synthesis)
 
 Use this as a product gap index. Some gaps are intentional for a read-only SOC
-assistant; one gap is a **committed** post–Wave 3 enhancement (see below).
+assistant. The only committed post–Wave 3 enhancement (multi-turn synthesis) is
+**shipped** on both platforms.
 
 **Related contracts:**
 
@@ -32,35 +33,27 @@ general-purpose agent.
 | Area | Current behavior |
 | --- | --- |
 | Scope | Requires a pinned `selected_case_id`; one supported mode: `selected_case` |
-| Synthesis input | Current question + retrieved case context (+ optional KB grounding on on-prem) |
-| Retrieval | On-prem: per-query hybrid lexical + vector RRF over `case_chunks`. AWS: bounded load of pre-stored S3 chunks for the case (not query-specific hybrid search until Wave 3 Slice B) |
+| Synthesis input | Current question + bounded prior session turns + retrieved case context (+ optional KB grounding) |
+| Retrieval | On-prem and AWS: per-query hybrid lexical + vector RRF over case chunks |
 | Response | Single non-streaming completion; Markdown rendering in UI |
-| History | Optional transcript persistence (Postgres on-prem, DynamoDB on AWS) for UI reload, session limits, and stop/cancel cleanup |
+| History | Optional transcript persistence (Postgres on-prem, DynamoDB on AWS) for UI reload, session limits, stop/cancel cleanup, and multi-turn synthesis when enabled |
 | Safety | No tool execution from chat; post-LLM action-boundary checks; draft-query guidance only |
 | UI | Case attach, multi-session sidebar, stop/cancel in-flight request, local + server session storage |
 
-## Committed Enhancement (Post–Wave 3)
+## Shipped Enhancement (P3-1)
 
-### 2. Multi-turn conversation memory in synthesis
+### Multi-turn conversation memory in synthesis
 
-**Product decision:** Add ChatGPT-style follow-up conversation on **both**
-on-prem and AWS after Wave 3 runtime parity ships. This is the only SOTA
-conversational UX gap we are committing to close from this document.
+**Status:** Shipped on both on-prem and AWS.
 
-**Target behavior:** Prior user and assistant turns in the session are included
-in the model context so follow-ups work naturally ("expand on that", "what about
-hypothesis 2?", "rewrite the SPL more narrowly").
+**Behavior:** When chat history is enabled, prior user and assistant turns in the
+session are included in the model context (bounded by
+`CASE_QA_MAX_CONVERSATION_TURNS` and `CASE_QA_MAX_CONVERSATION_CHARS`) so
+follow-ups work naturally ("expand on that", "what about hypothesis 2?",
+"rewrite the SPL more narrowly").
 
-**Gap today:** Each `POST /api/chat` is **stateless for the LLM**. The backend
-builds the prompt from the **current question only** plus retrieved archive
-chunks (and optional KB context). Persisted chat history is transcript storage for
-the UI — it is **not** replayed into synthesis on the next turn.
-
-**Applies to:** On-prem and AWS (implement together; not part of Wave 3 parity
-checklist).
-
-**Note:** Enabling `CASE_QA_CHAT_HISTORY_ENABLED` does not change synthesis
-today; it only persists and reloads transcripts.
+Retrieval still runs on each turn; transcript context supplements, not replaces,
+case-chunk evidence.
 
 **Out of scope for this item:** Holistic "summarize the entire case" modes,
 full-case inject, raised chunk budgets as a separate product lane, streaming,
@@ -75,40 +68,40 @@ These are product choices aligned with a **read-only SOC case archive assistant*
 | Choice | Rationale |
 | --- | --- |
 | No tool execution from chat | Prevent unapproved Splunk/ITSM/SOAR actions; keep chat query-transport only |
-| Case facts via retrieval on each turn (today) | Reduce hallucination and stale-context drift; multi-turn will add transcript context, not replace retrieval |
+| Case facts via retrieval on each turn | Reduce hallucination and stale-context drift; multi-turn adds transcript context, not replacement |
 | Pinned-case scope | Clear evidence boundary for v1 |
 | Stripped citations (on-prem UI) | Simpler UX; avoids implying clickable provenance we do not implement |
-| Default-off server chat history | Optional transcript feature until multi-turn synthesis is implemented |
+| Default-off server chat history | Optional transcript feature; enable when multi-turn synthesis is desired |
 | Fixed temperature 0.0 | More deterministic analyst-facing answers |
 
 ## Priority Lens
 
 | Item | Status |
 | --- | --- |
-| Multi-turn memory in synthesis (item 2 above) | **Committed** post–Wave 3 on both platforms |
+| Multi-turn memory in synthesis (P3-1) | **Shipped** on both platforms |
 | Holistic / full-case inject / higher budgets as a separate mode | **Not pursuing** — stay retrieval-bound |
 | Analyst-visible retrieval debug in the portal UI | **Not pursuing** — removed from planning docs |
+| Streaming, regenerate, file upload | **Not pursuing** for v1 read-only assistant |
 
 ## Platform Parity Notes
 
-| Capability gap | On-prem | AWS |
+| Capability | On-prem | AWS |
 | --- | --- | --- |
-| Stateless synthesis (today) | Yes | Yes |
-| History not in prompt (today) | Yes | Yes |
-| Per-query case retrieval | Hybrid FTS + vector | Bounded S3 chunk load until Wave 3 Slice B |
-| UI citations | Stripped | Backend citations until Wave 3 Slice A removes them |
+| Multi-turn synthesis (when history enabled) | Yes | Yes |
+| Per-query case retrieval | Hybrid FTS + vector | Hybrid BM25 + Titan vector + RRF |
+| UI citations | Stripped | Stripped (Wave 3 Slice A) |
 | Chat history store | Postgres | DynamoDB |
-| General-knowledge fallback | Configurable | Not equivalent to on-prem path until Wave 3 Slice A |
+| General-knowledge fallback | Configurable | Configurable (Wave 3 Slice A) |
 
-For AWS portal parity (prompt/API and hybrid retrieval), see
-[`AWS_ONPREM_RUNTIME_PARITY_GAPS.md`](AWS_ONPREM_RUNTIME_PARITY_GAPS.md).
+Runtime parity checklist: [`AWS_ONPREM_RUNTIME_PARITY_GAPS.md`](AWS_ONPREM_RUNTIME_PARITY_GAPS.md).
 
 ## Revision
 
 | Date | Change |
 | --- | --- |
 | 2026-06-18 | Committed multi-turn synthesis (item 2); dropped holistic Q&A and retrieval-debug tracking |
+| 2026-06-19 | Marked P3-1 shipped; refreshed baseline and parity notes after Wave 3 closeout |
 
 Update this document when portal chat behavior or API contracts change. Do not
 duplicate detailed implementation specs here — link to the technical specs above.
-
+
