@@ -7,7 +7,7 @@ Cases 1-5 in the analyst portal preview UI are backed by this directory.
 - [`docs/operations/analyst_portal/ANALYST_PORTAL_PREVIEW.md`](../docs/operations/analyst_portal/ANALYST_PORTAL_PREVIEW.md)
 - [`docs/operations/analyst_portal/ANALYST_PORTAL_CHAT_SECURITY.md`](../docs/operations/analyst_portal/ANALYST_PORTAL_CHAT_SECURITY.md)
 
-Analyst investigation questions (case 1 example):
+Analyst investigation questions (case 1 and Knowledge Base demo on case 5):
 [`PREVIEW_CASE_INVESTIGATION_GUIDE.md`](../../PREVIEW_CASE_INVESTIGATION_GUIDE.md)
 (repo root)
 
@@ -15,6 +15,7 @@ Analyst investigation questions (case 1 example):
 
 - `alerts/` — raw Splunk-style notable JSON (input only; no LLM output).
 - `bundles/` — **stored analyzer output** (alert + analysis). Commit these after generation so preview starts instantly with no analyzer LLM calls.
+- `knowledge_base/` — committed SOC advisory docs for preview chat KB grounding (keyword-matched; no Postgres RAG).
 
 ## Stored analysis (default)
 

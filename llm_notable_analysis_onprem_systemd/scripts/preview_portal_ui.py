@@ -60,6 +60,7 @@ from preview_fake_db import (  # noqa: E402
     PreviewFakeEmbeddingModel,
     build_preview_connect_factory,
 )
+from preview_knowledge_base import build_preview_knowledge_base_provider  # noqa: E402
 
 _PREVIEW_HOST = "127.0.0.1"
 _PREVIEW_PORT = 8765
@@ -408,6 +409,7 @@ def build_preview_app(*, inject_loopback_auth: bool | None = None):
         chat_synthesizer=synthesizer,
         chat_general_synthesizer=general_synthesizer,
         chat_text_complete=chat_text_complete,
+        chat_knowledge_base_provider=build_preview_knowledge_base_provider(),
         chat_llm_gateway_ready=llm_gateway_ready,
     )
 

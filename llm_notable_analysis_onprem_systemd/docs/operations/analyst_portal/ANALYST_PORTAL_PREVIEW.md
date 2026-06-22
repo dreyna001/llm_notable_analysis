@@ -23,6 +23,7 @@ Case investigation question flows for preview scenarios are in
 | Case analysis on page load | Read from bundles only; no analyzer LLM |
 | Chatbot | Live Bedrock / OpenAI / stub via `config.portal-preview.env`; Bedrock uses production prompt assembly via `chat_text_complete` |
 | Chat history / sessions | Enabled in preview by default (`CASE_QA_CHAT_HISTORY_ENABLED=true`); multi-turn chat with persisted sessions on the in-memory fake Postgres connection |
+| Knowledge Base (chat) | Committed fixtures in `data/preview_scenarios/knowledge_base/`; keyword-matched advisory snippets injected on `/api/chat` (same `knowledge_base` lane as production; no Postgres RAG) |
 | Postgres / nginx / systemd | Not required |
 
 | Case | Alert type |
@@ -45,6 +46,7 @@ Python preview modules live in `llm_notable_analysis_onprem_systemd/scripts/`:
 - `preview_bedrock_llm.py` — Bedrock Converse chat (preview only)
 - `preview_env.py` — loads `config.portal-preview.env`
 - `preview_synthetic_pipeline.py` — loads stored bundles for cases 1-5
+- `preview_knowledge_base.py` — synthetic KB fixtures for preview chat
 - `write_preview_bundles.py` — regenerate bundles from `preview_stored_analysis.py` (no live analyzer LLM)
 - `generate_preview_scenarios.py` — optional live analyzer regeneration
 
@@ -156,8 +158,13 @@ injects dev proxy auth headers.
 | `/cases/case-1` ... `/cases/case-5` | Full stored analysis panels |
 | Case chat | Live Bedrock/OpenAI synthesis with multi-turn sessions (selected-case mode recommended) |
 
-See [`PREVIEW_CASE_INVESTIGATION_GUIDE.md`](../../../../PREVIEW_CASE_INVESTIGATION_GUIDE.md)
-for recommended analyst questions on case 1.
+### Knowledge Base demo (alert 5 / case-5)
+
+Step-by-step walkthrough, copy-paste demo questions, and troubleshooting:
+[`PREVIEW_CASE_INVESTIGATION_GUIDE.md`](../../../../PREVIEW_CASE_INVESTIGATION_GUIDE.md#how-to-demo-knowledge-base-on-alert-5-case-5)
+(repo root).
+
+Fixtures: `data/preview_scenarios/knowledge_base/`.
 
 ## Optional chat providers
 
