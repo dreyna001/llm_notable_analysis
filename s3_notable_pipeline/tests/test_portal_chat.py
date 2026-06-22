@@ -18,6 +18,7 @@ from s3_notable_pipeline.portal_chat import (
     ChatTurn,
     bounded_conversation_history,
     build_case_grounded_prompt,
+    build_general_knowledge_prompt,
     conversation_history_from_config,
     sanitize_portal_chat_answer,
     should_fallback_to_general_knowledge,
@@ -63,6 +64,26 @@ class PortalChatTests(unittest.TestCase):
         self.assertIn("<CONTEXT_BLOCK>", prompt)
         self.assertIn("UNTRUSTED_TEXT_JSON:", prompt)
         self.assertNotIn("chunk_id=", prompt)
+
+    def test_build_prompt_uses_adaptive_chatbot_answer_guidance(self) -> None:
+        prompt = build_case_grounded_prompt(
+            question="What happened?",
+            sources=[{"search_text": "suspicious login", "text": "suspicious login"}],
+        )
+
+        self.assertIn("Answer like a default helpful chatbot", prompt)
+        self.assertIn("offer a brief follow-up", prompt)
+        self.assertIn("only when the analyst asks for it", prompt)
+        self.assertNotIn("When useful, structure the answer", prompt)
+        self.assertNotIn("Draft query/example (unvalidated draft", prompt)
+
+    def test_general_knowledge_prompt_uses_on_demand_query_guidance(self) -> None:
+        prompt = build_general_knowledge_prompt("How should I validate this?")
+
+        self.assertIn("Answer like a default helpful chatbot", prompt)
+        self.assertIn("If the analyst explicitly asks for Splunk SPL", prompt)
+        self.assertIn("offer a brief follow-up", prompt)
+        self.assertNotIn("draft queries or examples", prompt)
 
     def test_sanitize_removes_source_markers(self) -> None:
         cleaned = sanitize_portal_chat_answer("Answer text. Source #1")

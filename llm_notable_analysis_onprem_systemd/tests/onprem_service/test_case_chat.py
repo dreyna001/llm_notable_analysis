@@ -9,6 +9,7 @@ from llm_notable_analysis_onprem_systemd.onprem_service.case_chat import (
     ChatRequest,
     ChatTurn,
     RetrievedSource,
+    _build_general_knowledge_prompt,
     _build_prompt,
     answer_case_chat,
     bounded_conversation_history,
@@ -661,6 +662,26 @@ class TestCaseChat(unittest.TestCase):
         self.assertIn("CONVERSATION HISTORY:", prompt)
         self.assertIn("What happened?", prompt)
         self.assertIn("suspicious login occurred", prompt.lower())
+
+    def test_build_prompt_uses_adaptive_chatbot_answer_guidance(self) -> None:
+        prompt = _build_prompt(
+            "What happened?",
+            [RetrievedSource(source_lane="current_case", text="Evidence text.")],
+        )
+
+        self.assertIn("Answer like a default helpful chatbot", prompt)
+        self.assertIn("offer a brief follow-up", prompt)
+        self.assertIn("only when the analyst asks for it", prompt)
+        self.assertNotIn("When useful, structure the answer", prompt)
+        self.assertNotIn("Draft query/example (unvalidated draft", prompt)
+
+    def test_general_knowledge_prompt_uses_on_demand_query_guidance(self) -> None:
+        prompt = _build_general_knowledge_prompt("How should I validate this?")
+
+        self.assertIn("Answer like a default helpful chatbot", prompt)
+        self.assertIn("If the analyst explicitly asks for Splunk SPL", prompt)
+        self.assertIn("offer a brief follow-up", prompt)
+        self.assertNotIn("draft queries or examples", prompt)
 
     def test_bounded_conversation_history_keeps_recent_turns_within_budget(self) -> None:
         turns = bounded_conversation_history(

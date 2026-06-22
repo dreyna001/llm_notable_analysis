@@ -56,9 +56,9 @@ query prompt layer are **out of scope**.
 **When:** Archive retrieval is empty or insufficient and
 `CASE_QA_GENERAL_KNOWLEDGE_ENABLED=true`.
 
-**Key instruction:** flexible answer shape — short answer, assumptions,
-reasoning, recommended steps, draft queries/examples, validation checks,
-caveats, next questions — without forcing every section every time.
+**Key instruction:** adaptive chatbot-style answer shape — answer directly,
+stay concise by default, add structure only when helpful, and offer query
+drafting only when it is the natural next step or explicitly requested.
 
 ### `_build_prompt`
 
@@ -66,10 +66,9 @@ caveats, next questions — without forcing every section every time.
 
 **Key instruction:** retrieved archive is the only source of **case facts**;
 general cyber/MITRE/IR knowledge may interpret facts and suggest validation;
-clearly separate case-supported facts from inference, guidance, and draft queries.
-
-Optional sections when useful: Grounded answer, Unknowns, Suggested next steps,
-Draft query/example.
+answer naturally without forcing report sections; draft queries only when the
+analyst explicitly asks, otherwise offer a short follow-up when a query is the
+natural next step.
 
 **Related:** portal archive retrieval uses Postgres chunk search in the same
 module; SOC/SPL/Elastic KB lanes are optional advisory sources when configured.

@@ -112,11 +112,14 @@ Two synthesis prompts in `case_chat.py`:
   (prompt-injection mitigation)
 - Instructs model that the endpoint **cannot execute** searches, tickets, or host
   actions
-- Allows **draft** SPL, SQL, shell, API examples for human review; must not claim
-  execution; label drafts as unvalidated guidance
+- Allows **draft** SPL, SQL, shell, API examples for human review only when the
+  analyst asks; otherwise may offer a short query follow-up when a pivot is the
+  natural next step
+- Must not claim execution; label drafts as unvalidated guidance
 - Must not cite sources or emit source-number markers (stripped post-synthesis anyway)
 - Output is GitHub-flavored Markdown only (no structured action schema consumed by code)
-- May structure answers as Grounded answer / Unknowns / Suggested next steps / Draft query
+- Uses adaptive chatbot-style answers by default; fixed sections are optional only
+  when they make the answer clearer
 
 When chat history is enabled, prior turns are rendered as `CONVERSATION_TURN`
 blocks with `UNTRUSTED_TEXT_JSON` content for context only; case facts still
