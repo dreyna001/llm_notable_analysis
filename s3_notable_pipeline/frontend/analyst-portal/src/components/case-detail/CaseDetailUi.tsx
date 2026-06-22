@@ -123,7 +123,7 @@ export function DetailHypothesisBlock({
   return (
     <div
       className={cn(
-        "rounded-lg border p-3",
+        "rounded-md border p-3",
         variant === "benign"
           ? "border-emerald-500/30 bg-emerald-500/5"
           : "border-destructive/30 bg-destructive/5",
@@ -158,7 +158,7 @@ export function DetailDriverCol({
   return (
     <div
       className={cn(
-        "rounded-lg border p-3",
+        "rounded-md border p-3",
         variant === "malicious"
           ? "border-destructive/20 bg-destructive/5"
           : "border-emerald-500/20 bg-emerald-500/5",
@@ -191,7 +191,7 @@ export function DetailBulletList({ items }: { items: string[] }) {
 
 export function hypothesisChipClass(type: string): string {
   return cn(
-    "inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+    "inline-flex shrink-0 rounded-sm px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
     type === "benign" && "bg-emerald-500/15 text-emerald-400",
     type === "adversary" && "bg-destructive/15 text-destructive",
     type === "ttp" && "bg-primary/15 text-primary",
@@ -299,7 +299,7 @@ export function DetailMetaValue({ children }: { children: ReactNode }) {
 
 export function DetailCodeBlock({ children }: { children: ReactNode }) {
   return (
-    <pre className="max-h-[32rem] overflow-auto rounded-lg border border-border bg-muted/40 p-4 text-xs leading-relaxed text-foreground/90">
+    <pre className="max-h-[32rem] overflow-auto rounded-md border border-border bg-muted/40 p-4 text-xs leading-relaxed text-foreground/90">
       {children}
     </pre>
   );

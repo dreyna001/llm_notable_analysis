@@ -84,7 +84,7 @@ export function PortalSidebar({
                 <div className="group flex items-center gap-0.5" key={session.localId}>
                   <button
                     className={cn(
-                      "min-w-0 flex-1 truncate rounded-lg px-2.5 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
+                      "min-w-0 flex-1 truncate rounded-md px-2.5 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
                       session.localId === activeLocalId &&
                         "bg-sidebar-accent text-sidebar-accent-foreground",
                     )}

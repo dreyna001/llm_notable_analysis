@@ -13,7 +13,7 @@ export function CaseArchiveNoticeBanner({
 
   return (
     <div
-      className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-50"
+      className="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-50"
       role="status"
     >
       <div className="font-medium">{title}</div>

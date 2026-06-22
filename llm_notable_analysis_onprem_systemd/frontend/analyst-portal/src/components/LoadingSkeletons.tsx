@@ -45,13 +45,13 @@ export function CasesTableSkeleton({ rows = 5 }: { rows?: number }) {
                 <Skeleton className="h-4 w-32" />
               </td>
               <td className="py-3 pr-4">
-                <Skeleton className="h-6 w-24 rounded-full" />
+                <Skeleton className="h-6 w-24 rounded-sm" />
               </td>
               <td className="py-3 pr-4">
                 <Skeleton className="h-4 w-40" />
               </td>
               <td className="py-3 pr-4">
-                <Skeleton className="h-6 w-20 rounded-full" />
+                <Skeleton className="h-6 w-20 rounded-sm" />
               </td>
             </tr>
           ))}
@@ -68,7 +68,7 @@ export function ChatConversationSkeleton() {
       label="Loading conversation"
     >
       <div className="flex justify-end">
-        <Skeleton className="h-10 w-[55%] rounded-2xl" />
+        <Skeleton className="h-10 w-[55%] rounded-md" />
       </div>
       <div className="space-y-2">
         <Skeleton className="h-4 w-full" />
@@ -76,7 +76,7 @@ export function ChatConversationSkeleton() {
         <Skeleton className="h-4 w-[78%]" />
       </div>
       <div className="flex justify-end">
-        <Skeleton className="h-10 w-[45%] rounded-2xl" />
+        <Skeleton className="h-10 w-[45%] rounded-md" />
       </div>
       <div className="space-y-2">
         <Skeleton className="h-4 w-[88%]" />
@@ -116,7 +116,7 @@ export function CaseDetailMetricsSkeleton() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {Array.from({ length: 3 }, (_, index) => (
           <div
-            className="rounded-xl border bg-card p-4 shadow-sm"
+            className="rounded-lg border bg-card p-4 shadow-sm"
             key={`metric-skeleton-${index}`}
           >
             <Skeleton className="h-3 w-24" />
@@ -130,7 +130,7 @@ export function CaseDetailMetricsSkeleton() {
           <Skeleton className="h-9 w-24 rounded-md" key={`tab-skeleton-${index}`} />
         ))}
       </div>
-      <div className="mt-4 space-y-3 rounded-xl border bg-card p-4 shadow-sm">
+      <div className="mt-4 space-y-3 rounded-lg border bg-card p-4 shadow-sm">
         <Skeleton className="h-4 w-40" />
         <Skeleton className="h-4 w-full" />
         <Skeleton className="h-4 w-[90%]" />
@@ -154,7 +154,7 @@ export function PortalWorkspaceSkeleton({ className }: { className?: string }) {
           <Skeleton className="mx-auto h-6 w-48" />
           <Skeleton className="mx-auto h-4 w-72" />
         </div>
-        <Skeleton className="mx-auto h-24 w-full rounded-[26px]" />
+        <Skeleton className="mx-auto h-24 w-full rounded-lg" />
       </div>
     </LoadingRegion>
   );

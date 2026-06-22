@@ -206,7 +206,7 @@ export function CaseAttachPicker({
         value={query}
         onChange={(event) => setQuery(event.target.value)}
       />
-      <div className="chat-scrollbar max-h-44 space-y-0.5 overflow-y-auto rounded-lg bg-transparent py-1">
+      <div className="chat-scrollbar max-h-44 space-y-0.5 overflow-y-auto rounded-md bg-transparent py-1">
         {loading ? <CaseAttachListSkeleton /> : null}
         {error ? (
           <p className="px-2 py-2 text-xs text-destructive">{error}</p>

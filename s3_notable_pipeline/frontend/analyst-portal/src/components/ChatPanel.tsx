@@ -349,7 +349,7 @@ export function ChatPanel({
           {turns.map((turn) => (
             <div className="flex flex-col gap-4" key={turn.id}>
               <div className="flex justify-end">
-                <div className="max-w-[85%] rounded-2xl bg-muted px-4 py-2.5 text-sm leading-relaxed">
+                <div className="max-w-[85%] rounded-md bg-muted px-4 py-2.5 text-sm leading-relaxed">
                   {turn.question}
                 </div>
               </div>
@@ -389,7 +389,7 @@ export function ChatPanel({
               {serverSyncError ? <p>{serverSyncError}</p> : null}
             </div>
           ) : null}
-          <div className="flex items-end gap-3 rounded-[26px] bg-muted/70 px-4 py-3 shadow-sm">
+          <div className="flex items-end gap-3 rounded-lg bg-muted/70 px-4 py-3 shadow-sm">
             <textarea
               ref={textareaRef}
               className="chat-scrollbar max-h-[200px] min-h-[24px] flex-1 resize-none overflow-y-auto border-0 bg-transparent py-0.5 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground"
@@ -409,7 +409,7 @@ export function ChatPanel({
             />
             {isBusy ? (
               <Button
-                className="size-8 shrink-0 rounded-full"
+                className="size-8 shrink-0 rounded-md"
                 disabled={loadingHistory}
                 size="icon"
                 type="button"
@@ -424,7 +424,7 @@ export function ChatPanel({
               </Button>
             ) : (
               <Button
-                className="size-8 shrink-0 rounded-full"
+                className="size-8 shrink-0 rounded-md"
                 disabled={
                   inputDisabled || !question.trim()
                 }

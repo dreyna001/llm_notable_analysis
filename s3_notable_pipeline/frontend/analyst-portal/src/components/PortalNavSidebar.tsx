@@ -16,7 +16,7 @@ export function PortalNavHeader() {
         <NavLink
           className={({ isActive }) =>
             cn(
-              "rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+              "rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
               isActive &&
                 "bg-sidebar-accent text-sidebar-accent-foreground",
             )
@@ -32,7 +32,7 @@ export function PortalNavHeader() {
         <NavLink
           className={({ isActive }) =>
             cn(
-              "rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+              "rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
               isActive &&
                 "bg-sidebar-accent text-sidebar-accent-foreground",
             )

@@ -134,7 +134,7 @@ const markdownComponents: Components = {
     return (
       <pre
         className={cn(
-          "chat-scrollbar my-3 overflow-x-auto rounded-lg bg-muted p-3 font-mono text-xs leading-relaxed",
+          "chat-scrollbar my-3 overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs leading-relaxed",
           className,
         )}
         {...props}
