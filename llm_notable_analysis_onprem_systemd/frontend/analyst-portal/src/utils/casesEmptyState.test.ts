@@ -40,7 +40,7 @@ describe("resolveCasesEmptyState", () => {
       search_name: "",
     });
 
-    expect(content.title).toBe("No cases in the archive yet");
+    expect(content.title).toBe("No cases yet");
     expect(content.action).toBeUndefined();
   });
 });

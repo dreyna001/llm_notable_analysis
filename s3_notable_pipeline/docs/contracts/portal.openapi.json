@@ -730,7 +730,7 @@
     }
   },
   "info": {
-    "description": "Read-only case archive portal",
+    "description": "Read-only case portal",
     "title": "AWS Notable Analyst Portal API",
     "version": "1.0.0"
   },

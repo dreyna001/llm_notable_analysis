@@ -970,7 +970,7 @@ export function HomeChatWorkspace({
         {effectiveSelectedCaseId && effectiveArchiveNotices.length ? (
           <CaseArchiveNoticeBanner
             notices={effectiveArchiveNotices}
-            title="Attached case archive notice"
+            title="Attached case notice"
           />
         ) : null}
         <ChatPanel

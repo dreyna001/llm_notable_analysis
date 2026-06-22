@@ -23,7 +23,7 @@ describe("formatChatUnavailableReason", () => {
         llm_gateway: "unavailable",
       }),
     ).toBe(
-      "Case chat is unavailable: Embeddings, Archive retrieval, LLM gateway are down.",
+      "Case chat is unavailable: Embeddings, Case retrieval, LLM gateway are down.",
     );
   });
 });
@@ -33,7 +33,7 @@ describe("resolveChatUnavailableReason", () => {
     expect(
       resolveChatUnavailableReason({
         chat_degraded_reason:
-          "Case chat is temporarily unavailable. Embeddings, archive retrieval, or the LLM may be down.",
+          "Case chat is temporarily unavailable. Embeddings, case retrieval, or the LLM may be down.",
         chat_dependency_status: {
           embeddings: "ready",
           archive_retrieval: "ready",

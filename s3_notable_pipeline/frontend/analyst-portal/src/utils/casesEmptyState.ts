@@ -32,7 +32,7 @@ export function resolveCasesEmptyState(
     return {
       title: "No case matches this ID",
       description:
-        "Check the case ID spelling or remove it to browse the full archive.",
+        "Check the case ID spelling or remove it to browse all cases.",
       action: "clear_case_id",
     };
   }
@@ -47,8 +47,8 @@ export function resolveCasesEmptyState(
   }
 
   return {
-    title: "No cases in the archive yet",
+    title: "No cases yet",
     description:
-      "Cases appear here after analyzer processing and archive retention.",
+      "Cases appear here after analyzer processing and the retention window.",
   };
 }

@@ -23,14 +23,14 @@ def build_case_archive_notices(
             "Analyzer processing finished, but portal chat indexing failed for this case."
         )
     elif status == "pending":
-        notices.append("Case archive indexing is still pending.")
+        notices.append("Case indexing is still pending.")
     elif status == "not_indexed":
         notices.append("This case is not indexed for portal chat retrieval.")
 
     if completeness == "missing_analysis":
-        notices.append("Structured analysis was not stored in the case archive.")
+        notices.append("Structured analysis was not stored for this case.")
     elif completeness == "missing_alert":
-        notices.append("The original alert payload is missing from the case archive.")
+        notices.append("The original alert payload is missing for this case.")
     elif completeness == "markdown_only":
         notices.append("This case was imported from a legacy markdown report only.")
 

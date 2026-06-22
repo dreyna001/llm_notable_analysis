@@ -25,7 +25,7 @@ def build_case_archive_notices(
         )
     elif status == "pending":
         notices.append(
-            "Case archive indexing is still pending. Chat may be limited until "
+            "Case indexing is still pending. Chat may be limited until "
             "indexing completes."
         )
     elif status == "not_indexed":
@@ -35,17 +35,17 @@ def build_case_archive_notices(
 
     if completeness == "missing_analysis":
         notices.append(
-            "Structured analysis was not stored in the case archive. Chat can "
+            "Structured analysis was not stored for this case. Chat can "
             "use the alert payload only."
         )
     elif completeness == "missing_alert":
         notices.append(
-            "The original alert payload is missing from the case archive. Chat "
+            "The original alert payload is missing for this case. Chat "
             "answers may be incomplete."
         )
     elif completeness == "markdown_only":
         notices.append(
-            "This case was imported from a legacy markdown report only. Archive "
+            "This case was imported from a legacy markdown report only. Case "
             "detail and chat coverage may be incomplete."
         )
 

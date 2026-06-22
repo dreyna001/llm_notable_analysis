@@ -537,7 +537,7 @@ class TestPortalApp(unittest.TestCase):
         response = client.get("/api/cases/case-1", headers=_AUTH_HEADERS)
 
         self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json()["detail"], "Case archive unavailable.")
+        self.assertEqual(response.json()["detail"], "Case data unavailable.")
 
     def test_api_case_detail_maps_programming_errors_to_internal_error(self) -> None:
         client = TestClient(
@@ -563,7 +563,7 @@ class TestPortalApp(unittest.TestCase):
         response = client.get("/api/cases", headers=_AUTH_HEADERS)
 
         self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json()["detail"], "Case archive unavailable.")
+        self.assertEqual(response.json()["detail"], "Case data unavailable.")
 
     def test_api_cases_maps_programming_errors_to_internal_error(self) -> None:
         client = TestClient(

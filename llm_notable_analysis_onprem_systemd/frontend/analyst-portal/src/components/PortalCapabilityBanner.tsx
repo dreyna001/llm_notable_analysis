@@ -63,7 +63,7 @@ function buildNotices(
 
   if (capabilities && !capabilities.general_knowledge_enabled) {
     notices.push(
-      "General technology fallback is off. Answers use archived case context only.",
+      "General technology fallback is off. Answers use stored case context only.",
     );
   }
 

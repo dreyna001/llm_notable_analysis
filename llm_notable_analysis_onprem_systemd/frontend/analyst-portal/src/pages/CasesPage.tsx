@@ -487,7 +487,7 @@ export function CasesPage() {
                         </Link>
                         {item.archive_notices?.length ? (
                           <div className="mt-0.5 text-xs text-amber-700 dark:text-amber-200">
-                            Archive issue: open case for details
+                            Case issue: open case for details
                           </div>
                         ) : (
                           <div className="mt-0.5 text-xs text-muted-foreground">

@@ -684,7 +684,7 @@ export function CaseDetailPage() {
         }
       }
       if (!cancelled) {
-        setRawOutput(chunks.join("\n\n") || "No raw output archived.");
+        setRawOutput(chunks.join("\n\n") || "No raw output stored for this case.");
         setRawOutputLoading(false);
       }
     })();
@@ -745,7 +745,7 @@ export function CaseDetailPage() {
         <DetailCard>
           <DetailMuted>
             Part of this case was omitted from the initial view. Use Raw Output or
-            the raw JSON API for full archived fields.
+            the raw JSON API for full stored fields.
           </DetailMuted>
         </DetailCard>
       ) : null}
@@ -1198,7 +1198,7 @@ export function CaseDetailPage() {
               <DetailCardTitle>Raw Output</DetailCardTitle>
               <DetailCodeBlock>
                 {rawOutputLoading
-                  ? "Loading archived raw output…"
+                  ? "Loading stored raw output…"
                   : (rawOutput ?? String(analysis.raw_response ?? ""))}
               </DetailCodeBlock>
             </DetailCard>

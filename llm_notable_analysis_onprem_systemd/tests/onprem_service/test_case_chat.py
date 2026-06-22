@@ -391,7 +391,7 @@ class TestCaseChat(unittest.TestCase):
             connect=lambda _dsn: _FakeConnection(row_pages=[[_chunk_row()], []]),
             embedding_model=_FakeEmbeddingModel(),
             synthesize=lambda _question, _sources: (
-                "The archive did not contain enough grounded context to answer."
+                "This case did not contain enough grounded context to answer."
             ),
             general_synthesize=lambda question: f"General XSS answer for {question}",
         )
@@ -645,7 +645,7 @@ class TestCaseChat(unittest.TestCase):
         self.assertFalse(readiness.llm_gateway_ready)
         self.assertEqual(
             readiness.degraded_reason,
-            "Case chat is unavailable: Embeddings, Archive retrieval, LLM gateway are down.",
+            "Case chat is unavailable: Embeddings, Case retrieval, LLM gateway are down.",
         )
 
     def test_build_prompt_includes_bounded_conversation_history(self) -> None:

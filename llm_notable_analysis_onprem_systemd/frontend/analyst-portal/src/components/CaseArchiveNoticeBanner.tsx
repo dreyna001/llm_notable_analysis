@@ -5,7 +5,7 @@ type CaseArchiveNoticeBannerProps = {
 
 export function CaseArchiveNoticeBanner({
   notices,
-  title = "Case archive notice",
+  title = "Case notice",
 }: CaseArchiveNoticeBannerProps) {
   if (!notices.length) {
     return null;

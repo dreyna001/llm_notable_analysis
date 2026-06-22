@@ -2,7 +2,7 @@ import type { ChatDependencyStatus } from "../types";
 
 const CHAT_DEPENDENCY_LABELS: Record<keyof ChatDependencyStatus, string> = {
   embeddings: "Embeddings",
-  archive_retrieval: "Archive retrieval",
+  archive_retrieval: "Case retrieval",
   llm_gateway: "LLM gateway",
 };
 

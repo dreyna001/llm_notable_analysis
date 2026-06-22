@@ -549,7 +549,7 @@ def build_portal_app(
 
     app = FastAPI(
         title="Notable Analyst Portal",
-        description="Read-only case archive portal",
+        description="Read-only case portal",
         version="1.0.0",
     )
     app.state.config = config
@@ -576,7 +576,7 @@ def build_portal_app(
         except Exception as exc:
             _raise_portal_db_error(
                 exc,
-                detail_unavailable="Case archive unavailable.",
+                detail_unavailable="Case data unavailable.",
                 log_message=f"Failed to fetch case {normalized}",
             )
         if record is None:
@@ -708,7 +708,7 @@ def build_portal_app(
         except Exception as exc:
             _raise_portal_db_error(
                 exc,
-                detail_unavailable="Case archive unavailable.",
+                detail_unavailable="Case data unavailable.",
                 log_message="Failed to list cases",
             )
         response_items = items[:page_size]

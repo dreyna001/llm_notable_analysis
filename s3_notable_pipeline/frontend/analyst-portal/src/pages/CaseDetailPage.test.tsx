@@ -21,7 +21,7 @@ const { fetchCase, MockApiError, nullAnalysisCase } = vi.hoisted(() => {
       retrieval_status: "not_indexed",
       source_completeness: "missing_analysis",
       archive_notices: [
-        "Structured analysis was not stored in the case archive. Chat can use the alert payload only.",
+        "Structured analysis was not stored for this case. Chat can use the alert payload only.",
       ],
     },
     alert_payload: {
@@ -91,10 +91,10 @@ describe("CaseDetailPage", () => {
     expect(screen.getByText("Not indexed")).toBeInTheDocument();
     expect(screen.getByText("Structured analysis missing")).toBeInTheDocument();
     expect(screen.getByText("No hypothesis summary available.")).toBeInTheDocument();
-    expect(screen.getByText("Case archive notice")).toBeInTheDocument();
+    expect(screen.getByText("Case notice")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Structured analysis was not stored in the case archive. Chat can use the alert payload only.",
+        "Structured analysis was not stored for this case. Chat can use the alert payload only.",
       ),
     ).toBeInTheDocument();
   });

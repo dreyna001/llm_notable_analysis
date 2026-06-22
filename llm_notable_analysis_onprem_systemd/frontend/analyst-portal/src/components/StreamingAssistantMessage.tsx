@@ -31,7 +31,7 @@ export function ChatTypingIndicator({
       </div>
       {showLongWait ? (
         <p className="text-xs text-muted-foreground">
-          Complex case lookups can take a few minutes. Use Stop to cancel.
+          Still working — retrieval and synthesis can take some time. Stop cancels the request.
         </p>
       ) : null}
     </div>

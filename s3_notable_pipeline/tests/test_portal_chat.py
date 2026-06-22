@@ -85,6 +85,11 @@ class PortalChatTests(unittest.TestCase):
     def test_insufficient_archive_phrase_triggers_fallback(self) -> None:
         self.assertTrue(
             should_fallback_to_general_knowledge(
+                "This case did not contain enough grounded context to answer."
+            )
+        )
+        self.assertTrue(
+            should_fallback_to_general_knowledge(
                 "The archive did not contain enough grounded context to answer."
             )
         )
