@@ -1,7 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, fetchCapabilities, fetchCase, fetchChatSessions } from "../api/client";
+import {
+  ApiError,
+  fetchCapabilities,
+  fetchCase,
+  fetchChatSessionMessages,
+  fetchChatSessions,
+} from "../api/client";
 import type { PortalCapabilities } from "../types";
 
 import { HomeChatWorkspace } from "./HomeChatWorkspace";
@@ -298,6 +304,68 @@ describe("HomeChatWorkspace server chat sessions", () => {
       await screen.findByText(
         "Could not load server chat sessions. 503: unavailable. Showing local chats only.",
       ),
+    ).toBeInTheDocument();
+  });
+
+  it("loads server chat history on the first click of a saved session", async () => {
+    vi.mocked(fetchCapabilities).mockResolvedValue({
+      ...capabilities,
+      chat_history_enabled: true,
+    });
+    vi.mocked(fetchChatSessions).mockResolvedValue({
+      history_enabled: true,
+      items: [
+        {
+          session_id: "srv-1",
+          title: "Saved chat",
+          updated_at: "2026-01-01T00:00:00.000Z",
+          mode: "selected_case",
+          selected_case_id: "portal-test-1780770539",
+        },
+      ],
+    });
+    vi.mocked(fetchChatSessionMessages).mockResolvedValue({
+      session_id: "srv-1",
+      mode: "selected_case",
+      selected_case_id: "portal-test-1780770539",
+      messages: [
+        {
+          role: "user",
+          content: "What happened earlier?",
+          created_at: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          role: "assistant",
+          content: "Here is the prior summary.",
+          created_at: "2026-01-01T00:00:01.000Z",
+          answer_status: "answered",
+        },
+      ],
+    });
+
+    render(
+      <MemoryRouter>
+        <HomeChatWorkspace
+          sidebarMeta={<div>Case window</div>}
+          selectedCaseId="portal-test-1780770539"
+          selectedCaseName="Portal E2E Test"
+        />
+      </MemoryRouter>,
+    );
+
+    const savedChat = await screen.findByRole("button", { name: "Saved chat" });
+
+    fireEvent.click(savedChat);
+
+    await waitFor(() => {
+      expect(fetchChatSessionMessages).toHaveBeenCalledTimes(1);
+    });
+    expect(fetchChatSessionMessages).toHaveBeenCalledWith(
+      "srv-1",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(
+      await screen.findByText("What happened earlier?"),
     ).toBeInTheDocument();
   });
 });
