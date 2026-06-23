@@ -72,6 +72,8 @@ natural next step.
 
 **Related:** portal archive retrieval uses Postgres chunk search in the same
 module; SOC/SPL/Elastic KB lanes are optional advisory sources when configured.
+KB retrieval uses a case-aware query built from the analyst question plus
+selected-case identifiers extracted from retrieved case chunks.
 
 ---
 

@@ -44,6 +44,29 @@ general SOC KB. Do not load current-alert facts into any advisory KB.
 - Are separate Knowledge Bases required for general SOC guidance, SPL grounding,
   and Elasticsearch grounding? (Recommended: yes.)
 
+## Recommended Vector Store And Embedding (AWS)
+
+For typical SOC Knowledge Base sizes (a few hundred to about 1,000 curated
+documents):
+
+| Choice | When to use |
+|--------|-------------|
+| **S3 Vectors (recommended)** | Default for new Bedrock Knowledge Bases in this project. Low ops, pay-as-you-go, right-sized for SOC SOP/HVA/runbook corpora. |
+| **OpenSearch Serverless (alternative)** | Larger corpora, advanced search tuning, or an existing OpenSearch investment. Expect a much higher monthly minimum than S3 Vectors at small scale. |
+| **Aurora PostgreSQL Serverless** | Only when Aurora is already part of the customer stack and operators want SQL-centric vector ops. |
+| **Neptune Analytics** | Not for document KB retrieval; graph analytics only. |
+
+**Embedding model:** use `amazon.titan-embed-text-v2:0` (1024 dimensions) so KB
+retrieval stays aligned with AWS case-chat Titan embeddings in this repo.
+
+**Data source type:** unstructured. Upload approved `.md` or `.txt` SOC docs to
+an operator-controlled S3 prefix; do not use structured KB unless the corpus is
+already maintained as queryable tables.
+
+The pipeline templates do **not** provision the vector store. Operators create
+the Bedrock Knowledge Base, vector store, and S3 data source outside the stack,
+then pass Knowledge Base IDs into deploy parameters.
+
 ## Runtime Contract
 
 The deployment templates (`deploy/aws/template-sam.yaml`,
@@ -72,10 +95,12 @@ Perform these steps in the target AWS account and region **before** enabling a
 profile that depends on the KB.
 
 1. **Create a Bedrock Knowledge Base** in the Amazon Bedrock console or via API.
-   Choose an embedding model approved for that account and region (for example
-   `amazon.titan-embed-text-v2:0`).
-2. **Attach a vector store** (for example OpenSearch Serverless). Vector store
-   choice and sizing are customer-managed; the pipeline templates do not
+   Choose an embedding model approved for that account and region. For this
+   project, prefer `amazon.titan-embed-text-v2:0`.
+2. **Attach a vector store.** For SOC corpora up to about 1,000 documents,
+   prefer **S3 Vectors**. Use OpenSearch Serverless only when you need its
+   search/tuning features or expect the KB to grow well beyond that scale. Vector
+   store choice and sizing are customer-managed; the pipeline templates do not
    provision it.
 3. **Add an S3 data source** pointing at an operator-controlled bucket prefix
    for curated source documents. Block public access and encrypt at rest.

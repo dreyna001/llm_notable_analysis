@@ -32,8 +32,8 @@ general-purpose agent.
 | Area | Current behavior |
 | --- | --- |
 | Scope | Requires a pinned `selected_case_id`; one supported mode: `selected_case` |
-| Synthesis input | Current question + bounded prior session turns + retrieved case context (+ optional KB grounding) |
-| Retrieval | On-prem and AWS: per-query hybrid lexical + vector RRF over case chunks |
+| Synthesis input | Current question + bounded prior session turns + retrieved case context (+ optional KB grounding enriched with selected-case entities) |
+| Retrieval | On-prem and AWS: per-query hybrid lexical + vector RRF over case chunks; KB retrieval uses a case-aware query (question + selected-case identifiers) |
 | Response | Single non-streaming completion; Markdown rendering in UI |
 | History | Optional transcript persistence (Postgres on-prem, DynamoDB on AWS) for UI reload, session limits, stop/cancel cleanup, and multi-turn synthesis when enabled |
 | Safety | No tool execution from chat; post-LLM action-boundary checks; draft-query guidance only |
@@ -86,6 +86,7 @@ Runtime parity contract:
 
 | Date | Change |
 | --- | --- |
+| 2026-06-22 | Shipped case-aware KB retrieval query enrichment and KB advisory prompt labeling |
 | 2026-06-18 | Committed multi-turn synthesis (P3-1) |
 | 2026-06-19 | Marked P3-1 shipped; refreshed baseline and parity notes after Wave 3 closeout |
 | 2026-06-19 | Removed deferred non-goal topics from this index |

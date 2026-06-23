@@ -14,8 +14,14 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from s3_notable_pipeline.case_chat import retrieve_selected_case_chunks
+from unittest.mock import patch
+
+from s3_notable_pipeline.case_chat import (
+    answer_selected_case_question,
+    retrieve_selected_case_chunks,
+)
 from s3_notable_pipeline.config import Config
+from s3_notable_pipeline.portal_chat import PortalAnswer
 
 
 class FakeDynamoDbClient:
@@ -87,6 +93,59 @@ class CaseChatTests(unittest.TestCase):
 
         self.assertEqual(len(chunks), 1)
         self.assertEqual(chunks[0]["chunk_id"], "chunk-1")
+
+    def test_selected_case_chat_passes_case_aware_query_to_kb_retrieval(self) -> None:
+        captured: dict[str, str] = {}
+
+        def _fake_kb_sources(*, question: str, config: Config, bedrock_agent_client=None):
+            captured["question"] = question
+            return []
+
+        case_chunks = [
+            {
+                "chunk_id": "chunk-1",
+                "section": "alert.summary",
+                "search_text": "dest_host=db-prod-01.corp.local user=corp\\svc-backup",
+                "text": "dest_host=db-prod-01.corp.local user=corp\\svc-backup",
+            }
+        ]
+
+        with (
+            patch(
+                "s3_notable_pipeline.case_chat.retrieve_case_chunks_for_question",
+                return_value=case_chunks,
+            ),
+            patch(
+                "s3_notable_pipeline.case_chat.build_chat_knowledge_sources",
+                side_effect=_fake_kb_sources,
+            ),
+            patch(
+                "s3_notable_pipeline.case_chat.synthesize_case_answer",
+                return_value=PortalAnswer(answer="Summary.", answer_status="answered"),
+            ),
+        ):
+            answer_selected_case_question(
+                case_id="case-5",
+                question="Summarize this case in a few sentences.",
+                config=Config(
+                    PORTAL_ENABLED=True,
+                    PORTAL_AUTH_MODE="iam",
+                    CASE_QA_ENABLED=True,
+                    CASE_INDEX_TABLE="case-index",
+                    CASE_EMBED_LAMBDA_NAME="notable-case-embed",
+                    CASE_QA_MAX_QUESTION_CHARS=2000,
+                    CASE_QA_MAX_TOTAL_CHUNKS=18,
+                    CASE_QA_MAX_CHUNKS_PER_LANE=12,
+                    CASE_QA_CONTEXT_BUDGET_CHARS=12000,
+                ),
+                dynamodb_client=FakeDynamoDbClient("ready"),
+                s3_client=FakeS3Client(),
+                bedrock_client=object(),
+            )
+
+        self.assertIn("Summarize this case in a few sentences.", captured["question"])
+        self.assertIn("db-prod-01.corp.local", captured["question"])
+        self.assertIn("selected_case_id=case-5", captured["question"])
 
 
 if __name__ == "__main__":

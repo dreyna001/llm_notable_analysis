@@ -32,14 +32,24 @@ context** in chat. Case-5 is one of the five high-quality stored alerts; its
 destination host `db-prod-01.corp.local` appears in the preview HVA registry,
 so case facts and KB docs reinforce each other.
 
+**Demo posture:** preview uses **committed fixture KB docs** in this repo, not
+Amazon Bedrock Knowledge Base or S3 Vectors. You do not need to provision AWS KB
+infrastructure for this demo. Use Bedrock or OpenAI in `config.portal-preview.env`
+for chat **synthesis only**. AWS production KB setup (S3 Vectors +
+`amazon.titan-embed-text-v2:0`) is documented in
+[`s3_notable_pipeline/docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md`](s3_notable_pipeline/docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md).
+
 ### What you are showing
 
 1. **Case evidence** — stored alert and analyzer output for case-5 (RDP lateral
    movement).
 2. **Knowledge Base** — committed SOC docs (SOPs, network map, HVA list) injected
-   into chat when your question matches advisory topics.
+   into chat when your question matches advisory topics (or when case-aware KB
+   retrieval is enabled; see
+   [`CASE_AWARE_KB_RETRIEVAL_PLAN.md`](llm_notable_analysis_onprem_systemd/docs/planning/CASE_AWARE_KB_RETRIEVAL_PLAN.md)).
 3. **Combined synthesis** — the chatbot answers using both lanes (same production
-   chat path; preview uses keyword-matched fixtures instead of Postgres RAG).
+   chat path; preview uses keyword-matched fixtures instead of Postgres RAG or
+   Bedrock KB retrieval).
 
 KB fixtures:
 `llm_notable_analysis_onprem_systemd/data/preview_scenarios/knowledge_base/`
@@ -55,9 +65,11 @@ KB fixtures:
 
 - Repo cloned; dev venv bootstrapped (see ANALYST_PORTAL_PREVIEW.md).
 - `llm_notable_analysis_onprem_systemd/config.portal-preview.env` created with
-  **Bedrock or OpenAI** configured (stub chat does not produce realistic
-  KB-grounded answers).
-- If using Bedrock: `aws sso login --profile <your-profile>` completed.
+  **Bedrock or OpenAI** configured for chat synthesis (stub chat does not produce
+  realistic KB-grounded answers).
+- **No AWS Knowledge Base setup required** for preview — fixture docs under
+  `data/preview_scenarios/knowledge_base/` are sufficient.
+- If using Bedrock for synthesis: `aws sso login --profile <your-profile>` completed.
 
 ### Step-by-step
 
@@ -138,7 +150,7 @@ Paste into selected-case chat on `/cases/case-5`:
 |---------|-----|
 | Chat says LLM gateway down / unavailable | Restart preview API; confirm `config.portal-preview.env` has Bedrock or OpenAI set and startup log is not `stub` |
 | 403 on chat POST | Browse via **http://127.0.0.1:5173**; restart both preview API and Vite |
-| Answer ignores KB / only uses case text | Include keywords such as **HVA**, **Tier 2**, **escalate**, **network segment**, or **isolate** |
+| Answer ignores KB / only uses case text | Restart preview API after pulling case-aware KB changes. On case-5, generic summaries should retrieve HVA context via `db-prod-01.corp.local` in the enriched KB query. If not, ask an explicit HVA/escalation/network question. |
 | Case-5 page looks empty or minimal | Wrong case — use **case-5**, not case-6+ (fillers only) |
 
 ### Extended question bank (optional)

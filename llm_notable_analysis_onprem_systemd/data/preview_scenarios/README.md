@@ -15,7 +15,7 @@ Analyst investigation questions (case 1 and Knowledge Base demo on case 5):
 
 - `alerts/` — raw Splunk-style notable JSON (input only; no LLM output).
 - `bundles/` — **stored analyzer output** (alert + analysis). Commit these after generation so preview starts instantly with no analyzer LLM calls.
-- `knowledge_base/` — committed SOC advisory docs for preview chat KB grounding (keyword-matched; no Postgres RAG).
+- `knowledge_base/` — committed SOC advisory docs for preview chat KB grounding (keyword-matched; no Postgres RAG, no Bedrock KB). AWS production uses Bedrock KB with S3 Vectors; see [`s3_notable_pipeline/docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md`](../../../s3_notable_pipeline/docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md).
 
 ## Stored analysis (default)
 

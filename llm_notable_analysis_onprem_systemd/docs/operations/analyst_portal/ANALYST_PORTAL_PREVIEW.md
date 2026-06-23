@@ -23,7 +23,7 @@ Case investigation question flows for preview scenarios are in
 | Case analysis on page load | Read from bundles only; no analyzer LLM |
 | Chatbot | Live Bedrock / OpenAI / stub via `config.portal-preview.env`; Bedrock uses production prompt assembly via `chat_text_complete` |
 | Chat history / sessions | Enabled in preview by default (`CASE_QA_CHAT_HISTORY_ENABLED=true`); multi-turn chat with persisted sessions on the in-memory fake Postgres connection |
-| Knowledge Base (chat) | Committed fixtures in `data/preview_scenarios/knowledge_base/`; keyword-matched advisory snippets injected on `/api/chat` (same `knowledge_base` lane as production; no Postgres RAG) |
+| Knowledge Base (chat) | Committed fixtures in `data/preview_scenarios/knowledge_base/`; keyword-matched advisory snippets injected on `/api/chat` (same `knowledge_base` lane as production; **no Postgres RAG, no Bedrock KB, no S3 Vectors**) |
 | Postgres / nginx / systemd | Not required |
 
 | Case | Alert type |
@@ -51,6 +51,12 @@ Python preview modules live in `llm_notable_analysis_onprem_systemd/scripts/`:
 - `generate_preview_scenarios.py` — optional live analyzer regeneration
 
 Fixture layout: [`data/preview_scenarios/README.md`](../../../data/preview_scenarios/README.md).
+
+**Preview demo KB posture:** use the committed fixture docs above for Knowledge
+Base demos. Do **not** provision Amazon Bedrock Knowledge Base, S3 Vectors, or
+OpenSearch for local preview. Bedrock in preview is for **chat synthesis only**.
+AWS production KB setup is documented in
+[`s3_notable_pipeline/docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md`](../../../../s3_notable_pipeline/docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md).
 
 ## Prerequisites
 

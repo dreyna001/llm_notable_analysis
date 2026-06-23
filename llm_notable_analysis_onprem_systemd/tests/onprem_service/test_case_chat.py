@@ -11,6 +11,7 @@ from llm_notable_analysis_onprem_systemd.onprem_service.case_chat import (
     RetrievedSource,
     _build_general_knowledge_prompt,
     _build_prompt,
+    _case_grounded_system_instructions,
     answer_case_chat,
     bounded_conversation_history,
     build_lexical_chunk_query,
@@ -450,6 +451,65 @@ class TestCaseChat(unittest.TestCase):
 
         lanes = {source.source_lane for source in captured}
         self.assertEqual(lanes, {"current_case", "knowledge_base"})
+
+    def test_kb_provider_receives_case_aware_query(self) -> None:
+        captured_queries: list[str] = []
+
+        def provider(question: str) -> list[RetrievedSource]:
+            captured_queries.append(question)
+            return []
+
+        answer_case_chat(
+            payload={
+                "mode": "selected_case",
+                "question": "Summarize this case in a few sentences.",
+                "selected_case_id": "case-5",
+            },
+            config=_config(),
+            connect=lambda _dsn: _FakeConnection(
+                row_pages=[
+                    [
+                        _chunk_row(
+                            case_id="case-5",
+                            text=(
+                                "dest_host=db-prod-01.corp.local "
+                                "src_host=jump-01.corp.local user=corp\\svc-backup"
+                            ),
+                        )
+                    ],
+                    [],
+                ]
+            ),
+            embedding_model=_FakeEmbeddingModel(),
+            knowledge_base_provider=provider,
+            synthesize=lambda _question, sources: f"{len(sources)} sources",
+        )
+
+        self.assertEqual(len(captured_queries), 1)
+        self.assertIn("Summarize this case in a few sentences.", captured_queries[0])
+        self.assertIn("db-prod-01.corp.local", captured_queries[0])
+        self.assertIn("selected_case_id=case-5", captured_queries[0])
+
+    def test_build_prompt_includes_source_lane_metadata(self) -> None:
+        prompt = _build_prompt(
+            "Summarize this case.",
+            [
+                RetrievedSource(
+                    source_lane="current_case",
+                    section="alert.summary",
+                    text="Suspicious RDP activity.",
+                ),
+                RetrievedSource(
+                    source_lane="knowledge_base",
+                    section="knowledge_base.hva_registry",
+                    text="db-prod-01.corp.local is an HVA.",
+                ),
+            ],
+        )
+        self.assertIn("SOURCE_LANE_JSON: \"current_case\"", prompt)
+        self.assertIn("SOURCE_LANE_JSON: \"knowledge_base\"", prompt)
+        self.assertIn("SECTION_JSON:", prompt)
+        self.assertIn("knowledge_base blocks are advisory", _case_grounded_system_instructions())
 
     def test_answer_case_chat_refuses_action_claims_from_synthesizer(self) -> None:
         self.assertTrue(

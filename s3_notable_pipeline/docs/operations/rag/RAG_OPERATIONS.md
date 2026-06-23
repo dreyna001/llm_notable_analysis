@@ -26,6 +26,11 @@ call. See [`../investigation/SPL_OPERATIONS.md`](../investigation/SPL_OPERATIONS
   grants `bedrock:Retrieve` only when this id is non-empty.
 - Use `RagFailureMode=suppress` (default) so analysis continues when retrieval
   is unavailable.
+- Provision the Bedrock Knowledge Base with **S3 Vectors** and
+  `amazon.titan-embed-text-v2:0` for typical SOC corpora (see
+  [`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md)). Local analyst
+  portal preview does **not** call Bedrock KB; it uses committed fixture docs
+  instead.
 
 ## Customer Decisions
 

@@ -15,6 +15,13 @@ from preview_knowledge_base import (  # noqa: E402
     retrieve_preview_knowledge_base,
 )
 
+from llm_notable_analysis_onprem_systemd.onprem_service.case_chat import (  # noqa: E402
+    RetrievedSource,
+)
+from llm_notable_analysis_onprem_systemd.onprem_service.case_chat_kb_query import (  # noqa: E402
+    build_case_aware_kb_query,
+)
+
 
 class PreviewKnowledgeBaseTests(unittest.TestCase):
     def test_escalation_question_returns_tier2_sop(self) -> None:
@@ -55,6 +62,25 @@ class PreviewKnowledgeBaseTests(unittest.TestCase):
     def test_unrelated_question_returns_no_kb_sources(self) -> None:
         sources = retrieve_preview_knowledge_base("What is the weather today?")
         self.assertEqual(sources, [])
+
+    def test_case_aware_summary_query_returns_hva_registry(self) -> None:
+        query = build_case_aware_kb_query(
+            "Summarize this case in a few sentences.",
+            case_sources=[
+                RetrievedSource(
+                    source_lane="current_case",
+                    section="alert.summary",
+                    text=(
+                        "dest_host=db-prod-01.corp.local src_host=jump-01.corp.local "
+                        "user=corp\\svc-backup"
+                    ),
+                )
+            ],
+            selected_case_id="case-5",
+        )
+        sources = retrieve_preview_knowledge_base(query)
+        sections = {source.section for source in sources}
+        self.assertIn("knowledge_base.hva_registry", sections)
 
 
 if __name__ == "__main__":

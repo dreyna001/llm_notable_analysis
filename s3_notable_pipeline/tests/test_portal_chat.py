@@ -63,7 +63,23 @@ class PortalChatTests(unittest.TestCase):
 
         self.assertIn("<CONTEXT_BLOCK>", prompt)
         self.assertIn("UNTRUSTED_TEXT_JSON:", prompt)
+        self.assertIn("SOURCE_LANE_JSON:", prompt)
+        self.assertIn("SECTION_JSON:", prompt)
         self.assertNotIn("chunk_id=", prompt)
+
+    def test_build_prompt_labels_knowledge_base_as_advisory(self) -> None:
+        prompt = build_case_grounded_prompt(
+            question="Summarize this case.",
+            sources=[
+                {
+                    "source_lane": "knowledge_base",
+                    "section": "knowledge_base.hva_registry",
+                    "text": "db-prod-01.corp.local is an HVA.",
+                }
+            ],
+        )
+        self.assertIn("knowledge_base blocks are advisory", prompt)
+        self.assertIn("SOURCE_LANE_JSON: \"knowledge_base\"", prompt)
 
     def test_build_prompt_uses_adaptive_chatbot_answer_guidance(self) -> None:
         prompt = build_case_grounded_prompt(

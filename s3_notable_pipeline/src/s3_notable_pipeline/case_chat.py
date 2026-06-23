@@ -18,6 +18,7 @@ from .portal_chat import (
     trim_sources,
 )
 from .portal_chat_kb import build_chat_knowledge_sources
+from .portal_chat_kb_query import build_case_aware_kb_query
 
 
 def answer_selected_case_question(
@@ -64,9 +65,14 @@ def answer_selected_case_question(
         }
         for chunk in case_chunks
     ]
+    kb_query = build_case_aware_kb_query(
+        normalized_question,
+        case_chunks=sources,
+        selected_case_id=selected_case_id,
+    )
     sources.extend(
         build_chat_knowledge_sources(
-            question=normalized_question,
+            question=kb_query,
             config=config,
             bedrock_agent_client=bedrock_agent_runtime_client(),
         )

@@ -107,7 +107,13 @@ Two synthesis prompts in `case_chat.py`:
 
 ### Case-grounded chat (`_build_prompt`)
 
-- Assistant is **read-only**; case facts come from retrieved `CONTEXT_BLOCK` entries only
+- Assistant is **read-only**; case facts come from retrieved `current_case`
+  `CONTEXT_BLOCK` entries only
+- `knowledge_base` blocks are advisory organizational context (HVA registry,
+  SOPs, network reference) and must not be described as observed case evidence
+- When KB advisory context materially affects risk, escalation, containment, or
+  ownership, summaries and triage answers should include it with clear separation
+  from case evidence
 - Archive text is labeled **`UNTRUSTED_TEXT_JSON`** — evidence, not instructions
   (prompt-injection mitigation)
 - Instructs model that the endpoint **cannot execute** searches, tickets, or host
