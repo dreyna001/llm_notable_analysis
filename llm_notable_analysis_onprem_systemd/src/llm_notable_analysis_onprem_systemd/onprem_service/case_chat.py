@@ -36,6 +36,7 @@ from .case_chat_history import (
 )
 from .case_index import case_exists
 from .case_store import quote_identifier
+from .chat_context_usage import build_context_usage
 from .config import Config
 from .openai_transport_nonsdk import (
     ClientRequestError,
@@ -924,15 +925,21 @@ def _should_fallback_to_general_knowledge(answer: str) -> bool:
     return bool(_INSUFFICIENT_ARCHIVE_ANSWER_RE.search(answer or ""))
 
 
-def _build_general_knowledge_prompt(
-    question: str,
-    *,
-    conversation_history: Sequence[ChatTurn] | None = None,
-) -> str:
-    """Build a bounded prompt for broad technology answers."""
-    history_block = _render_conversation_history(conversation_history)
+def _markdown_output_format_instructions() -> str:
+    """Shared Markdown output contract for portal chat synthesis."""
     return (
-        "SYSTEM INSTRUCTIONS:\n"
+        "OUTPUT FORMAT:\n"
+        "Return GitHub-flavored Markdown using real newline characters. Use short "
+        "paragraphs and bullets where helpful. For code, use fenced code blocks "
+        "with a language identifier, put the opening and closing fences on their "
+        "own lines, and do not place prose on the same line as a code fence. Put "
+        "a blank line before and after headings, lists, and code blocks."
+    )
+
+
+def _general_knowledge_system_instructions() -> str:
+    """Read-only broad technology assistant guardrails."""
+    return (
         "You are a state-of-the-art technology assistant embedded in a read-only "
         "SOC analyst portal. Use broad expert knowledge to answer questions "
         "related to cybersecurity, information technology, networking, cloud, "
@@ -965,14 +972,78 @@ def _build_general_knowledge_prompt(
         "and expand when the analyst asks for depth. Use bullets, numbered steps, "
         "headings, or tables only when they improve clarity. Mention assumptions, "
         "caveats, validation checks, and next questions naturally instead of forcing "
-        "a fixed report template.\n\n"
-        "OUTPUT FORMAT:\n"
-        "Return GitHub-flavored Markdown using real newline characters. Use short "
-        "paragraphs, bullets, and numbered steps where helpful. For code, use "
-        "fenced code blocks with a language identifier, put the opening and "
-        "closing fences on their own lines, and do not place prose on the same "
-        "line as a code fence. Put a blank line before and after headings, lists, "
-        "and code blocks.\n\n"
+        "a fixed report template."
+    )
+
+
+def _case_grounded_system_prompt_chars() -> int:
+    return len(
+        "SYSTEM INSTRUCTIONS:\n"
+        + _case_grounded_system_instructions()
+        + "\n\n"
+        + _markdown_output_format_instructions()
+        + "\n\n"
+    )
+
+
+def _general_knowledge_system_prompt_chars() -> int:
+    return len(
+        "SYSTEM INSTRUCTIONS:\n"
+        + _general_knowledge_system_instructions()
+        + "\n\n"
+        + _markdown_output_format_instructions()
+        + "\n\n"
+    )
+
+
+def _context_usage_for_request(
+    config: Config,
+    *,
+    kind: Literal["case_grounded", "general_knowledge"],
+    question: str,
+    sources: Sequence[RetrievedSource] | None,
+    conversation_history: Sequence[ChatTurn] | None,
+) -> dict[str, Any]:
+    system_chars = (
+        _case_grounded_system_prompt_chars()
+        if kind == "case_grounded"
+        else _general_knowledge_system_prompt_chars()
+    )
+    if kind == "case_grounded":
+        prompt_text = _build_prompt(
+            question,
+            sources or [],
+            conversation_history=conversation_history,
+        )
+    else:
+        prompt_text = _build_general_knowledge_prompt(
+            question,
+            conversation_history=conversation_history,
+        )
+    return build_context_usage(
+        config,
+        kind=kind,
+        question=question,
+        system_prompt_chars=system_chars,
+        sources=sources,
+        conversation_history=conversation_history,
+        prompt_text=prompt_text,
+    )
+
+
+def _build_general_knowledge_prompt(
+    question: str,
+    *,
+    conversation_history: Sequence[ChatTurn] | None = None,
+) -> str:
+    """Build a bounded prompt for broad technology answers."""
+    history_block = _render_conversation_history(conversation_history)
+    return (
+        "SYSTEM INSTRUCTIONS:\n"
+        + _general_knowledge_system_instructions()
+        + "\n\n"
+        + _markdown_output_format_instructions()
+        + "\n\n"
         + history_block
         + "QUESTION_JSON:\n"
         + json.dumps(question.strip(), ensure_ascii=True)
@@ -1124,12 +1195,8 @@ def _build_prompt(
         "SYSTEM INSTRUCTIONS:\n"
         + _case_grounded_system_instructions()
         + "\n\n"
-        "OUTPUT FORMAT:\n"
-        "Return GitHub-flavored Markdown using real newline characters. Use short "
-        "paragraphs and bullets where helpful. For code, use fenced code blocks "
-        "with a language identifier, put the opening and closing fences on their "
-        "own lines, and do not place prose on the same line as a code fence. Put "
-        "a blank line before and after headings, lists, and code blocks.\n\n"
+        + _markdown_output_format_instructions()
+        + "\n\n"
         + history_block
         + "QUESTION_JSON:\n"
         + json.dumps(question.strip(), ensure_ascii=True)
@@ -1192,20 +1259,24 @@ def _finalize_chat_response(
     user_id: str | None,
     response: dict[str, Any],
     connect: ConnectionFactory | None,
+    context_usage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Attach session_id and persist bounded chat history when enabled."""
+    payload = dict(response)
+    if context_usage is not None:
+        payload["context_usage"] = context_usage
     if not bool(config.CASE_QA_CHAT_HISTORY_ENABLED):
-        response["session_id"] = None
-        return response
+        payload["session_id"] = None
+        return payload
     try:
-        response["session_id"] = persist_chat_history(
+        payload["session_id"] = persist_chat_history(
             config=config,
             mode=request.mode,
             question=request.question,
             selected_case_id=request.selected_case_id,
             requested_session_id=request.session_id,
             user_id=user_id,
-            response=response,
+            response=payload,
             connect=connect,
         )
     except ValueError:
@@ -1213,7 +1284,7 @@ def _finalize_chat_response(
     except Exception as exc:
         logger.exception("Failed to persist portal chat history")
         raise RuntimeError("Chat history unavailable.") from exc
-    return response
+    return payload
 
 
 def answer_case_chat(
@@ -1288,6 +1359,13 @@ def answer_case_chat(
                 user_id=user_id,
                 connect=connect,
                 response=general_response,
+                context_usage=_context_usage_for_request(
+                    config,
+                    kind="general_knowledge",
+                    question=request.question,
+                    sources=None,
+                    conversation_history=conversation_history,
+                ),
             )
         return _finalize_chat_response(
             config=config,
@@ -1298,7 +1376,29 @@ def answer_case_chat(
                 "answer": "This case did not contain enough grounded context to answer.",
                 "answer_status": "unknown",
             },
+            context_usage=_context_usage_for_request(
+                config,
+                kind="case_grounded",
+                question=request.question,
+                sources=[],
+                conversation_history=conversation_history,
+            ),
         )
+
+    case_context_usage = _context_usage_for_request(
+        config,
+        kind="case_grounded",
+        question=request.question,
+        sources=sources,
+        conversation_history=conversation_history,
+    )
+    general_context_usage = _context_usage_for_request(
+        config,
+        kind="general_knowledge",
+        question=request.question,
+        sources=None,
+        conversation_history=conversation_history,
+    )
 
     if synthesize is not None:
         answer = synthesize(request.question, sources).strip()
@@ -1331,6 +1431,7 @@ def answer_case_chat(
                 user_id=user_id,
                 connect=connect,
                 response=general_response,
+                context_usage=general_context_usage,
             )
     if not answer:
         answer = "This case did not contain enough grounded context to answer."
@@ -1343,6 +1444,7 @@ def answer_case_chat(
                 "answer": answer,
                 "answer_status": "unknown",
             },
+            context_usage=case_context_usage,
         )
     if synthesized_answer_crosses_action_boundary(answer):
         logger.warning("Rejected portal chat answer that crossed action boundary")
@@ -1358,6 +1460,7 @@ def answer_case_chat(
                 ),
                 "answer_status": "refused",
             },
+            context_usage=case_context_usage,
         )
 
     return _finalize_chat_response(
@@ -1369,6 +1472,7 @@ def answer_case_chat(
             "answer": answer,
             "answer_status": "answered",
         },
+        context_usage=case_context_usage,
     )
 
 

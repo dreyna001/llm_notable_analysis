@@ -244,6 +244,7 @@ class Config:
         CASE_QA_CONTEXT_BUDGET_CHARS: Max retrieval context characters for chat.
         CASE_QA_MAX_QUESTION_CHARS: Max analyst question length.
         CASE_QA_MAX_ANSWER_TOKENS: Max chat answer generation tokens.
+        CASE_QA_MODEL_CONTEXT_TOKENS: Estimated model context window for portal usage UI.
         CASE_QA_CHUNK_SCHEMA_VERSION: Case chunk schema version.
         CASE_QA_EMBEDDING_MODEL: Embedding model used for case chunks.
         CASE_QA_VECTOR_DIMENSIONS: pgvector dimensions for case chunks.
@@ -397,6 +398,7 @@ class Config:
     CASE_QA_CONTEXT_BUDGET_CHARS: int = 12000
     CASE_QA_MAX_QUESTION_CHARS: int = 2000
     CASE_QA_MAX_ANSWER_TOKENS: int = 800
+    CASE_QA_MODEL_CONTEXT_TOKENS: int = 128_000
     CASE_QA_CHUNK_SCHEMA_VERSION: int = 1
     CASE_QA_EMBEDDING_MODEL: str = "mixedbread-ai/mxbai-embed-large-v1"
     CASE_QA_VECTOR_DIMENSIONS: int = 1024
@@ -707,6 +709,9 @@ def load_config() -> Config:
         ),
         CASE_QA_MAX_ANSWER_TOKENS=_positive_int_env(
             "CASE_QA_MAX_ANSWER_TOKENS", 800, max_value=16000
+        ),
+        CASE_QA_MODEL_CONTEXT_TOKENS=_positive_int_env(
+            "CASE_QA_MODEL_CONTEXT_TOKENS", 128_000, max_value=2_000_000
         ),
         CASE_QA_CHUNK_SCHEMA_VERSION=_positive_int_env(
             "CASE_QA_CHUNK_SCHEMA_VERSION", 1, max_value=1000

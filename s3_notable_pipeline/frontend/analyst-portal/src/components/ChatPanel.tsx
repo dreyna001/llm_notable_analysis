@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { postChat } from "../api/client";
-import type { ChatMode, ChatResponse } from "../types";
+import type { ChatContextUsage, ChatMode, ChatResponse } from "../types";
 import {
   formatChatApiError,
   isChatRecoverableServerSession,
@@ -19,6 +19,7 @@ import { answerStatusLabel, shouldShowAnswerStatus } from "../utils/answerStatus
 import { resolveChatEmptyState } from "../utils/chatEmptyState";
 import { sanitizeChatAnswer } from "../utils/sanitizeChatAnswer";
 import { ChatConversationSkeleton } from "./LoadingSkeletons";
+import { ContextUsageIndicator } from "./ContextUsageIndicator";
 import { MarkdownMessage } from "./MarkdownMessage";
 import { ChatTypingIndicator } from "./StreamingAssistantMessage";
 
@@ -107,6 +108,12 @@ export function ChatPanel({
 
   const isBusy = turns.some((turn) => turn.awaitingResponse);
   const inputDisabled = Boolean(disabledReason) || composerDisabled || loadingHistory;
+  const latestContextUsage = [...turns]
+    .reverse()
+    .find((turn) => turn.response?.context_usage)?.response?.context_usage as
+    | ChatContextUsage
+    | null
+    | undefined;
 
   const adjustComposerHeight = useCallback(() => {
     const textarea = textareaRef.current;
@@ -406,6 +413,11 @@ export function ChatPanel({
               onChange={(event) => setQuestion(event.target.value)}
               onKeyDown={handleComposerKeyDown}
               maxLength={maxQuestionChars}
+            />
+            <ContextUsageIndicator
+              disabled={inputDisabled}
+              draftQuestion={question}
+              usage={latestContextUsage ?? null}
             />
             {isBusy ? (
               <Button

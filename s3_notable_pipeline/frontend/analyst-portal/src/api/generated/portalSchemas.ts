@@ -19,6 +19,7 @@ const PortalCapabilitiesResponse = z.object({
   max_answer_tokens: z.number().int(),
   max_chat_sessions_per_user: z.number().int(),
   max_question_chars: z.number().int(),
+  model_context_tokens: z.number().int(),
 });
 const limit = z.union([z.string(), z.null()]).optional();
 const CaseSummaryResponse = z.object({
@@ -85,9 +86,27 @@ const CaseRawSectionResponse = z.object({
   section: z.enum(["alert_payload", "analysis"]),
   total_keys: z.number().int(),
 });
+const ChatContextUsageSegmentResponse = z.object({
+  chars: z.number().int(),
+  id: z.string(),
+  label: z.string(),
+  tokens: z.number().int(),
+});
+const ChatContextUsageResponse = z.object({
+  chars_per_token_estimate: z.number(),
+  context_limit_tokens: z.number().int(),
+  current_question_chars: z.number().int(),
+  estimate_method: z.enum(["chars_per_token", "tiktoken"]),
+  kind: z.enum(["case_grounded", "general_knowledge"]),
+  prompt_chars: z.number().int(),
+  prompt_tokens: z.number().int(),
+  segments: z.array(ChatContextUsageSegmentResponse),
+  utilization_pct: z.number().int(),
+});
 const ChatResponseModel = z.object({
   answer: z.string(),
   answer_status: z.string(),
+  context_usage: z.union([ChatContextUsageResponse, z.null()]).optional(),
   session_id: z.union([z.string(), z.null()]).optional(),
 });
 const ChatSessionSummaryResponse = z.object({
@@ -138,6 +157,8 @@ export const schemas = {
   CaseDetailMetadataResponse,
   CaseDetailResponse,
   CaseRawSectionResponse,
+  ChatContextUsageSegmentResponse,
+  ChatContextUsageResponse,
   ChatResponseModel,
   ChatSessionSummaryResponse,
   ChatSessionsResponse,

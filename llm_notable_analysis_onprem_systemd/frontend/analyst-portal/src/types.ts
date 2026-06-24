@@ -67,10 +67,30 @@ export type ChatRequest = {
   session_id?: string | null;
 };
 
+export type ChatContextUsageSegment = {
+  id: string;
+  label: string;
+  chars: number;
+  tokens: number;
+};
+
+export type ChatContextUsage = {
+  kind: "case_grounded" | "general_knowledge";
+  prompt_chars: number;
+  prompt_tokens: number;
+  context_limit_tokens: number;
+  utilization_pct: number;
+  segments: ChatContextUsageSegment[];
+  estimate_method: "chars_per_token" | "tiktoken";
+  chars_per_token_estimate: number;
+  current_question_chars: number;
+};
+
 export type ChatResponse = {
   answer: string;
   answer_status: "answered" | "unknown" | "refused" | string;
   session_id: string | null;
+  context_usage?: ChatContextUsage | null;
 };
 
 export type ChatSessionSummary = {
@@ -112,6 +132,7 @@ export type PortalCapabilities = {
   general_knowledge_enabled: boolean;
   max_question_chars: number;
   max_answer_tokens: number;
+  model_context_tokens: number;
   max_chat_sessions_per_user?: number;
   case_retention_days?: number;
   chat_ready: boolean;

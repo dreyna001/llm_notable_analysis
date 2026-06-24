@@ -8,6 +8,7 @@ const enabledCapabilities = {
   general_knowledge_enabled: true,
   max_question_chars: 2000,
   max_answer_tokens: 800,
+  model_context_tokens: 128000,
   chat_ready: true,
 };
 

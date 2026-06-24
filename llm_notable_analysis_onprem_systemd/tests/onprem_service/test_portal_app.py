@@ -400,6 +400,7 @@ class TestPortalApp(unittest.TestCase):
                 "general_knowledge_enabled": True,
                 "max_question_chars": 1234,
                 "max_answer_tokens": 567,
+                "model_context_tokens": 128000,
                 "max_chat_sessions_per_user": 10,
                 "case_retention_days": 30,
                 "chat_ready": True,
