@@ -36,11 +36,6 @@ async function expectSelectedCaseAttached(
   page: import("@playwright/test").Page,
   caseId: string,
 ) {
-  const modeSelect = page.getByRole("combobox", { name: "Mode" });
-  if (await modeSelect.isVisible()) {
-    await modeSelect.click();
-    await page.getByRole("option", { name: "Selected case + knowledge base" }).click();
-  }
   const sidebar = page.locator('aside[aria-label="Portal navigation and chats"]');
   await expect(sidebar.getByText("Case attached")).toBeVisible();
   await expect(sidebar.getByRole("link", { name: caseId })).toBeVisible();
@@ -211,7 +206,7 @@ test.describe("Analyst portal E2E", () => {
     );
   });
 
-  test("chat assistant modes answer for the sample case", async ({ page }) => {
+  test("chat assistant answers for the sample case", async ({ page }) => {
     test.skip(!env.runChat, "PORTAL_E2E_CHAT=false");
     test.skip(!fixture.capabilities.case_qa_enabled, "case_qa_enabled is off");
 

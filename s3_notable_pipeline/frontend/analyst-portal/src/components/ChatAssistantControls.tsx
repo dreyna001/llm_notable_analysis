@@ -33,13 +33,6 @@ export function ChatAssistantControls({
         AI Case Assistant
       </div>
 
-      <div className="px-1">
-        <div className="text-xs text-muted-foreground">Mode</div>
-        <div className="mt-0.5 text-sm font-medium text-sidebar-foreground">
-          Selected case + knowledge base
-        </div>
-      </div>
-
       {selectedCaseId ? (
         <div className="px-1">
           <div className="flex items-start justify-between gap-2">
