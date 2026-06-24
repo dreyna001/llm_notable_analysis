@@ -25,6 +25,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+portal = [
+    "tiktoken==0.9.0",
+]
 proxy = [
     "litellm[proxy]==1.83.14",
 ]

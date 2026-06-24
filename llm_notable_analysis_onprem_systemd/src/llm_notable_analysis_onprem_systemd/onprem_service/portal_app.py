@@ -512,6 +512,7 @@ def _portal_capabilities_payload(
         "general_knowledge_enabled": bool(config.CASE_QA_GENERAL_KNOWLEDGE_ENABLED),
         "max_question_chars": int(config.CASE_QA_MAX_QUESTION_CHARS),
         "max_answer_tokens": int(config.CASE_QA_MAX_ANSWER_TOKENS),
+        "model_context_tokens": int(config.CASE_QA_MODEL_CONTEXT_TOKENS),
         "max_chat_sessions_per_user": int(config.CASE_QA_MAX_SESSIONS_PER_USER),
         "case_retention_days": int(config.CASE_RETENTION_DAYS),
         "chat_ready": chat_ready,

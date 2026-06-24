@@ -25,6 +25,29 @@ class ChatDependencyStatusResponse(BaseModel):
     llm_gateway: Literal["ready", "unavailable"]
 
 
+class ChatContextUsageSegmentResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    label: str
+    chars: int
+    tokens: int
+
+
+class ChatContextUsageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["case_grounded", "general_knowledge"]
+    prompt_chars: int
+    prompt_tokens: int
+    context_limit_tokens: int
+    utilization_pct: int
+    segments: list[ChatContextUsageSegmentResponse]
+    estimate_method: Literal["chars_per_token", "tiktoken"]
+    chars_per_token_estimate: float
+    current_question_chars: int
+
+
 class PortalCapabilitiesResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -33,6 +56,7 @@ class PortalCapabilitiesResponse(BaseModel):
     general_knowledge_enabled: bool
     max_question_chars: int
     max_answer_tokens: int
+    model_context_tokens: int
     max_chat_sessions_per_user: int
     case_retention_days: int
     chat_ready: bool
@@ -120,6 +144,7 @@ class ChatResponseModel(BaseModel):
     answer: str
     answer_status: str
     session_id: str | None = None
+    context_usage: ChatContextUsageResponse | None = None
 
 
 class ChatSessionSummaryResponse(BaseModel):

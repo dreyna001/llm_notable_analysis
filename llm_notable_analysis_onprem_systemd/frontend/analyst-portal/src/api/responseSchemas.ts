@@ -110,6 +110,7 @@ export function parsePortalCapabilities(value: unknown): PortalCapabilities | nu
     general_knowledge_enabled: parsed.general_knowledge_enabled,
     max_question_chars: parsed.max_question_chars,
     max_answer_tokens: parsed.max_answer_tokens,
+    model_context_tokens: parsed.model_context_tokens,
     chat_ready: parsed.chat_ready,
     ...(parsed.chat_dependency_status
       ? { chat_dependency_status: parsed.chat_dependency_status }
@@ -135,6 +136,9 @@ export function parseChatResponse(value: unknown): ChatResponse | null {
     answer: parsed.answer,
     answer_status: parsed.answer_status,
     session_id: parsed.session_id ?? null,
+    ...(parsed.context_usage !== undefined
+      ? { context_usage: parsed.context_usage }
+      : {}),
   };
 }
 

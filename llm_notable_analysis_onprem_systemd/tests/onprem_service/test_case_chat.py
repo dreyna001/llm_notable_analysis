@@ -421,6 +421,10 @@ class TestCaseChat(unittest.TestCase):
         self.assertIsNone(response["session_id"])
         self.assertNotIn("citations", response)
         self.assertNotIn("retrieved_case_ids", response)
+        usage = response.get("context_usage")
+        self.assertIsInstance(usage, dict)
+        self.assertEqual(usage["kind"], "case_grounded")
+        self.assertIn("system_prompt", {s["id"] for s in usage["segments"]})
 
     def test_selected_case_chat_combines_case_and_knowledge_base(self) -> None:
         captured: list[RetrievedSource] = []
