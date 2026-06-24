@@ -28,6 +28,7 @@ Optional deep dives:
 - **[Future enhancements roadmap](planning/FUTURE_ENHANCEMENTS_ROADMAP.md)** — Backlog (threat intel, SOAR invocation, observability, and related work).
 - **[Prompt enhancements plan](planning/PROMPT_ENHANCEMENTS_PLAN.md)** and **[AI integrity / drift plan](planning/ai_integrity_drift_monitoring_plan.md)** — Planned prompt and quality-monitoring work.
 - **[Golden eval harness todo](planning/golden_eval_harness_todo.md)** — Planned regression harness.
+- **[ServiceNow closed disposition sync plan](planning/SERVICENOW_CLOSED_DISPOSITION_SYNC_PLAN.md)** — Inbound sync of closed analyst dispositions from ServiceNow (planning).
 
 ## Topic shortcuts
 
