@@ -66,6 +66,7 @@ type HomeChatWorkspaceProps = {
   sidebarMeta: ReactNode;
   selectedCaseId?: string;
   selectedCaseName?: string;
+  selectedCaseVerdict?: string | null;
   selectedCaseProcessedAt?: string;
   selectedCaseLoading?: boolean;
   attachError?: string | null;
@@ -201,6 +202,7 @@ export function HomeChatWorkspace({
   sidebarMeta,
   selectedCaseId,
   selectedCaseName,
+  selectedCaseVerdict,
   selectedCaseProcessedAt,
   selectedCaseLoading,
   attachError,
@@ -340,6 +342,14 @@ export function HomeChatWorkspace({
           attachedCasePreview.case_id === effectiveSelectedCaseId
         ? attachedCasePreview.processed_at ?? undefined
         : resolvedCaseSummary?.processed_at ?? undefined;
+
+  const effectiveSelectedCaseVerdict =
+    effectiveSelectedCaseId === selectedCaseId
+      ? selectedCaseVerdict
+      : attachedCasePreview &&
+          attachedCasePreview.case_id === effectiveSelectedCaseId
+        ? attachedCasePreview.verdict
+        : resolvedCaseSummary?.verdict ?? null;
 
   const effectiveSelectedCaseLoading =
     effectiveSelectedCaseId === selectedCaseId
@@ -1004,6 +1014,7 @@ export function HomeChatWorkspace({
             selectedCaseId={effectiveSelectedCaseId}
             selectedCaseLoading={effectiveSelectedCaseLoading}
             selectedCaseName={effectiveSelectedCaseName}
+            selectedCaseVerdict={effectiveSelectedCaseVerdict}
             selectedCaseProcessedAt={effectiveSelectedCaseProcessedAt}
             caseAttachEnabled={
               !blockingLoadError &&

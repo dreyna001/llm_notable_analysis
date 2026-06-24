@@ -9,6 +9,7 @@ import { ApiError, fetchCase, fetchCases, isCancelledRequest } from "../api/clie
 import { resolveCaseAttachEmptyState } from "../utils/caseAttachEmptyState";
 import type { CaseListCursor, CaseSummary } from "../types";
 import { caseDetailToSummary } from "../utils/caseSummary";
+import { verdictColor } from "../utils/verdict";
 
 const SEARCH_DEBOUNCE_MS = 300;
 const PAGE_SIZE = 50;
@@ -235,7 +236,10 @@ export function CaseAttachPicker({
                 type="button"
                 onClick={() => onAttachCase(item)}
               >
-                <div className="truncate text-sm font-medium">
+                <div
+                  className="truncate text-sm font-medium"
+                  style={{ color: verdictColor(item.verdict) }}
+                >
                   {item.search_name || item.case_id}
                 </div>
                 <div className="truncate text-xs text-muted-foreground">

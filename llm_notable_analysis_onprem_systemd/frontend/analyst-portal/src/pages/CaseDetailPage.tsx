@@ -52,7 +52,7 @@ import {
 import { queryStatusLabel } from "../utils/queryStatus";
 import { retrievalStatusLabel } from "../utils/retrievalStatus";
 import { sourceCompletenessLabel } from "../utils/sourceCompleteness";
-import { verdictLabel, verdictTone, type VerdictTone } from "../utils/verdict";
+import { verdictLabel, verdictColor } from "../utils/verdict";
 
 type AlertReconciliation = {
   verdict?: unknown;
@@ -60,14 +60,6 @@ type AlertReconciliation = {
   one_sentence_summary?: unknown;
   decision_drivers?: unknown;
   recommended_actions?: unknown;
-};
-
-// Deterministic verdict -> threat color. Red is most malicious, green is least
-// malicious; unknown verdicts stay amber.
-const THREAT_COLOR: Record<VerdictTone, string> = {
-  malicious: "#f87171",
-  benign: "#4ade80",
-  unknown: "#fbbf24",
 };
 
 function asText(value: unknown, fallback = "-"): string {
@@ -576,7 +568,7 @@ export function CaseDetailPage() {
   const reconciliation = getAlertReconciliation(detail);
   const verdict = verdictLabel(reconciliation.verdict);
   const confidence = confidenceStats(reconciliation.confidence);
-  const threatColor = THREAT_COLOR[verdictTone(reconciliation.verdict)];
+  const threatColor = verdictColor(reconciliation.verdict);
   const summary = asText(reconciliation.one_sentence_summary, "");
   const searchName = detail ? recordField(detail.alert_payload, "search_name") : "-";
   const sourceId = detail ? recordField(detail.alert_payload, "notable_id") : "-";

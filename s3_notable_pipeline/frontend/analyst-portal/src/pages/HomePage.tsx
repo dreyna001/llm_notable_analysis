@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { fetchCase, isCancelledRequest } from "../api/client";
 import { HomeChatWorkspace } from "../components/HomeChatWorkspace";
 import type { CaseDetail, PortalCapabilities } from "../types";
+import { caseDetailToSummary } from "../utils/caseSummary";
 
 function asText(value: unknown): string {
   return typeof value === "string" && value.trim() ? value : "";
@@ -112,6 +113,9 @@ export function HomePage() {
         sidebarMeta={sidebarMeta}
         selectedCaseId={selectedCaseId}
         selectedCaseName={alertName(selectedCase)}
+        selectedCaseVerdict={
+          selectedCase ? caseDetailToSummary(selectedCase).verdict : undefined
+        }
         selectedCaseProcessedAt={selectedCase?.metadata.processed_at ?? undefined}
         selectedCaseLoading={selectedCaseLoading}
         attachError={attachError}

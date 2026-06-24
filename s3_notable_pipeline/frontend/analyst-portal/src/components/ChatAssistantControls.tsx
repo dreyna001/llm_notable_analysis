@@ -2,12 +2,14 @@ import { ExternalLink, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import type { CaseSummary } from "../types";
+import { verdictColor } from "../utils/verdict";
 import { CaseAttachMetaSkeleton } from "./LoadingSkeletons";
 import { CaseAttachPicker } from "./CaseAttachPicker";
 
 type ChatAssistantControlsProps = {
   selectedCaseId?: string;
   selectedCaseName?: string;
+  selectedCaseVerdict?: string | null;
   selectedCaseProcessedAt?: string;
   selectedCaseLoading?: boolean;
   caseAttachEnabled?: boolean;
@@ -18,6 +20,7 @@ type ChatAssistantControlsProps = {
 export function ChatAssistantControls({
   selectedCaseId,
   selectedCaseName,
+  selectedCaseVerdict,
   selectedCaseProcessedAt,
   selectedCaseLoading = false,
   caseAttachEnabled = true,
@@ -42,7 +45,10 @@ export function ChatAssistantControls({
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <div className="text-xs text-muted-foreground">Case attached</div>
-              <div className="mt-0.5 truncate text-sm font-medium text-sidebar-foreground">
+              <div
+                className="mt-0.5 truncate text-sm font-medium"
+                style={{ color: verdictColor(selectedCaseVerdict) }}
+              >
                 {selectedCaseName || selectedCaseId}
               </div>
               <div className="mt-1 text-xs text-muted-foreground">

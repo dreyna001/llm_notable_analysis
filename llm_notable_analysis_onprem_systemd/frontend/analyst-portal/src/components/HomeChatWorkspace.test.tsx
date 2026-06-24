@@ -9,6 +9,7 @@ import {
   fetchChatSessions,
 } from "../api/client";
 import type { PortalCapabilities } from "../types";
+import { VERDICT_COLOR } from "../utils/verdict";
 
 import { HomeChatWorkspace } from "./HomeChatWorkspace";
 
@@ -77,11 +78,14 @@ describe("HomeChatWorkspace attached case", () => {
           sidebarMeta={<div>Case window</div>}
           selectedCaseId="portal-test-1780770539"
           selectedCaseName="Portal E2E Test"
+          selectedCaseVerdict="likely_malicious"
         />
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText("Portal E2E Test")).toBeInTheDocument();
+    const caseName = await screen.findByText("Portal E2E Test");
+    expect(caseName).toBeInTheDocument();
+    expect(caseName).toHaveStyle({ color: VERDICT_COLOR.malicious });
     expect(screen.getByText("Case attached")).toBeInTheDocument();
   });
 });
