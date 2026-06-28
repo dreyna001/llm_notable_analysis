@@ -27,7 +27,7 @@ Optional deep dives:
 - **[SPL operations](operations/investigation/SPL_OPERATIONS.md)** — Indexes, execution limits, REST vs MCP, rollout.
 - **[Future enhancements roadmap](planning/FUTURE_ENHANCEMENTS_ROADMAP.md)** — Backlog (threat intel, SOAR invocation, observability, and related work).
 - **[Prompt enhancements plan](planning/PROMPT_ENHANCEMENTS_PLAN.md)** and **[AI integrity / drift plan](planning/ai_integrity_drift_monitoring_plan.md)** — Planned prompt and quality-monitoring work.
-- **[Golden eval harness todo](planning/golden_eval_harness_todo.md)** — Planned regression harness.
+- **[Golden eval (first slice)](testing/GOLDEN_EVAL.md)** — Analyzer disposition baseline corpus and rubric tests; broader harness backlog in [golden_eval_harness_todo.md](planning/golden_eval_harness_todo.md).
 
 ## Topic shortcuts
 

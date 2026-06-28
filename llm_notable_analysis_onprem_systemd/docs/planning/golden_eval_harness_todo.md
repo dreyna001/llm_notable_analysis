@@ -2,9 +2,10 @@
 
 ## Status
 
-**Not implemented.** Planning-only backlog for a future quality and regression
-harness. No golden corpus, harness command, rubric runner, eval report format, or
-`notable-eval` automation exists in this repo yet.
+**Partial.** First analyzer disposition slice is implemented (see
+[`../testing/GOLDEN_EVAL.md`](../testing/GOLDEN_EVAL.md)): three baseline alerts,
+offline rubric tests, and opt-in live eval. Broader harness items below remain
+backlog (portal chat evals, timer automation, drift export, full corpus).
 
 Complements shipped unit/smoke tests documented in
 [`../testing/TESTING.md`](../testing/TESTING.md) and the planned integrity/drift

@@ -1,0 +1,43 @@
+{
+  "alert_reconciliation": {
+    "verdict": "likely_malicious",
+    "confidence": "0.88",
+    "one_sentence_summary": "Fixed-interval HTTPS beacons to a young domain with constant payload size indicate likely C2 keepalive.",
+    "decision_drivers": [
+      "beacon_interval_seconds=60 with beacon_count_24h=1440",
+      "domain_age_days=3 for update-service-cloud.net",
+      "constant bytes_out=512 on each POST"
+    ],
+    "recommended_actions": [
+      "Block update-service-cloud.net and isolate laptop-22.corp.local."
+    ]
+  },
+  "competing_hypotheses": [
+    {"hypothesis_type": "benign", "hypothesis": "Legitimate updater", "evidence_support": [], "evidence_gaps": ["No vendor attribution"], "best_pivots": []},
+    {"hypothesis_type": "benign", "hypothesis": "Telemetry noise", "evidence_support": [], "evidence_gaps": ["Interval too regular"], "best_pivots": []},
+    {"hypothesis_type": "benign", "hypothesis": "Misconfigured agent", "evidence_support": [], "evidence_gaps": ["Domain age is 3 days"], "best_pivots": []},
+    {"hypothesis_type": "adversary", "hypothesis": "C2 beaconing", "evidence_support": ["60-second beacon interval"], "evidence_gaps": [], "best_pivots": []},
+    {"hypothesis_type": "adversary", "hypothesis": "Data exfil staging", "evidence_support": ["1440 POST events"], "evidence_gaps": [], "best_pivots": []},
+    {"hypothesis_type": "adversary", "hypothesis": "Malware callback", "evidence_support": ["update-service-cloud.net"], "evidence_gaps": [], "best_pivots": []}
+  ],
+  "evidence_vs_inference": {
+    "evidence": [
+      "beacon_interval_seconds=60",
+      "dest_domain=update-service-cloud.net",
+      "beacon_count_24h=1440"
+    ],
+    "inferences": ["Regular interval suggests automated callback rather than user browsing."]
+  },
+  "ioc_extraction": {
+    "ip_addresses": ["203.0.113.77"],
+    "domains": ["update-service-cloud.net"],
+    "user_accounts": ["corp\\mrossi"],
+    "hostnames": ["laptop-22.corp.local"],
+    "process_names": [],
+    "file_paths": [],
+    "file_hashes": [],
+    "event_ids": [],
+    "urls": []
+  },
+  "ttp_analysis": []
+}

@@ -63,12 +63,12 @@ Expected pytest collection (Linux validation host, current tree):
 
 | Suite | Collected |
 | --- | --- |
-| `tests/onprem_service` | 432 |
+| `tests/onprem_service` | 436 |
 | `tests/onprem_rag_notable_analysis` | 36 |
 | `tests/soar_playbook` | 4 |
 | `tests/scripts` | 8 (with `boto3`) |
 | `tests/test_benchmark_inference_server.py` | 5 |
-| **Full `tests/`** | **485** |
+| **Full `tests/`** | **489** |
 
 Pass/fail on a healthy Linux dev host or CI: all collected tests pass. Noisy
 warnings during negative-path tests are expected; trust the final pytest result.
@@ -78,6 +78,19 @@ Contract tests to run when changing runtime env, profiles, or deployment assets:
 - `tests/onprem_service/test_config_runtime_contract.py`
 - `tests/onprem_service/test_deployment_contract.py`
 - `tests/onprem_service/test_local_llm_client_contract.py`
+
+## Golden eval (disposition baseline)
+
+First-slice corpus and rubric for easy true-positive / false-positive / unknown
+alerts. Offline tests run in CI; live LLM eval is opt-in.
+
+```bash
+python -m unittest discover \
+  -s llm_notable_analysis_onprem_systemd/tests/onprem_service \
+  -p "test_golden_eval.py" -q
+```
+
+See [`GOLDEN_EVAL.md`](GOLDEN_EVAL.md) for corpus layout and live run steps.
 
 ## Legacy unittest entrypoints
 

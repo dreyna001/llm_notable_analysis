@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "beaconing-tp",
+      "title": "Obvious C2 beaconing (easy true positive)",
+      "alert": "alerts/beaconing-tp.json",
+      "reference_analysis": "references/beaconing-tp.json",
+      "expected_verdict": "likely_malicious",
+      "evidence_any": [
+        "beacon",
+        "update-service-cloud.net",
+        "beacon_interval"
+      ]
+    },
+    {
+      "id": "patch-admin-fp",
+      "title": "Approved SCCM patch activity (easy false positive)",
+      "alert": "alerts/patch-admin-fp.json",
+      "reference_analysis": "references/patch-admin-fp.json",
+      "expected_verdict": "likely_benign",
+      "evidence_any": [
+        "wuauclt",
+        "CHG-88421",
+        "maintenance"
+      ]
+    },
+    {
+      "id": "sparse-unknown",
+      "title": "Single low-signal DNS hit (should stay unknown)",
+      "alert": "alerts/sparse-unknown.json",
+      "reference_analysis": "references/sparse-unknown.json",
+      "expected_verdict": "unknown",
+      "evidence_any": [
+        "insufficient",
+        "single"
+      ]
+    }
+  ]
+}
