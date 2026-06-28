@@ -1,0 +1,22 @@
+{
+  "likely_malicious": [
+    "true positive",
+    "true_positive",
+    "confirmed malicious",
+    "malicious",
+    "S1"
+  ],
+  "likely_benign": [
+    "false positive",
+    "false_positive",
+    "benign",
+    "no action",
+    "S2"
+  ],
+  "unknown": [
+    "inconclusive",
+    "duplicate",
+    "unknown",
+    "other"
+  ]
+}

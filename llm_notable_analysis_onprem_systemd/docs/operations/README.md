@@ -98,6 +98,7 @@ Optional outbound writeback and ticketing. ServiceNow drafts use
 |-------|---------|
 | [`integrations/SPLUNK_WRITEBACK_OPERATIONS.md`](integrations/SPLUNK_WRITEBACK_OPERATIONS.md) | Notable comment writeback: endpoint, token, TLS, identifier mapping. |
 | [`integrations/SERVICENOW_OPERATIONS.md`](integrations/SERVICENOW_OPERATIONS.md) | Incident draft/create profiles, assignment group, HTTPS/token, approval payload. |
+| [`integrations/SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md`](integrations/SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md) | Inbound closed disposition sync: SN table/fields, read token, field maps (planned). |
 
 ## Security
 

@@ -28,7 +28,6 @@ Optional deep dives:
 - **[Future enhancements roadmap](planning/FUTURE_ENHANCEMENTS_ROADMAP.md)** — Backlog (threat intel, SOAR invocation, observability, and related work).
 - **[Prompt enhancements plan](planning/PROMPT_ENHANCEMENTS_PLAN.md)** and **[AI integrity / drift plan](planning/ai_integrity_drift_monitoring_plan.md)** — Planned prompt and quality-monitoring work.
 - **[Golden eval harness todo](planning/golden_eval_harness_todo.md)** — Planned regression harness.
-- **[ServiceNow closed disposition sync plan](planning/SERVICENOW_CLOSED_DISPOSITION_SYNC_PLAN.md)** — Inbound sync of closed analyst dispositions from ServiceNow (planning).
 
 ## Topic shortcuts
 
@@ -50,6 +49,7 @@ Optional deep dives:
 | Elasticsearch read-only execution | [ELASTICSEARCH_OPERATIONS.md](operations/investigation/ELASTICSEARCH_OPERATIONS.md) (`elastic_readonly` profile; mutually exclusive with `spl_readonly`) |
 | Splunk notable writeback | [SPLUNK_WRITEBACK_OPERATIONS.md](operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md) (`action_gated`) |
 | ServiceNow draft/create | [SERVICENOW_OPERATIONS.md](operations/integrations/SERVICENOW_OPERATIONS.md), [feature_enhancements_technical_spec.md](technical_specs/feature_enhancements_technical_spec.md) |
+| ServiceNow closed disposition sync (planned) | [SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md](operations/integrations/SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md) |
 | File drop and retention | [FILE_DROP_AND_RETENTION_OPERATIONS.md](operations/platform/FILE_DROP_AND_RETENTION_OPERATIONS.md) |
 | Planned gzip file intake | On-prem planned in [FILE_DROP_AND_RETENTION_OPERATIONS.md](operations/platform/FILE_DROP_AND_RETENTION_OPERATIONS.md); AWS implemented in [s3 FILE_DROP ops](../../s3_notable_pipeline/docs/operations/platform/FILE_DROP_AND_RETENTION_OPERATIONS.md) |
 | MITRE/TTP validation | [MITRE_TTP_OPERATIONS.md](operations/platform/MITRE_TTP_OPERATIONS.md) |

@@ -144,3 +144,4 @@ absolute, writable path. A duplicate successful create returns create status
 - [`../security/SECURITY_OPERATIONS.md`](../security/SECURITY_OPERATIONS.md)
 - [`../platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`](../platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md)
 - [`SPLUNK_WRITEBACK_OPERATIONS.md`](SPLUNK_WRITEBACK_OPERATIONS.md)
+- [`SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md`](SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md) — Inbound closed disposition sync (planned)
