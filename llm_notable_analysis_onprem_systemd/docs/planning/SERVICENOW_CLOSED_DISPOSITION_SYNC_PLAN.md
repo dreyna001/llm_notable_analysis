@@ -2,8 +2,9 @@
 
 ## Status
 
-Planning on branch `feature/servicenow-closed-disposition-sync`. Branch is current with
-`origin/main` (merged). Not implemented.
+Partial v1 shipped on on-prem (Postgres sync module + systemd) and AWS
+(`s3_notable_pipeline` DynamoDB + scheduled Lambda). Portal read API and
+retention purge remain backlog.
 
 Planning artifacts in repo:
 
@@ -288,9 +289,10 @@ Add entries to `config.env.example` in slice 4.
 - Writing dispositions back to ServiceNow from portal
 - Automatic RAG chunk ingest from dispositions
 - Model retraining or verdict override at analysis time
-- AWS parity (follow-on after on-prem proves mapping)
 - Splunk-as-source disposition pull
 - Fuzzy / ML-based case matching
+
+AWS v1 inbound sync shipped in `s3_notable_pipeline` (DynamoDB + scheduled Lambda).
 
 ## Hard Stops (do not implement until resolved)
 

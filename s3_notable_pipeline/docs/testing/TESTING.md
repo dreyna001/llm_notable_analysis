@@ -1,5 +1,11 @@
 # Testing
 
+## Golden Eval
+
+Offline disposition rubric tests for the fixed `data/golden_eval/` corpus. See
+[`GOLDEN_EVAL.md`](GOLDEN_EVAL.md) for corpus details, live Bedrock opt-in, and
+how to add cases.
+
 ## Unit Tests
 
 Unit tests must not call live AWS, Bedrock, Splunk, Elasticsearch, ServiceNow,
@@ -18,6 +24,7 @@ endpoint.
 Focused parity slices:
 
 ```bash
+python -m pytest tests/test_golden_eval.py -v
 python -m pytest tests/test_config.py
 python -m pytest tests/test_bedrock_kb_retrieval.py
 python -m pytest tests/test_spl_query_generation.py tests/test_splunk_investigation.py

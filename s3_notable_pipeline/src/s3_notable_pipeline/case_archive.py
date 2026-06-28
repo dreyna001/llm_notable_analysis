@@ -147,7 +147,7 @@ def archive_case(
     try:
         dynamodb_client.put_item(
             TableName=config.CASE_INDEX_TABLE,
-            Item=_to_ddb_item(item),
+            Item=_to_ddb_item(_prepare_case_index_attributes(item)),
             ConditionExpression="attribute_not_exists(case_id)",
         )
     except Exception as exc:
@@ -426,6 +426,13 @@ def _get_case_index_item(
     if not item:
         return None
     return {key: _from_ddb_value(value) for key, value in item.items()}
+
+
+def _prepare_case_index_attributes(item: dict[str, Any]) -> dict[str, Any]:
+    """Omit empty correlation_id before PutItem (CorrelationIdIndex GSI key)."""
+    if not str(item.get("correlation_id", "")).strip():
+        return {key: value for key, value in item.items() if key != "correlation_id"}
+    return item
 
 
 def _to_ddb_item(item: dict[str, Any]) -> dict[str, dict[str, Any]]:

@@ -335,6 +335,100 @@
         "title": "CaseSummaryResponse",
         "type": "object"
       },
+      "ChatContextUsageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "chars_per_token_estimate": {
+            "title": "Chars Per Token Estimate",
+            "type": "number"
+          },
+          "context_limit_tokens": {
+            "title": "Context Limit Tokens",
+            "type": "integer"
+          },
+          "current_question_chars": {
+            "title": "Current Question Chars",
+            "type": "integer"
+          },
+          "estimate_method": {
+            "enum": [
+              "chars_per_token",
+              "tiktoken"
+            ],
+            "title": "Estimate Method",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "case_grounded",
+              "general_knowledge"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "prompt_chars": {
+            "title": "Prompt Chars",
+            "type": "integer"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/ChatContextUsageSegmentResponse"
+            },
+            "title": "Segments",
+            "type": "array"
+          },
+          "utilization_pct": {
+            "title": "Utilization Pct",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "prompt_chars",
+          "prompt_tokens",
+          "context_limit_tokens",
+          "utilization_pct",
+          "segments",
+          "estimate_method",
+          "chars_per_token_estimate",
+          "current_question_chars"
+        ],
+        "title": "ChatContextUsageResponse",
+        "type": "object"
+      },
+      "ChatContextUsageSegmentResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "chars": {
+            "title": "Chars",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "tokens": {
+            "title": "Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "chars",
+          "tokens"
+        ],
+        "title": "ChatContextUsageSegmentResponse",
+        "type": "object"
+      },
       "ChatDependencyStatusResponse": {
         "additionalProperties": false,
         "properties": {
@@ -381,6 +475,16 @@
           "answer_status": {
             "title": "Answer Status",
             "type": "string"
+          },
+          "context_usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatContextUsageResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "session_id": {
             "anyOf": [
@@ -679,6 +783,10 @@
           "max_question_chars": {
             "title": "Max Question Chars",
             "type": "integer"
+          },
+          "model_context_tokens": {
+            "title": "Model Context Tokens",
+            "type": "integer"
           }
         },
         "required": [
@@ -687,6 +795,7 @@
           "general_knowledge_enabled",
           "max_question_chars",
           "max_answer_tokens",
+          "model_context_tokens",
           "max_chat_sessions_per_user",
           "case_retention_days",
           "chat_ready"

@@ -138,6 +138,7 @@ python -m unittest discover -s s3_notable_pipeline/tests -p "test_servicenow.py"
 
 ## Related Docs
 
+- [`SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md`](SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md) — Inbound closed disposition sync (AWS DynamoDB)
 - [`SPLUNK_WRITEBACK_OPERATIONS.md`](SPLUNK_WRITEBACK_OPERATIONS.md)
 - [`../platform/CAPABILITY_PROFILES.md`](../platform/CAPABILITY_PROFILES.md)
 - [`../security/SECURITY_OPERATIONS.md`](../security/SECURITY_OPERATIONS.md)

@@ -1,0 +1,17 @@
+{
+  "table": "sn_si_incident",
+  "fields": {
+    "sys_id": "sys_id",
+    "number": "number",
+    "state": "state",
+    "closed_at": "closed_at",
+    "sys_updated_on": "sys_updated_on",
+    "short_description": "short_description",
+    "close_code": "close_code",
+    "close_notes": "close_notes",
+    "correlation_id": "correlation_id",
+    "correlation_display": "correlation_display",
+    "search_name": "u_alert_rule_name"
+  },
+  "closed_state_values": ["3", "7", "closed", "resolved"]
+}

@@ -1,9 +1,10 @@
 # ServiceNow Closed Disposition Sync Operations
 
-**Status:** Planned on-prem capability. Not shipped yet. For outbound incident
+**Status:** Partial v1 shipped on-prem (sync module, schema, systemd job). Portal read
+API and disposition retention purge are not shipped yet. For outbound incident
 draft/create, see [`SERVICENOW_OPERATIONS.md`](SERVICENOW_OPERATIONS.md).
 
-## What This Will Control
+## What This Controls
 
 Scheduled **read-only** pull of **closed** ServiceNow security incidents into
 Postgres (`notable_dispositions.servicenow_closed_incidents`). Analyst close
@@ -12,6 +13,22 @@ Optional link to a portal case when correlation IDs match.
 
 Direction: **ServiceNow -> our database only**. No portal or analyzer writeback
 to ServiceNow.
+
+## Shipped In v1
+
+- Postgres schema: `deploy/postgres/dispositions_schema.sql`
+- Sync module: `onprem_service/servicenow_disposition_sync.py`
+- CLI: `scripts/run_disposition_sync.py`
+- systemd: `notable-disposition-sync.service` + `notable-disposition-sync.timer`
+- Field/code map loaders and normalization via `verdicts.normalize_verdict()`
+
+## Not Shipped Yet
+
+- Portal UI / read API for analyst dispositions
+- Automatic purge of rows past `expires_at` (`DISPOSITION_RETENTION_DAYS`)
+
+AWS inbound sync v1 ships in `s3_notable_pipeline` (DynamoDB + scheduled Lambda).
+See [`../../../s3_notable_pipeline/docs/operations/integrations/SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md`](../../../s3_notable_pipeline/docs/operations/integrations/SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md).
 
 ## Customer Prerequisites
 
@@ -41,9 +58,10 @@ Optional: `short_description`, `correlation_display`, custom rule-name field
 
 ### Closed state values
 
-Sync includes only rows whose `state` is in the customer field map list.
-Default: `3`, `7`, `closed`, `resolved`. Confirm with the ServiceNow owner;
-custom workflows often use different codes.
+Sync includes only rows whose `state` is in the customer field map list for
+backfill. Incremental runs query by `sys_updated_on` and deactivate reopened rows.
+Default closed values: `3`, `7`, `closed`, `resolved`. Confirm with the ServiceNow
+owner; custom workflows often use different codes.
 
 ### Case linking (optional)
 
@@ -94,7 +112,7 @@ Unmapped close text falls back to the same normalization rules as model verdicts
 
 Incremental runs use **`sys_updated_on`**, not `closed_at`.
 
-## ServiceNow API Shape (planned)
+## ServiceNow API Shape
 
 ```http
 GET {SERVICENOW_BASE_URL}/api/now/table/{table}
@@ -104,16 +122,22 @@ Authorization: Bearer {SERVICENOW_DISPOSITION_SYNC_TOKEN}
 Query (incremental):
 
 ```text
-sysparm_query=sys_updated_on>{cursor}^stateIN{closed_states}
+sysparm_query=sys_updated_on>{cursor}
 sysparm_fields=<mapped columns>
 sysparm_limit=100
 sysparm_order_by=sys_updated_on
 ```
 
+Backfill (no cursor yet):
+
+```text
+sysparm_query=closed_at>{backfill_start}^stateIN{closed_states}
+```
+
 Auth failure: job fails; cursor not advanced. Reopened tickets: row kept,
 marked inactive in our database.
 
-## Config Quick Reference (planned)
+## Config Quick Reference
 
 | Area | Primary variables |
 |------|-------------------|
@@ -123,10 +147,13 @@ marked inactive in our database.
 | Database | `CASE_POSTGRES_DSN` (same Postgres as case archive) |
 | Bounds | `SERVICENOW_DISPOSITION_BACKFILL_DAYS`, `DISPOSITION_RETENTION_DAYS` |
 
-Postgres DDL sketch:
+Postgres DDL:
 [`deploy/postgres/dispositions_schema.sql`](../../../deploy/postgres/dispositions_schema.sql).
 
-## Validation And Rollout (when shipped)
+Apply via `scripts/setup_postgres_case_archive.sh` (runs disposition schema after
+case archive schema).
+
+## Validation And Rollout
 
 1. Apply disposition schema on a lab Postgres host.
 2. Deploy customer field map and close-code map from a sample closed incident.
@@ -137,8 +164,21 @@ Postgres DDL sketch:
 5. Reopen a test incident; confirm row marked inactive.
 6. Promote only after ServiceNow owner signs off state codes and field map.
 
+Manual run:
+
+```bash
+/opt/notable-analyzer/venv/bin/python /opt/notable-analyzer/scripts/run_disposition_sync.py
+```
+
+Enable timer:
+
+```bash
+sudo systemctl enable --now notable-disposition-sync.timer
+```
+
 ## Related Docs
 
 - [`SERVICENOW_OPERATIONS.md`](SERVICENOW_OPERATIONS.md) — Outbound draft/create (shipped)
 - [`../analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../analyst_portal/ANALYST_PORTAL_OPERATIONS.md) — Case archive (model verdict today)
+- [`../../planning/SERVICENOW_CLOSED_DISPOSITION_SYNC_PLAN.md`](../../planning/SERVICENOW_CLOSED_DISPOSITION_SYNC_PLAN.md) — Planning source
 - [`../../technical_specs/feature_enhancements_technical_spec.md`](../../technical_specs/feature_enhancements_technical_spec.md) — Outbound ServiceNow contract

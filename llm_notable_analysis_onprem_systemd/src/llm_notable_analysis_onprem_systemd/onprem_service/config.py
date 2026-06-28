@@ -303,6 +303,12 @@ class Config:
         SERVICENOW_API_TOKEN: Bearer token for ServiceNow API.
         SERVICENOW_ASSIGNMENT_GROUP: Assignment group used for incident drafts.
         SERVICENOW_TIMEOUT_SECONDS: Create request timeout in seconds.
+        SERVICENOW_DISPOSITION_SYNC_ENABLED: Enables read-only closed disposition sync.
+        SERVICENOW_DISPOSITION_SYNC_TOKEN: Bearer token for disposition Table API reads.
+        SERVICENOW_DISPOSITION_FIELD_MAP: Path to ServiceNow disposition field map JSON.
+        SERVICENOW_DISPOSITION_CODE_MAP: Path to ServiceNow disposition code map JSON.
+        SERVICENOW_DISPOSITION_BACKFILL_DAYS: First-run closed_at lookback window.
+        DISPOSITION_RETENTION_DAYS: Retention window for synced disposition rows.
         SIDE_EFFECT_IDEMPOTENCY_ENABLED: Enables file-backed side-effect dedupe.
         SIDE_EFFECT_IDEMPOTENCY_DIR: Directory for side-effect idempotency markers.
         SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS: Retention window for idempotency markers.
@@ -495,6 +501,20 @@ class Config:
     SERVICENOW_API_TOKEN: str = ""
     SERVICENOW_ASSIGNMENT_GROUP: str = ""
     SERVICENOW_TIMEOUT_SECONDS: int = 15
+    SERVICENOW_DISPOSITION_SYNC_ENABLED: bool = False
+    SERVICENOW_DISPOSITION_SYNC_TOKEN: str = ""
+    SERVICENOW_DISPOSITION_FIELD_MAP: Path = field(
+        default_factory=lambda: Path(
+            "/etc/notable-analyzer/servicenow/disposition_field_map.json"
+        )
+    )
+    SERVICENOW_DISPOSITION_CODE_MAP: Path = field(
+        default_factory=lambda: Path(
+            "/etc/notable-analyzer/servicenow/disposition_code_map.json"
+        )
+    )
+    SERVICENOW_DISPOSITION_BACKFILL_DAYS: int = 90
+    DISPOSITION_RETENTION_DAYS: int = 365
 
     # Side-effect idempotency (external writes/actions only)
     SIDE_EFFECT_IDEMPOTENCY_ENABLED: bool = False
@@ -568,6 +588,26 @@ class Config:
         if bool(self.CASE_QA_CHAT_HISTORY_ENABLED) and not bool(self.CASE_QA_ENABLED):
             raise ValueError(
                 "CASE_QA_ENABLED is required when CASE_QA_CHAT_HISTORY_ENABLED=true"
+            )
+        if bool(self.SERVICENOW_DISPOSITION_SYNC_ENABLED):
+            if not str(self.SERVICENOW_DISPOSITION_SYNC_TOKEN or "").strip():
+                raise ValueError(
+                    "SERVICENOW_DISPOSITION_SYNC_TOKEN is required when "
+                    "SERVICENOW_DISPOSITION_SYNC_ENABLED=true"
+                )
+            if not str(self.SERVICENOW_BASE_URL or "").strip().startswith("https://"):
+                raise ValueError(
+                    "SERVICENOW_BASE_URL must be HTTPS when "
+                    "SERVICENOW_DISPOSITION_SYNC_ENABLED=true"
+                )
+            if not str(self.CASE_POSTGRES_DSN or "").strip():
+                raise ValueError(
+                    "CASE_POSTGRES_DSN is required when "
+                    "SERVICENOW_DISPOSITION_SYNC_ENABLED=true"
+                )
+            _validate_postgres_identifier(
+                self.CASE_POSTGRES_SCHEMA,
+                "CASE_POSTGRES_SCHEMA",
             )
         _validate_elasticsearch_runtime_contract(self)
 
@@ -916,6 +956,30 @@ def load_config() -> Config:
         SERVICENOW_API_TOKEN=os.getenv("SERVICENOW_API_TOKEN", ""),
         SERVICENOW_ASSIGNMENT_GROUP=os.getenv("SERVICENOW_ASSIGNMENT_GROUP", ""),
         SERVICENOW_TIMEOUT_SECONDS=int(os.getenv("SERVICENOW_TIMEOUT_SECONDS", "15")),
+        SERVICENOW_DISPOSITION_SYNC_ENABLED=_bool_env(
+            "SERVICENOW_DISPOSITION_SYNC_ENABLED", False
+        ),
+        SERVICENOW_DISPOSITION_SYNC_TOKEN=os.getenv(
+            "SERVICENOW_DISPOSITION_SYNC_TOKEN", ""
+        ),
+        SERVICENOW_DISPOSITION_FIELD_MAP=Path(
+            os.getenv(
+                "SERVICENOW_DISPOSITION_FIELD_MAP",
+                "/etc/notable-analyzer/servicenow/disposition_field_map.json",
+            )
+        ),
+        SERVICENOW_DISPOSITION_CODE_MAP=Path(
+            os.getenv(
+                "SERVICENOW_DISPOSITION_CODE_MAP",
+                "/etc/notable-analyzer/servicenow/disposition_code_map.json",
+            )
+        ),
+        SERVICENOW_DISPOSITION_BACKFILL_DAYS=_positive_int_env(
+            "SERVICENOW_DISPOSITION_BACKFILL_DAYS", 90, max_value=3650
+        ),
+        DISPOSITION_RETENTION_DAYS=_positive_int_env(
+            "DISPOSITION_RETENTION_DAYS", 365, max_value=3650
+        ),
         SIDE_EFFECT_IDEMPOTENCY_ENABLED=_profile_bool(
             "SIDE_EFFECT_IDEMPOTENCY_ENABLED", False, profile_flags
         ),

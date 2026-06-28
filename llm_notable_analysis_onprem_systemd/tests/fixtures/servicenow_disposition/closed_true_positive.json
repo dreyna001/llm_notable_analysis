@@ -1,0 +1,13 @@
+{
+  "sys_id": "abc123closedtp0001",
+  "number": "SIR0010001",
+  "state": "3",
+  "closed_at": "2026-06-01 12:00:00",
+  "sys_updated_on": "2026-06-01 12:05:00",
+  "close_code": "true positive",
+  "close_notes": "Confirmed malicious activity after investigation.",
+  "correlation_id": "notable-corr-001",
+  "short_description": "Suspicious login from new country",
+  "correlation_display": "notable-corr-001",
+  "u_alert_rule_name": "Excessive Failed Logins"
+}

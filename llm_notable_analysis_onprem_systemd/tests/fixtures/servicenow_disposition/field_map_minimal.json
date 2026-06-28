@@ -1,0 +1,14 @@
+{
+  "table": "sn_si_incident",
+  "fields": {
+    "sys_id": "sys_id",
+    "number": "number",
+    "state": "state",
+    "closed_at": "closed_at",
+    "sys_updated_on": "sys_updated_on",
+    "close_code": "close_code",
+    "close_notes": "close_notes",
+    "correlation_id": "correlation_id"
+  },
+  "closed_state_values": ["3", "7", "closed", "resolved"]
+}

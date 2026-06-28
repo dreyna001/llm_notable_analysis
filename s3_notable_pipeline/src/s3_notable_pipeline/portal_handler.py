@@ -285,6 +285,8 @@ def _handle_chat_gate(config: Config, event: dict[str, Any]) -> dict[str, Any]:
             "answer_status": answer.answer_status,
             "session_id": None,
         }
+        if answer.context_usage is not None:
+            response_payload["context_usage"] = answer.context_usage
         if config.CASE_QA_CHAT_HISTORY_ENABLED:
             try:
                 response_payload["session_id"] = persist_chat_history(
@@ -372,6 +374,7 @@ def _capabilities(config: Config) -> dict[str, Any]:
         "general_knowledge_enabled": config.CASE_QA_GENERAL_KNOWLEDGE_ENABLED,
         "max_question_chars": config.CASE_QA_MAX_QUESTION_CHARS,
         "max_answer_tokens": config.CASE_QA_MAX_ANSWER_TOKENS,
+        "model_context_tokens": config.CASE_QA_MODEL_CONTEXT_TOKENS,
         "max_chat_sessions_per_user": config.CASE_QA_MAX_SESSIONS_PER_USER,
         "case_retention_days": config.CASE_RETENTION_DAYS,
         "chat_ready": chat_ready,

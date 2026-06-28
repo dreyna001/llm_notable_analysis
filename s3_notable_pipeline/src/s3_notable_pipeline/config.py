@@ -235,6 +235,16 @@ class Config:
     SERVICENOW_ASSIGNMENT_GROUP: str = ""
     SERVICENOW_TIMEOUT_SECONDS: int = 15
 
+    SERVICENOW_DISPOSITION_SYNC_ENABLED: bool = False
+    SERVICENOW_DISPOSITION_SYNC_TOKEN: str = ""
+    SERVICENOW_DISPOSITION_SYNC_TOKEN_SECRET_ARN: str = ""
+    SERVICENOW_DISPOSITION_FIELD_MAP: str = ""
+    SERVICENOW_DISPOSITION_CODE_MAP: str = ""
+    SERVICENOW_DISPOSITION_BACKFILL_DAYS: int = 90
+    DISPOSITION_RETENTION_DAYS: int = 365
+    DISPOSITION_TABLE: str = ""
+    DISPOSITION_SYNC_STATE_TABLE: str = ""
+
     SIDE_EFFECT_IDEMPOTENCY_ENABLED: bool = False
     SIDE_EFFECT_IDEMPOTENCY_TABLE: str = ""
     SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS: int = 30
@@ -276,6 +286,7 @@ class Config:
     CASE_QA_CONTEXT_BUDGET_CHARS: int = 12_000
     CASE_QA_MAX_QUESTION_CHARS: int = 2_000
     CASE_QA_MAX_ANSWER_TOKENS: int = 800
+    CASE_QA_MODEL_CONTEXT_TOKENS: int = 128_000
     CASE_QA_EMBEDDING_MODEL: str = "amazon.titan-embed-text-v2:0"
     CASE_QA_VECTOR_DIMENSIONS: int = 1024
     CASE_QA_EMBED_NORMALIZE: bool = True
@@ -349,15 +360,27 @@ class Config:
                 raise ValueError(
                     "ELASTICSEARCH_ALLOWED_FIELDS is required when Elasticsearch execution is enabled"
                 )
-        if self.SERVICENOW_CREATE_ENABLED:
+        if self.SERVICENOW_CREATE_ENABLED or self.SERVICENOW_DISPOSITION_SYNC_ENABLED:
             self.SERVICENOW_BASE_URL = validate_https_url(
                 self.SERVICENOW_BASE_URL,
                 setting_name="SERVICENOW_BASE_URL",
                 allow_private=self.ALLOW_PRIVATE_OUTBOUND_ENDPOINTS,
             )
+        if self.SERVICENOW_CREATE_ENABLED:
             if self.SERVICENOW_CREATE_REQUIRES_APPROVAL and not self.SERVICENOW_APPROVAL_HMAC_SECRET_ARN:
                 raise ValueError(
                     "SERVICENOW_APPROVAL_HMAC_SECRET_ARN is required when ServiceNow create requires approval"
+                )
+        if self.SERVICENOW_DISPOSITION_SYNC_ENABLED:
+            if self.DISPOSITION_TABLE:
+                self.DISPOSITION_TABLE = _validate_dynamodb_table_name(
+                    self.DISPOSITION_TABLE,
+                    setting_name="DISPOSITION_TABLE",
+                )
+            if self.DISPOSITION_SYNC_STATE_TABLE:
+                self.DISPOSITION_SYNC_STATE_TABLE = _validate_dynamodb_table_name(
+                    self.DISPOSITION_SYNC_STATE_TABLE,
+                    setting_name="DISPOSITION_SYNC_STATE_TABLE",
                 )
         self.CASE_ARCHIVE_FAILURE_MODE = (
             self.CASE_ARCHIVE_FAILURE_MODE or "suppress"
@@ -616,6 +639,29 @@ def load_config() -> Config:
         SERVICENOW_TIMEOUT_SECONDS=_positive_int_env(
             "SERVICENOW_TIMEOUT_SECONDS", 15, max_value=300
         ),
+        SERVICENOW_DISPOSITION_SYNC_ENABLED=_bool_env(
+            "SERVICENOW_DISPOSITION_SYNC_ENABLED", False
+        ),
+        SERVICENOW_DISPOSITION_SYNC_TOKEN=_optional_str_env(
+            "SERVICENOW_DISPOSITION_SYNC_TOKEN"
+        ),
+        SERVICENOW_DISPOSITION_SYNC_TOKEN_SECRET_ARN=os.getenv(
+            "SERVICENOW_DISPOSITION_SYNC_TOKEN_SECRET_ARN", ""
+        ),
+        SERVICENOW_DISPOSITION_FIELD_MAP=os.getenv(
+            "SERVICENOW_DISPOSITION_FIELD_MAP", ""
+        ).strip(),
+        SERVICENOW_DISPOSITION_CODE_MAP=os.getenv(
+            "SERVICENOW_DISPOSITION_CODE_MAP", ""
+        ).strip(),
+        SERVICENOW_DISPOSITION_BACKFILL_DAYS=_positive_int_env(
+            "SERVICENOW_DISPOSITION_BACKFILL_DAYS", 90, max_value=3650
+        ),
+        DISPOSITION_RETENTION_DAYS=_positive_int_env(
+            "DISPOSITION_RETENTION_DAYS", 365, max_value=3650
+        ),
+        DISPOSITION_TABLE=os.getenv("DISPOSITION_TABLE", ""),
+        DISPOSITION_SYNC_STATE_TABLE=os.getenv("DISPOSITION_SYNC_STATE_TABLE", ""),
         SIDE_EFFECT_IDEMPOTENCY_ENABLED=_profile_bool(
             "SIDE_EFFECT_IDEMPOTENCY_ENABLED", False, profile_flags
         ),
@@ -704,6 +750,9 @@ def load_config() -> Config:
         ),
         CASE_QA_MAX_ANSWER_TOKENS=_positive_int_env(
             "CASE_QA_MAX_ANSWER_TOKENS", 800, max_value=4096
+        ),
+        CASE_QA_MODEL_CONTEXT_TOKENS=_positive_int_env(
+            "CASE_QA_MODEL_CONTEXT_TOKENS", 128_000, max_value=2_000_000
         ),
         CASE_QA_EMBEDDING_MODEL=(
             os.getenv("CASE_QA_EMBEDDING_MODEL", "amazon.titan-embed-text-v2:0").strip()

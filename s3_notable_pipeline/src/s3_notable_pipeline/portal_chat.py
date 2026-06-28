@@ -6,7 +6,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 
 from .config import Config
 
@@ -73,6 +73,7 @@ class PortalAnswer:
 
     answer: str
     answer_status: str
+    context_usage: dict[str, Any] | None = None
 
 
 def synthesized_answer_crosses_action_boundary(answer: str) -> bool:
@@ -148,6 +149,56 @@ def _format_context_block(source: dict[str, Any]) -> str:
     )
 
 
+def _markdown_output_format_instructions() -> str:
+    """Shared Markdown output contract for portal synthesis prompts."""
+    return (
+        "Return GitHub-flavored Markdown using real newline characters. Use short "
+        "paragraphs and bullets where helpful. For code, use fenced code blocks "
+        "with a language identifier, put the opening and closing fences on their "
+        "own lines, and do not place prose on the same line as a code fence. Put "
+        "a blank line before and after headings, lists, and code blocks."
+    )
+
+
+def _general_knowledge_system_instructions() -> str:
+    """Shared read-only general technology assistant guardrails."""
+    return (
+        "You are a state-of-the-art technology assistant embedded in a read-only "
+        "SOC analyst portal. Use broad expert knowledge to answer questions "
+        "related to cybersecurity, information technology, networking, cloud, "
+        "AI, machine learning, data, software development, code, DevOps, SRE, "
+        "databases, infrastructure, operating systems, hardware, electronics, "
+        "technical troubleshooting, architecture, and technical math.\n"
+        "When case context is absent, answer from general knowledge instead "
+        "of apologizing about missing retained cases.\n"
+        "Do not require questions to be about alerts, cases, SOC workflows, or "
+        "retained case data. Any technology-related question is in scope.\n"
+        "If the question is not related to technology, begin with 'Out of scope:' "
+        "and briefly say this assistant is limited to technology topics and "
+        "retained case analysis.\n"
+        "Do not claim access to this organization's retained cases, live systems, "
+        "internal telemetry, or private data unless that information is explicitly "
+        "provided in the question.\n"
+        "This chat endpoint cannot execute searches, write tickets, isolate hosts, "
+        "or call external systems. If the analyst explicitly asks for Splunk SPL, "
+        "Elasticsearch KQL/Lucene, CrowdStrike hunts, shell commands, API examples, "
+        "or other query text, provide draft guidance for a human to review and run. "
+        "If a query would be the natural next step but the analyst did not ask for "
+        "one, offer a brief follow-up such as: 'Want me to draft a Splunk, "
+        "Elasticsearch, or CrowdStrike query for that pivot?' Never claim you "
+        "performed an action; label drafted query text as unvalidated draft "
+        "guidance.\n"
+        "For code questions, include concise examples when useful and state "
+        "assumptions. Do not claim you ran code.\n"
+        "Answer like a default helpful chatbot: direct, conversational, and adaptive "
+        "to the question. Start with the answer, keep responses concise by default, "
+        "and expand when the analyst asks for depth. Use bullets, numbered steps, "
+        "headings, or tables only when they improve clarity. Mention assumptions, "
+        "caveats, validation checks, and next questions naturally instead of forcing "
+        "a fixed report template."
+    )
+
+
 def _case_grounded_system_instructions() -> str:
     """Shared read-only case chat synthesis guardrails."""
     return (
@@ -199,11 +250,8 @@ def build_case_grounded_prompt(
         + _case_grounded_system_instructions()
         + "\n\n"
         "OUTPUT FORMAT:\n"
-        "Return GitHub-flavored Markdown using real newline characters. Use short "
-        "paragraphs and bullets where helpful. For code, use fenced code blocks "
-        "with a language identifier, put the opening and closing fences on their "
-        "own lines, and do not place prose on the same line as a code fence. Put "
-        "a blank line before and after headings, lists, and code blocks.\n\n"
+        + _markdown_output_format_instructions()
+        + "\n\n"
         + history_block
         + "QUESTION_JSON:\n"
         + json.dumps(question.strip(), ensure_ascii=True)
@@ -226,39 +274,8 @@ def build_general_knowledge_prompt(
     history_block = _render_conversation_history(conversation_history)
     return (
         "SYSTEM INSTRUCTIONS:\n"
-        "You are a state-of-the-art technology assistant embedded in a read-only "
-        "SOC analyst portal. Use broad expert knowledge to answer questions "
-        "related to cybersecurity, information technology, networking, cloud, "
-        "AI, machine learning, data, software development, code, DevOps, SRE, "
-        "databases, infrastructure, operating systems, hardware, electronics, "
-        "technical troubleshooting, architecture, and technical math.\n"
-        "When case context is absent, answer from general knowledge instead "
-        "of apologizing about missing retained cases.\n"
-        "Do not require questions to be about alerts, cases, SOC workflows, or "
-        "retained case data. Any technology-related question is in scope.\n"
-        "If the question is not related to technology, begin with 'Out of scope:' "
-        "and briefly say this assistant is limited to technology topics and "
-        "retained case analysis.\n"
-        "Do not claim access to this organization's retained cases, live systems, "
-        "internal telemetry, or private data unless that information is explicitly "
-        "provided in the question.\n"
-        "This chat endpoint cannot execute searches, write tickets, isolate hosts, "
-        "or call external systems. If the analyst explicitly asks for Splunk SPL, "
-        "Elasticsearch KQL/Lucene, CrowdStrike hunts, shell commands, API examples, "
-        "or other query text, provide draft guidance for a human to review and run. "
-        "If a query would be the natural next step but the analyst did not ask for "
-        "one, offer a brief follow-up such as: 'Want me to draft a Splunk, "
-        "Elasticsearch, or CrowdStrike query for that pivot?' Never claim you "
-        "performed an action; label drafted query text as unvalidated draft "
-        "guidance.\n"
-        "For code questions, include concise examples when useful and state "
-        "assumptions. Do not claim you ran code.\n"
-        "Answer like a default helpful chatbot: direct, conversational, and adaptive "
-        "to the question. Start with the answer, keep responses concise by default, "
-        "and expand when the analyst asks for depth. Use bullets, numbered steps, "
-        "headings, or tables only when they improve clarity. Mention assumptions, "
-        "caveats, validation checks, and next questions naturally instead of forcing "
-        "a fixed report template.\n\n"
+        + _general_knowledge_system_instructions()
+        + "\n\n"
         "OUTPUT FORMAT:\n"
         "Return GitHub-flavored Markdown using real newline characters. Use short "
         "paragraphs, bullets, and numbered steps where helpful. For code, use "
@@ -363,11 +380,43 @@ def synthesize_case_answer(
             conversation_history=conversation_history,
         )
         if general is not None:
-            return general
+            return PortalAnswer(
+                answer=general.answer,
+                answer_status=general.answer_status,
+                context_usage=_context_usage_for_request(
+                    config,
+                    kind="general_knowledge",
+                    question=normalized_question,
+                    sources=None,
+                    conversation_history=conversation_history,
+                ),
+            )
         return PortalAnswer(
             answer="This case did not contain enough grounded context to answer.",
             answer_status="unknown",
+            context_usage=_context_usage_for_request(
+                config,
+                kind="case_grounded",
+                question=normalized_question,
+                sources=[],
+                conversation_history=conversation_history,
+            ),
         )
+
+    case_context_usage = _context_usage_for_request(
+        config,
+        kind="case_grounded",
+        question=normalized_question,
+        sources=trimmed_sources,
+        conversation_history=conversation_history,
+    )
+    general_context_usage = _context_usage_for_request(
+        config,
+        kind="general_knowledge",
+        question=normalized_question,
+        sources=None,
+        conversation_history=conversation_history,
+    )
 
     prompt = build_case_grounded_prompt(
         question=normalized_question,
@@ -388,11 +437,16 @@ def synthesize_case_answer(
             conversation_history=conversation_history,
         )
         if general is not None:
-            return general
+            return PortalAnswer(
+                answer=general.answer,
+                answer_status=general.answer_status,
+                context_usage=general_context_usage,
+            )
     if not answer:
         return PortalAnswer(
             answer="This case did not contain enough grounded context to answer.",
             answer_status="unknown",
+            context_usage=case_context_usage,
         )
     if synthesized_answer_crosses_action_boundary(answer):
         logger.warning("Rejected portal chat answer that crossed action boundary")
@@ -402,8 +456,64 @@ def synthesize_case_answer(
                 "action boundary."
             ),
             answer_status="refused",
+            context_usage=case_context_usage,
         )
-    return PortalAnswer(answer=answer, answer_status="answered")
+    return PortalAnswer(
+        answer=answer,
+        answer_status="answered",
+        context_usage=case_context_usage,
+    )
+
+
+def _case_grounded_system_prompt_chars() -> int:
+    prompt = build_case_grounded_prompt(
+        question="",
+        sources=[],
+        conversation_history=None,
+    )
+    return prompt.index("QUESTION_JSON:\n")
+
+
+def _general_knowledge_system_prompt_chars() -> int:
+    prompt = build_general_knowledge_prompt("", conversation_history=None)
+    return prompt.index("QUESTION_JSON:\n")
+
+
+def _context_usage_for_request(
+    config: Config,
+    *,
+    kind: Literal["case_grounded", "general_knowledge"],
+    question: str,
+    sources: Sequence[dict[str, Any]] | None,
+    conversation_history: Sequence[ChatTurn] | None,
+) -> dict[str, Any]:
+    from .chat_context_usage import build_context_usage
+
+    system_chars = (
+        _case_grounded_system_prompt_chars()
+        if kind == "case_grounded"
+        else _general_knowledge_system_prompt_chars()
+    )
+    if kind == "case_grounded":
+        prompt_text = build_case_grounded_prompt(
+            question=question,
+            sources=sources or [],
+            conversation_history=conversation_history,
+        )
+    else:
+        prompt_text = build_general_knowledge_prompt(
+            question,
+            conversation_history=conversation_history,
+        )
+    return build_context_usage(
+        config,
+        kind=kind,
+        question=question,
+        system_prompt_chars=system_chars,
+        sources=sources,
+        conversation_history=conversation_history,
+        prompt_text=prompt_text,
+    )
 
 
 def _render_conversation_history(

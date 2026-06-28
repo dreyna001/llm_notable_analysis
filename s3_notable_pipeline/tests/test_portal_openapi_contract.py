@@ -44,6 +44,8 @@ REQUIRED_SCHEMAS = (
     "HealthResponse",
     "PortalCapabilitiesResponse",
     "ChatDependencyStatusResponse",
+    "ChatContextUsageResponse",
+    "ChatContextUsageSegmentResponse",
     "CaseListResponse",
     "CaseDetailResponse",
     "CaseRawSectionResponse",

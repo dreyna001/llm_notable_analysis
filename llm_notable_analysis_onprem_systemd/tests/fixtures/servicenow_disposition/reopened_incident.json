@@ -1,0 +1,10 @@
+{
+  "sys_id": "abc123reopened0001",
+  "number": "SIR0010002",
+  "state": "2",
+  "closed_at": "2026-06-02 08:00:00",
+  "sys_updated_on": "2026-06-03 09:15:00",
+  "close_code": "false positive",
+  "close_notes": "Ticket reopened for additional review.",
+  "correlation_id": "notable-corr-002"
+}

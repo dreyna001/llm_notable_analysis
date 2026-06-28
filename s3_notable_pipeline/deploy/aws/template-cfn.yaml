@@ -185,6 +185,48 @@ Parameters:
     MinValue: 1
     MaxValue: 300
 
+  ServiceNowDispositionSyncEnabled:
+    Type: String
+    Description: Enables scheduled read-only ServiceNow closed disposition sync.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  ServiceNowDispositionSyncTokenSecretArn:
+    Type: String
+    Description: Secrets Manager ARN for read-only ServiceNow disposition sync bearer token.
+    Default: '*'
+
+  ServiceNowDispositionFieldMap:
+    Type: String
+    Description: Path to ServiceNow disposition field map JSON inside the Lambda package.
+    Default: '/var/task/deploy/servicenow/disposition_field_map.example.json'
+
+  ServiceNowDispositionCodeMap:
+    Type: String
+    Description: Path to ServiceNow disposition code map JSON inside the Lambda package.
+    Default: '/var/task/deploy/servicenow/disposition_code_map.example.json'
+
+  ServiceNowDispositionBackfillDays:
+    Type: Number
+    Description: First-run closed_at lookback window for disposition sync.
+    Default: 90
+    MinValue: 1
+    MaxValue: 3650
+
+  DispositionRetentionDays:
+    Type: Number
+    Description: Retention in days for synced ServiceNow disposition rows.
+    Default: 365
+    MinValue: 1
+    MaxValue: 3650
+
+  DispositionSyncLambdaName:
+    Type: String
+    Description: Lambda function name for ServiceNow closed disposition sync.
+    Default: notable-disposition-sync
+
   SideEffectIdempotencyTableName:
     Type: String
     Description: DynamoDB table for external side-effect idempotency markers.
@@ -713,6 +755,7 @@ Conditions:
   HasSplunkMcpSecret: !Not [!Equals [!Ref SplunkMcpAuthSecretArn, '*']]
   HasServiceNowSecret: !Not [!Equals [!Ref ServiceNowApiTokenSecretArn, '*']]
   HasServiceNowApprovalSecret: !Not [!Equals [!Ref ServiceNowApprovalHmacSecretArn, '*']]
+  HasServiceNowDispositionSyncSecret: !Not [!Equals [!Ref ServiceNowDispositionSyncTokenSecretArn, '*']]
   HasElasticsearchSecret: !Not [!Equals [!Ref ElasticsearchApiKeySecretArn, '*']]
   HasElasticsearchKnowledgeBase: !Not [!Equals [!Ref ElasticsearchGroundingBedrockKbId, '']]
   HasCaseArchiveBucketName: !Not [!Equals [!Ref CaseArchiveBucketName, '']]
@@ -830,6 +873,8 @@ Resources:
           AttributeType: S
         - AttributeName: processed_at_case_id
           AttributeType: S
+        - AttributeName: correlation_id
+          AttributeType: S
       KeySchema:
         - AttributeName: case_id
           KeyType: HASH
@@ -842,9 +887,65 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
+        - IndexName: CorrelationIdIndex
+          KeySchema:
+            - AttributeName: correlation_id
+              KeyType: HASH
+            - AttributeName: processed_at_case_id
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
       TimeToLiveSpecification:
         AttributeName: expires_at_epoch
         Enabled: true
+
+  DispositionTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-servicenow-dispositions'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: snow_sys_id
+          AttributeType: S
+        - AttributeName: correlation_id
+          AttributeType: S
+        - AttributeName: sys_updated_on
+          AttributeType: S
+        - AttributeName: case_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: snow_sys_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: CorrelationIdIndex
+          KeySchema:
+            - AttributeName: correlation_id
+              KeyType: HASH
+            - AttributeName: sys_updated_on
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: CaseIdIndex
+          KeySchema:
+            - AttributeName: case_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: expires_at_epoch
+        Enabled: true
+
+  DispositionSyncStateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-disposition-sync-state'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: job_name
+          AttributeType: S
+      KeySchema:
+        - AttributeName: job_name
+          KeyType: HASH
 
   ChatSessionsTable:
     Type: AWS::DynamoDB::Table
@@ -1253,6 +1354,128 @@ Resources:
           CASE_QA_EMBEDDING_MODEL: !Ref CaseQaEmbeddingModel
           CASE_QA_VECTOR_DIMENSIONS: !Ref CaseQaVectorDimensions
           CASE_QA_EMBED_NORMALIZE: !Ref CaseQaEmbedNormalize
+
+  DispositionSyncLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: NotableDispositionSyncLambdaRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - !If
+          - HasServiceNowDispositionSyncSecret
+          - PolicyName: ServiceNowDispositionSyncSecretPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - secretsmanager:GetSecretValue
+                  Resource:
+                    - !Ref ServiceNowDispositionSyncTokenSecretArn
+          - !Ref AWS::NoValue
+        - PolicyName: DispositionTablePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt DispositionTable.Arn
+                  - !Sub '${DispositionTable.Arn}/index/*'
+                  - !GetAtt DispositionSyncStateTable.Arn
+        - !If
+          - HasCaseIndexTable
+          - PolicyName: CaseIndexLinkPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - dynamodb:Query
+                    - dynamodb:Scan
+                  Resource:
+                    - !GetAtt CaseIndexTable.Arn
+                    - !Sub '${CaseIndexTable.Arn}/index/*'
+          - !Ref AWS::NoValue
+        - PolicyName: CaseArchiveReadForLinkPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub 'arn:aws:s3:::${OutputBucketName}/${CaseArchivePrefix}/*'
+              - !If
+                - HasCaseArchiveBucketName
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                  Resource:
+                    - !Sub 'arn:aws:s3:::${CaseArchiveBucketName}/${CaseArchivePrefix}/*'
+                - !Ref AWS::NoValue
+
+  DispositionSyncFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref DispositionSyncLambdaName
+      Runtime: python3.12
+      Handler: s3_notable_pipeline.disposition_sync_handler.handler
+      Role: !GetAtt DispositionSyncLambdaRole.Arn
+      Timeout: 900
+      MemorySize: !Ref LambdaMemorySize
+      EphemeralStorage:
+        Size: !Ref LambdaEphemeralStorageMb
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          CAPABILITY_PROFILES: core
+          ALLOW_PRIVATE_OUTBOUND_ENDPOINTS: !Ref AllowPrivateOutboundEndpoints
+          SERVICENOW_BASE_URL: !Ref ServiceNowBaseUrl
+          SERVICENOW_TIMEOUT_SECONDS: !Ref ServiceNowTimeoutSeconds
+          SERVICENOW_DISPOSITION_SYNC_ENABLED: !Ref ServiceNowDispositionSyncEnabled
+          SERVICENOW_DISPOSITION_SYNC_TOKEN_SECRET_ARN: !Ref ServiceNowDispositionSyncTokenSecretArn
+          SERVICENOW_DISPOSITION_FIELD_MAP: !Ref ServiceNowDispositionFieldMap
+          SERVICENOW_DISPOSITION_CODE_MAP: !Ref ServiceNowDispositionCodeMap
+          SERVICENOW_DISPOSITION_BACKFILL_DAYS: !Ref ServiceNowDispositionBackfillDays
+          DISPOSITION_RETENTION_DAYS: !Ref DispositionRetentionDays
+          DISPOSITION_TABLE: !Ref DispositionTable
+          DISPOSITION_SYNC_STATE_TABLE: !Ref DispositionSyncStateTable
+          CASE_ARCHIVE_BUCKET: !If [HasCaseArchiveBucketName, !Ref CaseArchiveBucketName, !Ref OutputBucketName]
+          CASE_ARCHIVE_PREFIX: !Ref CaseArchivePrefix
+          CASE_INDEX_TABLE: !Ref CaseIndexTableName
+
+  DispositionSyncSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Daily ServiceNow closed disposition sync
+      ScheduleExpression: rate(1 day)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt DispositionSyncFunction.Arn
+          Id: DispositionSyncTarget
+
+  DispositionSyncSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DispositionSyncFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt DispositionSyncSchedule.Arn
 
   PortalApiLambdaRole:
     Type: AWS::IAM::Role
@@ -1784,6 +2007,14 @@ Outputs:
     Condition: HasPortalChatFunctionUrl
     Description: Lambda Function URL for long-running portal chat (uses PortalChatTimeoutSec)
     Value: !GetAtt PortalApiFunctionUrl.FunctionUrl
+
+  DispositionTableName:
+    Description: DynamoDB table for synced ServiceNow closed dispositions
+    Value: !Ref DispositionTable
+
+  DispositionSyncFunctionName:
+    Description: Lambda function name for ServiceNow disposition sync
+    Value: !Ref DispositionSyncFunction
 
   PortalBrowserApiBaseUrl:
     Condition: HasCaseIndexTable
