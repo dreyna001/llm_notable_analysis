@@ -1,7 +1,20 @@
-# AWS Analyst Portal UI
+# Azure Analyst Portal UI
 
-Vendored React + Vite + Tailwind + shadcn-style SPA for the AWS read-only analyst
-portal API (JWT browser auth, CloudFront/S3 static hosting).
+Vendored React + Vite + Tailwind + shadcn-style SPA for the Azure read-only
+analyst portal API (JWT or Entra app-role browser auth, Front Door Premium and
+private Storage `$web` hosting).
+
+Production builds are always same-origin: leave `VITE_PORTAL_API_BASE_URL`
+unset. `scripts/setup-and-deploy.sh` and `.ps1` run the unit suite, build the SPA,
+and upload `dist/` to `$web` with `az storage blob upload-batch --auth-mode
+login`; shared keys and SAS tokens are not supported. The deployment runner
+must resolve and reach the storage private endpoint.
+
+Front Door routes `/api/chat` directly to the private Function origin before
+`/api/*`, routes `/health` and `/ready` through private APIM, and serves all
+other paths from the private `$web` origin. API caching is disabled. The
+synchronous chat timeout chain is browser 220 seconds, Function 225 seconds,
+and Front Door 240 seconds.
 
 Deploy and operator runbooks:
 [`docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../../docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md).
@@ -20,31 +33,30 @@ Deploy and operator runbooks:
 From the **repository root**:
 
 ```powershell
-npm --prefix s3_notable_pipeline/frontend/analyst-portal install
-npm --prefix s3_notable_pipeline/frontend/analyst-portal test
+npm --prefix frontend/analyst-portal install
+npm --prefix frontend/analyst-portal test
 ```
 
 Local UI dev server:
 
 ```powershell
-npm --prefix s3_notable_pipeline/frontend/analyst-portal run dev
+npm --prefix frontend/analyst-portal run dev
 ```
 
 Open http://127.0.0.1:5173/
 
-### Local dev against a deployed AWS portal
+### Local dev against a deployed Azure portal
 
 Point the Vite app at the stack browser API origin and supply a JWT in the
 browser (see [Browser JWT auth](#browser-jwt-auth)):
 
 ```powershell
 $env:VITE_PORTAL_API_BASE_URL = "https://<portal-browser-api-origin>"
-npm --prefix s3_notable_pipeline/frontend/analyst-portal run dev
+npm --prefix frontend/analyst-portal run dev
 ```
 
-Use the stack output `PortalBrowserApiBaseUrl` when UI hosting is enabled
-(CloudFront with `/api/*` behaviors). For API-only deploys, use `PortalApiUrl` or
-`PortalChatFunctionUrl` as documented in operations.
+Use the Bicep output `PortalBrowserApiBaseUrl` when UI hosting is enabled. For
+diagnostics, the deployment also returns `PortalApiUrl` and `PortalChatUrl`.
 
 When the SPA origin (`http://127.0.0.1:5173`) differs from the API hostname, add
 that origin to the stack parameter `PortalCorsAllowedOrigins` (or
@@ -57,7 +69,7 @@ When `VITE_PORTAL_API_BASE_URL` is unset, the dev server proxies `/api`,
 `http://127.0.0.1:8765`) and injects dev-only proxy headers
 (`X-Forwarded-User`, `X-Notable-Portal-Proxy-Secret`). That path is for local
 backends that accept proxy auth (on-prem preview/nginx style), **not** for the
-production AWS JWT API.
+production Azure JWT API.
 
 ## Environment overrides
 
@@ -69,7 +81,7 @@ VITE_PORTAL_DEV_PROXY_SECRET=portal-secret
 ```
 
 - `VITE_PORTAL_API_BASE_URL` — baked at build time; also used at dev time for
-  cross-origin calls to a deployed API. Leave unset for CloudFront same-origin
+  cross-origin calls to a deployed API. Leave unset for Front Door same-origin
   deploys (recommended when `PortalUiBucketName` is set).
 - `VITE_PORTAL_API_TARGET` / `VITE_PORTAL_DEV_*` — Vite dev proxy only; ignored
   in production static assets.
@@ -90,34 +102,34 @@ customer identity provider or an approved front-door auth flow.
 
 ## Build
 
-Build static assets for S3/CloudFront:
+Build static assets for Storage `$web` and Front Door:
 
 ```powershell
-npm --prefix s3_notable_pipeline/frontend/analyst-portal run build
+npm --prefix frontend/analyst-portal run build
 ```
 
 Output: `dist/`.
 
-**CloudFront UI with in-stack API behaviors (recommended):** leave
-`VITE_PORTAL_API_BASE_URL` unset. Upload `dist/` to the stack
-`PortalUiBucketName` bucket. CloudFront serves the SPA from S3, routes `/api/*`
-to API Gateway, `/api/chat` to the Function URL when enabled, and maps 403/404 to
-`/index.html` for client-side routing. S3 public access stays blocked; access is
-via CloudFront origin access control.
+**Front Door same-origin deployment (required):** leave
+`VITE_PORTAL_API_BASE_URL` unset. The deployment helpers upload `dist/` to the
+dedicated account's `$web` container using Entra auth. Front Door routes
+`/api/*` to APIM, `/api/chat` directly to the Function origin, and uses
+`index.html` as the Storage static-site 404 document. All three origins use
+Private Link and have public network access disabled.
 
 **Split UI and API hostnames:** set the API base at build time:
 
 ```powershell
 $env:VITE_PORTAL_API_BASE_URL = "https://<PortalBrowserApiBaseUrl>"
-npm --prefix s3_notable_pipeline/frontend/analyst-portal run build
+npm --prefix frontend/analyst-portal run build
 ```
 
 Ensure `PortalCorsAllowedOrigins` includes the exact SPA browser origin.
 
-Example upload after build (replace bucket name from stack output):
+Example keyless upload after build from a private-network-connected runner:
 
 ```powershell
-aws s3 sync s3_notable_pipeline/frontend/analyst-portal/dist/ s3://<PortalUiBucketName>/ --delete
+az storage blob upload-batch --auth-mode login --account-name <PortalUiStorageAccountName> --destination '$web' --source frontend/analyst-portal/dist --overwrite true
 ```
 
 ## Routes
@@ -137,7 +149,7 @@ not part of the default unit test suite.
 Install Chromium once per machine:
 
 ```powershell
-npm --prefix s3_notable_pipeline/frontend/analyst-portal run install:e2e-browsers
+npm --prefix frontend/analyst-portal run install:e2e-browsers
 ```
 
 Set the portal origin and a known archived case before running:
@@ -146,15 +158,15 @@ Set the portal origin and a known archived case before running:
 $env:PORTAL_E2E_BASE_URL = "https://<PortalUiDistributionDomainName-or-custom-host>"
 $env:PORTAL_E2E_CASE_ID = "<ready-case-id>"
 $env:PORTAL_E2E_CHAT = "true"
-npm --prefix s3_notable_pipeline/frontend/analyst-portal run test:e2e
+npm --prefix frontend/analyst-portal run test:e2e
 ```
 
 For deployments with HTTP basic auth in front of the portal (on-prem nginx
-pattern, not the default AWS stack), also set `PORTAL_E2E_USER` and
+pattern, not the Azure Front Door deployment), also set `PORTAL_E2E_USER` and
 `PORTAL_E2E_PASSWORD`. The default Playwright config still sends basic-auth
 credentials; clear or override them when the front door is JWT-only.
 
-JWT-protected AWS portals require a valid browser token before protected routes
+JWT-protected Azure portals require a valid browser token before protected routes
 load. The E2E harness does not inject JWTs automatically; set
 `notable.portal.jwt` through your IdP flow or an approved test hook before
 running chat and case-detail steps.
@@ -163,7 +175,7 @@ Environment variables:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `PORTAL_E2E_BASE_URL` | `https://127.0.0.1:8443` | Portal origin (use CloudFront or custom DNS for AWS) |
+| `PORTAL_E2E_BASE_URL` | `https://127.0.0.1:8443` | Portal origin (use the Front Door hostname) |
 | `PORTAL_E2E_USER` | `analyst` | HTTP basic-auth user when a basic-auth front door is present |
 | `PORTAL_E2E_PASSWORD` | `analyst-lab-change-me` | HTTP basic-auth password when a basic-auth front door is present |
 | `PORTAL_E2E_CASE_ID` | `portal-test-1780770539` | Sample archived case in the target environment |

@@ -40,7 +40,11 @@ def test_private_endpoint_contract_covers_trigger_and_host_services() -> None:
 def test_function_apps_have_no_secret_fallback_settings() -> None:
     functions = "\n".join(
         _read(AZURE / "modules" / name)
-        for name in ("functions-analyzer.bicep", "functions-embed.bicep")
+        for name in (
+            "functions-analyzer.bicep",
+            "functions-embed.bicep",
+            "functions-portal.bicep",
+        )
     )
     for forbidden in (
         "DOCKER_REGISTRY_SERVER_USERNAME",
@@ -82,13 +86,98 @@ def test_single_digest_image_and_wrapper_isolation_are_explicit() -> None:
     main = _read(AZURE / "main.bicep")
     analyzer = _read(AZURE / "modules" / "functions-analyzer.bicep")
     embed = _read(AZURE / "modules" / "functions-embed.bicep")
-    assert main.count("containerImageUri: ContainerImageUri") == 2
+    portal = _read(AZURE / "modules" / "functions-portal.bicep")
+    assert main.count("containerImageUri: ContainerImageUri") == 3
     assert "@sha256" in main
-    assert "AzureWebJobs.intake_blob.Disabled', value: 'false'" in analyzer
-    assert "AzureWebJobs.analyzer_queue.Disabled', value: 'false'" in analyzer
-    assert "AzureWebJobs.case_embed_queue.Disabled', value: 'false'" in embed
+    expected_wrappers = {
+        "intake_blob": {"analyzer": "false", "embed": "true", "portal": "true"},
+        "analyzer_queue": {"analyzer": "false", "embed": "true", "portal": "true"},
+        "case_embed_queue": {"analyzer": "true", "embed": "false", "portal": "true"},
+        "disposition_sync_timer": {"analyzer": "true", "embed": "true", "portal": "true"},
+        "portal_http": {"analyzer": "true", "embed": "true", "portal": "false"},
+    }
+    modules = {"analyzer": analyzer, "embed": embed, "portal": portal}
+    for wrapper, expected_by_app in expected_wrappers.items():
+        for app_name, expected_value in expected_by_app.items():
+            setting = f"AzureWebJobs.{wrapper}.Disabled', value: '{expected_value}'"
+            assert modules[app_name].count(setting) == 1
     assert "functionAppScaleLimit" in analyzer
     assert "functionAppScaleLimit" in embed
+
+
+def test_portal_storage_function_and_identity_contracts_are_private_and_keyless() -> None:
+    storage = _read(AZURE / "modules" / "storage.bicep")
+    portal = _read(AZURE / "modules" / "functions-portal.bicep")
+    openai = _read(AZURE / "modules" / "openai-access.bicep")
+    search = _read(AZURE / "modules" / "search-access.bicep")
+    assert "staticWebsite" in storage
+    assert "indexDocument: 'index.html'" in storage
+    assert "errorDocument404Path: 'index.html'" in storage
+    assert "portalUiDeployerBlobContributor" in storage
+    assert "publicNetworkAccess: 'Disabled'" in portal
+    assert "groupIds: ['sites']" in portal
+    assert "AzureFunctionsJobHost__functionTimeout', value: '00:03:45'" in portal
+    assert "PORTAL_CHAT_TIMEOUT_SEC" in portal
+    assert "AzureWebJobs.portal_http.Disabled', value: 'false'" in portal
+    assert "outputBlobReader" in portal
+    assert "portalOpenAiAccess" in openai
+    assert "1407120a-92aa-4202-b7e9-c0e197c71c8f" in search
+
+
+def test_apim_is_standard_v2_authenticated_and_staged_for_private_only_access() -> None:
+    main = _read(AZURE / "main.bicep")
+    apim = _read(AZURE / "modules" / "apim-portal.bicep")
+    assert "@allowed(['StandardV2'])" in main
+    assert "publicNetworkAccess: 'Enabled'" in apim
+    assert "virtualNetworkConfiguration" in apim
+    assert "format: 'openapi+json'" in apim
+    assert "validate-jwt" in apim
+    assert "openid-config" in apim
+    assert "require-scheme=\"Bearer\"" in apim
+    assert "require-expiration-time=\"true\"" in apim
+    assert "<claim name=\"sub\"" in apim
+    assert "<claim name=\"roles\"" in apim
+    assert "forward-request timeout=\"30\"" in apim
+
+
+def test_frontdoor_routes_private_origins_without_single_origin_probes_or_api_cache() -> None:
+    frontdoor = _read(AZURE / "modules" / "frontdoor-portal.bicep")
+    assert "Premium_AzureFrontDoor" in frontdoor
+    assert "originResponseTimeoutSeconds: 240" in frontdoor
+    assert frontdoor.index("resource chatRoute") < frontdoor.index("resource apiRoute")
+    assert "patternsToMatch: ['/api/chat']" in frontdoor
+    assert "patternsToMatch: ['/api/*']" in frontdoor
+    assert "patternsToMatch: ['/health']" in frontdoor
+    assert "patternsToMatch: ['/ready']" in frontdoor
+    assert "patternsToMatch: ['/', '/index.html']" in frontdoor
+    for group_id in ("'web'", "'Gateway'", "'sites'"):
+        assert f"groupId: {group_id}" in frontdoor
+    assert "healthProbeSettings:" not in frontdoor
+    api_prefix = frontdoor[: frontdoor.index("resource uiRoute")]
+    assert "cacheConfiguration:" not in api_prefix
+
+
+def test_portal_deploy_flow_approves_every_origin_before_disabling_apim() -> None:
+    for name in ("setup-and-deploy.sh", "setup-and-deploy.ps1"):
+        script = _read(ROOT / "scripts" / name)
+        assert "portal-function" in script
+        assert "portal-apim" in script
+        assert "portal-web" in script
+        assert "private-endpoint-connection approve" in script
+        assert "sharedPrivateLinkResource.status" in script
+        assert "properties.publicNetworkAccess=Disabled" in script
+        assert script.index("sharedPrivateLinkResource.status") < script.index(
+            "properties.publicNetworkAccess=Disabled"
+        )
+        assert "PORTAL_VALIDATION_BEARER_TOKEN" in script
+        assert (
+            "PORTAL_ENTRA_REQUIRED_APP_ROLE is required when PORTAL_AUTH_MODE=iam."
+            in script
+        )
+        assert "Authorization" in script
+        assert "storage blob upload-batch" in script
+        assert "--auth-mode login" in script
+        assert "VITE_PORTAL_API_BASE_URL" in script
 
 
 def test_deployment_scripts_gate_on_host_identity_storage_and_exact_functions() -> None:

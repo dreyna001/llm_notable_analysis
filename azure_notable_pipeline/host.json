@@ -2,6 +2,9 @@
   "version": "2.0",
   "functionTimeout": "00:03:45",
   "extensions": {
+    "http": {
+      "routePrefix": ""
+    },
     "queues": {
       "batchSize": 1,
       "newBatchThreshold": 0,

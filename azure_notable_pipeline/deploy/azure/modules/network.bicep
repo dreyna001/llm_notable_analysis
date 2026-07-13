@@ -11,6 +11,7 @@ param portalUiStorageAccountName string = ''
 param vnetAddressPrefix string = '10.42.0.0/16'
 param functionSubnetPrefix string = '10.42.0.0/24'
 param privateEndpointSubnetPrefix string = '10.42.1.0/24'
+param apimSubnetPrefix string = '10.42.2.0/24'
 
 resource vnet 'Microsoft.Network/virtualNetworks@2024-01-01' = {
   name: '${namePrefix}-vnet'
@@ -38,6 +39,18 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-01-01' = {
           privateEndpointNetworkPolicies: 'Disabled'
         }
       }
+      {
+        name: 'apim-integration'
+        properties: {
+          addressPrefix: apimSubnetPrefix
+          delegations: [
+            {
+              name: 'apim-serverfarms'
+              properties: { serviceName: 'Microsoft.Web/serverFarms' }
+            }
+          ]
+        }
+      }
     ]
   }
 }
@@ -50,6 +63,10 @@ resource functionSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-01-01' e
 resource privateEndpointSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-01-01' existing = {
   parent: vnet
   name: 'private-endpoints'
+}
+resource apimSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-01-01' existing = {
+  parent: vnet
+  name: 'apim-integration'
 }
 
 var storageSuffix = environment().suffixes.storage
@@ -67,6 +84,10 @@ resource tableDns 'Microsoft.Network/privateDnsZones@2020-06-01' = {
 }
 resource webDns 'Microsoft.Network/privateDnsZones@2020-06-01' = if (!empty(portalUiStorageAccountName)) {
   name: 'privatelink.web.${storageSuffix}'
+  location: 'global'
+}
+resource sitesDns 'Microsoft.Network/privateDnsZones@2020-06-01' = if (!empty(portalUiStorageAccountName)) {
+  name: 'privatelink.azurewebsites.net'
   location: 'global'
 }
 
@@ -100,6 +121,15 @@ resource tableDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@202
 resource webDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = if (!empty(portalUiStorageAccountName)) {
   parent: webDns
   name: '${namePrefix}-web-vnet-link'
+  location: 'global'
+  properties: {
+    registrationEnabled: false
+    virtualNetwork: { id: vnet.id }
+  }
+}
+resource sitesDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = if (!empty(portalUiStorageAccountName)) {
+  parent: sitesDns
+  name: '${namePrefix}-sites-vnet-link'
   location: 'global'
   properties: {
     registrationEnabled: false
@@ -185,3 +215,5 @@ resource portalWebPrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-01-01
 output vnetId string = vnet.id
 output functionSubnetId string = functionSubnet.id
 output privateEndpointSubnetId string = privateEndpointSubnet.id
+output apimSubnetId string = apimSubnet.id
+output sitesPrivateDnsZoneId string = empty(portalUiStorageAccountName) ? '' : sitesDns.id

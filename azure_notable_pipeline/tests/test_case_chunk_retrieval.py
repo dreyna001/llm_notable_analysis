@@ -15,7 +15,7 @@ from azure_notable_pipeline.config import Config
 
 
 class FakeCaseStore:
-    def get_case(self, case_id: str) -> dict[str, Any] | None:
+    def get_case(self, _container_name: str, case_id: str) -> dict[str, Any] | None:
         return {"case_id": case_id, "retrieval_status": "ready"}
 
 

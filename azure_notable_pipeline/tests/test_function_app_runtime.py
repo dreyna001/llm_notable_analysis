@@ -14,15 +14,28 @@ def _registered_functions():
     }
 
 
-def test_runtime_enumerates_phase1_wrappers_with_bicep_function_names() -> None:
+def test_runtime_enumerates_native_wrappers_with_bicep_function_names() -> None:
     registered = _registered_functions()
 
-    assert set(registered) == {"intake_blob", "analyzer_queue", "case_embed_queue"}
+    assert set(registered) == {
+        "intake_blob",
+        "analyzer_queue",
+        "case_embed_queue",
+        "portal_http",
+    }
     binding = registered["case_embed_queue"].get_bindings()[0].get_dict_repr()
     assert binding["type"] == "queueTrigger"
     assert binding["name"] == "message"
     assert binding["queueName"] == "%CASE_EMBED_QUEUE_NAME%"
     assert binding["connection"] == "OutputStorage"
+
+    portal_binding = registered["portal_http"].get_bindings()[0].get_dict_repr()
+    assert portal_binding["type"] == "httpTrigger"
+    assert portal_binding["route"] == "{*path}"
+    assert (
+        getattr(portal_binding["authLevel"], "value", portal_binding["authLevel"])
+        == "anonymous"
+    )
 
 
 def test_case_embed_wrapper_passes_raw_queue_body_to_strict_dispatcher(monkeypatch) -> None:
@@ -38,3 +51,15 @@ def test_case_embed_wrapper_passes_raw_queue_body_to_strict_dispatcher(monkeypat
     )
 
     assert calls == [b'{"schema_version":1}']
+
+
+def test_portal_wrapper_passes_native_http_request(monkeypatch) -> None:
+    request = SimpleNamespace(method="GET")
+    response = object()
+    monkeypatch.setattr(
+        function_app,
+        "handle_request",
+        lambda value: response if value is request else None,
+    )
+
+    assert function_app.portal_http(request) is response

@@ -5,6 +5,7 @@ param functionsHostStorageAccountName string
 param inputStorageAccountName string
 param outputStorageAccountName string
 param portalUiStorageAccountName string = ''
+param portalUiDeployerPrincipalId string = ''
 
 @minValue(1)
 param inputRetentionDays int = 2
@@ -68,6 +69,28 @@ resource portalStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = if (!emp
   kind: 'StorageV2'
   sku: { name: 'Standard_LRS' }
   properties: commonProperties
+}
+
+resource portalBlobService 'Microsoft.Storage/storageAccounts/blobServices@2025-08-01' = if (!empty(portalUiStorageAccountName)) {
+  parent: portalStorage
+  name: 'default'
+  properties: {
+    staticWebsite: {
+      enabled: true
+      indexDocument: 'index.html'
+      errorDocument404Path: 'index.html'
+    }
+  }
+}
+
+var blobContributorRoleId = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
+resource portalUiDeployerBlobContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(portalUiStorageAccountName) && !empty(portalUiDeployerPrincipalId)) {
+  name: guid(portalStorage.id, portalUiDeployerPrincipalId, blobContributorRoleId)
+  scope: portalStorage
+  properties: {
+    principalId: portalUiDeployerPrincipalId
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', blobContributorRoleId)
+  }
 }
 
 resource inputBlobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
@@ -198,6 +221,7 @@ output analyzerQueueName string = analyzerQueue.name
 output embedQueueAccountName string = outputStorageAccountName
 output embedQueueName string = embedQueue.name
 output portalStorageId string = empty(portalUiStorageAccountName) ? '' : portalStorage.id
+output portalWebHostName string = empty(portalUiStorageAccountName) ? '' : replace(replace(portalStorage!.properties.primaryEndpoints.web, 'https://', ''), '/', '')
 output inputBlobServiceUri string = 'https://${inputStorage.name}.blob.${environment().suffixes.storage}'
 output inputQueueServiceUri string = 'https://${inputStorage.name}.queue.${environment().suffixes.storage}'
 output outputBlobServiceUri string = 'https://${outputStorage.name}.blob.${environment().suffixes.storage}'

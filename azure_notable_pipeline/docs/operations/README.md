@@ -3,6 +3,9 @@
 Azure deployment, monitoring, intake, portal, AI Search, and Azure OpenAI
 runbooks are delivered with Phase 4.
 
+The Phase 3 private portal deployment and approval gate is documented in
+[`ANALYST_PORTAL_DEPLOYMENT.md`](ANALYST_PORTAL_DEPLOYMENT.md).
+
 The intake recovery runbook must distinguish three independent poison paths:
 
 - `webjobs-blobtrigger-poison` on input storage means discovery/publication did

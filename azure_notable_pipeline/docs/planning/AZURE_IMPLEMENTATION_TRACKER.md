@@ -9,7 +9,7 @@ Status values: `not started`, `in progress`, `blocked verification`, `complete`.
 | Phase 0 — scaffold and inventory | Phase 0 scaffold agent | complete | 66 Python tests, 92 frontend tests/build, root and module Bicep compilation |
 | Phase 1 — core pipeline | Phase 1 implementation | in progress | Native queue/analyzer/embed wrapper contracts and Bicep are complete; live private-host deployment acceptance remains |
 | Phase 2 — optional Wave 1 profiles | Phase 2 implementation | complete | Native Search grounding, optional-profile orchestration, Cosmos persistence, and archive/embed integration pass the offline Phase 2 gate: 202 passed, 2 skipped, plus 3 golden-rubric subtests |
-| Phase 3 — analyst portal | Phase 3 implementation | not started | OpenAPI, portal, Front Door/APIM acceptance |
+| Phase 3 — analyst portal | Phase 3 implementation | blocked verification | Offline portal runtime/infra tests and Bicep compile complete; live Front Door private-endpoint approval, direct-origin denial, and authenticated `/ready` acceptance require a customer Azure subscription |
 | Phase 4 — disposition sync and operations | Phase 4 implementation | not started | Timer, runbooks, staging readiness |
 
 ## Native application boundaries
@@ -29,7 +29,9 @@ Status values: `not started`, `in progress`, `blocked verification`, `complete`.
 | `case_embed.py` | Phase 2/3 | complete | Deterministic bounded chunk replacement uses 1024-d Azure OpenAI vectors and ETag-retried Cosmos ready/failed status updates |
 | `blob_handler.py` | Phase 1/2 | complete | ETag-guarded orchestration preserves core behavior and AWS ordering for native RAG, SPL, and Elasticsearch grounding/generation/read-only execution, enrichment, interpretation, and deterministic reports |
 | `embed_handler.py` | Phase 1/2/3 | complete | Strict v1 Queue dispatcher invokes native Blob/OpenAI/Cosmos embedding and propagates failures for Functions retry/poison handling |
-| `function_app.py` | Phase 1/3/4 | in progress | Phase 1 polling intake Blob, analyzer queue, and case embed queue wrappers complete; timer and portal wrappers remain with later phases |
+| `portal_chat.py` / `case_chat.py` | Phase 3 | complete | Native Azure OpenAI synthesis and 1024-d case retrieval preserve grounding attribution, attached-case behavior, bounded context/history, timeout, and deterministic read-only policy |
+| `portal_handler.py` | Phase 3 | complete | Native Azure HTTP routing preserves the published API/response contracts with application JWT or Entra app-role auth on every route, fail-closed `sub`, ownership isolation, same-origin responses, bounded inputs, and injectable native chat orchestration |
+| `function_app.py` | Phase 1/3/4 | in progress | Polling intake Blob, analyzer/embed queues, and wildcard native portal HTTP wrapper are complete; the Phase 4 timer remains |
 
 ## Bicep modules
 
@@ -37,16 +39,16 @@ Status values: `not started`, `in progress`, `blocked verification`, `complete`.
 | --- | --- | --- | --- |
 | `main.bicep` | all phases | in progress | Root parameter/output contract established |
 | `network.bicep` | Phase 1 | complete | VNet, delegated integration subnet, PE subnet, private DNS, required storage endpoints |
-| `storage.bicep` | Phase 1/3 | in progress | Phase 1 input/output/host resources complete; UI origin remains Phase 3 |
+| `storage.bicep` | Phase 1/3 | complete | Dedicated private/keyless `$web` static website, SPA fallback, and deployer MI/RBAC added |
 | `identities.bicep` | Phase 1 | complete | Four user-assigned identities plus keyless host-storage grants |
 | `container-registry-access.bicep` | Phase 1 | complete | Deterministic `AcrPull` grants for all four identities |
 | `cosmos.bicep` | Phase 2 | complete | Single-region serverless Strong account, database, conditional aggregate containers, TTL/index contracts, and container-scoped SQL RBAC |
 | `functions-analyzer.bicep` | Phase 1 | complete | Private polling Blob/analyzer queue app, scale/timeout overrides, native RBAC |
 | `functions-embed.bicep` | Phase 1 | complete | Private embed queue app, scale/timeout override, native RBAC |
 | `functions-disposition.bicep` | Phase 4 | not started | Timer app |
-| `functions-portal.bicep` | Phase 3 | not started | Private portal app |
-| `apim-portal.bicep` | Phase 3 | not started | Standard v2 API and policy |
-| `frontdoor-portal.bicep` | Phase 3 | not started | Premium routes/private origins |
+| `functions-portal.bicep` | Phase 3 | complete | Private portal app/PE, 225s timeout, exact wrapper isolation, keyless app settings, Blob/OpenAI/Search/Cosmos access |
+| `apim-portal.bicep` | Phase 3 | complete | Standard v2, VNet integration, OpenAPI import, authenticated 30s backend policy; public access staged only for AFD connection approval |
+| `frontdoor-portal.bicep` | Phase 3 | complete | Premium private `web`/`Gateway`/`sites` origins, ordered chat/API routes, 240s timeout, no API cache or single-origin probes |
 | `keyvault-access.bicep` | Phase 1/2 | complete | Conditional managed-identity secret-reader grants; no secret values provisioned |
 
 ## Test ports
@@ -243,3 +245,83 @@ remain assigned to their owning implementation phase.
   regression after the Phase 2 gate: `202 passed, 2 skipped`, plus 3
   golden-rubric subtests. The combined Cosmos/optional-profile/archive/embed
   seam gate reports `42 passed, 1 skipped`.
+
+## Phase 3 private portal infrastructure verification log
+
+- The root conditionally deploys one portal Function App from the same immutable
+  digest, APIM Standard v2, Front Door Premium, and a dedicated private/keyless
+  `$web` static website for `core,analyst_portal`. Portal app settings preserve
+  the 225-second runtime timeout and native Cosmos, Blob, Search, and OpenAI
+  contracts without Azure service keys or connection strings.
+- Front Door declares `/api/chat` before `/api/*`, sends chat directly to the
+  private Function `sites` origin, sends other APIs plus authenticated
+  `/health` and `/ready` to the private APIM `Gateway` origin, and uses a private
+  Storage `web` origin for the SPA. API routes have no cache configuration and
+  all single-origin groups omit unauthenticated health probes.
+- Bash and PowerShell deployment gates build/test and upload the SPA with Entra
+  auth, approve and poll all three generated Front Door managed private endpoint
+  connections, then disable APIM public access. They verify direct APIM denial,
+  disabled Function/Storage public access, and authenticated Front Door `/ready`
+  without logging the bearer token. Both scripts fail before mutation when Entra
+  `iam` mode omits its required app role, preventing an empty APIM/Easy Auth role
+  contract from reaching deployment.
+- Bicep CLI 0.45.15 compiles the root and every module. The focused static
+  infrastructure/scaffold gate reports `22 passed`; Bash syntax validation and
+  PowerShell 7.6.3 parser validation succeed. The local frontend test/build
+  command remains unavailable because the installed Windows Node runtime
+  rejects WSL1; this change does not modify frontend source or dependencies.
+  Live Azure mutation was intentionally not run; customer-subscription private
+  endpoint approval, propagation, direct-origin denial, and authenticated
+  synthetic acceptance remain the Phase 3 deployment blocker.
+
+## Phase 3 portal chat verification log
+
+- `portal_chat.py` uses only the native Azure OpenAI gateway and the configured
+  portal deployment. It propagates the 225-second business timeout, merges
+  normalized gateway usage into deterministic context estimates, sends no tool
+  definitions, and rejects any unexpected tool call without execution.
+- Selected-case Q&A performs bounded BM25/vector fusion with exactly 1024-d
+  Azure OpenAI query embeddings, labels case chunks as direct evidence, keeps
+  Azure Search material advisory, and includes the attached case ID and entities
+  in the bounded knowledge query. General knowledge is used only when its
+  explicit capability setting is enabled.
+- The handler-facing seam accepts authenticated identity, native Cosmos/Blob
+  dependencies, and a plain prior transcript. Cosmos-backed history tests cover
+  ownership isolation, expiry, per-session message limits, per-user session
+  pruning, UTF-8 storage bounds, and latest-turn deletion. The integration gate
+  also verifies that selected-case retrieval passes the configured case-index
+  container into the native `CosmosStore.get_case(container, case_id)` contract.
+- Focused offline chat/history/chunk/Search/OpenAI suite: `38 passed`. A full
+  Phase 3 integration regression reports `249 passed, 2 skipped`, plus 3
+  golden-rubric subtests. The exact runtime-wrapper assertion now includes
+  `portal_http`, and the Bicep contract verifies the complete analyzer, embed,
+  and portal enable/disable matrix.
+
+## Phase 3 native portal HTTP verification log
+
+- `portal_handler.py` consumes native Azure `HttpRequest` properties and returns
+  native `HttpResponse` objects; it contains no API Gateway/Lambda request or
+  response envelope. The copied route table, status/error behavior, Pydantic
+  response validation, native Cosmos/Blob ports, and synchronous chat semaphore
+  remain explicit.
+- JWT and Entra app-role modes authenticate before all routes, including
+  `/health`, `/ready`, and unsupported methods. Both modes require a stable
+  token `sub`; Entra additionally requires the configured role. Chat history
+  operations pass that identity into the native ownership boundary and obscure
+  cross-user sessions as not found.
+- Production responses emit no permissive CORS headers. Request bodies, path
+  components, cursor components, integer queries, page sizes, raw-section
+  output, question length, and chat-history operations remain bounded.
+- The host uses an empty HTTP route prefix and registers one anonymous-trigger
+  wildcard `portal_http` wrapper; application authentication remains mandatory.
+  `/api/chat` lazy-loads or accepts injection of the separately owned native
+  chat service and passes only native application dependencies and a plain
+  bounded transcript.
+- The Phase 3 integration gate passes Python 3.12 `compileall`, `git diff
+  --check`, all 18 root/module Bicep compilations with Bicep CLI 0.45.15, Bash
+  syntax checks, PowerShell parser validation, exact OpenAPI/frontend parity,
+  and production AWS-shape/secret-bearing-setting scans. Full pytest reports
+  `249 passed, 2 skipped`, plus 3 golden-rubric subtests. Live customer Azure
+  private-endpoint approval/propagation, direct-origin denial, and authenticated
+  Front Door `/ready` acceptance remain blocked on a customer subscription and
+  private-network-connected deployment runner.

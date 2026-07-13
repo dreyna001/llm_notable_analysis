@@ -21,6 +21,7 @@ if app is not None:
         publish_blob_trigger_input,
     )
     from .embed_handler import dispatch_embed_queue_message
+    from .portal_handler import handle_request
 
     @app.function_name(name="intake_blob")
     @app.blob_trigger(
@@ -67,3 +68,14 @@ if app is not None:
         except Exception:
             logger.exception("Case embed queue processing failed")
             raise
+
+    @app.function_name(name="portal_http")
+    @app.route(
+        route="{*path}",
+        methods=["GET", "POST", "DELETE", "OPTIONS"],
+        auth_level=func.AuthLevel.ANONYMOUS,
+    )
+    def portal_http(request: func.HttpRequest) -> func.HttpResponse:
+        """Route native portal requests; application authentication is mandatory."""
+
+        return handle_request(request)

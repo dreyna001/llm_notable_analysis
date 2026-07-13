@@ -99,7 +99,7 @@ def load_all_case_chunks(
     normalized_case_id = str(case_id or "").strip()
     if not normalized_case_id:
         raise ValueError("case_id is required")
-    metadata = case_store.get_case(normalized_case_id)
+    metadata = case_store.get_case(config.CASE_INDEX_CONTAINER, normalized_case_id)
     if not metadata:
         raise LookupError("case not found")
     if str(metadata.get("retrieval_status", "")).lower() != "ready":

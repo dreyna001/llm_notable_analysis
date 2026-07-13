@@ -17,6 +17,29 @@ done
 
 command -v az >/dev/null || { echo 'Azure CLI (az) is required.' >&2; exit 2; }
 LOCATION="${AZURE_LOCATION:-eastus}"
+capability_profiles="${CAPABILITY_PROFILES:-core}"
+capability_profiles="${capability_profiles//[[:space:]]/}"
+deploy_portal=false
+if [[ ",${capability_profiles,,}," == *,analyst_portal,* ]]; then
+  deploy_portal=true
+  portal_required=(
+    PORTAL_UI_STORAGE_ACCOUNT_NAME PORTAL_UI_DEPLOYER_PRINCIPAL_ID
+    PORTAL_JWT_ISSUER PORTAL_JWT_AUDIENCE APIM_PUBLISHER_EMAIL
+    AZURE_OPENAI_ENDPOINT AZURE_OPENAI_RESOURCE_ID
+    AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT
+    PORTAL_VALIDATION_BEARER_TOKEN
+  )
+  for name in "${portal_required[@]}"; do
+    if [[ -z "${!name:-}" ]]; then
+      echo "Required analyst-portal environment variable is unset: ${name}" >&2
+      exit 2
+    fi
+  done
+  if [[ "${PORTAL_AUTH_MODE:-jwt}" == 'iam' && -z "${PORTAL_ENTRA_REQUIRED_APP_ROLE:-}" ]]; then
+    echo 'PORTAL_ENTRA_REQUIRED_APP_ROLE is required when PORTAL_AUTH_MODE=iam.' >&2
+    exit 2
+  fi
+fi
 
 if [[ "${CONTAINER_IMAGE_URI}" != *@sha256:* ]]; then
   echo 'CONTAINER_IMAGE_URI must be pinned to an immutable @sha256: digest.' >&2
@@ -48,22 +71,38 @@ az deployment group create \
     AzureOpenAiEndpoint="${AZURE_OPENAI_ENDPOINT:-}" \
     AzureOpenAiResourceId="${AZURE_OPENAI_RESOURCE_ID:-}" \
     AzureOpenAiEmbeddingsDeployment="${AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT:-}" \
+    AzureOpenAiPortalChatDeployment="${AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT:-}" \
+    AzureSearchEndpoint="${AZURE_SEARCH_ENDPOINT:-}" \
+    AzureSearchResourceId="${AZURE_SEARCH_RESOURCE_ID:-}" \
+    RagAzureSearchIndex="${RAG_AZURE_SEARCH_INDEX:-}" \
     KeyVaultName="${KEY_VAULT_NAME:-}" \
     CosmosAccountName="${COSMOS_ACCOUNT_NAME}" \
     CosmosDatabaseName="${COSMOS_DATABASE_NAME}" \
-    CapabilityProfiles="${CAPABILITY_PROFILES:-core}" \
+    CapabilityProfiles="${capability_profiles}" \
     ServiceNowDispositionSyncEnabled="${SERVICENOW_DISPOSITION_SYNC_ENABLED:-false}" \
     CaseQaChatHistoryEnabled="${CASE_QA_CHAT_HISTORY_ENABLED:-false}" \
     FunctionsHostStorageAccountName="${FUNCTIONS_HOST_STORAGE_ACCOUNT_NAME}" \
     StorageAccountNameInput="${INPUT_STORAGE_ACCOUNT_NAME}" \
     StorageAccountNameOutput="${OUTPUT_STORAGE_ACCOUNT_NAME}" \
     StorageAccountNamePortalUi="${PORTAL_UI_STORAGE_ACCOUNT_NAME:-}" \
+    PortalUiDeployerPrincipalId="${PORTAL_UI_DEPLOYER_PRINCIPAL_ID:-}" \
+    PortalAuthMode="${PORTAL_AUTH_MODE:-jwt}" \
+    PortalJwtIssuer="${PORTAL_JWT_ISSUER:-}" \
+    PortalJwtAudience="${PORTAL_JWT_AUDIENCE:-}" \
+    PortalEntraRequiredAppRole="${PORTAL_ENTRA_REQUIRED_APP_ROLE:-}" \
+    ApiManagementPublisherEmail="${APIM_PUBLISHER_EMAIL:-}" \
+    ApiManagementPublisherName="${APIM_PUBLISHER_NAME:-Notable Analysis}" \
+    PortalChatTimeoutSec="${PORTAL_CHAT_TIMEOUT_SEC:-225}" \
     AnalyzerMaxInstanceCount="${ANALYZER_MAX_INSTANCE_COUNT:-5}" \
     EmbedMaxInstanceCount="${EMBED_MAX_INSTANCE_COUNT:-5}" \
   --output none
 
 analyzer_name="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.AnalyzerFunctionAppName.value -o tsv)"
 embed_name="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.EmbedFunctionAppName.value -o tsv)"
+portal_name="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.PortalFunctionAppName.value -o tsv)"
+apim_name="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.PortalApiManagementName.value -o tsv)"
+frontdoor_profile="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.PortalFrontDoorProfileName.value -o tsv)"
+frontdoor_host="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.PortalFrontDoorHostName.value -o tsv)"
 
 forbidden_setting_pattern='^(AZUREWEBJOBSSTORAGE|AZUREWEBJOBSDASHBOARD|WEBSITE_CONTENTAZUREFILECONNECTIONSTRING|WEBSITE_CONTENTSHARE)$|(^|_)(DOCKER_REGISTRY_SERVER|ACR|AZURE_CONTAINER_REGISTRY|CONTAINER_REGISTRY)(_|$).*(USERNAME|PASSWORD|API_?KEY|ACCESS_?KEY|KEY|TOKEN|SECRET|CREDENTIAL|CONNECTION_?STRING)|(^|_)(AZURE_)?(STORAGE|BLOB|QUEUE|TABLE|FILE|FILES)(_|$).*(ACCOUNT_?KEY|ACCESS_?KEY|API_?KEY|KEY|CONNECTION_?STRING|SAS(_TOKEN)?|PASSWORD|SECRET)|(^|_)(AZURE_AI_FOUNDRY|AI_FOUNDRY|FOUNDRY|ANTHROPIC|AZURE_OPENAI|OPENAI|AZURE_SEARCH|COGNITIVE_SEARCH|SEARCH_SERVICE|SEARCH|COSMOSDB|COSMOS|AZURE_COSMOS)(_|$).*(API_?KEY|ACCOUNT_?KEY|ACCESS_?KEY|PRIMARY_?KEY|SECONDARY_?KEY|MASTER_?KEY|KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|CONNECTION_?STRING)'
 
@@ -180,4 +219,108 @@ done
 wait_for_function_host "${analyzer_name}" intake_blob analyzer_queue
 wait_for_function_host "${embed_name}" case_embed_queue
 
-echo "Deployment ${deployment_name} completed: ${analyzer_name}, ${embed_name}."
+approve_pending_connections() {
+  local target_id="$1"
+  local connection_id
+  while IFS= read -r connection_id; do
+    [[ -z "${connection_id}" ]] && continue
+    az network private-endpoint-connection approve \
+      --id "${connection_id}" \
+      --description 'Approved Front Door Premium managed private origin' \
+      --output none
+  done < <(
+    az network private-endpoint-connection list \
+      --id "${target_id}" \
+      --query "[?properties.privateLinkServiceConnectionState.status=='Pending'].id" \
+      -o tsv
+  )
+}
+
+wait_for_private_connections() {
+  local target_id="$1"
+  local states
+  for attempt in {1..30}; do
+    states="$(az network private-endpoint-connection list --id "${target_id}" --query '[].properties.privateLinkServiceConnectionState.status' -o tsv)"
+    if [[ -n "${states}" ]] && ! grep -qv '^Approved$' <<<"${states}"; then
+      sleep 10
+      continue
+    fi
+    [[ -n "${states}" ]] && return
+    sleep 10
+  done
+  echo "Private endpoint connections did not all reach Approved on ${target_id}." >&2
+  exit 1
+}
+
+expect_direct_origin_denied() {
+  local url="$1"
+  local status
+  status="$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' \
+    --header "Authorization: Bearer ${PORTAL_VALIDATION_BEARER_TOKEN}" "${url}" || true)"
+  if [[ "${status}" =~ ^2 ]]; then
+    echo "Direct portal origin unexpectedly returned success: ${url}" >&2
+    exit 1
+  fi
+}
+
+if [[ "${deploy_portal}" == true ]]; then
+  verify_no_forbidden_settings "${portal_name}"
+  verify_managed_identity_configuration "${portal_name}"
+  wait_for_function_host "${portal_name}" portal_http
+
+  unset VITE_PORTAL_API_BASE_URL
+  npm --prefix frontend/analyst-portal ci
+  npm --prefix frontend/analyst-portal test
+  npm --prefix frontend/analyst-portal run build
+  upload_ready=false
+  for attempt in {1..18}; do
+    if az storage blob upload-batch \
+      --auth-mode login \
+      --account-name "${PORTAL_UI_STORAGE_ACCOUNT_NAME}" \
+      --destination '$web' \
+      --source frontend/analyst-portal/dist \
+      --overwrite true \
+      --output none; then
+      upload_ready=true
+      break
+    fi
+    sleep 10
+  done
+  [[ "${upload_ready}" == true ]] || { echo 'Portal UI upload failed after RBAC propagation wait.' >&2; exit 1; }
+
+  subscription_id="$(az account show --query id -o tsv)"
+  portal_storage_id="/subscriptions/${subscription_id}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Storage/storageAccounts/${PORTAL_UI_STORAGE_ACCOUNT_NAME}"
+  portal_function_id="$(az functionapp show --resource-group "${AZURE_RESOURCE_GROUP}" --name "${portal_name}" --query id -o tsv)"
+  apim_id="$(az apim show --resource-group "${AZURE_RESOURCE_GROUP}" --name "${apim_name}" --query id -o tsv)"
+  for target_id in "${portal_storage_id}" "${portal_function_id}" "${apim_id}"; do
+    approve_pending_connections "${target_id}"
+    wait_for_private_connections "${target_id}"
+  done
+
+  for origin in portal-function portal-apim portal-web; do
+    case "${origin}" in
+      portal-function) group=portal-chat ;;
+      portal-apim) group=portal-api ;;
+      portal-web) group=portal-ui ;;
+    esac
+    for attempt in {1..30}; do
+      state="$(az afd origin show --resource-group "${AZURE_RESOURCE_GROUP}" --profile-name "${frontdoor_profile}" --origin-group-name "${group}" --origin-name "${origin}" --query sharedPrivateLinkResource.status -o tsv 2>/dev/null || true)"
+      [[ "${state}" == 'Approved' ]] && break
+      sleep 10
+    done
+    [[ "${state}" == 'Approved' ]] || { echo "Front Door origin ${origin} was not approved." >&2; exit 1; }
+  done
+
+  # Never disable APIM public access until every Front Door managed endpoint is approved.
+  az resource update --ids "${apim_id}" --set properties.publicNetworkAccess=Disabled --output none
+  [[ "$(az resource show --ids "${apim_id}" --query properties.publicNetworkAccess -o tsv)" == 'Disabled' ]] || exit 1
+  [[ "$(az storage account show --ids "${portal_storage_id}" --query publicNetworkAccess -o tsv)" == 'Disabled' ]] || exit 1
+  [[ "$(az functionapp show --ids "${portal_function_id}" --query publicNetworkAccess -o tsv)" == 'Disabled' ]] || exit 1
+
+  expect_direct_origin_denied "https://${apim_name}.azure-api.net/ready"
+  curl --fail --silent --show-error --max-time 240 \
+    --header "Authorization: Bearer ${PORTAL_VALIDATION_BEARER_TOKEN}" \
+    "https://${frontdoor_host}/ready" >/dev/null
+fi
+
+echo "Deployment ${deployment_name} completed: ${analyzer_name}, ${embed_name}${portal_name:+, ${portal_name}}."

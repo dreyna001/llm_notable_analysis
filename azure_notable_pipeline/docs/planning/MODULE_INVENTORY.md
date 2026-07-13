@@ -12,8 +12,8 @@ copied.
 | `bedrock_kb_retrieval.py` | AWS-only/replaced | `azure_search_retrieval.py` | RAG/grounding | Omitted; native bounded Search boundary implemented | `test_azure_search_retrieval.py` |
 | `case_archive.py` | Tier C | `case_archive.py` + `blob_store.py` + `cosmos_store.py` | analyst portal | Ported with deterministic envelope/index identity, retention, collision/replay behavior, and native conditional create | `test_case_archive.py` |
 | `case_archive_notices.py` | Tier A | same filename | analyst portal | Copied | `test_case_archive_notices.py` |
-| `case_chat.py` | Tier C | same filename + `azure_openai_gateway.py` | analyst portal | Deferred | Phase 3 chat tests |
-| `case_chat_history.py` | Tier C | same filename + `cosmos_store.py` | analyst portal | Deferred | Phase 2/3 history tests |
+| `case_chat.py` | Tier C | same filename + native Azure boundaries | analyst portal | Ported with attached-case BM25/vector retrieval, case-aware Search query enrichment, and a handler-facing Cosmos/Blob injection seam | `test_case_chat.py` |
+| `case_chat_history.py` | Tier C | same filename + `cosmos_store.py` | analyst portal | Ported with native ownership, retention, session/message caps, and bounded transcript behavior | `test_case_chat_history.py` |
 | `case_chunk_retrieval.py` | Tier B | same filename + Azure gateways | analyst portal | Ported with bounded chunk source and Azure OpenAI embeddings | `test_case_chunk_retrieval.py` |
 | `case_embed.py` | Tier C | same filename + Azure gateways | analyst portal | Ported with deterministic bounded chunk replacement, 1024-d Azure OpenAI vectors, and ETag-retried Cosmos status | `test_case_embed.py` |
 | `case_index.py` | Tier C | same filename + `cosmos_store.py` | analyst portal | Deferred | Phase 2/3 index tests |
@@ -30,10 +30,10 @@ copied.
 | `lambda_handler.py` | AWS-only/replaced | `blob_handler.py` + `function_app.py` | core intake + optional analyzer profiles | Native queue/intake and AWS-ordered RAG/SPL/Elasticsearch orchestration implemented without AWS event/client shapes | Phase 1 queue/event tests + `test_optional_profile_orchestration.py` |
 | `markdown_generator.py` | Tier A | same filename | core reports | Copied | `test_markdown_generator.py` |
 | `portal_api_models.py` | Tier A | same filename | analyst portal API | Copied | Phase 3 API contract tests |
-| `portal_chat.py` | Tier B | same filename + `azure_openai_gateway.py` | analyst portal | Deferred | Phase 3 chat tests |
-| `portal_chat_kb.py` | Tier B | same filename + `azure_search_retrieval.py` | analyst portal | Advisory Search lanes ported; chat orchestration remains Phase 3 | `test_portal_chat_kb.py` |
+| `portal_chat.py` | Tier B | same filename + `azure_openai_gateway.py` | analyst portal | Ported with grounded prompts, attribution guards, deterministic read-only policy, timeout/usage handling, bounded multi-turn context, and opt-in general knowledge | `test_portal_chat.py`, `test_chat_context_usage.py` |
+| `portal_chat_kb.py` | Tier B | same filename + `azure_search_retrieval.py` | analyst portal | Advisory Search lanes integrated with selected-case chat orchestration | `test_portal_chat_kb.py` |
 | `portal_chat_kb_query.py` | Tier A | same filename | analyst portal | Copied | `test_portal_chat_kb_query.py` |
-| `portal_handler.py` | Tier C | same filename + native HTTP wrappers | analyst portal | Deferred | Phase 3 native HTTP tests |
+| `portal_handler.py` | Tier C | same filename + native HTTP wrappers | analyst portal | Ported to native Azure request/response, Cosmos/Blob, JWT/Entra role, ownership, same-origin, bounded-input, and injectable chat-service contracts with no API Gateway/Lambda shape | `test_portal_handler.py`, `test_portal_api_contract.py`, `test_function_app_runtime.py` |
 | `portal_jwt.py` | Tier A | same filename | portal authorization | Copied | `test_portal_jwt.py` |
 | `query_result_enrichment.py` | Tier A | same filename | investigations | Copied | `test_query_result_enrichment.py` |
 | `query_result_interpretation.py` | Tier A | same filename | investigations | Copied | `test_query_result_interpretation.py` |
@@ -54,12 +54,12 @@ copied.
 | `test_bedrock_kb_retrieval.py` | Replaced by Azure AI Search tests | Phase 2 |
 | `test_case_archive.py` | Ported to Blob/Cosmos fakes with durable-schema and replay/collision assertions | Phase 2 |
 | `test_case_archive_notices.py` | Copied | Phase 0 |
-| `test_case_chat.py` | Port to Azure OpenAI gateway fake | Phase 3 |
-| `test_case_chat_history.py` | Port to Cosmos store fake | Phase 2/3 |
+| `test_case_chat.py` | Ported to native chunk/OpenAI/Search/application fakes | Phase 3 complete |
+| `test_case_chat_history.py` | Ported to native Cosmos store fake | Phase 3 complete |
 | `test_case_chunk_retrieval.py` | Ported to application source and Azure OpenAI gateway fakes | Phase 2 |
 | `test_case_embed.py` | Ported to Azure embeddings/Cosmos/Blob fakes | Phase 2 |
 | `test_case_index.py` | Port to Cosmos native contract | Phase 2 |
-| `test_chat_context_usage.py` | Copy when `portal_chat.py` lands | Phase 3 |
+| `test_chat_context_usage.py` | Ported with deterministic lane and native gateway-usage assertions | Phase 3 complete |
 | `test_config.py` | Foundry/Sonnet runtime contract port | Phase 0 |
 | `test_deploy_templates.py` | Replaced by Bicep tests | Phase 1–4 |
 | `test_elastic_query_generation.py` | Copied | Phase 0 |
@@ -70,10 +70,10 @@ copied.
 | `test_idempotency.py` | Replace database transport assertions with Cosmos outcomes | Phase 2 |
 | `test_lambda_handler.py` | Replace with native polling Blob-trigger/queue/intake tests | Phase 1 |
 | `test_markdown_generator.py` | Copied | Phase 0 |
-| `test_portal_api_contract.py` | Reuse assertions after native handler lands | Phase 3 |
-| `test_portal_chat.py` | Port to native gateway/search boundaries | Phase 3 |
+| `test_portal_api_contract.py` | Ported response-model assertions to native Azure HTTP responses | Phase 3 complete |
+| `test_portal_chat.py` | Ported to native gateway/search boundaries | Phase 3 complete |
 | `test_portal_chat_kb_query.py` | Copied | Phase 0 |
-| `test_portal_handler.py` | Replace transport assertions with native HTTP tests | Phase 3 |
+| `test_portal_handler.py` | Replaced with native Azure HTTP/auth/ownership/size/pagination/chat-seam tests | Phase 3 complete |
 | `test_portal_jwt.py` | Copied | Phase 0 |
 | `test_portal_openapi_contract.py` | Copied; sync-script case deferred | Phase 0/3 |
 | `test_query_result_enrichment.py` | Copied | Phase 0 |

@@ -1,4 +1,4 @@
-"""Pydantic response models for the AWS analyst portal API."""
+"""Pydantic response models for the shared analyst portal HTTP API."""
 
 from __future__ import annotations
 

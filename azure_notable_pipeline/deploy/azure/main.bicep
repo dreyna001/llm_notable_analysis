@@ -33,6 +33,8 @@ param AzureOpenAiResourceRegion string = Location
 param AzureOpenAiEmbeddingsDeployment string = ''
 param AzureOpenAiPortalChatDeployment string = ''
 param AzureSearchEndpoint string = ''
+param AzureSearchResourceId string = ''
+param RagAzureSearchIndex string = ''
 param KeyVaultName string = ''
 @minLength(3)
 param CosmosAccountName string
@@ -56,6 +58,15 @@ param FunctionsHostStorageAccountName string
 param StorageAccountNameInput string
 param StorageAccountNameOutput string
 param StorageAccountNamePortalUi string = ''
+param PortalUiDeployerPrincipalId string = ''
+
+@allowed(['jwt', 'iam'])
+param PortalAuthMode string = 'jwt'
+param PortalJwtIssuer string = ''
+param PortalJwtAudience string = ''
+param PortalEntraRequiredAppRole string = ''
+param ApiManagementPublisherEmail string = ''
+param ApiManagementPublisherName string = 'Notable Analysis'
 
 @allowed(['blob', 'notable_rest'])
 param ReportSinkMode string = 'blob'
@@ -105,8 +116,15 @@ var openAiIdSegments = split(
     : AzureOpenAiResourceId,
   '/'
 )
+var searchIdSegments = split(
+  empty(AzureSearchResourceId)
+    ? '/subscriptions/none/resourceGroups/none/providers/Microsoft.Search/searchServices/none'
+    : AzureSearchResourceId,
+  '/'
+)
 var normalizedCapabilityProfiles = split(toLower(replace(CapabilityProfiles, ' ', '')), ',')
 var hasAnalystPortalProfile = contains(normalizedCapabilityProfiles, 'analyst_portal')
+var deployPortal = hasAnalystPortalProfile && !empty(StorageAccountNamePortalUi)
 var deployChatHistoryContainers = hasAnalystPortalProfile && CaseQaChatHistoryEnabled
 
 module storage 'modules/storage.bicep' = {
@@ -117,6 +135,7 @@ module storage 'modules/storage.bicep' = {
     inputStorageAccountName: StorageAccountNameInput
     outputStorageAccountName: StorageAccountNameOutput
     portalUiStorageAccountName: StorageAccountNamePortalUi
+    portalUiDeployerPrincipalId: PortalUiDeployerPrincipalId
     inputRetentionDays: InputRetentionDays
     outputRetentionDays: OutputRetentionDays
     caseRetentionDays: CaseRetentionDays
@@ -229,6 +248,18 @@ module openAiAccess 'modules/openai-access.bicep' = if (!empty(AzureOpenAiResour
   params: {
     openAiAccountName: openAiIdSegments[8]
     embedPrincipalId: identities.outputs.embed.principalId
+    portalPrincipalId: deployPortal ? identities.outputs.portal.principalId : ''
+  }
+}
+
+module searchAccess 'modules/search-access.bicep' = if (!empty(AzureSearchResourceId)) {
+  name: '${DeploymentPrefix}-search-access'
+  scope: resourceGroup(searchIdSegments[2], searchIdSegments[4])
+  params: {
+    searchServiceName: searchIdSegments[8]
+    principalIds: deployPortal
+      ? [identities.outputs.analyzer.principalId, identities.outputs.portal.principalId]
+      : [identities.outputs.analyzer.principalId]
   }
 }
 
@@ -328,11 +359,88 @@ module embedFunction 'modules/functions-embed.bicep' = {
   dependsOn: [registryAccess, embedHostAccess, openAiAccess]
 }
 
+module portalFunction 'modules/functions-portal.bicep' = if (deployPortal) {
+  name: '${DeploymentPrefix}-portal-function'
+  params: {
+    location: Location
+    functionAppName: '${DeploymentPrefix}-notable-portal-api'
+    serverFarmId: functionPlan.id
+    functionSubnetId: network.outputs.functionSubnetId
+    privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
+    sitesPrivateDnsZoneId: network.outputs.sitesPrivateDnsZoneId
+    containerImageUri: ContainerImageUri
+    portalIdentityResourceId: identities.outputs.portal.id
+    portalIdentityClientId: identities.outputs.portal.clientId
+    portalIdentityPrincipalId: identities.outputs.portal.principalId
+    outputStorageAccountName: StorageAccountNameOutput
+    outputBlobServiceUri: storage.outputs.outputBlobServiceUri
+    hostBlobServiceUri: storage.outputs.hostBlobServiceUri
+    hostQueueServiceUri: storage.outputs.hostQueueServiceUri
+    hostTableServiceUri: storage.outputs.hostTableServiceUri
+    applicationInsightsConnectionString: observability.outputs.applicationInsightsConnectionString
+    cosmosEndpoint: cosmos.outputs.endpoint
+    cosmosDatabaseName: cosmos.outputs.databaseName
+    caseIndexContainerName: cosmos.outputs.caseIndexContainerName
+    chatSessionsContainerName: deployChatHistoryContainers ? cosmos.outputs.chatSessionsContainerName : ''
+    chatMessagesContainerName: deployChatHistoryContainers ? cosmos.outputs.chatMessagesContainerName : ''
+    azureOpenAiEndpoint: AzureOpenAiEndpoint
+    azureOpenAiApiVersion: AzureOpenAiApiVersion
+    azureOpenAiEmbeddingsDeployment: AzureOpenAiEmbeddingsDeployment
+    azureOpenAiPortalChatDeployment: AzureOpenAiPortalChatDeployment
+    azureSearchEndpoint: AzureSearchEndpoint
+    ragAzureSearchIndex: RagAzureSearchIndex
+    capabilityProfiles: CapabilityProfiles
+    portalAuthMode: PortalAuthMode
+    portalJwtIssuer: PortalJwtIssuer
+    portalJwtAudience: PortalJwtAudience
+    portalEntraRequiredAppRole: PortalEntraRequiredAppRole
+    caseQaChatHistoryEnabled: deployChatHistoryContainers
+    portalChatTimeoutSec: PortalChatTimeoutSec
+  }
+  dependsOn: [registryAccess, portalHostAccess, openAiAccess, searchAccess]
+}
+
+module portalApiManagement 'modules/apim-portal.bicep' = if (deployPortal) {
+  name: '${DeploymentPrefix}-portal-apim'
+  params: {
+    location: Location
+    apiManagementName: '${DeploymentPrefix}-portal-apim'
+    apiManagementSkuName: ApiManagementSkuName
+    publisherEmail: ApiManagementPublisherEmail
+    publisherName: ApiManagementPublisherName
+    apimSubnetId: network.outputs.apimSubnetId
+    portalFunctionHostName: portalFunction!.outputs.defaultHostName
+    portalAuthMode: PortalAuthMode
+    portalJwtIssuer: PortalJwtIssuer
+    portalJwtAudience: PortalJwtAudience
+    portalEntraRequiredAppRole: PortalEntraRequiredAppRole
+  }
+}
+
+module portalFrontDoor 'modules/frontdoor-portal.bicep' = if (deployPortal) {
+  name: '${DeploymentPrefix}-portal-frontdoor'
+  params: {
+    location: Location
+    profileName: '${DeploymentPrefix}-portal-fd'
+    endpointName: '${DeploymentPrefix}-portal'
+    portalUiStorageId: storage.outputs.portalStorageId
+    portalUiHostName: storage.outputs.portalWebHostName
+    apiManagementId: portalApiManagement!.outputs.apiManagementId
+    apiManagementHostName: portalApiManagement!.outputs.gatewayHostName
+    portalFunctionId: portalFunction!.outputs.functionAppId
+    portalFunctionHostName: portalFunction!.outputs.defaultHostName
+  }
+}
+
 output DeploymentLocation string = Location
 output ConfiguredCloud string = cloudEnvironment
 output AnalyzerFunctionAppName string = analyzerFunction.outputs.functionAppName
 output EmbedFunctionAppName string = embedFunction.outputs.functionAppName
+output PortalFunctionAppName string = deployPortal ? portalFunction!.outputs.functionAppName : ''
+output PortalApiManagementName string = deployPortal ? portalApiManagement!.outputs.apiManagementName : ''
+output PortalFrontDoorProfileName string = deployPortal ? portalFrontDoor!.outputs.profileName : ''
 output AnalysisDeployment string = AzureAiFoundryAnalysisDeployment
+output AzureOpenAiRegion string = AzureOpenAiResourceRegion
 output ReportSinkMode string = ReportSinkMode
 output InputStorageAccountName string = StorageAccountNameInput
 output OutputStorageAccountName string = StorageAccountNameOutput
@@ -346,8 +454,8 @@ output DispositionContainerName string = cosmos.outputs.dispositionContainerName
 output DispositionSyncStateContainerName string = cosmos.outputs.dispositionSyncStateContainerName
 output ChatSessionsContainerName string = cosmos.outputs.chatSessionsContainerName
 output ChatMessagesContainerName string = cosmos.outputs.chatMessagesContainerName
-output PortalApiUrl string = ''
-output PortalChatUrl string = ''
-output PortalBrowserApiBaseUrl string = ''
-output PortalFrontDoorHostName string = ''
+output PortalApiUrl string = deployPortal ? 'https://${portalFrontDoor!.outputs.endpointHostName}/api' : ''
+output PortalChatUrl string = deployPortal ? 'https://${portalFrontDoor!.outputs.endpointHostName}/api/chat' : ''
+output PortalBrowserApiBaseUrl string = deployPortal ? 'https://${portalFrontDoor!.outputs.endpointHostName}' : ''
+output PortalFrontDoorHostName string = deployPortal ? portalFrontDoor!.outputs.endpointHostName : ''
 output PortalUiStorageAccountName string = StorageAccountNamePortalUi

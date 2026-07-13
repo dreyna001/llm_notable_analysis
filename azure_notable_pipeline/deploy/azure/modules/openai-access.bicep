@@ -2,6 +2,7 @@ targetScope = 'resourceGroup'
 
 param openAiAccountName string
 param embedPrincipalId string
+param portalPrincipalId string = ''
 
 resource openAi 'Microsoft.CognitiveServices/accounts@2024-10-01' existing = {
   name: openAiAccountName
@@ -13,6 +14,16 @@ resource embedOpenAiAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' 
   scope: openAi
   properties: {
     principalId: embedPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', openAiUserRoleId)
+  }
+}
+
+resource portalOpenAiAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(portalPrincipalId)) {
+  name: guid(openAi.id, portalPrincipalId, openAiUserRoleId)
+  scope: openAi
+  properties: {
+    principalId: portalPrincipalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', openAiUserRoleId)
   }

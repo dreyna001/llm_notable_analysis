@@ -22,3 +22,11 @@ the app and offending setting name.
 Run uploads and deployment validation from a private-network-connected runner.
 Phase 4 adds the full staging `test-pipeline.ps1`/`.sh` workflow and portal
 private-origin checks.
+
+For `analyst_portal`, both deployment helpers also build/test the same-origin
+SPA, upload `$web` with Microsoft Entra authentication, approve and poll all
+Front Door managed private endpoints (`web`, `Gateway`, and `sites`), and only
+then disable APIM public access. The final gate rejects a successful direct
+APIM request, asserts disabled public access on Function/Storage, and requires
+authenticated `/ready` through Front Door.
+See [`ANALYST_PORTAL_DEPLOYMENT.md`](../docs/operations/ANALYST_PORTAL_DEPLOYMENT.md).
