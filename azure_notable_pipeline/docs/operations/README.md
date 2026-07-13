@@ -1,18 +1,16 @@
 # Azure operations documentation
 
-Azure deployment, monitoring, intake, portal, AI Search, and Azure OpenAI
-runbooks are delivered with Phase 4.
+| Area | Runbook |
+| --- | --- |
+| Build/deploy/rollback | [`deployment/DEPLOYMENT_IMAGE_STEPS.md`](deployment/DEPLOYMENT_IMAGE_STEPS.md) |
+| Foundry Claude and Azure OpenAI | [`llm/LLM_INFERENCE_OPERATIONS.md`](llm/LLM_INFERENCE_OPERATIONS.md) |
+| Azure AI Search | [`rag/KNOWLEDGE_BASE_OPERATIONS.md`](rag/KNOWLEDGE_BASE_OPERATIONS.md) |
+| Analyst portal | [`analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](analyst_portal/ANALYST_PORTAL_OPERATIONS.md) |
+| Portal deployment gate | [`ANALYST_PORTAL_DEPLOYMENT.md`](ANALYST_PORTAL_DEPLOYMENT.md) |
+| Monitoring, poison replay, escalation | [`AZURE_MONITORING_AND_RECOVERY.md`](AZURE_MONITORING_AND_RECOVERY.md) |
+| ServiceNow disposition sync | [`integrations/SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md`](integrations/SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md) |
+| SIEM/SOAR private intake | [`integrations/SIEM_SOAR_PRIVATE_INTAKE_OPERATIONS.md`](integrations/SIEM_SOAR_PRIVATE_INTAKE_OPERATIONS.md) |
 
-The Phase 3 private portal deployment and approval gate is documented in
-[`ANALYST_PORTAL_DEPLOYMENT.md`](ANALYST_PORTAL_DEPLOYMENT.md).
-
-The intake recovery runbook must distinguish three independent poison paths:
-
-- `webjobs-blobtrigger-poison` on input storage means discovery/publication did
-  not complete; check whether an analyzer job was already durably published.
-- `notable-analysis-jobs-poison` on output storage means analyzer processing
-  failed after publication.
-- `case-embed-invocations-poison` on output storage means embedding failed.
-
-None is replayed automatically. Replay follows correction of the underlying
-cause and uses the normal idempotent intake or queue path.
+The three poison paths are independent and never auto-replayed. Operators must
+correct the cause, check for an already durable outcome, and replay one message
+through its normal idempotent path.

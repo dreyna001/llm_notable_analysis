@@ -21,7 +21,9 @@ if app is not None:
         publish_blob_trigger_input,
     )
     from .embed_handler import dispatch_embed_queue_message
+    from .disposition_sync_handler import handle_timer
     from .portal_handler import handle_request
+    from .queue_monitor import emit_queue_depth_traces
 
     @app.function_name(name="intake_blob")
     @app.blob_trigger(
@@ -67,6 +69,40 @@ if app is not None:
             dispatch_embed_queue_message(message.get_body())
         except Exception:
             logger.exception("Case embed queue processing failed")
+            raise
+
+    @app.function_name(name="disposition_sync_timer")
+    @app.timer_trigger(
+        arg_name="timer",
+        schedule="0 0 0 * * *",
+        run_on_startup=False,
+        use_monitor=True,
+    )
+    def disposition_sync_timer(timer: func.TimerRequest) -> None:
+        """Run the daily native ServiceNow disposition synchronization pass."""
+
+        try:
+            handle_timer(timer)
+        except Exception:
+            logger.exception("ServiceNow disposition timer processing failed")
+            raise
+
+    @app.function_name(name="operations_monitor_timer")
+    @app.timer_trigger(
+        arg_name="timer",
+        schedule="0 */5 * * * *",
+        run_on_startup=False,
+        use_monitor=True,
+    )
+    def operations_monitor_timer(timer: func.TimerRequest) -> None:
+        """Emit per-queue depth traces for poison and backlog alerting."""
+
+        if timer.past_due:
+            logger.warning("Operations queue monitor timer invocation is past due")
+        try:
+            emit_queue_depth_traces()
+        except Exception:
+            logger.exception("Operations queue depth polling failed")
             raise
 
     @app.function_name(name="portal_http")

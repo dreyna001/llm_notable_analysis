@@ -20,6 +20,13 @@ LOCATION="${AZURE_LOCATION:-eastus}"
 capability_profiles="${CAPABILITY_PROFILES:-core}"
 capability_profiles="${capability_profiles//[[:space:]]/}"
 deploy_portal=false
+deployment_environment="${DEPLOYMENT_ENVIRONMENT:-development}"
+deployment_environment="${deployment_environment,,}"
+case "${deployment_environment}" in
+  development|staging|production) ;;
+  *) echo 'DEPLOYMENT_ENVIRONMENT must be development, staging, or production.' >&2; exit 2 ;;
+esac
+disposition_sync_enabled="${SERVICENOW_DISPOSITION_SYNC_ENABLED:-false}"
 if [[ ",${capability_profiles,,}," == *,analyst_portal,* ]]; then
   deploy_portal=true
   portal_required=(
@@ -40,6 +47,26 @@ if [[ ",${capability_profiles,,}," == *,analyst_portal,* ]]; then
     exit 2
   fi
 fi
+if [[ "${deployment_environment}" == 'production' && -z "${ALERT_ACTION_GROUP_RESOURCE_ID:-}" ]]; then
+  echo 'ALERT_ACTION_GROUP_RESOURCE_ID is required when DEPLOYMENT_ENVIRONMENT=production.' >&2
+  exit 2
+fi
+if [[ "${deployment_environment}" == 'production' && "${deploy_portal}" == true && -z "${PORTAL_SYNTHETIC_CHECK_NAME:-}" ]]; then
+  echo 'PORTAL_SYNTHETIC_CHECK_NAME is required for a production analyst portal.' >&2
+  exit 2
+fi
+if [[ "${disposition_sync_enabled,,}" == 'true' ]]; then
+  disposition_required=(
+    KEY_VAULT_NAME SERVICENOW_BASE_URL
+    SERVICENOW_DISPOSITION_SYNC_TOKEN_SECRET_NAME
+  )
+  for name in "${disposition_required[@]}"; do
+    if [[ -z "${!name:-}" ]]; then
+      echo "Required disposition-sync environment variable is unset: ${name}" >&2
+      exit 2
+    fi
+  done
+fi
 
 if [[ "${CONTAINER_IMAGE_URI}" != *@sha256:* ]]; then
   echo 'CONTAINER_IMAGE_URI must be pinned to an immutable @sha256: digest.' >&2
@@ -47,6 +74,13 @@ if [[ "${CONTAINER_IMAGE_URI}" != *@sha256:* ]]; then
 fi
 
 az account set --subscription "${AZURE_SUBSCRIPTION_ID}"
+if [[ -n "${ALERT_ACTION_GROUP_RESOURCE_ID:-}" ]]; then
+  action_group_type="$(az resource show --ids "${ALERT_ACTION_GROUP_RESOURCE_ID}" --query type -o tsv)"
+  if [[ "${action_group_type,,}" != 'microsoft.insights/actiongroups' ]]; then
+    echo 'ALERT_ACTION_GROUP_RESOURCE_ID must identify an existing Microsoft.Insights/actionGroups resource.' >&2
+    exit 2
+  fi
+fi
 acr_login_server="$(az resource show --ids "${CONTAINER_REGISTRY_RESOURCE_ID}" --query properties.loginServer -o tsv)"
 if [[ "${CONTAINER_IMAGE_URI,,}" != "${acr_login_server,,}/"* ]]; then
   echo "Container image registry does not match ${CONTAINER_REGISTRY_RESOURCE_ID}." >&2
@@ -79,7 +113,15 @@ az deployment group create \
     CosmosAccountName="${COSMOS_ACCOUNT_NAME}" \
     CosmosDatabaseName="${COSMOS_DATABASE_NAME}" \
     CapabilityProfiles="${capability_profiles}" \
-    ServiceNowDispositionSyncEnabled="${SERVICENOW_DISPOSITION_SYNC_ENABLED:-false}" \
+    ServiceNowDispositionSyncEnabled="${disposition_sync_enabled}" \
+    ServiceNowBaseUrl="${SERVICENOW_BASE_URL:-https://your-instance.service-now.com}" \
+    ServiceNowTimeoutSeconds="${SERVICENOW_TIMEOUT_SECONDS:-15}" \
+    ServiceNowDispositionSyncTokenSecretName="${SERVICENOW_DISPOSITION_SYNC_TOKEN_SECRET_NAME:-}" \
+    ServiceNowDispositionFieldMap="${SERVICENOW_DISPOSITION_FIELD_MAP:-/home/site/wwwroot/deploy/servicenow/disposition_field_map.example.json}" \
+    ServiceNowDispositionCodeMap="${SERVICENOW_DISPOSITION_CODE_MAP:-/home/site/wwwroot/deploy/servicenow/disposition_code_map.example.json}" \
+    ServiceNowDispositionBackfillDays="${SERVICENOW_DISPOSITION_BACKFILL_DAYS:-90}" \
+    DispositionRetentionDays="${DISPOSITION_RETENTION_DAYS:-365}" \
+    AllowPrivateOutboundEndpoints="${ALLOW_PRIVATE_OUTBOUND_ENDPOINTS:-false}" \
     CaseQaChatHistoryEnabled="${CASE_QA_CHAT_HISTORY_ENABLED:-false}" \
     FunctionsHostStorageAccountName="${FUNCTIONS_HOST_STORAGE_ACCOUNT_NAME}" \
     StorageAccountNameInput="${INPUT_STORAGE_ACCOUNT_NAME}" \
@@ -95,14 +137,28 @@ az deployment group create \
     PortalChatTimeoutSec="${PORTAL_CHAT_TIMEOUT_SEC:-225}" \
     AnalyzerMaxInstanceCount="${ANALYZER_MAX_INSTANCE_COUNT:-5}" \
     EmbedMaxInstanceCount="${EMBED_MAX_INSTANCE_COUNT:-5}" \
+    DeploymentEnvironment="${deployment_environment}" \
+    AlertActionGroupResourceId="${ALERT_ACTION_GROUP_RESOURCE_ID:-}" \
+    PortalSyntheticCheckName="${PORTAL_SYNTHETIC_CHECK_NAME:-}" \
+    PoisonQueueDepthThreshold="${POISON_QUEUE_DEPTH_THRESHOLD:-0}" \
+    AnalyzerQueueBacklogThreshold="${ANALYZER_QUEUE_BACKLOG_THRESHOLD:-100}" \
+    EmbedQueueBacklogThreshold="${EMBED_QUEUE_BACKLOG_THRESHOLD:-100}" \
+    ModelErrorThreshold="${MODEL_ERROR_THRESHOLD:-5}" \
+    ModelThrottleThreshold="${MODEL_THROTTLE_THRESHOLD:-5}" \
+    CosmosThrottleThreshold="${COSMOS_THROTTLE_THRESHOLD:-10}" \
+    FrontDoor5xxPercentageThreshold="${FRONTDOOR_5XX_PERCENTAGE_THRESHOLD:-5}" \
+    DispositionCompletionGraceHours="${DISPOSITION_COMPLETION_GRACE_HOURS:-26}" \
+    QueueTelemetryMaxAgeMinutes="${QUEUE_TELEMETRY_MAX_AGE_MINUTES:-10}" \
   --output none
 
 analyzer_name="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.AnalyzerFunctionAppName.value -o tsv)"
 embed_name="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.EmbedFunctionAppName.value -o tsv)"
+disposition_name="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.DispositionFunctionAppName.value -o tsv)"
 portal_name="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.PortalFunctionAppName.value -o tsv)"
 apim_name="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.PortalApiManagementName.value -o tsv)"
 frontdoor_profile="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.PortalFrontDoorProfileName.value -o tsv)"
 frontdoor_host="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.PortalFrontDoorHostName.value -o tsv)"
+workspace_customer_id="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.LogAnalyticsWorkspaceCustomerId.value -o tsv)"
 
 forbidden_setting_pattern='^(AZUREWEBJOBSSTORAGE|AZUREWEBJOBSDASHBOARD|WEBSITE_CONTENTAZUREFILECONNECTIONSTRING|WEBSITE_CONTENTSHARE)$|(^|_)(DOCKER_REGISTRY_SERVER|ACR|AZURE_CONTAINER_REGISTRY|CONTAINER_REGISTRY)(_|$).*(USERNAME|PASSWORD|API_?KEY|ACCESS_?KEY|KEY|TOKEN|SECRET|CREDENTIAL|CONNECTION_?STRING)|(^|_)(AZURE_)?(STORAGE|BLOB|QUEUE|TABLE|FILE|FILES)(_|$).*(ACCOUNT_?KEY|ACCESS_?KEY|API_?KEY|KEY|CONNECTION_?STRING|SAS(_TOKEN)?|PASSWORD|SECRET)|(^|_)(AZURE_AI_FOUNDRY|AI_FOUNDRY|FOUNDRY|ANTHROPIC|AZURE_OPENAI|OPENAI|AZURE_SEARCH|COGNITIVE_SEARCH|SEARCH_SERVICE|SEARCH|COSMOSDB|COSMOS|AZURE_COSMOS)(_|$).*(API_?KEY|ACCOUNT_?KEY|ACCESS_?KEY|PRIMARY_?KEY|SECONDARY_?KEY|MASTER_?KEY|KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|CONNECTION_?STRING)'
 
@@ -211,13 +267,64 @@ wait_for_function_host() {
   exit 1
 }
 
-for app in "${analyzer_name}" "${embed_name}"; do
+for app in "${analyzer_name}" "${embed_name}" "${disposition_name}"; do
   verify_no_forbidden_settings "${app}"
   verify_managed_identity_configuration "${app}"
 done
 
 wait_for_function_host "${analyzer_name}" intake_blob analyzer_queue
 wait_for_function_host "${embed_name}" case_embed_queue
+if [[ "${disposition_sync_enabled,,}" == 'true' ]]; then
+  wait_for_function_host "${disposition_name}" disposition_sync_timer operations_monitor_timer
+else
+  wait_for_function_host "${disposition_name}" operations_monitor_timer
+fi
+
+wait_for_queue_depth_telemetry() {
+  local expected actual query
+  expected="$(printf '%s\n' \
+    webjobs-blobtrigger-poison \
+    notable-analysis-jobs \
+    notable-analysis-jobs-poison \
+    case-embed-invocations \
+    case-embed-invocations-poison | LC_ALL=C sort)"
+  query="AppTraces | where TimeGenerated > ago(15m) and Message startswith 'notable.queue.depth.v1 ' | extend sample=parse_json(substring(Message, strlen('notable.queue.depth.v1 '))) | where toint(sample.schema_version) == 1 | summarize arg_max(TimeGenerated, *) by QueueName=tostring(sample.queue_name) | project QueueName"
+  for attempt in {1..48}; do
+    actual="$(az monitor log-analytics query --workspace "${workspace_customer_id}" --analytics-query "${query}" --query 'tables[0].rows[][0]' -o tsv 2>/dev/null | sed '/^$/d' | LC_ALL=C sort || true)"
+    [[ "${actual}" == "${expected}" ]] && return
+    sleep 10
+  done
+  echo 'The operations monitor did not emit fresh structured depth telemetry for all five queues.' >&2
+  exit 1
+}
+
+if [[ -n "${ALERT_ACTION_GROUP_RESOURCE_ID:-}" ]]; then
+  wait_for_queue_depth_telemetry
+fi
+
+validate_monitoring_alerts() {
+  local alert_name alert_id enabled action_group
+  local expected_alerts
+  expected_alerts="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query 'properties.outputs.MonitoringAlertRuleNames.value[]' -o tsv)"
+  if [[ -z "${ALERT_ACTION_GROUP_RESOURCE_ID:-}" ]]; then
+    [[ -z "${expected_alerts}" ]] || { echo 'Alert rules were unexpectedly returned without an action group.' >&2; exit 1; }
+    return
+  fi
+  while IFS= read -r alert_name; do
+    [[ -z "${alert_name}" ]] && continue
+    alert_id="$(az resource list --resource-group "${AZURE_RESOURCE_GROUP}" --name "${alert_name}" --query '[0].id' -o tsv)"
+    [[ -n "${alert_id}" ]] || { echo "Expected monitoring alert was not deployed: ${alert_name}" >&2; exit 1; }
+    enabled="$(az resource show --ids "${alert_id}" --query properties.enabled -o tsv)"
+    [[ "${enabled,,}" == 'true' ]] || { echo "Monitoring alert is not enabled: ${alert_name}" >&2; exit 1; }
+    action_group="$(az resource show --ids "${alert_id}" --query 'properties.actions.actionGroups[0]' -o tsv 2>/dev/null || true)"
+    if [[ -z "${action_group}" ]]; then
+      action_group="$(az resource show --ids "${alert_id}" --query 'properties.actions[0].actionGroupId' -o tsv 2>/dev/null || true)"
+    fi
+    [[ "${action_group,,}" == "${ALERT_ACTION_GROUP_RESOURCE_ID,,}" ]] || { echo "Monitoring alert is not wired to the supplied action group: ${alert_name}" >&2; exit 1; }
+  done <<<"${expected_alerts}"
+}
+
+validate_monitoring_alerts
 
 approve_pending_connections() {
   local target_id="$1"
@@ -321,6 +428,25 @@ if [[ "${deploy_portal}" == true ]]; then
   curl --fail --silent --show-error --max-time 240 \
     --header "Authorization: Bearer ${PORTAL_VALIDATION_BEARER_TOKEN}" \
     "https://${frontdoor_host}/ready" >/dev/null
+
+  if [[ "${deployment_environment}" == 'production' ]]; then
+    synthetic_name_b64="$(printf '%s' "${PORTAL_SYNTHETIC_CHECK_NAME}" | base64 | tr -d '\n')"
+    synthetic_query="let checkName=base64_decode_tostring('${synthetic_name_b64}'); AppAvailabilityResults | where TimeGenerated > ago(15m) and Name == checkName | summarize Results=count(), Successes=countif(Success == true)"
+    synthetic_ready=false
+    for attempt in {1..30}; do
+      synthetic_row="$(az monitor log-analytics query --workspace "${workspace_customer_id}" --analytics-query "${synthetic_query}" --query 'tables[0].rows[0]' -o tsv 2>/dev/null || true)"
+      read -r synthetic_results synthetic_successes <<<"${synthetic_row}"
+      if [[ "${synthetic_results:-0}" =~ ^[0-9]+$ && "${synthetic_successes:-0}" =~ ^[0-9]+$ && ${synthetic_results} -gt 0 && ${synthetic_successes} -gt 0 ]]; then
+        synthetic_ready=true
+        break
+      fi
+      sleep 10
+    done
+    [[ "${synthetic_ready}" == true ]] || {
+      echo 'Production requires a fresh successful AppAvailabilityResults row from the named customer authenticated /ready monitor.' >&2
+      exit 1
+    }
+  fi
 fi
 
-echo "Deployment ${deployment_name} completed: ${analyzer_name}, ${embed_name}${portal_name:+, ${portal_name}}."
+echo "Deployment ${deployment_name} completed: ${analyzer_name}, ${embed_name}, ${disposition_name}${portal_name:+, ${portal_name}}."

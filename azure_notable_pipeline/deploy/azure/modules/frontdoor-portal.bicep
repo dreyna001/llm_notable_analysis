@@ -216,6 +216,7 @@ resource uiRoute 'Microsoft.Cdn/profiles/afdEndpoints/routes@2024-09-01' = {
 }
 
 output profileName string = profile.name
+output profileId string = profile.id
 output endpointName string = endpoint.name
 output endpointHostName string = endpoint.properties.hostName
 output chatOriginId string = chatOrigin.id

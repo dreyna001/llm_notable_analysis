@@ -19,7 +19,7 @@ copied.
 | `case_index.py` | Tier C | same filename + `cosmos_store.py` | analyst portal | Deferred | Phase 2/3 index tests |
 | `chat_context_usage.py` | Tier A | same filename | analyst portal | Copied | Phase 3 portable test (depends on `portal_chat.py`) |
 | `config.py` | Tier B | same filename | all profiles | Azure runtime contract ported | `test_config.py` |
-| `disposition_sync_handler.py` | Tier C | same filename + timer wrapper | disposition sync | Deferred | Phase 4 native timer tests |
+| `disposition_sync_handler.py` | Tier C | same filename + timer wrapper | disposition sync | Native timer dispatcher implemented | `test_disposition_sync_handler.py`, `test_function_app_runtime.py` |
 | `elastic_query_generation.py` | Tier A | same filename | elastic read-only | Copied | `test_elastic_query_generation.py` |
 | `elasticsearch_investigation.py` | Tier A | same filename | elastic read-only | Copied | `test_elasticsearch_investigation.py` |
 | `elasticsearch_query_grounding.py` | Tier B | same filename + `azure_search_retrieval.py` | elastic grounding | Ported to stable native Search results | `test_query_grounding_retrieval.py` |
@@ -39,7 +39,7 @@ copied.
 | `query_result_interpretation.py` | Tier A | same filename | investigations | Copied | `test_query_result_interpretation.py` |
 | `runtime_security.py` | Tier B | same filename + `secret_provider.py` | external integrations | Ported to native secret boundary | config/integration tests |
 | `servicenow.py` | Tier A | same filename | ticket draft/action | Copied unchanged | `test_servicenow.py` |
-| `servicenow_disposition_sync.py` | Tier C | same filename + `cosmos_store.py` | disposition sync | Deferred | Phase 2/4 sync tests |
+| `servicenow_disposition_sync.py` | Tier C | same filename + `cosmos_store.py` | disposition sync | Native Cosmos read-only synchronization, normalization, linking, cursor, retry, and malformed-page policy implemented | `test_servicenow_disposition_sync.py`, `test_cosmos_store.py` |
 | `spl_query_generation.py` | Tier A | same filename | SPL read-only | Copied | `test_spl_query_generation.py` |
 | `spl_query_grounding.py` | Tier B | same filename + `azure_search_retrieval.py` | SPL grounding | Ported to stable native Search results | `test_query_grounding_retrieval.py` |
 | `splunk_investigation.py` | Tier A | same filename | SPL read-only | Copied | `test_splunk_investigation.py` |
@@ -79,7 +79,7 @@ copied.
 | `test_query_result_enrichment.py` | Copied | Phase 0 |
 | `test_query_result_interpretation.py` | Copied | Phase 0 |
 | `test_servicenow.py` | Copied; disabled idempotency path uses Azure shell | Phase 0 |
-| `test_servicenow_disposition_sync.py` | Port to Cosmos contract | Phase 2/4 |
+| `test_servicenow_disposition_sync.py` | Ported to Cosmos/application contracts plus failure/cursor policy | Phase 4 complete |
 | `test_spl_query_generation.py` | Copied | Phase 0 |
 | `test_splunk_investigation.py` | Copied | Phase 0 |
 | `test_ttp_analyzer_prompts.py` | Reuse prompt assertions after native analyzer port | Phase 1 |
@@ -88,3 +88,17 @@ copied.
 Azure-only `test_config_contract.py` preserves the broader capability-profile,
 validation, portal timeout, and no-AWS-alias assertions from the portable AWS
 config suite.
+
+## Phase 4 operations inventory
+
+| Artifact | Contract owner | Verification |
+| --- | --- | --- |
+| `scripts/test-pipeline.sh`, `.ps1` | isolated staging acceptance | offline contract gate by default; explicit subscription-locked live/chaos gate |
+| `docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md` | immutable digest deployment/rollback | links setup/build scripts and readiness gate |
+| `docs/operations/llm/LLM_INFERENCE_OPERATIONS.md` | Foundry Claude/OpenAI approval, quota, filtering | customer decision and monitoring contract |
+| `docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md` | Azure AI Search indexes/ingestion | attribution, MI, versioned rollback |
+| `docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md` | auth, ownership, synthetic identity | unchanged OpenAPI and timeout chain |
+| `docs/operations/AZURE_MONITORING_AND_RECOVERY.md` | alerts, poison replay, escalation | three distinct five-attempt recovery paths |
+| `docs/operations/integrations/*` | disposition and vendor-neutral intake | dry run, least privilege, replay/rollback |
+| `docs/technical_specs/AZURE_AWS_PARITY_TECHNICAL_SPEC.md` | normative Azure v1 contract | indexed from `docs/README.md` |
+| `docs/delivery_package/AZURE_READINESS.md` | production-enable decision record | customer-completed checklist outside source |

@@ -10,7 +10,7 @@ Status values: `not started`, `in progress`, `blocked verification`, `complete`.
 | Phase 1 — core pipeline | Phase 1 implementation | in progress | Native queue/analyzer/embed wrapper contracts and Bicep are complete; live private-host deployment acceptance remains |
 | Phase 2 — optional Wave 1 profiles | Phase 2 implementation | complete | Native Search grounding, optional-profile orchestration, Cosmos persistence, and archive/embed integration pass the offline Phase 2 gate: 202 passed, 2 skipped, plus 3 golden-rubric subtests |
 | Phase 3 — analyst portal | Phase 3 implementation | blocked verification | Offline portal runtime/infra tests and Bicep compile complete; live Front Door private-endpoint approval, direct-origin denial, and authenticated `/ready` acceptance require a customer Azure subscription |
-| Phase 4 — disposition sync and operations | Phase 4 implementation | not started | Timer, runbooks, staging readiness |
+| Phase 4 — disposition sync and operations | Phase 4 implementation | blocked verification | Native timer/runtime and offline operations package complete; live dedicated-subscription staging gate remains |
 
 ## Native application boundaries
 
@@ -31,13 +31,13 @@ Status values: `not started`, `in progress`, `blocked verification`, `complete`.
 | `embed_handler.py` | Phase 1/2/3 | complete | Strict v1 Queue dispatcher invokes native Blob/OpenAI/Cosmos embedding and propagates failures for Functions retry/poison handling |
 | `portal_chat.py` / `case_chat.py` | Phase 3 | complete | Native Azure OpenAI synthesis and 1024-d case retrieval preserve grounding attribution, attached-case behavior, bounded context/history, timeout, and deterministic read-only policy |
 | `portal_handler.py` | Phase 3 | complete | Native Azure HTTP routing preserves the published API/response contracts with application JWT or Entra app-role auth on every route, fail-closed `sub`, ownership isolation, same-origin responses, bounded inputs, and injectable native chat orchestration |
-| `function_app.py` | Phase 1/3/4 | in progress | Polling intake Blob, analyzer/embed queues, and wildcard native portal HTTP wrapper are complete; the Phase 4 timer remains |
+| `function_app.py` | Phase 1/3/4 | complete | Exact six-wrapper host inventory: analyzer intake/queue, embed queue, disposition timer, operations monitor timer, and wildcard portal HTTP; every app enables only its owned functions |
 
 ## Bicep modules
 
 | Module | Owner | Status | Required capability |
 | --- | --- | --- | --- |
-| `main.bicep` | all phases | in progress | Root parameter/output contract established |
+| `main.bicep` | all phases | blocked verification | Root composition, production gates, outputs, and all four apps compile; live Azure deployment acceptance remains |
 | `network.bicep` | Phase 1 | complete | VNet, delegated integration subnet, PE subnet, private DNS, required storage endpoints |
 | `storage.bicep` | Phase 1/3 | complete | Dedicated private/keyless `$web` static website, SPA fallback, and deployer MI/RBAC added |
 | `identities.bicep` | Phase 1 | complete | Four user-assigned identities plus keyless host-storage grants |
@@ -45,11 +45,12 @@ Status values: `not started`, `in progress`, `blocked verification`, `complete`.
 | `cosmos.bicep` | Phase 2 | complete | Single-region serverless Strong account, database, conditional aggregate containers, TTL/index contracts, and container-scoped SQL RBAC |
 | `functions-analyzer.bicep` | Phase 1 | complete | Private polling Blob/analyzer queue app, scale/timeout overrides, native RBAC |
 | `functions-embed.bicep` | Phase 1 | complete | Private embed queue app, scale/timeout override, native RBAC |
-| `functions-disposition.bicep` | Phase 4 | not started | Timer app |
+| `functions-disposition.bicep` | Phase 4 | complete | Private/keyless 900s timer app, exact wrapper isolation, conditional Blob/Key Vault/Cosmos access, and queue-depth-reader RBAC |
 | `functions-portal.bicep` | Phase 3 | complete | Private portal app/PE, 225s timeout, exact wrapper isolation, keyless app settings, Blob/OpenAI/Search/Cosmos access |
 | `apim-portal.bicep` | Phase 3 | complete | Standard v2, VNet integration, OpenAPI import, authenticated 30s backend policy; public access staged only for AFD connection approval |
 | `frontdoor-portal.bicep` | Phase 3 | complete | Premium private `web`/`Gateway`/`sites` origins, ordered chat/API routes, 240s timeout, no API cache or single-origin probes |
 | `keyvault-access.bicep` | Phase 1/2 | complete | Conditional managed-identity secret-reader grants; no secret values provisioned |
+| `observability.bicep` | Phase 4 | complete | Conditional action-group-only poison/backlog/dependency/edge/synthetic/disposition alerts consume the locked structured queue trace schema |
 
 ## Test ports
 
@@ -325,3 +326,40 @@ remain assigned to their owning implementation phase.
   private-endpoint approval/propagation, direct-origin denial, and authenticated
   Front Door `/ready` acceptance remain blocked on a customer subscription and
   private-network-connected deployment runner.
+
+## Phase 4 operations verification log
+
+- Final local Phase 4 regression reports `273 passed, 2 skipped`, plus 3
+  golden-rubric subtests. The skips are the opt-in local emulator cases. All 18
+  root/module Bicep files compile, Python compileall passes, and the exact six
+  runtime wrappers match every Function App's enable/disable settings and
+  deployment-script host enumeration. The unchanged frontend suite reports
+  `92 passed`; the production build succeeds with only the inherited bundle-size
+  warning, and the production-dependency audit reports no vulnerabilities.
+- The Bash and PowerShell staging harnesses default to the non-mutating offline
+  contract gate. Live mutation requires an exact dedicated-subscription match
+  plus `STAGING_CHAOS_CONFIRMATION=isolated-nonproduction`; generated fixtures
+  are synthetic and external Splunk/ServiceNow creation must be disabled.
+- The live path covers private storage/origin state, normal intake and report,
+  a three-times-cap burst, duplicate delivery, the distinct Blob publication,
+  analyzer, and embed five-attempt poison paths, required alert-rule presence,
+  authenticated Front Door readiness, and disabled disposition dry run. Poison
+  evidence is intentionally retained for the recovery exercise.
+- Offline staging selection reports `65 passed, 1 skipped` using an isolated
+  Linux Python 3.12 environment, including the mutation-free disposition dry
+  run and synchronization behavior cases. Bash syntax, PowerShell parser
+  validation, Python compileall, Markdown link resolution, `git diff --check`,
+  and credential-pattern scans pass. Live Azure mutation remains for the
+  customer staging runner.
+- The indexed operations package documents immutable image deployment,
+  Anthropic-hosted preview/residency approval, Azure OpenAI, Search ingestion,
+  portal synthetic identity, alert thresholds/owners, ServiceNow read-only
+  disposition sync, vendor-neutral private intake, explicit replay/rollback,
+  normative parity, and the production-readiness decision record.
+- Production deployment requires a supplied action group and, for the portal,
+  both a nonempty synthetic result name and a fresh successful matching
+  `AppAvailabilityResults` row. Live private deployment, alert exercise,
+  synthetic token issuance/rotation, three poison paths, managed-identity
+  service smoke, and isolated ServiceNow acceptance remain `blocked
+  verification` until a customer Azure staging subscription and private runner
+  are available.

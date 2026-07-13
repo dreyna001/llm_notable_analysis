@@ -95,6 +95,47 @@ param ApiManagementSkuName string = 'StandardV2'
 
 param AlertActionGroupResourceId string = ''
 
+@allowed(['development', 'staging', 'production'])
+param DeploymentEnvironment string = 'development'
+
+@description('Application Insights availability result name emitted by the customer authenticated /ready monitor. The stack stores no token.')
+param PortalSyntheticCheckName string = ''
+
+@minValue(0)
+param PoisonQueueDepthThreshold int = 0
+@minValue(1)
+param AnalyzerQueueBacklogThreshold int = 100
+@minValue(1)
+param EmbedQueueBacklogThreshold int = 100
+@minValue(1)
+param ModelErrorThreshold int = 5
+@minValue(1)
+param ModelThrottleThreshold int = 5
+@minValue(1)
+param CosmosThrottleThreshold int = 10
+@minValue(0)
+@maxValue(100)
+param FrontDoor5xxPercentageThreshold int = 5
+@minValue(24)
+param DispositionCompletionGraceHours int = 26
+@minValue(5)
+param QueueTelemetryMaxAgeMinutes int = 10
+
+param ServiceNowBaseUrl string = 'https://your-instance.service-now.com'
+@minValue(1)
+@maxValue(300)
+param ServiceNowTimeoutSeconds int = 15
+param ServiceNowDispositionSyncTokenSecretName string = ''
+param ServiceNowDispositionFieldMap string = '/home/site/wwwroot/deploy/servicenow/disposition_field_map.example.json'
+param ServiceNowDispositionCodeMap string = '/home/site/wwwroot/deploy/servicenow/disposition_code_map.example.json'
+@minValue(1)
+@maxValue(3650)
+param ServiceNowDispositionBackfillDays int = 90
+@minValue(1)
+@maxValue(3650)
+param DispositionRetentionDays int = 365
+param AllowPrivateOutboundEndpoints bool = false
+
 @minValue(1)
 param InputRetentionDays int = 2
 @minValue(1)
@@ -126,6 +167,20 @@ var normalizedCapabilityProfiles = split(toLower(replace(CapabilityProfiles, ' '
 var hasAnalystPortalProfile = contains(normalizedCapabilityProfiles, 'analyst_portal')
 var deployPortal = hasAnalystPortalProfile && !empty(StorageAccountNamePortalUi)
 var deployChatHistoryContainers = hasAnalystPortalProfile && CaseQaChatHistoryEnabled
+var queueDepthTracePrefix = 'notable.queue.depth.v1 '
+var isProduction = DeploymentEnvironment == 'production'
+var validatedAlertActionGroupResourceId = isProduction && empty(AlertActionGroupResourceId)
+  ? fail('AlertActionGroupResourceId is required when DeploymentEnvironment=production.')
+  : AlertActionGroupResourceId
+var validatedSyntheticCheckName = isProduction && deployPortal && empty(PortalSyntheticCheckName)
+  ? fail('PortalSyntheticCheckName is required for a production analyst portal.')
+  : PortalSyntheticCheckName
+var validatedKeyVaultName = ServiceNowDispositionSyncEnabled && empty(KeyVaultName)
+  ? fail('KeyVaultName is required when ServiceNowDispositionSyncEnabled=true.')
+  : KeyVaultName
+var validatedDispositionTokenSecretName = ServiceNowDispositionSyncEnabled && empty(ServiceNowDispositionSyncTokenSecretName)
+  ? fail('ServiceNowDispositionSyncTokenSecretName is required when ServiceNowDispositionSyncEnabled=true.')
+  : ServiceNowDispositionSyncTokenSecretName
 
 module storage 'modules/storage.bicep' = {
   name: '${DeploymentPrefix}-storage'
@@ -263,20 +318,24 @@ module searchAccess 'modules/search-access.bicep' = if (!empty(AzureSearchResour
   }
 }
 
-module keyVaultAccess 'modules/keyvault-access.bicep' = if (!empty(KeyVaultName)) {
+module keyVaultAccess 'modules/keyvault-access.bicep' = if (!empty(validatedKeyVaultName)) {
   name: '${DeploymentPrefix}-keyvault-access'
   params: {
-    keyVaultName: KeyVaultName
-    secretReaderPrincipalIds: [identities.outputs.analyzer.principalId, identities.outputs.disposition.principalId]
+    keyVaultName: validatedKeyVaultName
+    secretReaderPrincipalIds: concat(
+      [identities.outputs.analyzer.principalId],
+      ServiceNowDispositionSyncEnabled ? [identities.outputs.disposition.principalId] : []
+    )
   }
 }
 
-module observability 'modules/observability.bicep' = {
+module observabilityBase 'modules/observability.bicep' = {
   name: '${DeploymentPrefix}-observability'
   params: {
     location: Location
     namePrefix: DeploymentPrefix
-    alertActionGroupResourceId: AlertActionGroupResourceId
+    deployCoreResources: true
+    deployAlertRules: false
   }
 }
 
@@ -312,8 +371,8 @@ module analyzerFunction 'modules/functions-analyzer.bicep' = {
     hostBlobServiceUri: storage.outputs.hostBlobServiceUri
     hostQueueServiceUri: storage.outputs.hostQueueServiceUri
     hostTableServiceUri: storage.outputs.hostTableServiceUri
-    applicationInsightsConnectionString: observability.outputs.applicationInsightsConnectionString
-    keyVaultUri: empty(KeyVaultName) ? '' : keyVaultAccess!.outputs.keyVaultUri
+    applicationInsightsConnectionString: observabilityBase.outputs.applicationInsightsConnectionString
+    keyVaultUri: empty(validatedKeyVaultName) ? '' : keyVaultAccess!.outputs.keyVaultUri
     azureAiFoundryAnthropicBaseUrl: AzureAiFoundryAnthropicBaseUrl
     azureAiFoundryResourceId: AzureAiFoundryResourceId
     azureAiFoundryAnalysisDeployment: AzureAiFoundryAnalysisDeployment
@@ -346,7 +405,7 @@ module embedFunction 'modules/functions-embed.bicep' = {
     hostBlobServiceUri: storage.outputs.hostBlobServiceUri
     hostQueueServiceUri: storage.outputs.hostQueueServiceUri
     hostTableServiceUri: storage.outputs.hostTableServiceUri
-    applicationInsightsConnectionString: observability.outputs.applicationInsightsConnectionString
+    applicationInsightsConnectionString: observabilityBase.outputs.applicationInsightsConnectionString
     azureOpenAiEndpoint: AzureOpenAiEndpoint
     azureOpenAiApiVersion: AzureOpenAiApiVersion
     azureOpenAiEmbeddingsDeployment: AzureOpenAiEmbeddingsDeployment
@@ -357,6 +416,45 @@ module embedFunction 'modules/functions-embed.bicep' = {
     maxInstanceCount: EmbedMaxInstanceCount
   }
   dependsOn: [registryAccess, embedHostAccess, openAiAccess]
+}
+
+module dispositionFunction 'modules/functions-disposition.bicep' = {
+  name: '${DeploymentPrefix}-disposition-function'
+  params: {
+    location: Location
+    functionAppName: '${DeploymentPrefix}-notable-disposition-sync'
+    serverFarmId: functionPlan.id
+    functionSubnetId: network.outputs.functionSubnetId
+    containerImageUri: ContainerImageUri
+    dispositionIdentityResourceId: identities.outputs.disposition.id
+    dispositionIdentityClientId: identities.outputs.disposition.clientId
+    dispositionIdentityPrincipalId: identities.outputs.disposition.principalId
+    inputStorageAccountName: StorageAccountNameInput
+    inputQueueServiceUri: storage.outputs.inputQueueServiceUri
+    outputStorageAccountName: StorageAccountNameOutput
+    outputBlobServiceUri: storage.outputs.outputBlobServiceUri
+    outputQueueServiceUri: storage.outputs.outputQueueServiceUri
+    hostBlobServiceUri: storage.outputs.hostBlobServiceUri
+    hostQueueServiceUri: storage.outputs.hostQueueServiceUri
+    hostTableServiceUri: storage.outputs.hostTableServiceUri
+    applicationInsightsConnectionString: observabilityBase.outputs.applicationInsightsConnectionString
+    keyVaultUri: empty(validatedKeyVaultName) ? '' : keyVaultAccess!.outputs.keyVaultUri
+    cosmosEndpoint: cosmos.outputs.endpoint
+    cosmosDatabaseName: cosmos.outputs.databaseName
+    caseIndexContainerName: cosmos.outputs.caseIndexContainerName
+    dispositionContainerName: cosmos.outputs.dispositionContainerName
+    dispositionSyncStateContainerName: cosmos.outputs.dispositionSyncStateContainerName
+    serviceNowBaseUrl: ServiceNowBaseUrl
+    serviceNowDispositionSyncEnabled: ServiceNowDispositionSyncEnabled
+    serviceNowTimeoutSeconds: ServiceNowTimeoutSeconds
+    serviceNowDispositionSyncTokenSecretName: validatedDispositionTokenSecretName
+    serviceNowDispositionFieldMap: ServiceNowDispositionFieldMap
+    serviceNowDispositionCodeMap: ServiceNowDispositionCodeMap
+    serviceNowDispositionBackfillDays: ServiceNowDispositionBackfillDays
+    dispositionRetentionDays: DispositionRetentionDays
+    allowPrivateOutboundEndpoints: AllowPrivateOutboundEndpoints
+  }
+  dependsOn: [registryAccess, dispositionHostAccess]
 }
 
 module portalFunction 'modules/functions-portal.bicep' = if (deployPortal) {
@@ -377,7 +475,7 @@ module portalFunction 'modules/functions-portal.bicep' = if (deployPortal) {
     hostBlobServiceUri: storage.outputs.hostBlobServiceUri
     hostQueueServiceUri: storage.outputs.hostQueueServiceUri
     hostTableServiceUri: storage.outputs.hostTableServiceUri
-    applicationInsightsConnectionString: observability.outputs.applicationInsightsConnectionString
+    applicationInsightsConnectionString: observabilityBase.outputs.applicationInsightsConnectionString
     cosmosEndpoint: cosmos.outputs.endpoint
     cosmosDatabaseName: cosmos.outputs.databaseName
     caseIndexContainerName: cosmos.outputs.caseIndexContainerName
@@ -432,13 +530,48 @@ module portalFrontDoor 'modules/frontdoor-portal.bicep' = if (deployPortal) {
   }
 }
 
+module observabilityAlerts 'modules/observability.bicep' = if (!empty(validatedAlertActionGroupResourceId)) {
+  name: '${DeploymentPrefix}-monitor-alerts'
+  params: {
+    location: Location
+    namePrefix: DeploymentPrefix
+    deployCoreResources: false
+    deployAlertRules: true
+    alertActionGroupResourceId: validatedAlertActionGroupResourceId
+    inputQueueServiceResourceId: storage.outputs.inputQueueServiceId
+    outputQueueServiceResourceId: storage.outputs.outputQueueServiceId
+    foundryResourceId: AzureAiFoundryResourceId
+    azureOpenAiResourceId: AzureOpenAiResourceId
+    cosmosResourceId: cosmos.outputs.accountId
+    frontDoorProfileResourceId: deployPortal ? portalFrontDoor!.outputs.profileId : ''
+    dispositionSyncEnabled: ServiceNowDispositionSyncEnabled
+    analystPortalEnabled: deployPortal
+    syntheticCheckName: validatedSyntheticCheckName
+    queueDepthTracePrefix: queueDepthTracePrefix
+    poisonQueueDepthThreshold: PoisonQueueDepthThreshold
+    analyzerQueueBacklogThreshold: AnalyzerQueueBacklogThreshold
+    embedQueueBacklogThreshold: EmbedQueueBacklogThreshold
+    modelErrorThreshold: ModelErrorThreshold
+    modelThrottleThreshold: ModelThrottleThreshold
+    cosmosThrottleThreshold: CosmosThrottleThreshold
+    frontDoor5xxPercentageThreshold: FrontDoor5xxPercentageThreshold
+    dispositionCompletionGraceHours: DispositionCompletionGraceHours
+    queueTelemetryMaxAgeMinutes: QueueTelemetryMaxAgeMinutes
+  }
+  dependsOn: [analyzerFunction, embedFunction, dispositionFunction]
+}
+
 output DeploymentLocation string = Location
 output ConfiguredCloud string = cloudEnvironment
 output AnalyzerFunctionAppName string = analyzerFunction.outputs.functionAppName
 output EmbedFunctionAppName string = embedFunction.outputs.functionAppName
+output DispositionFunctionAppName string = dispositionFunction.outputs.functionAppName
 output PortalFunctionAppName string = deployPortal ? portalFunction!.outputs.functionAppName : ''
 output PortalApiManagementName string = deployPortal ? portalApiManagement!.outputs.apiManagementName : ''
 output PortalFrontDoorProfileName string = deployPortal ? portalFrontDoor!.outputs.profileName : ''
+output MonitoringAlertRuleNames array = empty(validatedAlertActionGroupResourceId) ? [] : observabilityAlerts!.outputs.alertRuleNames
+output ApplicationInsightsName string = '${DeploymentPrefix}-insights'
+output LogAnalyticsWorkspaceCustomerId string = observabilityBase.outputs.workspaceCustomerId
 output AnalysisDeployment string = AzureAiFoundryAnalysisDeployment
 output AzureOpenAiRegion string = AzureOpenAiResourceRegion
 output ReportSinkMode string = ReportSinkMode

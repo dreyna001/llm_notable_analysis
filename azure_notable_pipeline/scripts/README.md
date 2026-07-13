@@ -20,8 +20,12 @@ The scripts never print app-setting values. Failed setting checks identify only
 the app and offending setting name.
 
 Run uploads and deployment validation from a private-network-connected runner.
-Phase 4 adds the full staging `test-pipeline.ps1`/`.sh` workflow and portal
-private-origin checks.
+`test-pipeline.ps1` and `.sh` default to a non-mutating offline contract gate.
+Their explicit staging mode requires the named dedicated subscription and a
+chaos acknowledgement, generates synthetic data only, rejects enabled external
+writeback, and covers private intake, a 3x burst, three five-attempt poison
+paths, duplicate delivery, portal auth/ownership/OpenAPI, chat timeout,
+disposition dry run, and managed-identity service smoke.
 
 For `analyst_portal`, both deployment helpers also build/test the same-origin
 SPA, upload `$web` with Microsoft Entra authentication, approve and poll all
@@ -30,3 +34,5 @@ then disable APIM public access. The final gate rejects a successful direct
 APIM request, asserts disabled public access on Function/Storage, and requires
 authenticated `/ready` through Front Door.
 See [`ANALYST_PORTAL_DEPLOYMENT.md`](../docs/operations/ANALYST_PORTAL_DEPLOYMENT.md).
+The complete staging inputs and production gate are in
+[`AZURE_READINESS.md`](../docs/delivery_package/AZURE_READINESS.md).

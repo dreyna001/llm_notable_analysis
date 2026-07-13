@@ -43,6 +43,7 @@ def test_function_apps_have_no_secret_fallback_settings() -> None:
         for name in (
             "functions-analyzer.bicep",
             "functions-embed.bicep",
+            "functions-disposition.bicep",
             "functions-portal.bicep",
         )
     )
@@ -86,21 +87,31 @@ def test_single_digest_image_and_wrapper_isolation_are_explicit() -> None:
     main = _read(AZURE / "main.bicep")
     analyzer = _read(AZURE / "modules" / "functions-analyzer.bicep")
     embed = _read(AZURE / "modules" / "functions-embed.bicep")
+    disposition = _read(AZURE / "modules" / "functions-disposition.bicep")
     portal = _read(AZURE / "modules" / "functions-portal.bicep")
-    assert main.count("containerImageUri: ContainerImageUri") == 3
+    assert main.count("containerImageUri: ContainerImageUri") == 4
     assert "@sha256" in main
     expected_wrappers = {
-        "intake_blob": {"analyzer": "false", "embed": "true", "portal": "true"},
-        "analyzer_queue": {"analyzer": "false", "embed": "true", "portal": "true"},
-        "case_embed_queue": {"analyzer": "true", "embed": "false", "portal": "true"},
+        "intake_blob": {"analyzer": "false", "embed": "true", "disposition": "true", "portal": "true"},
+        "analyzer_queue": {"analyzer": "false", "embed": "true", "disposition": "true", "portal": "true"},
+        "case_embed_queue": {"analyzer": "true", "embed": "false", "disposition": "true", "portal": "true"},
         "disposition_sync_timer": {"analyzer": "true", "embed": "true", "portal": "true"},
-        "portal_http": {"analyzer": "true", "embed": "true", "portal": "false"},
+        "operations_monitor_timer": {"analyzer": "true", "embed": "true", "disposition": "false", "portal": "true"},
+        "portal_http": {"analyzer": "true", "embed": "true", "disposition": "true", "portal": "false"},
     }
-    modules = {"analyzer": analyzer, "embed": embed, "portal": portal}
+    modules = {
+        "analyzer": analyzer,
+        "embed": embed,
+        "disposition": disposition,
+        "portal": portal,
+    }
     for wrapper, expected_by_app in expected_wrappers.items():
         for app_name, expected_value in expected_by_app.items():
             setting = f"AzureWebJobs.{wrapper}.Disabled', value: '{expected_value}'"
             assert modules[app_name].count(setting) == 1
+    assert "AzureWebJobs.disposition_sync_timer.Disabled', value: string(!serviceNowDispositionSyncEnabled)" in disposition
+    for app_name, module in modules.items():
+        assert module.count("AzureWebJobs.") == 6, app_name
     assert "functionAppScaleLimit" in analyzer
     assert "functionAppScaleLimit" in embed
 
@@ -194,7 +205,13 @@ def test_deployment_scripts_gate_on_host_identity_storage_and_exact_functions() 
         assert "AzureWebJobsStorage__clientId" in script
         for service in ("blob", "queue", "table"):
             assert f"AzureWebJobsStorage__${{service}}ServiceUri" in script
-        for function_name in ("intake_blob", "analyzer_queue", "case_embed_queue"):
+        for function_name in (
+            "intake_blob",
+            "analyzer_queue",
+            "case_embed_queue",
+            "disposition_sync_timer",
+            "operations_monitor_timer",
+        ):
             assert function_name in script
     assert "Assert-AzSucceeded" in scripts[1]
 
@@ -382,3 +399,81 @@ def test_deployment_scripts_pass_required_cosmos_and_capability_contracts() -> N
             "CaseQaChatHistoryEnabled",
         ):
             assert setting in script
+
+
+def test_disposition_app_is_always_deployed_keyless_and_least_privilege() -> None:
+    main = _read(AZURE / "main.bicep")
+    disposition = _read(AZURE / "modules" / "functions-disposition.bicep")
+    assert "module dispositionFunction 'modules/functions-disposition.bicep' = {" in main
+    assert "AzureFunctionsJobHost__functionTimeout', value: '00:15:00'" in disposition
+    assert "DISPOSITION_SYNC_SCHEDULE', value: '0 0 0 * * *'" in disposition
+    assert "OPERATIONS_MONITOR_SCHEDULE', value: '0 */5 * * * *'" in disposition
+    assert "INPUT_QUEUE_SERVICE_URI" in disposition
+    assert "OUTPUT_QUEUE_SERVICE_URI" in disposition
+    assert "queueReaderRoleId = '19e7f393-937e-4f77-808e-94535e297925'" in disposition
+    assert "resource outputBlobReader" in disposition
+    assert "if (serviceNowDispositionSyncEnabled)" in disposition
+    assert "acrUseManagedIdentityCreds: true" in disposition
+    assert "AzureWebJobsStorage__credential" in disposition
+    for forbidden in (
+        "AzureWebJobsStorage',",
+        "DOCKER_REGISTRY_SERVER_PASSWORD",
+        "SERVICENOW_DISPOSITION_SYNC_TOKEN=",
+        "COSMOS_KEY",
+        "STORAGE_ACCOUNT_KEY",
+    ):
+        assert forbidden not in disposition
+
+
+def test_monitoring_alerts_are_conditional_complete_and_action_group_only() -> None:
+    main = _read(AZURE / "main.bicep")
+    monitoring = _read(AZURE / "modules" / "observability.bicep")
+    assert "DeploymentEnvironment string = 'development'" in main
+    assert "AlertActionGroupResourceId is required when DeploymentEnvironment=production." in main
+    assert "createAlerts = deployAlertRules && !empty(alertActionGroupResourceId)" in monitoring
+    assert "Microsoft.Insights/actionGroups" not in monitoring
+    for queue_name in (
+        "webjobs-blobtrigger-poison",
+        "notable-analysis-jobs-poison",
+        "case-embed-invocations-poison",
+        "notable-analysis-jobs",
+        "case-embed-invocations",
+    ):
+        assert queue_name in monitoring
+    assert "var queueDepthTracePrefix = 'notable.queue.depth.v1 '" in main
+    assert "param queueDepthTracePrefix string" in monitoring
+    assert "parse_json" in monitoring
+    assert "queueTelemetryMaxAgeMinutes" in monitoring
+    assert "Oldest <= ago(14m)" in monitoring
+    assert "MinimumDepth" in monitoring
+    assert "windowSize: 'PT15M'" in monitoring
+    for alert_signal in (
+        "function-failures",
+        "function-timeouts",
+        "ModelRequests",
+        "AzureOpenAIRequests",
+        "TotalRequests",
+        "Percentage5XX",
+        "AppAvailabilityResults",
+        "disposition-completion-missed",
+    ):
+        assert alert_signal in monitoring
+    assert "actionGroups: [alertActionGroupResourceId]" in monitoring
+
+
+def test_deployment_scripts_enforce_production_monitoring_and_validate_fourth_app() -> None:
+    for name in ("setup-and-deploy.sh", "setup-and-deploy.ps1"):
+        script = _read(ROOT / "scripts" / name)
+        for contract in (
+            "DEPLOYMENT_ENVIRONMENT",
+            "ALERT_ACTION_GROUP_RESOURCE_ID",
+            "PORTAL_SYNTHETIC_CHECK_NAME",
+            "ServiceNowDispositionSyncTokenSecretName",
+            "DispositionFunctionAppName",
+            "MonitoringAlertRuleNames",
+            "operations_monitor_timer",
+            "Microsoft.Insights/actionGroups",
+            "AppAvailabilityResults",
+            "fresh successful",
+        ):
+            assert contract in script

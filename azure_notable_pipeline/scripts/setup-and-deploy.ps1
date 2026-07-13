@@ -24,6 +24,11 @@ $location = if ($env:AZURE_LOCATION) { $env:AZURE_LOCATION } else { 'eastus' }
 $capabilityProfiles = if ($env:CAPABILITY_PROFILES) { $env:CAPABILITY_PROFILES } else { 'core' }
 $capabilityProfiles = $capabilityProfiles -replace '\s', ''
 $deployPortal = ",${capabilityProfiles},".ToLowerInvariant().Contains(',analyst_portal,')
+$deploymentEnvironment = if ($env:DEPLOYMENT_ENVIRONMENT) { $env:DEPLOYMENT_ENVIRONMENT.ToLowerInvariant() } else { 'development' }
+if ($deploymentEnvironment -notin @('development', 'staging', 'production')) {
+    throw 'DEPLOYMENT_ENVIRONMENT must be development, staging, or production.'
+}
+$dispositionSyncEnabled = if ($env:SERVICENOW_DISPOSITION_SYNC_ENABLED) { $env:SERVICENOW_DISPOSITION_SYNC_ENABLED } else { 'false' }
 if ($deployPortal) {
     $portalRequired = @(
         'PORTAL_UI_STORAGE_ACCOUNT_NAME', 'PORTAL_UI_DEPLOYER_PRINCIPAL_ID',
@@ -44,7 +49,26 @@ if ($deployPortal) {
         throw 'PORTAL_ENTRA_REQUIRED_APP_ROLE is required when PORTAL_AUTH_MODE=iam.'
     }
 }
+if ($deploymentEnvironment -eq 'production' -and [string]::IsNullOrWhiteSpace($env:ALERT_ACTION_GROUP_RESOURCE_ID)) {
+    throw 'ALERT_ACTION_GROUP_RESOURCE_ID is required when DEPLOYMENT_ENVIRONMENT=production.'
+}
+if ($deploymentEnvironment -eq 'production' -and $deployPortal -and [string]::IsNullOrWhiteSpace($env:PORTAL_SYNTHETIC_CHECK_NAME)) {
+    throw 'PORTAL_SYNTHETIC_CHECK_NAME is required for a production analyst portal.'
+}
+if ($dispositionSyncEnabled -ieq 'true') {
+    foreach ($name in @('KEY_VAULT_NAME', 'SERVICENOW_BASE_URL', 'SERVICENOW_DISPOSITION_SYNC_TOKEN_SECRET_NAME')) {
+        if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+            throw "Required disposition-sync environment variable is unset: $name"
+        }
+    }
+}
 az account set --subscription $env:AZURE_SUBSCRIPTION_ID
+if ($env:ALERT_ACTION_GROUP_RESOURCE_ID) {
+    $actionGroupType = "$(az resource show --ids $env:ALERT_ACTION_GROUP_RESOURCE_ID --query type -o tsv)".Trim()
+    if ($LASTEXITCODE -ne 0 -or $actionGroupType -ine 'Microsoft.Insights/actionGroups') {
+        throw 'ALERT_ACTION_GROUP_RESOURCE_ID must identify an existing Microsoft.Insights/actionGroups resource.'
+    }
+}
 $acrLoginServer = az resource show --ids $env:CONTAINER_REGISTRY_RESOURCE_ID --query properties.loginServer -o tsv
 if (-not $env:CONTAINER_IMAGE_URI.StartsWith("$acrLoginServer/", [System.StringComparison]::OrdinalIgnoreCase)) {
     throw 'Container image registry does not match CONTAINER_REGISTRY_RESOURCE_ID.'
@@ -71,7 +95,15 @@ $parameters = @(
     "CosmosAccountName=$($env:COSMOS_ACCOUNT_NAME)",
     "CosmosDatabaseName=$($env:COSMOS_DATABASE_NAME)",
     "CapabilityProfiles=$capabilityProfiles",
-    "ServiceNowDispositionSyncEnabled=$(if ($env:SERVICENOW_DISPOSITION_SYNC_ENABLED) { $env:SERVICENOW_DISPOSITION_SYNC_ENABLED } else { 'false' })",
+    "ServiceNowDispositionSyncEnabled=$dispositionSyncEnabled",
+    "ServiceNowBaseUrl=$(if ($env:SERVICENOW_BASE_URL) { $env:SERVICENOW_BASE_URL } else { 'https://your-instance.service-now.com' })",
+    "ServiceNowTimeoutSeconds=$(if ($env:SERVICENOW_TIMEOUT_SECONDS) { $env:SERVICENOW_TIMEOUT_SECONDS } else { '15' })",
+    "ServiceNowDispositionSyncTokenSecretName=$($env:SERVICENOW_DISPOSITION_SYNC_TOKEN_SECRET_NAME)",
+    "ServiceNowDispositionFieldMap=$(if ($env:SERVICENOW_DISPOSITION_FIELD_MAP) { $env:SERVICENOW_DISPOSITION_FIELD_MAP } else { '/home/site/wwwroot/deploy/servicenow/disposition_field_map.example.json' })",
+    "ServiceNowDispositionCodeMap=$(if ($env:SERVICENOW_DISPOSITION_CODE_MAP) { $env:SERVICENOW_DISPOSITION_CODE_MAP } else { '/home/site/wwwroot/deploy/servicenow/disposition_code_map.example.json' })",
+    "ServiceNowDispositionBackfillDays=$(if ($env:SERVICENOW_DISPOSITION_BACKFILL_DAYS) { $env:SERVICENOW_DISPOSITION_BACKFILL_DAYS } else { '90' })",
+    "DispositionRetentionDays=$(if ($env:DISPOSITION_RETENTION_DAYS) { $env:DISPOSITION_RETENTION_DAYS } else { '365' })",
+    "AllowPrivateOutboundEndpoints=$(if ($env:ALLOW_PRIVATE_OUTBOUND_ENDPOINTS) { $env:ALLOW_PRIVATE_OUTBOUND_ENDPOINTS } else { 'false' })",
     "CaseQaChatHistoryEnabled=$(if ($env:CASE_QA_CHAT_HISTORY_ENABLED) { $env:CASE_QA_CHAT_HISTORY_ENABLED } else { 'false' })",
     "FunctionsHostStorageAccountName=$($env:FUNCTIONS_HOST_STORAGE_ACCOUNT_NAME)",
     "StorageAccountNameInput=$($env:INPUT_STORAGE_ACCOUNT_NAME)",
@@ -84,16 +116,32 @@ $parameters = @(
     "PortalEntraRequiredAppRole=$($env:PORTAL_ENTRA_REQUIRED_APP_ROLE)",
     "ApiManagementPublisherEmail=$($env:APIM_PUBLISHER_EMAIL)",
     "ApiManagementPublisherName=$(if ($env:APIM_PUBLISHER_NAME) { $env:APIM_PUBLISHER_NAME } else { 'Notable Analysis' })",
-    "PortalChatTimeoutSec=$(if ($env:PORTAL_CHAT_TIMEOUT_SEC) { $env:PORTAL_CHAT_TIMEOUT_SEC } else { '225' })"
+    "PortalChatTimeoutSec=$(if ($env:PORTAL_CHAT_TIMEOUT_SEC) { $env:PORTAL_CHAT_TIMEOUT_SEC } else { '225' })",
+    "AnalyzerMaxInstanceCount=$(if ($env:ANALYZER_MAX_INSTANCE_COUNT) { $env:ANALYZER_MAX_INSTANCE_COUNT } else { '5' })",
+    "EmbedMaxInstanceCount=$(if ($env:EMBED_MAX_INSTANCE_COUNT) { $env:EMBED_MAX_INSTANCE_COUNT } else { '5' })",
+    "DeploymentEnvironment=$deploymentEnvironment",
+    "AlertActionGroupResourceId=$($env:ALERT_ACTION_GROUP_RESOURCE_ID)",
+    "PortalSyntheticCheckName=$($env:PORTAL_SYNTHETIC_CHECK_NAME)",
+    "PoisonQueueDepthThreshold=$(if ($env:POISON_QUEUE_DEPTH_THRESHOLD) { $env:POISON_QUEUE_DEPTH_THRESHOLD } else { '0' })",
+    "AnalyzerQueueBacklogThreshold=$(if ($env:ANALYZER_QUEUE_BACKLOG_THRESHOLD) { $env:ANALYZER_QUEUE_BACKLOG_THRESHOLD } else { '100' })",
+    "EmbedQueueBacklogThreshold=$(if ($env:EMBED_QUEUE_BACKLOG_THRESHOLD) { $env:EMBED_QUEUE_BACKLOG_THRESHOLD } else { '100' })",
+    "ModelErrorThreshold=$(if ($env:MODEL_ERROR_THRESHOLD) { $env:MODEL_ERROR_THRESHOLD } else { '5' })",
+    "ModelThrottleThreshold=$(if ($env:MODEL_THROTTLE_THRESHOLD) { $env:MODEL_THROTTLE_THRESHOLD } else { '5' })",
+    "CosmosThrottleThreshold=$(if ($env:COSMOS_THROTTLE_THRESHOLD) { $env:COSMOS_THROTTLE_THRESHOLD } else { '10' })",
+    "FrontDoor5xxPercentageThreshold=$(if ($env:FRONTDOOR_5XX_PERCENTAGE_THRESHOLD) { $env:FRONTDOOR_5XX_PERCENTAGE_THRESHOLD } else { '5' })",
+    "DispositionCompletionGraceHours=$(if ($env:DISPOSITION_COMPLETION_GRACE_HOURS) { $env:DISPOSITION_COMPLETION_GRACE_HOURS } else { '26' })",
+    "QueueTelemetryMaxAgeMinutes=$(if ($env:QUEUE_TELEMETRY_MAX_AGE_MINUTES) { $env:QUEUE_TELEMETRY_MAX_AGE_MINUTES } else { '10' })"
 )
 az deployment group create --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --template-file deploy/azure/main.bicep --parameters $parameters --output none
 
 $analyzer = az deployment group show --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --query properties.outputs.AnalyzerFunctionAppName.value -o tsv
 $embed = az deployment group show --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --query properties.outputs.EmbedFunctionAppName.value -o tsv
+$disposition = "$(az deployment group show --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --query properties.outputs.DispositionFunctionAppName.value -o tsv)".Trim()
 $portal = "$(az deployment group show --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --query properties.outputs.PortalFunctionAppName.value -o tsv)".Trim()
 $apim = "$(az deployment group show --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --query properties.outputs.PortalApiManagementName.value -o tsv)".Trim()
 $frontDoorProfile = "$(az deployment group show --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --query properties.outputs.PortalFrontDoorProfileName.value -o tsv)".Trim()
 $frontDoorHost = "$(az deployment group show --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --query properties.outputs.PortalFrontDoorHostName.value -o tsv)".Trim()
+$workspaceCustomerId = "$(az deployment group show --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --query properties.outputs.LogAnalyticsWorkspaceCustomerId.value -o tsv)".Trim()
 
 $forbiddenSettingPattern = '^(AZUREWEBJOBSSTORAGE|AZUREWEBJOBSDASHBOARD|WEBSITE_CONTENTAZUREFILECONNECTIONSTRING|WEBSITE_CONTENTSHARE)$|(^|_)(DOCKER_REGISTRY_SERVER|ACR|AZURE_CONTAINER_REGISTRY|CONTAINER_REGISTRY)(_|$).*(USERNAME|PASSWORD|API_?KEY|ACCESS_?KEY|KEY|TOKEN|SECRET|CREDENTIAL|CONNECTION_?STRING)|(^|_)(AZURE_)?(STORAGE|BLOB|QUEUE|TABLE|FILE|FILES)(_|$).*(ACCOUNT_?KEY|ACCESS_?KEY|API_?KEY|KEY|CONNECTION_?STRING|SAS(_TOKEN)?|PASSWORD|SECRET)|(^|_)(AZURE_AI_FOUNDRY|AI_FOUNDRY|FOUNDRY|ANTHROPIC|AZURE_OPENAI|OPENAI|AZURE_SEARCH|COGNITIVE_SEARCH|SEARCH_SERVICE|SEARCH|COSMOSDB|COSMOS|AZURE_COSMOS)(_|$).*(API_?KEY|ACCOUNT_?KEY|ACCESS_?KEY|PRIMARY_?KEY|SECONDARY_?KEY|MASTER_?KEY|KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|CONNECTION_?STRING)'
 
@@ -209,13 +257,78 @@ function Wait-FunctionHost {
     throw "$App did not reach a healthy Functions host with the exact expected enabled function set after managed-identity image-pull and host-storage propagation."
 }
 
-foreach ($app in @($analyzer, $embed)) {
+foreach ($app in @($analyzer, $embed, $disposition)) {
     Assert-NoForbiddenSettings -App $app
     Assert-ManagedIdentityConfiguration -App $app
 }
 
 Wait-FunctionHost -App $analyzer -ExpectedFunctions @('intake_blob', 'analyzer_queue')
 Wait-FunctionHost -App $embed -ExpectedFunctions @('case_embed_queue')
+if ($dispositionSyncEnabled -ieq 'true') {
+    Wait-FunctionHost -App $disposition -ExpectedFunctions @('disposition_sync_timer', 'operations_monitor_timer')
+}
+else {
+    Wait-FunctionHost -App $disposition -ExpectedFunctions @('operations_monitor_timer')
+}
+
+function Wait-QueueDepthTelemetry {
+    $expected = @(
+        'webjobs-blobtrigger-poison',
+        'notable-analysis-jobs',
+        'notable-analysis-jobs-poison',
+        'case-embed-invocations',
+        'case-embed-invocations-poison'
+    ) | Sort-Object
+    $query = "AppTraces | where TimeGenerated > ago(15m) and Message startswith 'notable.queue.depth.v1 ' | extend sample=parse_json(substring(Message, strlen('notable.queue.depth.v1 '))) | where toint(sample.schema_version) == 1 | summarize arg_max(TimeGenerated, *) by QueueName=tostring(sample.queue_name) | project QueueName"
+    foreach ($attempt in 1..48) {
+        $actual = @(
+            az monitor log-analytics query `
+                --workspace $workspaceCustomerId `
+                --analytics-query $query `
+                --query 'tables[0].rows[][0]' `
+                -o tsv 2>$null
+        ) | ForEach-Object { "$_".Trim() } | Where-Object { $_ } | Sort-Object
+        if ($LASTEXITCODE -eq 0 -and ($actual -join "`n") -ceq ($expected -join "`n")) {
+            return
+        }
+        Start-Sleep -Seconds 10
+    }
+    throw 'The operations monitor did not emit fresh structured depth telemetry for all five queues.'
+}
+
+if ($env:ALERT_ACTION_GROUP_RESOURCE_ID) {
+    Wait-QueueDepthTelemetry
+}
+
+function Assert-MonitoringAlerts {
+    $expectedAlerts = @(
+        az deployment group show `
+            --name $deploymentName `
+            --resource-group $env:AZURE_RESOURCE_GROUP `
+            --query 'properties.outputs.MonitoringAlertRuleNames.value[]' `
+            -o tsv
+    ) | ForEach-Object { "$_".Trim() } | Where-Object { $_ }
+    Assert-AzSucceeded -Operation 'reading deployed monitoring alert outputs'
+    if (-not $env:ALERT_ACTION_GROUP_RESOURCE_ID) {
+        if ($expectedAlerts.Count -ne 0) { throw 'Alert rules were unexpectedly returned without an action group.' }
+        return
+    }
+    foreach ($alertName in $expectedAlerts) {
+        $alertId = "$(az resource list --resource-group $env:AZURE_RESOURCE_GROUP --name $alertName --query '[0].id' -o tsv)".Trim()
+        if (-not $alertId) { throw "Expected monitoring alert was not deployed: $alertName" }
+        $enabled = "$(az resource show --ids $alertId --query properties.enabled -o tsv)".Trim()
+        if ($enabled -ine 'true') { throw "Monitoring alert is not enabled: $alertName" }
+        $actionGroup = "$(az resource show --ids $alertId --query 'properties.actions.actionGroups[0]' -o tsv 2>$null)".Trim()
+        if (-not $actionGroup) {
+            $actionGroup = "$(az resource show --ids $alertId --query 'properties.actions[0].actionGroupId' -o tsv 2>$null)".Trim()
+        }
+        if ($actionGroup -ine $env:ALERT_ACTION_GROUP_RESOURCE_ID) {
+            throw "Monitoring alert is not wired to the supplied action group: $alertName"
+        }
+    }
+}
+
+Assert-MonitoringAlerts
 
 function Approve-PendingPrivateConnections {
     param([Parameter(Mandatory = $true)][string]$TargetResourceId)
@@ -340,6 +453,33 @@ if ($deployPortal) {
         -Uri "https://${frontDoorHost}/ready" `
         -Headers @{ Authorization = "Bearer $($env:PORTAL_VALIDATION_BEARER_TOKEN)" } `
         -TimeoutSec 240 | Out-Null
+
+    if ($deploymentEnvironment -eq 'production') {
+        $syntheticNameBytes = [Text.Encoding]::UTF8.GetBytes($env:PORTAL_SYNTHETIC_CHECK_NAME)
+        $syntheticNameBase64 = [Convert]::ToBase64String($syntheticNameBytes)
+        $syntheticQuery = "let checkName=base64_decode_tostring('$syntheticNameBase64'); AppAvailabilityResults | where TimeGenerated > ago(15m) and Name == checkName | summarize Results=count(), Successes=countif(Success == true)"
+        $syntheticReady = $false
+        foreach ($attempt in 1..30) {
+            $row = @(
+                az monitor log-analytics query `
+                    --workspace $workspaceCustomerId `
+                    --analytics-query $syntheticQuery `
+                    --query 'tables[0].rows[0]' `
+                    -o tsv 2>$null
+            )
+            if ($LASTEXITCODE -eq 0 -and $row.Count -gt 0) {
+                $values = ("$($row[0])" -split "`t")
+                if ($values.Count -ge 2 -and [int64]$values[0] -gt 0 -and [int64]$values[1] -gt 0) {
+                    $syntheticReady = $true
+                    break
+                }
+            }
+            Start-Sleep -Seconds 10
+        }
+        if (-not $syntheticReady) {
+            throw 'Production requires a fresh successful AppAvailabilityResults row from the named customer authenticated /ready monitor.'
+        }
+    }
 }
 
-Write-Host "Deployment $deploymentName completed: $analyzer, $embed$(if ($portal) { ", $portal" })."
+Write-Host "Deployment $deploymentName completed: $analyzer, $embed, $disposition$(if ($portal) { ", $portal" })."

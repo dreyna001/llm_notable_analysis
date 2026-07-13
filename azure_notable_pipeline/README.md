@@ -8,6 +8,9 @@ Phase 0 establishes the package, portable behavior baseline, Azure runtime
 contract, native boundary shells, Functions container, and Bicep module layout.
 Implementation status is tracked in
 [`docs/planning/AZURE_IMPLEMENTATION_TRACKER.md`](docs/planning/AZURE_IMPLEMENTATION_TRACKER.md).
+Start operator handoff at [`docs/README.md`](docs/README.md) and use the
+[`Azure readiness checklist`](docs/delivery_package/AZURE_READINESS.md) before
+production intake.
 
 The locked private intake path is a polling Blob trigger on
 `input/incoming/{name}`. Application code publishes a strict v1 job to

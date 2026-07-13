@@ -80,6 +80,7 @@ var applicationSettings = [
   { name: 'AzureWebJobs.analyzer_queue.Disabled', value: 'true' }
   { name: 'AzureWebJobs.case_embed_queue.Disabled', value: 'true' }
   { name: 'AzureWebJobs.disposition_sync_timer.Disabled', value: 'true' }
+  { name: 'AzureWebJobs.operations_monitor_timer.Disabled', value: 'true' }
   { name: 'AzureWebJobs.portal_http.Disabled', value: 'false' }
 ]
 
