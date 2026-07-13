@@ -24,6 +24,7 @@ from azure_notable_pipeline.ttp_analyzer import (
 from azure_notable_pipeline.azure_anthropic_gateway import (
     AnthropicGatewayRateLimitError,
 )
+from azure_notable_pipeline.config import Config
 
 
 def _valid_payload() -> dict:
@@ -205,3 +206,105 @@ def test_runtime_can_propagate_retryable_foundry_failures(monkeypatch) -> None:
 
     with pytest.raises(AnthropicGatewayRateLimitError, match="limited"):
         analyzer.analyze_ttp("alert")
+
+
+def _query_hypotheses() -> list[dict]:
+    return [
+        {
+            "hypothesis_type": "benign" if index < 3 else "adversary",
+            "hypothesis": f"hypothesis {index}",
+            "evidence_support": [],
+            "evidence_gaps": [],
+            "best_pivots": [],
+        }
+        for index in range(6)
+    ]
+
+
+def test_native_optional_query_generation_keeps_deterministic_validators(
+    monkeypatch,
+) -> None:
+    analyzer = AnthropicAnalyzer(gateway=Mock())
+    spl_payload = {
+        "competing_hypotheses": [
+            {
+                "query_strategy": "resolve_unknown",
+                "primary_spl_query": "index=main user=alice | stats count",
+                "why_this_query": "Counts related events.",
+                "supports_if": "Related events exist.",
+                "weakens_if": "No events exist.",
+            }
+            for _ in range(6)
+        ]
+    }
+    monkeypatch.setattr(
+        analyzer,
+        "_request_json_object",
+        lambda _prompt, **_kwargs: (spl_payload, None, '{"generated":true}'),
+    )
+
+    spl = analyzer.generate_spl_queries(
+        alert_text="user=alice",
+        analysis_result={"competing_hypotheses": _query_hypotheses()},
+        config=Config(SPL_QUERY_GENERATION_ENABLED=True),
+    )
+
+    assert spl["metadata"]["spl_query_generation_status"] == "success"
+    assert spl["competing_hypotheses"][0]["primary_spl_query"].startswith(
+        "index=main"
+    )
+
+    elastic_payload = {
+        "competing_hypotheses": [
+            {
+                "query_strategy": "resolve_unknown",
+                "primary_elastic_query": {
+                    "index_pattern": "security-events",
+                    "body": {
+                        "size": 25,
+                        "query": {
+                            "bool": {
+                                "filter": [
+                                    {"term": {"user": "alice"}},
+                                    {
+                                        "range": {
+                                            "@timestamp": {
+                                                "gte": "now-24h",
+                                                "lte": "now",
+                                            }
+                                        }
+                                    },
+                                ]
+                            }
+                        },
+                    },
+                },
+                "why_this_query": "Finds related events.",
+                "supports_if": "Related events exist.",
+                "weakens_if": "No events exist.",
+            }
+            for _ in range(6)
+        ]
+    }
+    monkeypatch.setattr(
+        analyzer,
+        "_request_json_object",
+        lambda _prompt, **_kwargs: (elastic_payload, None, '{"generated":true}'),
+    )
+    elastic = analyzer.generate_elastic_queries(
+        alert_text="user=alice",
+        analysis_result={"competing_hypotheses": _query_hypotheses()},
+        config=Config(
+            ELASTIC_QUERY_GENERATION_ENABLED=True,
+            ELASTICSEARCH_INDEX_ALLOWLIST="security-events",
+            ELASTICSEARCH_ALLOWED_FIELDS="@timestamp,user",
+        ),
+    )
+
+    assert elastic["metadata"]["elastic_query_generation_status"] == "success"
+    assert (
+        elastic["competing_hypotheses"][0]["primary_elastic_query"][
+            "index_pattern"
+        ]
+        == "security-events"
+    )

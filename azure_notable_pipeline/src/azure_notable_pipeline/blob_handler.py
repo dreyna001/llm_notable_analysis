@@ -16,13 +16,17 @@ from pathlib import PurePosixPath
 from typing import Any, Callable, Mapping
 
 from .analyzer_job import AnalyzerQueueJob
+from .azure_search_retrieval import retrieve_soc_context
 from .blob_store import (
     BlobConditionFailedError,
     BlobReadResult,
     read_blob_result,
     write_text_blob,
 )
+from .case_archive import SourceContext, archive_case
 from .config import Config, load_config
+from .elasticsearch_investigation import execute_hypothesis_elasticsearch_queries
+from .elasticsearch_query_grounding import retrieve_elasticsearch_grounding
 from .html_generator import generate_html_report
 from .idempotency import (
     begin_side_effect,
@@ -31,8 +35,11 @@ from .idempotency import (
 )
 from .markdown_generator import generate_markdown_report
 from .queue_publisher import enqueue_analyzer_job, enqueue_case_embed
+from .query_result_enrichment import enrich_analysis_with_query_results
 from .runtime_security import validate_https_url
 from .secret_provider import read_secret_field
+from .spl_query_grounding import retrieve_spl_query_grounding
+from .splunk_investigation import HttpSplunkMcpClient, execute_hypothesis_queries
 from .ttp_analyzer import AnthropicAnalyzer
 
 logger = logging.getLogger(__name__)
@@ -443,6 +450,45 @@ def _splunk_api_token(config: Config) -> str:
     )
 
 
+def _splunk_mcp_token(config: Config) -> str:
+    secret_name = config.SPLUNK_MCP_AUTH_SECRET_NAME.strip()
+    if not secret_name:
+        return ""
+    try:
+        return read_secret_field(
+            secret_name,
+            field=config.SPLUNK_MCP_AUTH_SECRET_FIELD,
+            allow_plain_text=True,
+        )
+    except Exception as exc:  # Optional investigation reports missing credentials.
+        logger.error("Could not resolve the Splunk MCP token: %s", exc)
+        return ""
+
+
+def _splunk_investigation_api_token(config: Config) -> str:
+    try:
+        return _splunk_api_token(config)
+    except Exception as exc:  # Match the fail-soft AWS integration boundary.
+        logger.error("Could not resolve the Splunk investigation token: %s", exc)
+        return ""
+
+
+def _elasticsearch_api_key(config: Config) -> str:
+    secret_name = config.ELASTICSEARCH_API_KEY_SECRET_NAME.strip()
+    if not secret_name:
+        return ""
+    try:
+        return read_secret_field(
+            secret_name,
+            field="api_key",
+            fallback_fields=("token",),
+            allow_plain_text=True,
+        )
+    except Exception as exc:  # Optional investigation reports missing credentials.
+        logger.error("Could not resolve the Elasticsearch API key: %s", exc)
+        return ""
+
+
 def write_to_splunk_rest(
     analysis_result: dict[str, Any],
     source_blob_name: str,
@@ -552,16 +598,8 @@ def _assert_phase1_capabilities(
     case_archive_workflow: Callable[..., CaseEnvelopeReference | None] | None,
 ) -> None:
     unsupported: list[str] = []
-    if config.RAG_ENABLED:
-        unsupported.append("rag")
-    if config.SPL_QUERY_GENERATION_ENABLED or config.INVESTIGATION_QUERY_EXECUTION_ENABLED:
-        unsupported.append("investigation queries")
-    if config.ELASTIC_QUERY_GENERATION_ENABLED:
-        unsupported.append("Elasticsearch query generation")
     if config.SERVICENOW_DRAFT_ENABLED or config.SERVICENOW_CREATE_ENABLED:
         unsupported.append("ServiceNow")
-    if config.CASE_ARCHIVE_ENABLED and case_archive_workflow is None:
-        unsupported.append("case archive")
     if unsupported:
         raise UnsupportedPipelineCapabilityError(
             "Native workflow not yet available for enabled capability: "
@@ -581,9 +619,8 @@ def process_blob_created(
 ) -> dict[str, Any]:
     """Process one normalized Blob observation and write durable reports.
 
-    A stale ETag is a terminal superseded outcome. A later-phase archive workflow
-    may be injected and must return a native reference; this function never
-    fabricates archive or Cosmos state. All other failures propagate so Azure
+    A stale ETag is a terminal superseded outcome. The native archive workflow
+    may be replaced in tests but must return a native reference. Retryable failures propagate so Azure
     Functions can retry and eventually poison the analyzer queue message.
     """
 
@@ -654,9 +691,140 @@ def process_blob_created(
         raw_content=decoded.content,
         content_type=decoded.content_type,
     )
+    rag_result = retrieve_soc_context(alert_text, runtime_config)
     started = time.monotonic()
-    scored_ttps = analysis_engine.analyze_ttp(alert_text)
+    scored_ttps = analysis_engine.analyze_ttp(
+        alert_text,
+        advisory_context=rag_result.context,
+    )
     llm_response = analysis_engine.last_llm_response or {}
+    if isinstance(llm_response, dict):
+        metadata = llm_response.setdefault("metadata", {})
+        if isinstance(metadata, dict):
+            metadata["rag_status"] = rag_result.status
+            metadata["rag_snippet_count"] = rag_result.snippet_count
+            if rag_result.message:
+                metadata["rag_message"] = rag_result.message
+
+    if (
+        isinstance(llm_response, dict)
+        and runtime_config.INVESTIGATION_QUERY_BACKEND == "splunk"
+        and runtime_config.SPL_QUERY_GENERATION_ENABLED
+    ):
+        spl_grounding = retrieve_spl_query_grounding(
+            alert_text=alert_text,
+            hypotheses=llm_response.get("competing_hypotheses", []),
+            config=runtime_config,
+        )
+        llm_response = analysis_engine.generate_spl_queries(
+            alert_text=alert_text,
+            analysis_result=llm_response,
+            config=runtime_config,
+            soc_operational_context=rag_result.context,
+            spl_query_grounding_context=spl_grounding.context,
+        )
+        metadata = llm_response.setdefault("metadata", {})
+        if isinstance(metadata, dict):
+            metadata["spl_query_rag_status"] = spl_grounding.status
+            metadata["spl_query_rag_snippet_count"] = spl_grounding.snippet_count
+            if spl_grounding.message:
+                metadata["spl_query_rag_message"] = spl_grounding.message
+
+    if (
+        isinstance(llm_response, dict)
+        and runtime_config.INVESTIGATION_QUERY_BACKEND == "splunk"
+        and runtime_config.INVESTIGATION_QUERY_EXECUTION_ENABLED
+    ):
+        mcp_client = None
+        if (
+            runtime_config.INVESTIGATION_QUERY_EXECUTOR == "mcp"
+            and runtime_config.SPLUNK_MCP_ENDPOINT
+        ):
+            mcp_client = HttpSplunkMcpClient(
+                endpoint=runtime_config.SPLUNK_MCP_ENDPOINT,
+                bearer_token=_splunk_mcp_token(runtime_config),
+                timeout_seconds=runtime_config.SPLUNK_MCP_HTTP_TIMEOUT_SECONDS,
+                allow_private=runtime_config.ALLOW_PRIVATE_OUTBOUND_ENDPOINTS,
+            )
+        query_results = execute_hypothesis_queries(
+            llm_response,
+            config=runtime_config,
+            api_token=_splunk_investigation_api_token(runtime_config),
+            mcp_client=mcp_client,
+        )
+        llm_response["investigation_query_results"] = query_results
+        llm_response = enrich_analysis_with_query_results(llm_response, query_results)
+        if runtime_config.QUERY_RESULT_INTERPRETATION_ENABLED:
+            llm_response = analysis_engine.interpret_query_results(
+                alert_text=alert_text,
+                analysis_result=llm_response,
+                config=runtime_config,
+            )
+        metadata = llm_response.setdefault("metadata", {})
+        if isinstance(metadata, dict):
+            metadata["investigation_query_backend"] = (
+                runtime_config.INVESTIGATION_QUERY_BACKEND
+            )
+            metadata["investigation_query_executor"] = (
+                runtime_config.INVESTIGATION_QUERY_EXECUTOR
+            )
+            metadata["investigation_query_result_count"] = len(query_results)
+
+    if (
+        isinstance(llm_response, dict)
+        and runtime_config.INVESTIGATION_QUERY_BACKEND == "elasticsearch"
+        and runtime_config.ELASTIC_QUERY_GENERATION_ENABLED
+    ):
+        elastic_grounding = retrieve_elasticsearch_grounding(
+            alert_text=alert_text,
+            hypotheses=llm_response.get("competing_hypotheses", []),
+            config=runtime_config,
+        )
+        llm_response = analysis_engine.generate_elastic_queries(
+            alert_text=alert_text,
+            analysis_result=llm_response,
+            config=runtime_config,
+            soc_operational_context=rag_result.context,
+            elasticsearch_grounding_context=elastic_grounding.context,
+        )
+        metadata = llm_response.setdefault("metadata", {})
+        if isinstance(metadata, dict):
+            metadata["elasticsearch_grounding_status"] = elastic_grounding.status
+            metadata["elasticsearch_grounding_snippet_count"] = (
+                elastic_grounding.snippet_count
+            )
+            if elastic_grounding.message:
+                metadata["elasticsearch_grounding_message"] = (
+                    elastic_grounding.message
+                )
+
+    if (
+        isinstance(llm_response, dict)
+        and runtime_config.INVESTIGATION_QUERY_BACKEND == "elasticsearch"
+        and runtime_config.INVESTIGATION_QUERY_EXECUTION_ENABLED
+    ):
+        query_results = execute_hypothesis_elasticsearch_queries(
+            llm_response,
+            config=runtime_config,
+            api_key=_elasticsearch_api_key(runtime_config),
+        )
+        llm_response["investigation_query_results"] = query_results
+        llm_response = enrich_analysis_with_query_results(llm_response, query_results)
+        if runtime_config.QUERY_RESULT_INTERPRETATION_ENABLED:
+            llm_response = analysis_engine.interpret_query_results(
+                alert_text=alert_text,
+                analysis_result=llm_response,
+                config=runtime_config,
+            )
+        metadata = llm_response.setdefault("metadata", {})
+        if isinstance(metadata, dict):
+            metadata["investigation_query_backend"] = (
+                runtime_config.INVESTIGATION_QUERY_BACKEND
+            )
+            metadata["investigation_query_executor"] = "elasticsearch"
+            metadata["investigation_query_result_count"] = len(query_results)
+
+    analysis_engine.last_llm_response = llm_response
     markdown = generate_markdown_report(alert_text, llm_response, scored_ttps)
     html = None
     if runtime_config.HTML_REPORT_ENABLED:
@@ -699,18 +867,23 @@ def process_blob_created(
         )
     case_envelope_reference = None
     if runtime_config.CASE_ARCHIVE_ENABLED:
-        workflow = case_archive_workflow
-        if workflow is None:  # Kept explicit if preflight validation changes.
-            raise UnsupportedPipelineCapabilityError(
-                "Native workflow not yet available for enabled capability: case archive"
+        workflow = case_archive_workflow or _archive_case_from_pipeline
+        try:
+            archive_kwargs = dict(
+                analysis_result=analysis_result,
+                config=runtime_config,
+                intake=intake,
+                decoded_notable=decoded,
+                sink_result=sink_result,
             )
-        case_envelope_reference = workflow(
-            analysis_result=analysis_result,
-            config=runtime_config,
-            intake=intake,
-            decoded_notable=decoded,
-            sink_result=sink_result,
-        )
+            if case_archive_workflow is None:
+                archive_kwargs["blob_store"] = store
+            case_envelope_reference = workflow(**archive_kwargs)
+        except Exception:
+            if runtime_config.CASE_ARCHIVE_FAILURE_MODE == "fail_closed":
+                raise
+            logger.exception("Case archive failed for Blob %s", intake.blob_name)
+            case_envelope_reference = None
         if (
             case_envelope_reference is not None
             and not isinstance(case_envelope_reference, CaseEnvelopeReference)
@@ -741,6 +914,38 @@ def process_blob_created(
         "sink_result": sink_result,
         "case_embed_queued": case_embed_queued,
     }
+
+
+def _archive_case_from_pipeline(
+    *,
+    analysis_result: dict[str, Any],
+    config: Config,
+    intake: BlobCreatedInput,
+    decoded_notable: DecodedNotable,
+    sink_result: dict[str, Any],
+    blob_store: Any | None = None,
+) -> CaseEnvelopeReference | None:
+    """Adapt analyzer values to the native archive domain contract."""
+
+    result = archive_case(
+        analysis_result=analysis_result,
+        config=config,
+        source=SourceContext(
+            input_bucket=intake.container_name,
+            input_key=intake.blob_name,
+            source_filename=PurePosixPath(intake.blob_name).name,
+            content_type=decoded_notable.content_type,
+            was_compressed=decoded_notable.was_compressed,
+        ),
+        sink_result=sink_result,
+        blob_store=blob_store,
+    )
+    if result.status != "success" or not result.case_envelope_key:
+        return None
+    return CaseEnvelopeReference(
+        container_name=config.CASE_ARCHIVE_CONTAINER,
+        blob_name=result.case_envelope_key,
+    )
 
 
 __all__ = [

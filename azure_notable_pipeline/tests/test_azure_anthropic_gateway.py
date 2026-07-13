@@ -24,7 +24,9 @@ from azure_notable_pipeline.azure_anthropic_gateway import (
     AnthropicGatewayResponseError,
     AnthropicGatewayTimeoutError,
     analyze_notable,
+    generate_text,
     parse_analyze_notable_response,
+    parse_text_response,
 )
 
 
@@ -109,6 +111,28 @@ def test_parser_rejects_truncated_response_with_bounded_diagnostic_text() -> Non
         )
 
     assert exc_info.value.raw_output == "partial"
+
+
+def test_optional_synthesis_uses_native_text_without_tool_contract() -> None:
+    client = Mock()
+    client.messages.create.return_value = _response(
+        TextBlock(text='{"answer":"ok"}', type="text"),
+        stop_reason="end_turn",
+    )
+
+    result = generate_text(
+        messages=[{"role": "user", "content": "generate bounded JSON"}],
+        deployment="claude-sonnet-4-6",
+        max_tokens=768,
+        gateway=client,
+    )
+
+    assert result.text == '{"answer":"ok"}'
+    kwargs = client.messages.create.call_args.kwargs
+    assert kwargs["max_tokens"] == 768
+    assert "tools" not in kwargs
+    assert "tool_choice" not in kwargs
+    assert parse_text_response(client.messages.create.return_value) == result
 
 
 @pytest.mark.parametrize(

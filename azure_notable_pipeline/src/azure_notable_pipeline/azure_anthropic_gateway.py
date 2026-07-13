@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 import anthropic
-from anthropic.types import ToolUseBlock
+from anthropic.types import TextBlock, ToolUseBlock
 
 from .azure_clients import anthropic_foundry_client
 
@@ -54,6 +54,16 @@ class AnthropicAnalysis:
 
     payload: dict[str, Any]
     raw_output: str
+    stop_reason: str
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+
+@dataclass(frozen=True)
+class AnthropicText:
+    """Native text response used by bounded optional synthesis calls."""
+
+    text: str
     stop_reason: str
     input_tokens: int | None = None
     output_tokens: int | None = None
@@ -152,6 +162,41 @@ def parse_analyze_notable_response(response: Any) -> AnthropicAnalysis:
     )
 
 
+def parse_text_response(response: Any) -> AnthropicText:
+    """Require a complete native text-only Messages response."""
+
+    stop_reason = str(getattr(response, "stop_reason", "") or "")
+    stop_details = getattr(response, "stop_details", None)
+    content = getattr(response, "content", None)
+    if stop_reason == "refusal" or stop_details is not None:
+        raise AnthropicGatewayRefusalError(
+            "Anthropic Foundry refused the synthesis request"
+        )
+    if not isinstance(content, list):
+        raise AnthropicGatewayResponseError(
+            "Anthropic Foundry response content must be a list"
+        )
+    text_blocks = [block for block in content if isinstance(block, TextBlock)]
+    diagnostic_text = "\n".join(block.text for block in text_blocks)
+    if stop_reason == "max_tokens":
+        raise AnthropicGatewayResponseError(
+            "Anthropic Foundry response stopped at the output-token limit",
+            raw_output=diagnostic_text,
+        )
+    if len(text_blocks) != len(content) or not diagnostic_text.strip():
+        raise AnthropicGatewayResponseError(
+            "Anthropic Foundry synthesis response must contain only non-empty text",
+            raw_output=diagnostic_text,
+        )
+    usage = getattr(response, "usage", None)
+    return AnthropicText(
+        text=diagnostic_text,
+        stop_reason=stop_reason,
+        input_tokens=_usage_value(usage, "input_tokens"),
+        output_tokens=_usage_value(usage, "output_tokens"),
+    )
+
+
 def analyze_notable(
     *,
     messages: Sequence[Mapping[str, Any]],
@@ -197,3 +242,38 @@ def analyze_notable(
         ) from exc
 
     return parse_analyze_notable_response(response)
+
+
+def generate_text(
+    *,
+    messages: Sequence[Mapping[str, Any]],
+    deployment: str,
+    base_url: str = "",
+    max_tokens: int = 8192,
+    temperature: float = 0.1,
+    gateway: Any | None = None,
+) -> AnthropicText:
+    """Run one native text synthesis call for an optional bounded workflow."""
+
+    if not deployment.strip():
+        raise ValueError("deployment cannot be blank")
+    if not 256 <= max_tokens <= 8192:
+        raise ValueError("max_tokens must be between 256 and 8192")
+    if not messages:
+        raise ValueError("messages cannot be empty")
+
+    client = gateway or anthropic_foundry_client(base_url)
+    try:
+        response = client.messages.create(
+            model=deployment,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            messages=list(messages),
+        )
+    except anthropic.APIError as exc:
+        raise _translate_sdk_error(exc) from exc
+    except (OSError, TimeoutError) as exc:
+        raise AnthropicGatewayServiceError(
+            "Anthropic Foundry client request failed"
+        ) from exc
+    return parse_text_response(response)

@@ -20,6 +20,7 @@ from azure_notable_pipeline.case_index import list_cases
 from azure_notable_pipeline.config import Config
 from azure_notable_pipeline.cosmos_store import (
     CONTAINER_PARTITION_KEYS,
+    ConditionalOutcome,
     CosmosStore,
     ttl_from_expiry,
 )
@@ -397,6 +398,48 @@ def test_disposition_sync_upserts_native_documents_and_advances_checkpoint(
     correlation_query = database.containers["cases"].query_calls[-1]
     assert correlation_query["enable_cross_partition_query"] is True
     assert correlation_query["max_item_count"] == 200
+
+
+def test_case_create_and_retrieval_status_use_native_conditional_outcomes(monkeypatch: pytest.MonkeyPatch) -> None:
+    store, database = _store()
+    created = store.create_case_if_absent(
+        "cases",
+        {
+            "case_id": "case-1",
+            "processed_at": "2026-01-01T00:00:00Z",
+            "expires_at_epoch": 2_000_001_000,
+            "retrieval_status": "pending",
+        },
+    )
+    duplicate = store.create_case_if_absent(
+        "cases",
+        {"case_id": "case-1", "processed_at": "2026-01-01T00:00:00Z"},
+    )
+    assert created.created is True
+    assert duplicate.created is False
+
+    native_replace = store.replace_if_match
+    attempts = 0
+    def conflict_once(container_name, item, *, expected_etag):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return ConditionalOutcome(False, "precondition_failed")
+        return native_replace(container_name, item, expected_etag=expected_etag)
+    monkeypatch.setattr(store, "replace_if_match", conflict_once)
+
+    updated = store.update_case_retrieval_status(
+        "cases",
+        case_id="case-1",
+        status="ready",
+        message="embedded 2 chunk(s)",
+        updated_at="2026-01-01T00:01:00Z",
+    )
+    assert attempts == 2
+    assert updated["retrieval_status"] == "ready"
+    assert database.containers["cases"].items[("case-1", "case-1")][
+        "retrieval_status_message"
+    ] == "embedded 2 chunk(s)"
 
 
 @pytest.mark.skip(reason="Optional Cosmos emulator integration test; unit CI is network-free")

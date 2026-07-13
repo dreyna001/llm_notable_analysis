@@ -1153,6 +1153,32 @@ SECURITY ALERT INPUT:
             gateway=self.gateway,
         )
 
+    def _request_json_object(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int | None = None,
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[str], str]:
+        """Run one native text call and decode its bounded JSON object."""
+
+        response = azure_anthropic_gateway.generate_text(
+            messages=[{"role": "user", "content": prompt}],
+            deployment=self.deployment,
+            base_url=self.base_url,
+            max_tokens=max_tokens or self.max_output_tokens,
+            temperature=0.1,
+            gateway=self.gateway,
+        )
+        raw_text = response.text
+        candidate_text, _extraction_note = extract_json_object(raw_text)
+        try:
+            parsed = json.loads(candidate_text)
+        except json.JSONDecodeError as exc:
+            return None, f"JSON parse error: {exc}", raw_text
+        if not isinstance(parsed, dict):
+            return None, "JSON response was not an object", raw_text
+        return parsed, None, raw_text
+
     def _validate_and_postprocess(
         self, parsed: Dict[str, Any]
     ) -> Tuple[bool, Optional[str], Dict[str, Any]]:
@@ -1334,6 +1360,380 @@ SECURITY ALERT INPUT:
             logger.info(
                 "TTP analysis completed in %.2f seconds", time.time() - start_time
             )
+
+    def generate_spl_queries(
+        self,
+        *,
+        alert_text: str,
+        analysis_result: Dict[str, Any],
+        config: Any,
+        soc_operational_context: str = "",
+        spl_query_grounding_context: str = "",
+        alert_time: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Generate validated SPL fields as a bounded optional model call."""
+
+        from .spl_query_generation import (
+            build_spl_query_generation_prompt,
+            merge_spl_query_fields_by_position,
+            normalize_competing_hypotheses,
+            validate_spl_query_contract,
+        )
+
+        out = dict(analysis_result) if isinstance(analysis_result, dict) else {}
+        metadata = out.setdefault("metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+            out["metadata"] = metadata
+        hypotheses = out.get("competing_hypotheses", [])
+        if not bool(getattr(config, "SPL_QUERY_GENERATION_ENABLED", False)):
+            out["competing_hypotheses"] = normalize_competing_hypotheses(
+                hypotheses, spl_query_enabled=False
+            )
+            metadata["spl_query_generation_enabled"] = False
+            return out
+        if not isinstance(hypotheses, list) or not hypotheses:
+            metadata.update(
+                {
+                    "spl_query_generation_enabled": True,
+                    "spl_query_generation_status": "skipped",
+                    "spl_query_generation_message": "No competing hypotheses available",
+                }
+            )
+            return out
+
+        require_grounding = bool(getattr(config, "SPL_QUERY_RAG_ENABLED", False))
+        failure_mode = str(
+            getattr(config, "SPL_QUERY_RAG_FAILURE_MODE", "suppress") or "suppress"
+        ).strip().lower()
+        if require_grounding and not spl_query_grounding_context.strip():
+            metadata.update(
+                {
+                    "spl_query_generation_enabled": True,
+                    "spl_query_generation_status": "skipped",
+                    "spl_query_generation_message": "SPL query grounding unavailable",
+                }
+            )
+            if failure_mode != "fallback_to_ungrounded":
+                return out
+            require_grounding = False
+
+        prompt = build_spl_query_generation_prompt(
+            alert_text=alert_text,
+            hypotheses=hypotheses,
+            soc_operational_context=soc_operational_context,
+            spl_query_grounding_context=spl_query_grounding_context,
+            alert_time=alert_time,
+        )
+        started = time.time()
+        try:
+            parsed, error_msg, raw_content = self._request_json_object(prompt)
+            if not isinstance(parsed, dict):
+                metadata.update(
+                    {
+                        "spl_query_generation_enabled": True,
+                        "spl_query_generation_status": "failed",
+                        "spl_query_generation_message": error_msg
+                        or "SPL query response was not an object",
+                    }
+                )
+                return out
+            ok, validation_error = validate_spl_query_contract(
+                parsed,
+                alert_text=alert_text,
+                spl_query_grounding_context=spl_query_grounding_context,
+                require_spl_grounding=require_grounding,
+                allowed_indexes=str(
+                    getattr(config, "SPLUNK_SEARCH_ALLOWED_INDEXES", "")
+                ),
+            )
+            if not ok:
+                metadata.update(
+                    {
+                        "spl_query_generation_enabled": True,
+                        "spl_query_generation_status": "failed",
+                        "spl_query_generation_message": validation_error,
+                    }
+                )
+                return out
+            out["competing_hypotheses"] = merge_spl_query_fields_by_position(
+                base_hypotheses=hypotheses,
+                generated_payload=parsed,
+                spl_query_grounding_context=spl_query_grounding_context,
+            )
+            metadata.update(
+                {
+                    "spl_query_generation_enabled": True,
+                    "spl_query_generation_status": "success",
+                    "spl_query_generation_inference_time_seconds": round(
+                        time.time() - started, 3
+                    ),
+                    "spl_query_generation_prompt_length": len(prompt),
+                }
+            )
+            if raw_content:
+                metadata["spl_query_generation_raw_response_length"] = len(raw_content)
+            return out
+        except Exception as exc:  # Optional generation remains fail-soft.
+            logger.warning("SPL query generation failed: %s", exc)
+            metadata.update(
+                {
+                    "spl_query_generation_enabled": True,
+                    "spl_query_generation_status": "failed",
+                    "spl_query_generation_message": str(exc),
+                }
+            )
+            return out
+
+    def interpret_query_results(
+        self,
+        *,
+        alert_text: str,
+        analysis_result: Dict[str, Any],
+        config: Any,
+    ) -> Dict[str, Any]:
+        """Interpret deterministic query results with one bounded repair attempt."""
+
+        from .query_result_interpretation import (
+            build_query_result_interpretation_prompt,
+            build_query_result_interpretation_repair_prompt,
+            merge_query_result_interpretation,
+            validate_query_result_interpretation_payload,
+        )
+
+        out = dict(analysis_result) if isinstance(analysis_result, dict) else {}
+        metadata = out.setdefault("metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+            out["metadata"] = metadata
+        if not bool(getattr(config, "QUERY_RESULT_INTERPRETATION_ENABLED", False)):
+            metadata["query_result_interpretation_enabled"] = False
+            return out
+        if not isinstance(out.get("query_result_section"), dict):
+            metadata.update(
+                {
+                    "query_result_interpretation_enabled": True,
+                    "query_result_interpretation_available": False,
+                    "query_result_interpretation_failure_reason": "query_result_section unavailable",
+                }
+            )
+            return out
+
+        prompt = build_query_result_interpretation_prompt(
+            alert_text,
+            out,
+            context_budget_chars=int(
+                getattr(config, "QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS", 4000)
+            ),
+            max_sample_rows=int(
+                getattr(config, "QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS", 3)
+            ),
+        )
+        started = time.time()
+        token_budget = int(
+            getattr(config, "QUERY_RESULT_INTERPRETATION_MAX_TOKENS", 768)
+        )
+        try:
+            parsed, error_msg, raw_content = self._request_json_object(
+                prompt, max_tokens=token_budget
+            )
+        except Exception as exc:  # Optional interpretation remains fail-soft.
+            metadata.update(
+                {
+                    "query_result_interpretation_enabled": True,
+                    "query_result_interpretation_attempted": True,
+                    "query_result_interpretation_available": False,
+                    "query_result_interpretation_failure_reason": str(exc),
+                }
+            )
+            return out
+
+        ok = False
+        validation_error = error_msg
+        normalized: Dict[str, Any] = {}
+        if isinstance(parsed, dict):
+            ok, validation_error, normalized = (
+                validate_query_result_interpretation_payload(parsed, out)
+            )
+        repair_attempted = False
+        if not ok:
+            repair_attempted = True
+            repair_prompt = build_query_result_interpretation_repair_prompt(
+                original_prompt=prompt,
+                validation_error=validation_error or "response failed validation",
+                prior_output=raw_content
+                or json.dumps(parsed, ensure_ascii=True)[:2000],
+            )
+            try:
+                repair_parsed, repair_error, _repair_raw = self._request_json_object(
+                    repair_prompt, max_tokens=token_budget
+                )
+                if isinstance(repair_parsed, dict):
+                    ok, validation_error, normalized = (
+                        validate_query_result_interpretation_payload(
+                            repair_parsed, out
+                        )
+                    )
+                else:
+                    validation_error = repair_error or validation_error
+            except Exception as exc:
+                validation_error = str(exc)
+
+        metadata.update(
+            {
+                "query_result_interpretation_enabled": True,
+                "query_result_interpretation_attempted": True,
+                "query_result_interpretation_inference_time_seconds": round(
+                    time.time() - started, 3
+                ),
+                "query_result_interpretation_prompt_length": len(prompt),
+                "query_result_interpretation_repair_attempted": repair_attempted,
+            }
+        )
+        if not ok:
+            metadata.update(
+                {
+                    "query_result_interpretation_available": False,
+                    "query_result_interpretation_failure_reason": validation_error,
+                }
+            )
+            return out
+        merged = merge_query_result_interpretation(out, normalized)
+        merged_metadata = merged.setdefault("metadata", {})
+        if isinstance(merged_metadata, dict):
+            merged_metadata.update(metadata)
+            merged_metadata["query_result_interpretation_available"] = True
+        return merged
+
+    def generate_elastic_queries(
+        self,
+        *,
+        alert_text: str,
+        analysis_result: Dict[str, Any],
+        config: Any,
+        soc_operational_context: str = "",
+        elasticsearch_grounding_context: str = "",
+        alert_time: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Generate validated Elasticsearch fields as a bounded optional call."""
+
+        from .elastic_query_generation import (
+            build_elastic_query_generation_prompt,
+            merge_elastic_query_fields_by_position,
+            normalize_competing_hypotheses,
+            validate_elastic_query_contract,
+        )
+
+        out = dict(analysis_result) if isinstance(analysis_result, dict) else {}
+        metadata = out.setdefault("metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+            out["metadata"] = metadata
+        hypotheses = out.get("competing_hypotheses", [])
+        if not bool(getattr(config, "ELASTIC_QUERY_GENERATION_ENABLED", False)):
+            out["competing_hypotheses"] = normalize_competing_hypotheses(
+                hypotheses, elastic_query_enabled=False
+            )
+            metadata["elastic_query_generation_enabled"] = False
+            return out
+        require_grounding = bool(
+            getattr(config, "ELASTICSEARCH_GROUNDING_ENABLED", False)
+        )
+        failure_mode = str(
+            getattr(config, "ELASTICSEARCH_GROUNDING_FAILURE_MODE", "suppress")
+            or "suppress"
+        ).strip().lower()
+        if require_grounding and not elasticsearch_grounding_context.strip():
+            metadata.update(
+                {
+                    "elastic_query_generation_enabled": True,
+                    "elastic_query_generation_status": "skipped",
+                    "elastic_query_generation_message": "Elasticsearch grounding unavailable",
+                }
+            )
+            if failure_mode != "fallback_to_ungrounded":
+                return out
+            require_grounding = False
+
+        prompt = build_elastic_query_generation_prompt(
+            alert_text=alert_text,
+            hypotheses=hypotheses if isinstance(hypotheses, list) else [],
+            soc_operational_context=soc_operational_context,
+            elasticsearch_grounding_context=elasticsearch_grounding_context,
+            alert_time=alert_time,
+        )
+        started = time.time()
+        try:
+            parsed, error_msg, raw_content = self._request_json_object(prompt)
+            if not isinstance(parsed, dict):
+                metadata.update(
+                    {
+                        "elastic_query_generation_enabled": True,
+                        "elastic_query_generation_status": "failed",
+                        "elastic_query_generation_message": error_msg
+                        or "Elastic query response was not an object",
+                    }
+                )
+                return out
+            ok, validation_error = validate_elastic_query_contract(
+                parsed,
+                alert_text=alert_text,
+                elasticsearch_grounding_context=elasticsearch_grounding_context,
+                allowed_fields=str(
+                    getattr(config, "ELASTICSEARCH_ALLOWED_FIELDS", "")
+                ),
+                allowed_index_patterns=str(
+                    getattr(config, "ELASTICSEARCH_INDEX_ALLOWLIST", "")
+                ),
+                allow_wildcard_indexes=bool(
+                    getattr(config, "ELASTICSEARCH_ALLOW_WILDCARD_INDEXES", False)
+                ),
+                max_rows=int(getattr(config, "ELASTICSEARCH_MAX_ROWS", 100)),
+                max_time_range=str(
+                    getattr(config, "ELASTICSEARCH_MAX_TIME_RANGE", "24h")
+                ),
+                timestamp_field=str(
+                    getattr(config, "ELASTICSEARCH_TIMESTAMP_FIELD", "@timestamp")
+                ),
+                require_elastic_grounding=require_grounding,
+            )
+            if not ok:
+                metadata.update(
+                    {
+                        "elastic_query_generation_enabled": True,
+                        "elastic_query_generation_status": "failed",
+                        "elastic_query_generation_message": validation_error,
+                    }
+                )
+                return out
+            out["competing_hypotheses"] = merge_elastic_query_fields_by_position(
+                base_hypotheses=hypotheses,
+                generated_payload=parsed,
+                elasticsearch_grounding_context=elasticsearch_grounding_context,
+            )
+            metadata.update(
+                {
+                    "elastic_query_generation_enabled": True,
+                    "elastic_query_generation_status": "success",
+                    "elastic_query_generation_inference_time_seconds": round(
+                        time.time() - started, 3
+                    ),
+                    "elastic_query_generation_prompt_length": len(prompt),
+                }
+            )
+            if raw_content:
+                metadata["elastic_query_generation_raw_response_length"] = len(raw_content)
+            return out
+        except Exception as exc:  # Optional generation remains fail-soft.
+            logger.warning("Elasticsearch query generation failed: %s", exc)
+            metadata.update(
+                {
+                    "elastic_query_generation_enabled": True,
+                    "elastic_query_generation_status": "failed",
+                    "elastic_query_generation_message": str(exc),
+                }
+            )
+            return out
 
 
 def extract_score(ttp: Dict[str, Any]) -> float:

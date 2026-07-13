@@ -74,7 +74,7 @@ class FakeAnalyzer:
         self.formatted_payload = payload
         return json.dumps(payload, separators=(",", ":"))
 
-    def analyze_ttp(self, _alert_text: str):
+    def analyze_ttp(self, _alert_text: str, advisory_context: str = ""):
         return []
 
 
@@ -315,6 +315,43 @@ def test_analyzer_enqueues_produced_case_envelope_when_case_qa_enabled(
     )
 
 
+def test_analyzer_default_archive_seam_builds_native_source_context(monkeypatch) -> None:
+    body = b'{"finding_id":"finding-123"}'
+    archived = []
+    monkeypatch.setattr(
+        blob_handler,
+        "read_blob_result",
+        lambda *_args, **_kwargs: _read_result(body),
+    )
+    monkeypatch.setattr(blob_handler, "write_text_blob", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        blob_handler,
+        "archive_case",
+        lambda **kwargs: archived.append(kwargs)
+        or SimpleNamespace(
+            status="success",
+            case_envelope_key="cases/2026/07/10/case-123.json",
+        ),
+    )
+
+    result = blob_handler.process_blob_created(
+        _intake(size_bytes=len(body)),
+        config=Config(
+            CASE_ARCHIVE_ENABLED=True,
+            CASE_INDEX_CONTAINER="notable-case-index",
+        ),
+        analyzer=FakeAnalyzer(),
+    )
+
+    assert result["status"] == "success"
+    assert result["case_embed_queued"] is False
+    source = archived[0]["source"]
+    assert source.input_bucket == "input"
+    assert source.input_key == "incoming/finding-123.json"
+    assert source.source_filename == "finding-123.json"
+    assert source.content_type == "json"
+
+
 def test_analyzer_does_not_invent_case_envelope_or_enqueue_when_qa_disabled(
     monkeypatch,
 ) -> None:
@@ -351,22 +388,32 @@ def test_analyzer_does_not_invent_case_envelope_or_enqueue_when_qa_disabled(
     assert enqueues == []
 
 
-def test_analyzer_fails_closed_when_archive_enabled_without_produced_reference() -> None:
-    with pytest.raises(
-        blob_handler.UnsupportedPipelineCapabilityError,
-        match="case archive",
-    ):
+def test_analyzer_fails_closed_when_archive_workflow_fails(monkeypatch) -> None:
+    body = b'{"finding_id":"finding-123"}'
+    monkeypatch.setattr(
+        blob_handler,
+        "read_blob_result",
+        lambda *_args, **_kwargs: _read_result(body),
+    )
+    monkeypatch.setattr(blob_handler, "write_text_blob", lambda *_args, **_kwargs: None)
+
+    def fail_archive(**_kwargs):
+        raise RuntimeError("Cosmos unavailable")
+
+    with pytest.raises(RuntimeError, match="Cosmos unavailable"):
         blob_handler.process_blob_created(
-            _intake(),
+            _intake(size_bytes=len(body)),
             config=Config(
                 PORTAL_ENABLED=True,
                 PORTAL_AUTH_MODE="iam",
                 PORTAL_ENTRA_REQUIRED_APP_ROLE="Case.Reader",
                 CASE_QA_ENABLED=True,
                 CASE_ARCHIVE_ENABLED=True,
+                CASE_ARCHIVE_FAILURE_MODE="fail_closed",
                 CASE_INDEX_CONTAINER="notable-case-index",
             ),
             analyzer=FakeAnalyzer(),
+            case_archive_workflow=fail_archive,
         )
 
 

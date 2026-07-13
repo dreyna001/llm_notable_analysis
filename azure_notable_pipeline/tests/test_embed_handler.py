@@ -7,10 +7,11 @@ import json
 import pytest
 
 from azure_notable_pipeline.embed_handler import (
-    DeferredCaseEmbeddingWorkflowError,
+    CaseEmbeddingFailedError,
     dispatch_embed_queue_message,
     normalize_embed_queue_message,
 )
+from azure_notable_pipeline.case_embed import EmbedResult
 from azure_notable_pipeline.queue_publisher import QueuePublisherConfigurationError
 
 
@@ -64,9 +65,20 @@ def test_embed_job_schema_rejects_non_contract_payloads(payload, message) -> Non
         normalize_embed_queue_message(payload)
 
 
-def test_default_dispatcher_fails_closed_until_native_workflow_lands() -> None:
-    with pytest.raises(
-        DeferredCaseEmbeddingWorkflowError,
-        match="deferred Blob/Cosmos workflow",
-    ):
-        dispatch_embed_queue_message(_payload())
+def test_default_dispatcher_invokes_native_workflow(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        "azure_notable_pipeline.embed_handler._native_embed_workflow",
+        lambda job: calls.append(job) or EmbedResult("ready", "case-123", 2),
+    )
+    result = dispatch_embed_queue_message(_payload())
+    assert result.status == "ready"
+    assert calls[0].case_envelope_blob_name.endswith("case-123.json")
+
+
+def test_failed_embedding_raises_for_functions_retry_and_poison() -> None:
+    with pytest.raises(CaseEmbeddingFailedError, match="OpenAI unavailable"):
+        dispatch_embed_queue_message(
+            _payload(),
+            workflow=lambda _job: EmbedResult("failed", "case-123", message="OpenAI unavailable"),
+        )

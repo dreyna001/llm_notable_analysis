@@ -8,7 +8,7 @@ Status values: `not started`, `in progress`, `blocked verification`, `complete`.
 | --- | --- | --- | --- |
 | Phase 0 — scaffold and inventory | Phase 0 scaffold agent | complete | 66 Python tests, 92 frontend tests/build, root and module Bicep compilation |
 | Phase 1 — core pipeline | Phase 1 implementation | in progress | Native queue/analyzer/embed wrapper contracts and Bicep are complete; live private-host deployment acceptance remains |
-| Phase 2 — optional Wave 1 profiles | Phase 2 implementation | in progress | Cosmos IaC, native Search grounding, and native Cosmos persistence behavior are complete; remaining Wave 1 integration is tracked by its owning modules |
+| Phase 2 — optional Wave 1 profiles | Phase 2 implementation | complete | Native Search grounding, optional-profile orchestration, Cosmos persistence, and archive/embed integration pass the offline Phase 2 gate: 202 passed, 2 skipped, plus 3 golden-rubric subtests |
 | Phase 3 — analyst portal | Phase 3 implementation | not started | OpenAPI, portal, Front Door/APIM acceptance |
 | Phase 4 — disposition sync and operations | Phase 4 implementation | not started | Timer, runbooks, staging readiness |
 
@@ -22,11 +22,13 @@ Status values: `not started`, `in progress`, `blocked verification`, `complete`.
 | `queue_publisher.py` | Phase 1 | complete | Managed-identity Storage Queue publication uses the strict analyzer and versioned embed schemas with retryable failure classification |
 | `analyzer_job.py` | Phase 1 | complete | Strict six-key v1 intake job validation/serialization is wired from polling Blob intake through analyzer queue normalization |
 | `azure_openai_gateway.py` | Phase 2/3 | complete | Portal chat and embeddings use only Azure OpenAI; returned embedding vectors are strictly 1024-dimensional and analyzer fallback is forbidden |
-| `azure_anthropic_gateway.py` | Phase 1 | complete | Native Foundry Messages call forces one `analyze_notable` tool with Sonnet 4.6; strict native block parsing and typed failures covered offline |
+| `azure_anthropic_gateway.py` | Phase 1/2 | complete | Native Foundry Messages analysis forces one `analyze_notable` tool; optional bounded query synthesis uses strict text-only responses with the same typed failure boundary |
 | `azure_search_retrieval.py` | Phase 2 | complete | Bounded native Search maps stable results; semantic rerank is opt-in and known SKU/billing unavailability falls back to plain Search |
 | `cosmos_store.py` | Phase 2 | complete | Native aggregate operations use natural IDs/partitions, Strong point reads, ETag outcomes, business TTL, bounded keysets/cross-partition queries, and RU/latency telemetry |
-| `blob_handler.py` | Phase 1 | complete | Core ETag-guarded orchestration preserves bounded gzip/JSON parsing, Sonnet analysis, deterministic reports, Blob-first sink ordering, and retry semantics |
-| `embed_handler.py` | Phase 1/2/3 | in progress | Phase 1 strict v1 Queue dispatcher is registered and dependency-injectable; native Blob/Cosmos embedding remains deferred without AWS emulation |
+| `case_archive.py` | Phase 2/3 | complete | Deterministic legacy envelope/index schema, Blob layout, retention, replay/collision suppression, and native Cosmos conditional create are preserved |
+| `case_embed.py` | Phase 2/3 | complete | Deterministic bounded chunk replacement uses 1024-d Azure OpenAI vectors and ETag-retried Cosmos ready/failed status updates |
+| `blob_handler.py` | Phase 1/2 | complete | ETag-guarded orchestration preserves core behavior and AWS ordering for native RAG, SPL, and Elasticsearch grounding/generation/read-only execution, enrichment, interpretation, and deterministic reports |
+| `embed_handler.py` | Phase 1/2/3 | complete | Strict v1 Queue dispatcher invokes native Blob/OpenAI/Cosmos embedding and propagates failures for Functions retry/poison handling |
 | `function_app.py` | Phase 1/3/4 | in progress | Phase 1 polling intake Blob, analyzer queue, and case embed queue wrappers complete; timer and portal wrappers remain with later phases |
 
 ## Bicep modules
@@ -181,6 +183,27 @@ remain assigned to their owning implementation phase.
 - Focused Search, grounding, portal-KB, and case-chunk suite: `19 passed` with
   native fakes only and no network calls.
 
+## Phase 2 optional-profile orchestration verification log
+
+- `blob_handler.py` now retrieves general advisory RAG before the primary
+  analysis, then applies only the selected backend's grounding, validated query
+  generation, deterministic read-only execution, result enrichment, and
+  optional bounded interpretation before report rendering and sink/archive
+  side effects. Disabled profiles do not enter these lanes.
+- RAG and query-grounding status, snippet counts, failure messages, backend,
+  executor, and result counts retain the AWS report metadata contract. Search
+  contexts keep explicit source/section attribution and configured character
+  budgets; SPL and Elasticsearch executors retain their allowlists, time/row
+  caps, concurrency caps, and denial results.
+- Optional model synthesis uses the native Anthropic Foundry text response
+  boundary and the existing deterministic SPL/Elasticsearch/interpreted-result
+  validators. Generation and interpretation remain fail-soft; general RAG
+  retains its configured `suppress`/`fail_closed` behavior.
+- Focused offline optional-profile/analyzer/grounding/investigation suite:
+  `57 passed`. Full Azure regression after the integration gate:
+  `202 passed, 2 skipped`, plus 3 golden-rubric subtests. The Cosmos
+  correlation-query cap now preserves the AWS business bound of 200.
+
 ## Phase 2 Cosmos persistence verification log
 
 - `cosmos_store.py` defines the six natural aggregate partition contracts and
@@ -200,3 +223,23 @@ remain assigned to their owning implementation phase.
   The focused offline suite reports `9 passed, 1 skipped`; the skip is the
   optional Cosmos emulator profile. Full Azure Python regression reports
   `188 passed, 2 skipped`, plus 3 golden-rubric subtests, with no network calls.
+
+## Phase 2 case archive and embedding verification log
+
+- `case_archive.py` preserves deterministic case IDs, `cases/YYYY/MM/DD/` Blob
+  names, durable legacy envelope/index fields, bounded source completeness,
+  retention timestamps, normalized verdicts, and identity replay/collision
+  outcomes while using native Blob writes and Cosmos conditional creates.
+- The analyzer's default archive seam honors `suppress`/`fail_closed` and queues
+  only an actual native envelope reference. `case_embed.py` replaces bounded
+  chunk prefixes, requests Azure OpenAI vectors at exactly 1024 dimensions,
+  writes deterministic chunk IDs, and updates ready/failed status with bounded
+  Cosmos ETag retries.
+- Strict v1 embed jobs reject missing, extra, malformed, or unknown-version
+  fields. Failed native embedding raises through the Functions wrapper for the
+  configured Storage Queue retry and poison behavior; successful duplicate
+  delivery converges through chunk replacement and status updates.
+- Focused archive/embed/analyzer seam/runtime suite: `31 passed`. Full Python
+  regression after the Phase 2 gate: `202 passed, 2 skipped`, plus 3
+  golden-rubric subtests. The combined Cosmos/optional-profile/archive/embed
+  seam gate reports `42 passed, 1 skipped`.

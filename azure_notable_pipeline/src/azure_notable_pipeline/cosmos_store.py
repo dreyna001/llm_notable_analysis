@@ -230,6 +230,61 @@ class CosmosStore:
         body["id"] = case_id
         return self.upsert_item(container_name, body)
 
+    def create_case_if_absent(
+        self,
+        container_name: str,
+        case: Mapping[str, Any],
+    ) -> CreateOutcome:
+        """Conditionally create one case-index document by natural case ID."""
+
+        body = dict(case)
+        case_id = _required_text(body.get("case_id"), "case_id")
+        body["id"] = case_id
+        return self.create_if_absent(container_name, body)
+
+    def update_case_retrieval_status(
+        self,
+        container_name: str,
+        *,
+        case_id: str,
+        status: str,
+        message: str,
+        updated_at: str,
+        max_attempts: int = 3,
+    ) -> dict[str, Any]:
+        """Update retrieval state with bounded ETag retries for duplicate workers."""
+
+        normalized_case_id = _required_text(case_id, "case_id")
+        normalized_status = _required_text(status, "status")
+        attempts = int(max_attempts)
+        if attempts < 1 or attempts > 10:
+            raise ValueError("max_attempts must be from 1 to 10")
+        for _attempt in range(attempts):
+            item = self.get_case(container_name, normalized_case_id)
+            if item is None:
+                raise KeyError(f"case index item not found: {normalized_case_id}")
+            etag = _required_text(item.get("_etag"), "case _etag")
+            replacement = dict(item)
+            replacement.update(
+                {
+                    "retrieval_status": normalized_status,
+                    "retrieval_status_message": str(message or "")[:500],
+                    "retrieval_updated_at": _required_text(updated_at, "updated_at"),
+                }
+            )
+            outcome = self.replace_if_match(
+                container_name,
+                replacement,
+                expected_etag=etag,
+            )
+            if outcome.applied:
+                return outcome.item or replacement
+            if outcome.outcome != "precondition_failed":
+                raise KeyError(f"case index item not found: {normalized_case_id}")
+        raise RuntimeError(
+            f"case retrieval status update exhausted ETag retries: {normalized_case_id}"
+        )
+
     def list_cases(
         self,
         container_name: str,
@@ -276,7 +331,7 @@ class CosmosStore:
     ) -> list[dict[str, Any]]:
         """Return bounded newest-first case candidates across partitions."""
 
-        bounded = _bounded_limit(limit, maximum=100)
+        bounded = _bounded_limit(limit, maximum=200)
         return self._query(
             container_name,
             query=(
