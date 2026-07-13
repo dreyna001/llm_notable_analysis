@@ -1,0 +1,13 @@
+{
+  "notable_id": "golden-003",
+  "search_name": "Low Confidence DNS Anomaly",
+  "urgency": "informational",
+  "risk_score": 12,
+  "owner": "unassigned",
+  "status": "new",
+  "event_time": "2026-06-04T09:41:02Z",
+  "src_host": "laptop-41.corp.local",
+  "dest_domain": "cdn-static-akamai.example",
+  "event_count": 1,
+  "description": "Single DNS query to a rarely seen domain with no corroborating auth, endpoint, or proxy events in the alert."
+}

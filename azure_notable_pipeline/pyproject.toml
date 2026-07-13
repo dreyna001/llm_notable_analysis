@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "azure-notable-pipeline"
+version = "0.1.0"
+description = "Azure Functions notable analysis pipeline"
+requires-python = ">=3.12"
+dependencies = [
+    "azure-functions>=1.21,<2",
+    "azure-identity>=1.19,<2",
+    "azure-keyvault-secrets>=4.9,<5",
+    "azure-search-documents>=11.6,<12",
+    "azure-storage-blob>=12.24,<13",
+    "azure-storage-queue>=12.13,<13",
+    "azure-cosmos>=4.9,<5",
+    "anthropic>=0.116,<1",
+    "openai>=1.55,<3",
+    "requests==2.32.5",
+    "pydantic==2.13.4",
+    "PyJWT[crypto]==2.10.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+azure_notable_pipeline = ["enterprise_attack_v17.1_ids.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "integration: tests requiring Azurite, the Cosmos DB emulator, or another local service emulator",
+]

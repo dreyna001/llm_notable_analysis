@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+.env
+local.settings.json
+frontend/analyst-portal/node_modules/
+frontend/analyst-portal/dist/
+!frontend/analyst-portal/src/lib/
+!frontend/analyst-portal/src/lib/utils.ts
+deploy/azure/*.json
+!deploy/azure/*.parameters.example.json

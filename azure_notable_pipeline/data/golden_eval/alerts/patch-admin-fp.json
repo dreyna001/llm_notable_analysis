@@ -1,0 +1,19 @@
+{
+  "notable_id": "golden-002",
+  "search_name": "Scheduled Patch Deployment",
+  "urgency": "low",
+  "risk_score": 22,
+  "owner": "unassigned",
+  "status": "new",
+  "event_time": "2026-06-04T03:15:00Z",
+  "src_host": "workstation-09.corp.local",
+  "src_ip": "10.44.8.19",
+  "src_user": "NT AUTHORITY\\SYSTEM",
+  "process_name": "C:\\Windows\\System32\\wuauclt.exe",
+  "parent_process": "C:\\Windows\\System32\\services.exe",
+  "change_ticket": "CHG-88421",
+  "maintenance_window": true,
+  "deployment_tool": "SCCM",
+  "kb_id": "KB5034441",
+  "description": "SCCM pushed KB5034441 to workstation-09 during approved maintenance window CHG-88421 via wuauclt.exe."
+}

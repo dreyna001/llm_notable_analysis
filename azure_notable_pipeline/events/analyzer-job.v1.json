@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "container_name": "input",
+  "blob_name": "incoming/finding-123.json.gz",
+  "etag": "\"0x8DCABC123\"",
+  "size_bytes": 1234,
+  "last_modified": "2026-07-10T12:34:56Z"
+}

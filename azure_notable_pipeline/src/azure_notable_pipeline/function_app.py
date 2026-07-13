@@ -1,0 +1,69 @@
+"""Thin Azure Functions trigger registration shell."""
+
+from __future__ import annotations
+
+import logging
+
+try:
+    import azure.functions as func
+except ImportError:  # Phase 0 contract tests do not require runtime packages.
+    func = None  # type: ignore[assignment]
+
+
+app = func.FunctionApp() if func is not None else None
+logger = logging.getLogger(__name__)
+
+
+if app is not None:
+    from .blob_handler import (
+        normalize_analyzer_queue_message,
+        process_blob_created,
+        publish_blob_trigger_input,
+    )
+    from .embed_handler import dispatch_embed_queue_message
+
+    @app.function_name(name="intake_blob")
+    @app.blob_trigger(
+        arg_name="source_blob",
+        path="%INPUT_CONTAINER_NAME%/incoming/{name}",
+        connection="InputStorage",
+    )
+    def intake_blob(source_blob: func.InputStream) -> None:
+        """Extract native Blob properties and publish one strict v1 job."""
+
+        try:
+            publish_blob_trigger_input(source_blob)
+        except Exception:
+            logger.exception("Polling Blob intake failed before durable job publication")
+            raise
+
+    @app.function_name(name="analyzer_queue")
+    @app.queue_trigger(
+        arg_name="message",
+        queue_name="%ANALYZER_QUEUE_NAME%",
+        connection="OutputStorage",
+    )
+    def analyzer_queue(message: func.QueueMessage) -> None:
+        """Validate the application job before invoking analyzer orchestration."""
+
+        try:
+            intake = normalize_analyzer_queue_message(message.get_body())
+            process_blob_created(intake)
+        except Exception:
+            logger.exception("Analyzer queue processing failed")
+            raise
+
+    @app.function_name(name="case_embed_queue")
+    @app.queue_trigger(
+        arg_name="message",
+        queue_name="%CASE_EMBED_QUEUE_NAME%",
+        connection="OutputStorage",
+    )
+    def case_embed_queue(message: func.QueueMessage) -> None:
+        """Validate a v1 embed job before native workflow dispatch."""
+
+        try:
+            dispatch_embed_queue_message(message.get_body())
+        except Exception:
+            logger.exception("Case embed queue processing failed")
+            raise

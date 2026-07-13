@@ -1,0 +1,9 @@
+{
+  "name": "input/incoming/finding-123.json.gz",
+  "length": 1234,
+  "blob_properties": {
+    "ETag": "\"0x8DCABC123\"",
+    "LastModified": "2026-07-10T12:34:56Z",
+    "ContentLength": 1234
+  }
+}
