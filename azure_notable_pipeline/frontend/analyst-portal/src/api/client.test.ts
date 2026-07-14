@@ -3,9 +3,11 @@ import {
   ApiError,
   INVALID_RESPONSE_STATUS,
   PORTAL_AUTH_TOKEN_STORAGE_KEY,
+  clearPortalAuthToken,
   fetchCase,
   fetchCases,
   setPortalAuthToken,
+  setPortalTokenProvider,
 } from "./client";
 import { INVALID_RESPONSE_MESSAGE } from "./responseSchemas";
 
@@ -18,6 +20,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 describe("fetchCase response validation", () => {
   afterEach(() => {
+    setPortalTokenProvider(null);
     vi.unstubAllGlobals();
   });
 
@@ -114,6 +117,7 @@ describe("fetchCase response validation", () => {
 
 describe("fetchCases request cancellation", () => {
   afterEach(() => {
+    setPortalTokenProvider(null);
     window.sessionStorage.clear();
     window.localStorage.clear();
     vi.unstubAllGlobals();
@@ -163,7 +167,30 @@ describe("fetchCases request cancellation", () => {
     expect((init?.headers as Headers).get("Authorization")).toBe("Bearer jwt-token");
   });
 
-  it("falls back to local storage token for browser auth", async () => {
+  it("acquires a fresh OIDC access token before each request", async () => {
+    const provider = vi.fn().mockResolvedValue("fresh-access-token");
+    setPortalTokenProvider(provider);
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({ items: [], limit: 50, has_more: false, next_cursor: null }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchCases({ limit: 50 });
+
+    expect(provider).toHaveBeenCalledOnce();
+    expect((fetchMock.mock.calls[0][1]?.headers as Headers).get("Authorization"))
+      .toBe("Bearer fresh-access-token");
+  });
+
+  it("clears both current and legacy bearer-token storage", () => {
+    window.sessionStorage.setItem(PORTAL_AUTH_TOKEN_STORAGE_KEY, "session");
+    window.localStorage.setItem(PORTAL_AUTH_TOKEN_STORAGE_KEY, "legacy");
+    clearPortalAuthToken();
+    expect(window.sessionStorage.getItem(PORTAL_AUTH_TOKEN_STORAGE_KEY)).toBeNull();
+    expect(window.localStorage.getItem(PORTAL_AUTH_TOKEN_STORAGE_KEY)).toBeNull();
+  });
+
+  it("does not reuse legacy local storage tokens", async () => {
     window.localStorage.setItem(PORTAL_AUTH_TOKEN_STORAGE_KEY, "stored-token");
     const fetchMock = vi.fn(async () =>
       jsonResponse({
@@ -178,9 +205,7 @@ describe("fetchCases request cancellation", () => {
     await fetchCases({ limit: 50 });
 
     const init = fetchMock.mock.calls[0][1];
-    expect((init?.headers as Headers).get("Authorization")).toBe(
-      "Bearer stored-token",
-    );
+    expect((init?.headers as Headers).get("Authorization")).toBeNull();
   });
 
   it("aborts in-flight fetchCases requests when the signal is cancelled", async () => {

@@ -836,6 +836,14 @@
         "title": "ValidationError",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "PortalBearer": {
+        "bearerFormat": "JWT",
+        "description": "Bearer token containing the configured analyst authorization grant.",
+        "scheme": "bearer",
+        "type": "http"
+      }
     }
   },
   "info": {
@@ -1179,7 +1187,36 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
+                "additionalProperties": false,
+                "properties": {
+                  "client_request_id": {
+                    "description": "Retry-stable idempotency key, 8-128 URL-safe characters.",
+                    "maxLength": 128,
+                    "minLength": 8,
+                    "pattern": "^[A-Za-z0-9._-]+$",
+                    "type": "string"
+                  },
+                  "mode": {
+                    "const": "selected_case",
+                    "type": "string"
+                  },
+                  "question": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "selected_case_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "session_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "mode",
+                  "question",
+                  "selected_case_id"
+                ],
                 "title": "Payload",
                 "type": "object"
               }
@@ -1447,5 +1484,10 @@
         "summary": "Ready"
       }
     }
-  }
+  },
+  "security": [
+    {
+      "PortalBearer": []
+    }
+  ]
 }

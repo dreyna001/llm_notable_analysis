@@ -34,6 +34,7 @@ if [[ ",${capability_profiles,,}," == *,analyst_portal,* ]]; then
     PORTAL_JWT_ISSUER PORTAL_JWT_AUDIENCE APIM_PUBLISHER_EMAIL
     AZURE_OPENAI_ENDPOINT AZURE_OPENAI_RESOURCE_ID
     AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT
+    PORTAL_OIDC_CLIENT_ID PORTAL_OIDC_AUTHORITY PORTAL_OIDC_API_SCOPE
     PORTAL_VALIDATION_BEARER_TOKEN
   )
   for name in "${portal_required[@]}"; do
@@ -42,8 +43,12 @@ if [[ ",${capability_profiles,,}," == *,analyst_portal,* ]]; then
       exit 2
     fi
   done
-  if [[ "${PORTAL_AUTH_MODE:-jwt}" == 'iam' && -z "${PORTAL_ENTRA_REQUIRED_APP_ROLE:-}" ]]; then
-    echo 'PORTAL_ENTRA_REQUIRED_APP_ROLE is required when PORTAL_AUTH_MODE=iam.' >&2
+  if [[ -z "${PORTAL_ENTRA_REQUIRED_APP_ROLE:-}" ]]; then
+    echo 'PORTAL_ENTRA_REQUIRED_APP_ROLE is required when the analyst portal is enabled.' >&2
+    exit 2
+  fi
+  if [[ "${PORTAL_AUTH_MODE:-jwt}" == 'jwt' && "${PORTAL_OIDC_API_SCOPE##*/}" != "${PORTAL_ENTRA_REQUIRED_APP_ROLE}" ]]; then
+    echo 'In JWT mode, PORTAL_ENTRA_REQUIRED_APP_ROLE must match the final segment of PORTAL_OIDC_API_SCOPE.' >&2
     exit 2
   fi
 fi
@@ -72,6 +77,42 @@ if [[ "${CONTAINER_IMAGE_URI}" != *@sha256:* ]]; then
   echo 'CONTAINER_IMAGE_URI must be pinned to an immutable @sha256: digest.' >&2
   exit 2
 fi
+
+run_preflight() {
+  local python_bin="${PYTHON:-python3}"
+  command -v "${python_bin}" >/dev/null || { echo "Python is required: ${python_bin}" >&2; exit 2; }
+  command -v docker >/dev/null || { echo 'Docker is required for the container preflight.' >&2; exit 2; }
+  "${python_bin}" -m pytest tests -q
+  "${python_bin}" -m pytest tests/test_portal_openapi_contract.py -q
+  az bicep build --file deploy/azure/main.bicep --stdout >/dev/null
+  docker build --platform linux/amd64 -f deploy/docker/Dockerfile \
+    -t "azure-notable-preflight:${AZURE_DEPLOYMENT_PREFIX,,}" .
+  if [[ "${deploy_portal}" == true ]]; then
+    command -v npm >/dev/null || { echo 'npm is required for the portal preflight.' >&2; exit 2; }
+    export VITE_PORTAL_OIDC_CLIENT_ID="${PORTAL_OIDC_CLIENT_ID}"
+    export VITE_PORTAL_OIDC_AUTHORITY="${PORTAL_OIDC_AUTHORITY}"
+    export VITE_PORTAL_OIDC_API_SCOPE="${PORTAL_OIDC_API_SCOPE}"
+    unset VITE_PORTAL_API_BASE_URL
+    npm --prefix frontend/analyst-portal ci
+    npm --prefix frontend/analyst-portal test
+    npm --prefix frontend/analyst-portal run build
+  fi
+}
+
+# Complete source, contract, IaC, and image checks before Azure mutation.
+run_preflight
+
+apim_id=''
+deployment_succeeded=false
+disable_apim_on_failure() {
+  local exit_code=$?
+  if [[ ${exit_code} -ne 0 && -n "${apim_id}" && "${deployment_succeeded}" != true ]]; then
+    az resource update --ids "${apim_id}" \
+      --set properties.publicNetworkAccess=Disabled --output none >/dev/null 2>&1 || true
+  fi
+  exit "${exit_code}"
+}
+trap disable_apim_on_failure EXIT
 
 az account set --subscription "${AZURE_SUBSCRIPTION_ID}"
 if [[ -n "${ALERT_ACTION_GROUP_RESOURCE_ID:-}" ]]; then
@@ -136,6 +177,7 @@ az deployment group create \
     ApiManagementPublisherName="${APIM_PUBLISHER_NAME:-Notable Analysis}" \
     PortalChatTimeoutSec="${PORTAL_CHAT_TIMEOUT_SEC:-225}" \
     AnalyzerMaxInstanceCount="${ANALYZER_MAX_INSTANCE_COUNT:-5}" \
+    MaxCompressedInputBytes="${MAX_COMPRESSED_INPUT_BYTES:-1048576}" \
     EmbedMaxInstanceCount="${EMBED_MAX_INSTANCE_COUNT:-5}" \
     DeploymentEnvironment="${deployment_environment}" \
     AlertActionGroupResourceId="${ALERT_ACTION_GROUP_RESOURCE_ID:-}" \
@@ -159,6 +201,11 @@ apim_name="$(az deployment group show --name "${deployment_name}" --resource-gro
 frontdoor_profile="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.PortalFrontDoorProfileName.value -o tsv)"
 frontdoor_host="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.PortalFrontDoorHostName.value -o tsv)"
 workspace_customer_id="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.LogAnalyticsWorkspaceCustomerId.value -o tsv)"
+if [[ -n "${apim_name}" ]]; then
+  # Resolve this immediately so the EXIT trap can fail closed during any
+  # post-deployment validation, not only after portal asset upload succeeds.
+  apim_id="$(az apim show --resource-group "${AZURE_RESOURCE_GROUP}" --name "${apim_name}" --query id -o tsv)"
+fi
 
 forbidden_setting_pattern='^(AZUREWEBJOBSSTORAGE|AZUREWEBJOBSDASHBOARD|WEBSITE_CONTENTAZUREFILECONNECTIONSTRING|WEBSITE_CONTENTSHARE)$|(^|_)(DOCKER_REGISTRY_SERVER|ACR|AZURE_CONTAINER_REGISTRY|CONTAINER_REGISTRY)(_|$).*(USERNAME|PASSWORD|API_?KEY|ACCESS_?KEY|KEY|TOKEN|SECRET|CREDENTIAL|CONNECTION_?STRING)|(^|_)(AZURE_)?(STORAGE|BLOB|QUEUE|TABLE|FILE|FILES)(_|$).*(ACCOUNT_?KEY|ACCESS_?KEY|API_?KEY|KEY|CONNECTION_?STRING|SAS(_TOKEN)?|PASSWORD|SECRET)|(^|_)(AZURE_AI_FOUNDRY|AI_FOUNDRY|FOUNDRY|ANTHROPIC|AZURE_OPENAI|OPENAI|AZURE_SEARCH|COGNITIVE_SEARCH|SEARCH_SERVICE|SEARCH|COSMOSDB|COSMOS|AZURE_COSMOS)(_|$).*(API_?KEY|ACCOUNT_?KEY|ACCESS_?KEY|PRIMARY_?KEY|SECONDARY_?KEY|MASTER_?KEY|KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|CONNECTION_?STRING)'
 
@@ -326,36 +373,36 @@ validate_monitoring_alerts() {
 
 validate_monitoring_alerts
 
-approve_pending_connections() {
+approve_expected_frontdoor_connection() {
   local target_id="$1"
-  local connection_id
-  while IFS= read -r connection_id; do
-    [[ -z "${connection_id}" ]] && continue
-    az network private-endpoint-connection approve \
-      --id "${connection_id}" \
-      --description 'Approved Front Door Premium managed private origin' \
-      --output none
-  done < <(
+  local expected_description="$2"
+  local origin_group="$3"
+  local origin_name="$4"
+  local origin_state connection_state connection_id
+  local -a connection_ids=()
+  origin_state="$(az afd origin show --resource-group "${AZURE_RESOURCE_GROUP}" --profile-name "${frontdoor_profile}" --origin-group-name "${origin_group}" --origin-name "${origin_name}" --query sharedPrivateLinkResource.status -o tsv)"
+  [[ "${origin_state}" == 'Approved' ]] && return
+  mapfile -t connection_ids < <(
     az network private-endpoint-connection list \
       --id "${target_id}" \
-      --query "[?properties.privateLinkServiceConnectionState.status=='Pending'].id" \
+      --query "[?properties.privateLinkServiceConnectionState.status=='Pending' && properties.privateLinkServiceConnectionState.description=='${expected_description}'].id" \
       -o tsv
   )
-}
-
-wait_for_private_connections() {
-  local target_id="$1"
-  local states
+  [[ ${#connection_ids[@]} -eq 1 && -n "${connection_ids[0]}" ]] || {
+    echo "Expected exactly one pending Front Door request '${expected_description}' on ${target_id}." >&2
+    exit 1
+  }
+  connection_id="${connection_ids[0]}"
+  az network private-endpoint-connection approve \
+    --id "${connection_id}" \
+    --description 'Approved Front Door Premium managed private origin' \
+    --output none
   for attempt in {1..30}; do
-    states="$(az network private-endpoint-connection list --id "${target_id}" --query '[].properties.privateLinkServiceConnectionState.status' -o tsv)"
-    if [[ -n "${states}" ]] && ! grep -qv '^Approved$' <<<"${states}"; then
-      sleep 10
-      continue
-    fi
-    [[ -n "${states}" ]] && return
+    connection_state="$(az network private-endpoint-connection show --id "${connection_id}" --query properties.privateLinkServiceConnectionState.status -o tsv)"
+    [[ "${connection_state}" == 'Approved' ]] && return
     sleep 10
   done
-  echo "Private endpoint connections did not all reach Approved on ${target_id}." >&2
+  echo "Front Door private endpoint connection did not reach Approved on ${target_id}." >&2
   exit 1
 }
 
@@ -375,10 +422,6 @@ if [[ "${deploy_portal}" == true ]]; then
   verify_managed_identity_configuration "${portal_name}"
   wait_for_function_host "${portal_name}" portal_http
 
-  unset VITE_PORTAL_API_BASE_URL
-  npm --prefix frontend/analyst-portal ci
-  npm --prefix frontend/analyst-portal test
-  npm --prefix frontend/analyst-portal run build
   upload_ready=false
   for attempt in {1..18}; do
     if az storage blob upload-batch \
@@ -398,11 +441,9 @@ if [[ "${deploy_portal}" == true ]]; then
   subscription_id="$(az account show --query id -o tsv)"
   portal_storage_id="/subscriptions/${subscription_id}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Storage/storageAccounts/${PORTAL_UI_STORAGE_ACCOUNT_NAME}"
   portal_function_id="$(az functionapp show --resource-group "${AZURE_RESOURCE_GROUP}" --name "${portal_name}" --query id -o tsv)"
-  apim_id="$(az apim show --resource-group "${AZURE_RESOURCE_GROUP}" --name "${apim_name}" --query id -o tsv)"
-  for target_id in "${portal_storage_id}" "${portal_function_id}" "${apim_id}"; do
-    approve_pending_connections "${target_id}"
-    wait_for_private_connections "${target_id}"
-  done
+  approve_expected_frontdoor_connection "${portal_storage_id}" 'Front Door private static website origin' portal-ui portal-web
+  approve_expected_frontdoor_connection "${portal_function_id}" 'Front Door private chat origin' portal-chat portal-function
+  approve_expected_frontdoor_connection "${apim_id}" 'Front Door private APIM origin' portal-api portal-apim
 
   for origin in portal-function portal-apim portal-web; do
     case "${origin}" in
@@ -449,4 +490,5 @@ if [[ "${deploy_portal}" == true ]]; then
   fi
 fi
 
+deployment_succeeded=true
 echo "Deployment ${deployment_name} completed: ${analyzer_name}, ${embed_name}, ${disposition_name}${portal_name:+, ${portal_name}}."

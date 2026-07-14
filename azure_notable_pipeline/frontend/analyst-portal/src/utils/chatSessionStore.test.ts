@@ -6,6 +6,9 @@ import {
   resolveNewChatContext,
   resolveSyncedServerSessionId,
   switchToChatContext,
+  loadChatSessionStore,
+  saveChatSessionStore,
+  clearChatSessionStore,
   type ChatSessionStore,
 } from "./chatSessionStore";
 
@@ -143,5 +146,34 @@ describe("chatSessionStore cap", () => {
     expect(store.sessions.some((session) => session.localId === activeId)).toBe(
       true,
     );
+  });
+});
+
+describe("chat session browser retention", () => {
+  it("stores chat contents only for the current browser session", () => {
+    const store = makeStore(1);
+    store.sessions[0].turns = [{
+      id: "turn-1",
+      question: "confidential question",
+      response: { answer: "confidential answer", answer_status: "answered" },
+    }];
+
+    saveChatSessionStore(store);
+
+    expect(window.localStorage.length).toBe(0);
+    expect(window.sessionStorage.getItem("portal-chat-sessions-v1")).toContain(
+      "confidential question",
+    );
+    expect(loadChatSessionStore().sessions[0].turns[0].response?.answer).toBe(
+      "confidential answer",
+    );
+    clearChatSessionStore();
+    expect(window.sessionStorage.getItem("portal-chat-sessions-v1")).toBeNull();
+  });
+
+  it("deletes legacy persistent chat data", () => {
+    window.localStorage.setItem("portal-chat-sessions-v1", "legacy-secret");
+    loadChatSessionStore();
+    expect(window.localStorage.getItem("portal-chat-sessions-v1")).toBeNull();
   });
 });

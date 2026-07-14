@@ -7,10 +7,15 @@ valid bearer token.
 
 ## Authentication and ownership
 
-`PORTAL_AUTH_MODE=jwt` validates issuer, audience, expiry, signature, and `sub`.
-`iam` additionally requires the configured Entra app role. Stable ownership is
+Both portal modes validate issuer, audience, expiry, signature, `sub`, and the
+configured role or delegated scope. Stable ownership is
 derived only from `sub`; email, display name, and caller headers are not identity
 contracts. Production is same-origin and emits no permissive CORS policy.
+
+Register the UI as an Entra public SPA client using authorization-code + PKCE.
+Set `PORTAL_OIDC_CLIENT_ID`, `PORTAL_OIDC_AUTHORITY`, and
+`PORTAL_OIDC_API_SCOPE` for the build, and register the exact Front Door origin
+as a redirect/logout URI. No browser client secret is used.
 
 Before enablement, test missing, expired, wrong-issuer, wrong-audience,
 missing-`sub`, and missing-role tokens. Use two valid test identities to prove

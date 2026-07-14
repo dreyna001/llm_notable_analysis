@@ -111,6 +111,58 @@ def test_oversized_payload_marks_missing_without_truncation(monkeypatch):
     assert envelope["alert_payload"] is None
 
 
+def test_fallback_case_identity_uses_full_source_location(monkeypatch):
+    monkeypatch.setattr(case_archive, "write_blob", lambda *_args, **_kwargs: None)
+    payload_without_id = {"search_name": "No authoritative identifier"}
+
+    first = archive_case(
+        analysis_result=_analysis(alert_payload=payload_without_id),
+        config=_config(),
+        source=SourceContext(
+            "input", "incoming/team-a/alert.json", "alert.json", "json", False
+        ),
+        sink_result=_sink(),
+        cosmos=FakeCosmos(),
+        processed_at="2026-06-15T10:30:00Z",
+    )
+    second = archive_case(
+        analysis_result=_analysis(alert_payload=payload_without_id),
+        config=_config(),
+        source=SourceContext(
+            "input", "incoming/team-b/alert.json", "alert.json", "json", False
+        ),
+        sink_result=_sink(),
+        cosmos=FakeCosmos(),
+        processed_at="2026-06-15T10:30:00Z",
+    )
+
+    assert first.case_id != second.case_id
+    assert first.case_id.startswith("alert-")
+    assert second.case_id.startswith("alert-")
+
+
+def test_fallback_case_identity_sanitizes_source_basename(monkeypatch):
+    monkeypatch.setattr(case_archive, "write_blob", lambda *_args, **_kwargs: None)
+
+    result = archive_case(
+        analysis_result=_analysis(alert_payload={"search_name": "No ID"}),
+        config=_config(),
+        source=SourceContext(
+            "input",
+            "incoming/team-a/Alert with spaces (1).json",
+            "Alert with spaces (1).json",
+            "json",
+            False,
+        ),
+        sink_result=_sink(),
+        cosmos=FakeCosmos(),
+        processed_at="2026-06-15T10:30:00Z",
+    )
+
+    assert result.status == "success"
+    assert result.case_id.startswith("Alert_with_spaces_1-")
+
+
 def test_replay_and_collision_are_resolved_before_blob_write(monkeypatch):
     writes = []
     monkeypatch.setattr(case_archive, "write_blob", lambda *args, **kwargs: writes.append(args))

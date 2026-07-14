@@ -58,6 +58,14 @@ describe("ChatPanel session scope recovery", () => {
     expect(postChat.mock.calls[1]?.[0]).toMatchObject({
       session_id: null,
     });
+    const firstRequest = postChat.mock.calls[0]?.[0] as {
+      client_request_id?: string;
+    };
+    const retryRequest = postChat.mock.calls[1]?.[0] as {
+      client_request_id?: string;
+    };
+    expect(firstRequest.client_request_id).toMatch(/^[A-Za-z0-9._-]{8,128}$/);
+    expect(retryRequest.client_request_id).toBe(firstRequest.client_request_id);
   });
 
   it("retries after an expired server session response", async () => {

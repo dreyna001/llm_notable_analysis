@@ -29,6 +29,9 @@ export type ApiErrorKind = "cancelled" | "timeout" | "http" | "invalid_response"
 export const INVALID_RESPONSE_STATUS = 502;
 export const PORTAL_AUTH_TOKEN_STORAGE_KEY = "notable.portal.jwt";
 
+type PortalTokenProvider = () => Promise<string>;
+let portalTokenProvider: PortalTokenProvider | null = null;
+
 export class ApiError extends Error {
   status: number;
   kind: ApiErrorKind;
@@ -123,19 +126,25 @@ export function setPortalAuthToken(token: string): void {
 
 export function clearPortalAuthToken(): void {
   window.sessionStorage.removeItem(PORTAL_AUTH_TOKEN_STORAGE_KEY);
+  // Remove tokens created by older portal releases so logout cannot fall back
+  // to a long-lived bearer token.
+  window.localStorage.removeItem(PORTAL_AUTH_TOKEN_STORAGE_KEY);
 }
 
-function portalAuthToken(): string {
-  return (
-    window.sessionStorage.getItem(PORTAL_AUTH_TOKEN_STORAGE_KEY) ||
-    window.localStorage.getItem(PORTAL_AUTH_TOKEN_STORAGE_KEY) ||
-    ""
-  ).trim();
+export function setPortalTokenProvider(provider: PortalTokenProvider | null): void {
+  portalTokenProvider = provider;
 }
 
-function withAuthHeaders(headers: HeadersInit | undefined): Headers {
+async function portalAuthToken(): Promise<string> {
+  if (portalTokenProvider) {
+    return (await portalTokenProvider()).trim();
+  }
+  return (window.sessionStorage.getItem(PORTAL_AUTH_TOKEN_STORAGE_KEY) || "").trim();
+}
+
+async function withAuthHeaders(headers: HeadersInit | undefined): Promise<Headers> {
   const merged = new Headers(headers);
-  const token = portalAuthToken();
+  const token = await portalAuthToken();
   if (token) {
     merged.set("Authorization", `Bearer ${token}`);
   }
@@ -187,12 +196,19 @@ async function apiFetch(
     signal ?? undefined,
   );
   try {
+    const headers = await withAuthHeaders(init.headers);
+    if (signal?.aborted) {
+      throw new ApiError(0, "Request cancelled.", "cancelled");
+    }
     return await fetch(apiUrl(input), {
       ...init,
-      headers: withAuthHeaders(init.headers),
+      headers,
       signal: mergedSignal,
     });
   } catch (error) {
+    if (error instanceof ApiError && error.kind === "cancelled") {
+      throw error;
+    }
     if (signal?.aborted) {
       throw new ApiError(0, "Request cancelled.", "cancelled");
     }

@@ -46,6 +46,14 @@ class DispositionSyncConfigError(Exception):
     """Disposition sync configuration or map validation failed."""
 
 
+@dataclass(frozen=True, order=True)
+class SyncCursor:
+    """Stable ServiceNow page boundary ordered by update time then sys_id."""
+
+    updated_at: datetime
+    sys_id: str = ""
+
+
 @dataclass(frozen=True)
 class DispositionSyncSummary:
     status: str
@@ -95,7 +103,7 @@ def run_disposition_sync(
 
     cursor = _read_cursor(cosmos_store, config.DISPOSITION_SYNC_STATE_CONTAINER)
     counts = {key: 0 for key in ("fetched", "upserted", "skipped", "linked", "deactivated", "malformed")}
-    max_updated: datetime | None = None
+    max_cursor: SyncCursor | None = None
     try:
         for page_rows in _iter_table_api_pages(
             base_url=base_url,
@@ -130,26 +138,29 @@ def run_disposition_sync(
                 if outcome.get("linked"):
                     counts["linked"] += 1
                 updated = outcome.get("sys_updated_on")
-                if isinstance(updated, datetime) and (max_updated is None or updated > max_updated):
-                    max_updated = updated
+                snow_sys_id = str(outcome.get("snow_sys_id") or "").strip()
+                if isinstance(updated, datetime) and snow_sys_id:
+                    row_cursor = SyncCursor(updated, snow_sys_id)
+                    if max_cursor is None or row_cursor > max_cursor:
+                        max_cursor = row_cursor
             if page_rows and page_malformed / len(page_rows) > MALFORMED_PAGE_FAIL_RATIO:
                 raise RuntimeError(
                     f"malformed row ratio exceeded threshold on page ({page_malformed}/{len(page_rows)})"
                 )
             if counts["fetched"] >= MAX_RECORDS_PER_RUN:
                 break
-        if max_updated is not None:
+        if max_cursor is not None:
             _write_cursor(
                 cosmos_store,
                 config.DISPOSITION_SYNC_STATE_CONTAINER,
-                cursor_value=max_updated,
+                cursor=max_cursor,
                 updated_at=run_at,
             )
         summary = DispositionSyncSummary(
             status="success",
             **counts,
-            message="" if max_updated else "no rows processed; cursor unchanged",
-            cursor_advanced=max_updated is not None,
+            message="" if max_cursor else "no rows processed; cursor unchanged",
+            cursor_advanced=max_cursor is not None,
         )
     except Exception as exc:
         summary = DispositionSyncSummary(
@@ -228,16 +239,28 @@ def _process_row(
     existing = cosmos_store.get_disposition(config.DISPOSITION_CONTAINER, snow_sys_id)
     if not _state_is_closed(str(mapped.get("state") or ""), closed_states):
         if not existing or existing.get("is_active") is False:
-            return {"action": "skipped", "sys_updated_on": updated}
+            return {
+                "action": "skipped",
+                "sys_updated_on": updated,
+                "snow_sys_id": snow_sys_id,
+            }
         cosmos_store.upsert_disposition(
             config.DISPOSITION_CONTAINER,
             _merge_deactivated_item(existing, sys_updated_on=updated, run_at=run_at),
         )
-        return {"action": "deactivated", "sys_updated_on": updated}
+        return {
+            "action": "deactivated",
+            "sys_updated_on": updated,
+            "snow_sys_id": snow_sys_id,
+        }
 
     row_hash = payload_hash({key: mapped.get(key) for key in sorted(mapped)})
     if existing and str(existing.get("payload_hash") or "") == row_hash:
-        return {"action": "skipped", "sys_updated_on": updated}
+        return {
+            "action": "skipped",
+            "sys_updated_on": updated,
+            "snow_sys_id": snow_sys_id,
+        }
     normalized, raw = normalize_disposition(mapped.get("close_code"), code_map)
     correlation_id = str(mapped.get("correlation_id") or "").strip()
     case_id = str((existing or {}).get("case_id") or "").strip()
@@ -267,7 +290,12 @@ def _process_row(
         "expires_at_epoch": int(expires_at.timestamp()),
     }
     cosmos_store.upsert_disposition(config.DISPOSITION_CONTAINER, item)
-    return {"action": "upserted", "sys_updated_on": updated, "linked": bool(case_id)}
+    return {
+        "action": "upserted",
+        "sys_updated_on": updated,
+        "snow_sys_id": snow_sys_id,
+        "linked": bool(case_id),
+    }
 
 
 def _link_case_id(
@@ -317,12 +345,13 @@ def _alert_payload_matches(payload: dict[str, Any], correlation_id: str) -> bool
 
 def _iter_table_api_pages(
     *, base_url: str, table_name: str, api_fields: list[str], closed_states: list[str],
-    field_map: dict[str, Any], cursor: datetime | None, backfill_days: int,
+    field_map: dict[str, Any], cursor: SyncCursor | datetime | None, backfill_days: int,
     run_at: datetime, token: str, session: Any, timeout_seconds: int,
 ) -> Iterator[list[dict[str, Any]]]:
     offset = fetched_total = 0
     closed_field = field_map["fields"]["closed_at"]
     updated_field = field_map["fields"]["sys_updated_on"]
+    sys_id_field = field_map["fields"]["sys_id"]
     state_field = field_map["fields"]["state"]
     while fetched_total < MAX_RECORDS_PER_RUN:
         if cursor is None:
@@ -331,7 +360,16 @@ def _iter_table_api_pages(
                 f"^{state_field}IN{','.join(closed_states)}"
             )
         else:
-            query = f"{updated_field}>{_servicenow_query_timestamp(cursor)}"
+            boundary = cursor if isinstance(cursor, SyncCursor) else SyncCursor(cursor)
+            timestamp = _servicenow_query_timestamp(boundary.updated_at)
+            # NQ expresses the required union without relying on ambiguous OR/AND
+            # precedence in ServiceNow encoded queries. A legacy timestamp-only
+            # checkpoint has an empty sys_id and safely replays its boundary.
+            query = (
+                f"{updated_field}>{timestamp}"
+                f"^NQ{updated_field}={timestamp}^{sys_id_field}>{boundary.sys_id}"
+            )
+        query += f"^ORDERBY{updated_field}^ORDERBY{sys_id_field}"
         response = _request_with_retry(
             session=session,
             method="GET",
@@ -344,7 +382,6 @@ def _iter_table_api_pages(
                 "sysparm_exclude_reference_link": "true",
                 "sysparm_limit": str(PAGE_SIZE),
                 "sysparm_offset": str(offset),
-                "sysparm_order_by": updated_field,
             },
             timeout=timeout_seconds,
         )
@@ -378,23 +415,27 @@ def _request_with_retry(*, session: Any, method: str, url: str, timeout: int, **
     raise RuntimeError("ServiceNow disposition sync request failed without response")
 
 
-def _read_cursor(store: CosmosStore, container_name: str) -> datetime | None:
+def _read_cursor(store: CosmosStore, container_name: str) -> SyncCursor | None:
     row = store.get_sync_checkpoint(container_name, JOB_NAME)
-    return _parse_servicenow_datetime(row.get("cursor_value")) if row else None
+    updated_at = _parse_servicenow_datetime(row.get("cursor_value")) if row else None
+    if updated_at is None:
+        return None
+    return SyncCursor(updated_at, str(row.get("cursor_sys_id") or "").strip())
 
 
 def _write_cursor(
     store: CosmosStore,
     container_name: str,
     *,
-    cursor_value: datetime,
+    cursor: SyncCursor,
     updated_at: datetime,
 ) -> None:
     store.upsert_sync_checkpoint(
         container_name,
         {
             "job_name": JOB_NAME,
-            "cursor_value": _format_servicenow_timestamp(cursor_value),
+            "cursor_value": _format_servicenow_timestamp(cursor.updated_at),
+            "cursor_sys_id": cursor.sys_id,
             "updated_at": _format_servicenow_timestamp(updated_at),
         },
     )

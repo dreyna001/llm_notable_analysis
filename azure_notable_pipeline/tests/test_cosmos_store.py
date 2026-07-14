@@ -220,6 +220,41 @@ def test_case_listing_uses_bounded_keyset_and_logs_charge(caplog: pytest.LogCapt
     assert "request_charge=4.75" in caplog.text
 
 
+def test_case_listing_applies_filters_in_parameterized_cosmos_query() -> None:
+    store, database = _store()
+    store.list_cases(
+        "cases",
+        limit=10,
+        start_date="2026-07-01T00:00:00Z",
+        end_date="2026-07-14T23:59:59Z",
+        verdict="Likely_True_Positive",
+        search_name="Suspicious Login",
+    )
+    call = database.containers["cases"].query_calls[-1]
+    query = call["query"]
+    params = {entry["name"]: entry["value"] for entry in call["parameters"]}
+    assert "c.processed_at >= @start_date" in query
+    assert "c.processed_at <= @end_date" in query
+    assert "LOWER(c.verdict) = @verdict" in query
+    assert "CONTAINS(LOWER(c.search_name), @search_name)" in query
+    assert params["@verdict"] == "likely_true_positive"
+    assert params["@search_name"] == "suspicious login"
+
+
+def test_public_case_filters_validate_dates_before_query() -> None:
+    store, _ = _store()
+    config = Config(CASE_INDEX_CONTAINER="cases")
+    with pytest.raises(ValueError, match="start_date"):
+        list_cases(config=config, cosmos_store=store, start_date="not-a-date")
+    with pytest.raises(ValueError, match="must not be after"):
+        list_cases(
+            config=config,
+            cosmos_store=store,
+            start_date="2026-07-15",
+            end_date="2026-07-14",
+        )
+
+
 def test_public_case_pagination_returns_keyset_not_cosmos_continuation() -> None:
     store, _ = _store()
     for case_id, processed_at in (("c", "2026-01-03Z"), ("b", "2026-01-02Z"), ("a", "2026-01-01Z")):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import re
 import threading
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -53,6 +54,10 @@ _chat_semaphore: threading.BoundedSemaphore | None = None
 _chat_semaphore_limit: int | None = None
 
 
+class PortalForbiddenError(PermissionError):
+    """Authenticated principal lacks the configured analyst grant."""
+
+
 def configure_chat_service(service: ChatService | None) -> None:
     """Set an explicit chat callable for tests or alternate application composition."""
 
@@ -85,6 +90,8 @@ def handle_request(
             user_id=user_id,
             chat_service=chat_service,
         )
+    except PortalForbiddenError:
+        return _json_response(403, {"error": "Forbidden"})
     except ValueError as exc:
         return _json_response(400, {"error": str(exc)})
 
@@ -116,10 +123,18 @@ def _route(
     if path == "/health":
         return _model_response(HealthResponse, {"status": "ok"})
     if path == "/ready":
-        ready = config.PORTAL_ENABLED and bool(config.CASE_INDEX_CONTAINER)
+        dependencies = _probe_portal_dependencies(config)
+        if config.CASE_QA_ENABLED:
+            dependencies.update(_probe_chat_dependencies(config))
+        ready = config.PORTAL_ENABLED and all(
+            value == "ready" for value in dependencies.values()
+        )
         return _json_response(
             200 if ready else 503,
-            {"status": "ready" if ready else "not_ready"},
+            {
+                "status": "ready" if ready else "not_ready",
+                **({} if ready else {"dependencies": dependencies}),
+            },
         )
     if path == "/api/capabilities":
         return _model_response(PortalCapabilitiesResponse, _capabilities(config))
@@ -132,6 +147,10 @@ def _route(
             cosmos_store=_cosmos_store(config),
             limit=_int_query(query.get("limit")),
             cursor=_case_cursor(query),
+            start_date=query.get("start_date") or query.get("start"),
+            end_date=query.get("end_date") or query.get("end"),
+            verdict=query.get("verdict"),
+            search_name=query.get("search_name"),
         )
         return _model_response(CaseListResponse, payload)
 
@@ -295,6 +314,14 @@ def _handle_chat_gate(
                 f"question exceeds {config.CASE_QA_MAX_QUESTION_CHARS} characters"
             )
         session_id = _bounded_optional_text(payload.get("session_id"), "session_id")
+        client_request_id = _bounded_optional_text(
+            payload.get("client_request_id"),
+            "client_request_id",
+        )
+        if client_request_id and not re.fullmatch(
+            r"[A-Za-z0-9._-]{8,128}", client_request_id
+        ):
+            raise ValueError("client_request_id must be 8-128 URL-safe characters")
         store = _cosmos_store(config)
         if config.CASE_QA_CHAT_HISTORY_ENABLED:
             validate_chat_history_request(
@@ -333,6 +360,7 @@ def _handle_chat_gate(
                 requested_session_id=session_id,
                 user_id=user_id,
                 response=response_payload,
+                client_request_id=client_request_id,
             )
         return _model_response(ChatResponseModel, response_payload)
     except (ChatSessionNotFoundError, ChatSessionExpiredError) as exc:
@@ -445,23 +473,56 @@ def _capabilities(config: Config) -> dict[str, Any]:
 
 def _probe_chat_dependencies(config: Config) -> dict[str, str]:
     status = {
-        "embeddings": "ready" if config.CASE_EMBED_QUEUE_NAME else "unavailable",
+        "embeddings": "unavailable",
         "archive_retrieval": "unavailable",
         "llm_gateway": "unavailable",
     }
-    try:
-        _cosmos_store(config).get_case(config.CASE_INDEX_CONTAINER, "__readiness__")
+    portal_status = _probe_portal_dependencies(config)
+    if all(value == "ready" for value in portal_status.values()):
         status["archive_retrieval"] = "ready"
-    except Exception:  # Dependency probe must degrade without leaking provider failures.
-        pass
-    if config.AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT.strip():
+    if (
+        config.AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT
+        and config.AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT
+    ):
         try:
-            from .azure_clients import azure_openai_client
+            from .azure_clients import probe_azure_openai_endpoint
 
-            azure_openai_client(config.AZURE_OPENAI_ENDPOINT, config.AZURE_OPENAI_API_VERSION)
-            status["llm_gateway"] = "ready"
+            if probe_azure_openai_endpoint(config.AZURE_OPENAI_ENDPOINT):
+                status["embeddings"] = "ready"
+                status["llm_gateway"] = "ready"
         except Exception:  # Dependency probe must degrade without leaking provider failures.
             pass
+    return status
+
+
+def _probe_portal_dependencies(config: Config) -> dict[str, str]:
+    status = {"case_index": "unavailable", "archive_blob": "unavailable"}
+    try:
+        store = _cosmos_store(config)
+        store.get_case(config.CASE_INDEX_CONTAINER, "__readiness__")
+        status["case_index"] = "ready"
+        if config.CASE_QA_CHAT_HISTORY_ENABLED:
+            store.read_item(
+                config.CHAT_SESSIONS_CONTAINER,
+                item_id="__readiness__",
+                partition_key="__readiness__",
+            )
+            store.read_item(
+                config.CHAT_MESSAGES_CONTAINER,
+                item_id="__readiness__",
+                partition_key="__readiness__",
+            )
+            status["chat_history"] = "ready"
+    except Exception:  # Dependency probe must degrade without leaking provider failures.
+        if config.CASE_QA_CHAT_HISTORY_ENABLED:
+            status["chat_history"] = "unavailable"
+    try:
+        _blob_service(config).get_container_client(
+            config.CASE_ARCHIVE_CONTAINER
+        ).get_container_properties(timeout=5)
+        status["archive_blob"] = "ready"
+    except Exception:  # Dependency probe must degrade without leaking provider failures.
+        pass
     return status
 
 
@@ -478,6 +539,8 @@ def _authenticated_claims(
         )
         if not isinstance(claims, dict) or not str(claims.get("sub") or "").strip():
             return None
+        if not _claim_contains_role(claims, config.PORTAL_ENTRA_REQUIRED_APP_ROLE):
+            raise PortalForbiddenError
         return claims
     if config.PORTAL_AUTH_MODE == "iam":
         claims = _entra_principal_claims(request.headers or {})
@@ -485,15 +548,29 @@ def _authenticated_claims(
         roles = claims.get("roles") if claims else None
         if isinstance(roles, str):
             roles = [roles]
-        if (
-            not claims
-            or not str(claims.get("sub") or "").strip()
-            or not isinstance(roles, list)
-            or required_role not in roles
-        ):
+        if not claims or not str(claims.get("sub") or "").strip():
             return None
+        if not isinstance(roles, list) or required_role not in roles:
+            raise PortalForbiddenError
         return claims
     return None
+
+
+def _claim_contains_role(claims: Mapping[str, Any], required_role: str) -> bool:
+    """Return whether an Entra roles or delegated-scope claim grants access."""
+
+    required = str(required_role or "").strip()
+    if not required:
+        return False
+    roles = claims.get("roles")
+    if isinstance(roles, str):
+        role_values = roles.split()
+    elif isinstance(roles, list):
+        role_values = [str(value) for value in roles]
+    else:
+        role_values = []
+    scopes = str(claims.get("scp") or claims.get("scope") or "").split()
+    return required in role_values or required in scopes
 
 
 def _entra_principal_claims(headers: Mapping[str, Any]) -> dict[str, Any] | None:

@@ -291,16 +291,20 @@ class CosmosStore:
         *,
         limit: int,
         before: tuple[str, str] | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        verdict: str | None = None,
+        search_name: str | None = None,
     ) -> list[dict[str, Any]]:
         """Return a bounded newest-first case page using application keysets."""
 
         bounded = _bounded_limit(limit, maximum=500)
         parameters: list[dict[str, Any]] = [{"name": "@limit", "value": bounded}]
-        predicate = ""
+        predicates: list[str] = []
         if before is not None:
             processed_at, case_id = before
-            predicate = (
-                " WHERE (c.processed_at < @processed_at OR "
+            predicates.append(
+                "(c.processed_at < @processed_at OR "
                 "(c.processed_at = @processed_at AND c.case_id < @case_id))"
             )
             parameters.extend(
@@ -309,6 +313,19 @@ class CosmosStore:
                     {"name": "@case_id", "value": _required_text(case_id, "case_id")},
                 ]
             )
+        if start_date:
+            predicates.append("c.processed_at >= @start_date")
+            parameters.append({"name": "@start_date", "value": start_date})
+        if end_date:
+            predicates.append("c.processed_at <= @end_date")
+            parameters.append({"name": "@end_date", "value": end_date})
+        if verdict:
+            predicates.append("LOWER(c.verdict) = @verdict")
+            parameters.append({"name": "@verdict", "value": verdict.lower()})
+        if search_name:
+            predicates.append("CONTAINS(LOWER(c.search_name), @search_name)")
+            parameters.append({"name": "@search_name", "value": search_name.lower()})
+        predicate = f" WHERE {' AND '.join(predicates)}" if predicates else ""
         query = (
             "SELECT TOP @limit * FROM c"
             f"{predicate} ORDER BY c.processed_at DESC, c.case_id DESC"
@@ -416,6 +433,22 @@ class CosmosStore:
         _required_text(body.get("user_id"), "user_id")
         return self.upsert_item(container_name, body)
 
+    def replace_chat_session_if_match(
+        self,
+        container_name: str,
+        session: Mapping[str, Any],
+        *,
+        expected_etag: str,
+    ) -> ConditionalOutcome:
+        body = dict(session)
+        body["id"] = _required_text(body.get("session_id"), "session_id")
+        _required_text(body.get("user_id"), "user_id")
+        return self.replace_if_match(
+            container_name,
+            body,
+            expected_etag=expected_etag,
+        )
+
     def list_chat_sessions(
         self,
         container_name: str,
@@ -475,6 +508,19 @@ class CosmosStore:
         body["id"] = _required_text(body.get("message_id"), "message_id")
         _required_text(body.get("session_id"), "session_id")
         return self.create_if_absent(container_name, body)
+
+    def get_chat_message(
+        self,
+        container_name: str,
+        *,
+        session_id: str,
+        message_id: str,
+    ) -> dict[str, Any] | None:
+        return self.read_item(
+            container_name,
+            item_id=_required_text(message_id, "message_id"),
+            partition_key=_required_text(session_id, "session_id"),
+        )
 
     def list_chat_messages(
         self,

@@ -81,6 +81,9 @@ param AnalyzerTimeoutSeconds int = 360
 param AnalyzerMaxInstanceCount int = 5
 
 @minValue(1)
+param MaxCompressedInputBytes int = 1048576
+
+@minValue(1)
 param EmbedMaxInstanceCount int = 5
 
 @minValue(30)
@@ -383,6 +386,7 @@ module analyzerFunction 'modules/functions-analyzer.bicep' = {
     reportSinkMode: ReportSinkMode
     capabilityProfiles: CapabilityProfiles
     maxInstanceCount: AnalyzerMaxInstanceCount
+    maxCompressedInputBytes: MaxCompressedInputBytes
     timeoutSeconds: AnalyzerTimeoutSeconds
   }
   dependsOn: [registryAccess, foundryAccess, analyzerHostAccess]

@@ -147,7 +147,9 @@ def test_apim_is_standard_v2_authenticated_and_staged_for_private_only_access() 
     assert "require-scheme=\"Bearer\"" in apim
     assert "require-expiration-time=\"true\"" in apim
     assert "<claim name=\"sub\"" in apim
-    assert "<claim name=\"roles\"" in apim
+    assert "GetValueOrDefault(&quot;roles&quot;" in apim
+    assert "GetValueOrDefault(&quot;scp&quot;" in apim
+    assert "code=\"403\" reason=\"Forbidden\"" in apim
     assert "forward-request timeout=\"30\"" in apim
 
 
@@ -177,18 +179,57 @@ def test_portal_deploy_flow_approves_every_origin_before_disabling_apim() -> Non
         assert "private-endpoint-connection approve" in script
         assert "sharedPrivateLinkResource.status" in script
         assert "properties.publicNetworkAccess=Disabled" in script
-        assert script.index("sharedPrivateLinkResource.status") < script.index(
+        assert script.index("sharedPrivateLinkResource.status") < script.rindex(
             "properties.publicNetworkAccess=Disabled"
         )
         assert "PORTAL_VALIDATION_BEARER_TOKEN" in script
         assert (
-            "PORTAL_ENTRA_REQUIRED_APP_ROLE is required when PORTAL_AUTH_MODE=iam."
+            "PORTAL_ENTRA_REQUIRED_APP_ROLE is required when the analyst portal is enabled."
             in script
+        )
+        assert (
+            "PORTAL_ENTRA_REQUIRED_APP_ROLE must match the final segment of "
+            "PORTAL_OIDC_API_SCOPE" in script
         )
         assert "Authorization" in script
         assert "storage blob upload-batch" in script
         assert "--auth-mode login" in script
         assert "VITE_PORTAL_API_BASE_URL" in script
+        for oidc_setting in (
+            "PORTAL_OIDC_CLIENT_ID",
+            "PORTAL_OIDC_AUTHORITY",
+            "PORTAL_OIDC_API_SCOPE",
+        ):
+            assert oidc_setting in script
+        assert "privateLinkServiceConnectionState.description" in script
+        assert "Front Door private static website origin" in script
+        assert "Front Door private chat origin" in script
+        assert "Front Door private APIM origin" in script
+
+
+def test_deployment_preflights_run_before_azure_mutation_and_cleanup_apim() -> None:
+    for name in ("setup-and-deploy.sh", "setup-and-deploy.ps1"):
+        script = _read(ROOT / "scripts" / name)
+        mutation = script.index("az group create")
+        for gate in (
+            "-m pytest tests -q",
+            "-m pytest tests/test_portal_openapi_contract.py -q",
+            "bicep build --file deploy/azure/main.bicep",
+            "docker build --platform linux/amd64",
+            "npm --prefix frontend/analyst-portal test",
+            "npm --prefix frontend/analyst-portal run build",
+        ):
+            assert script.index(gate) < mutation
+        assert script.count("properties.publicNetworkAccess=Disabled") >= 2
+
+    bash = _read(ROOT / "scripts" / "setup-and-deploy.sh")
+    powershell = _read(ROOT / "scripts" / "setup-and-deploy.ps1")
+    assert bash.index('apim_id="$(az apim show') < bash.index(
+        'verify_no_forbidden_settings "${portal_name}"'
+    )
+    assert powershell.index('$apimId = "$(az apim show') < powershell.index(
+        "Assert-NoForbiddenSettings -App $portal"
+    )
 
 
 def test_deployment_scripts_gate_on_host_identity_storage_and_exact_functions() -> None:
@@ -399,6 +440,17 @@ def test_deployment_scripts_pass_required_cosmos_and_capability_contracts() -> N
             "CaseQaChatHistoryEnabled",
         ):
             assert setting in script
+
+
+def test_analyzer_threads_compressed_input_limit_into_runtime_settings() -> None:
+    main = _read(AZURE / "main.bicep")
+    analyzer = _read(AZURE / "modules" / "functions-analyzer.bicep")
+    assert "param MaxCompressedInputBytes int = 1048576" in main
+    assert "maxCompressedInputBytes: MaxCompressedInputBytes" in main
+    assert "param maxCompressedInputBytes int = 1048576" in analyzer
+    assert "MAX_COMPRESSED_INPUT_BYTES" in analyzer
+    for name in ("setup-and-deploy.sh", "setup-and-deploy.ps1"):
+        assert "MaxCompressedInputBytes" in _read(ROOT / "scripts" / name)
 
 
 def test_disposition_app_is_always_deployed_keyless_and_least_privilege() -> None:

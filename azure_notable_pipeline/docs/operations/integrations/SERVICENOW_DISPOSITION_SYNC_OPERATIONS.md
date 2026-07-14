@@ -14,10 +14,13 @@ token. Configure validated field/code maps from
 disabled, 90-day initial backfill, and 365-day disposition retention.
 
 Disposition documents partition by `/snow_sys_id`; checkpoint state partitions
-by `/job_name`. Incremental reads use `sys_updated_on`. Authentication, malformed
-page threshold, or request failure leaves the cursor unadvanced. Reopened rows
-remain auditable and become inactive. Correlation linking is exact only; no
-fuzzy/time match is permitted.
+by `/job_name`. Incremental reads use a compound `(sys_updated_on, sys_id)`
+cursor and deterministic ordering, so more than one run's record limit can
+safely share the same second. Existing timestamp-only checkpoints are accepted
+and replay that timestamp boundary idempotently. Authentication, malformed page
+threshold, or request failure leaves the cursor unadvanced. Reopened rows remain
+auditable and become inactive. Correlation linking is exact only; no fuzzy/time
+match is permitted.
 
 ## Dry run and rollout
 

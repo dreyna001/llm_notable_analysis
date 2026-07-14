@@ -49,7 +49,8 @@ def test_analyst_portal_profile_uses_cosmos_and_queue_contracts() -> None:
             "CAPABILITY_PROFILES": "core,analyst_portal",
             "CASE_INDEX_CONTAINER": "notable-case-index",
             "PORTAL_JWT_ISSUER": "https://issuer.example.test",
-            "PORTAL_JWT_AUDIENCE": "notable-portal",
+                "PORTAL_JWT_AUDIENCE": "notable-portal",
+                "PORTAL_ENTRA_REQUIRED_APP_ROLE": "Case.Reader",
         },
         clear=True,
     ):
@@ -104,6 +105,21 @@ def test_portal_entra_mode_requires_app_role() -> None:
             "PORTAL_ENABLED": "true",
             "PORTAL_AUTH_MODE": "iam",
             "CASE_INDEX_CONTAINER": "notable-case-index",
+        },
+        clear=True,
+    ), pytest.raises(ValueError, match="PORTAL_ENTRA_REQUIRED_APP_ROLE"):
+        load_config()
+
+
+def test_portal_jwt_mode_requires_app_role_after_issuer_and_audience() -> None:
+    with patch.dict(
+        "os.environ",
+        {
+            "PORTAL_ENABLED": "true",
+            "PORTAL_AUTH_MODE": "jwt",
+            "CASE_INDEX_CONTAINER": "notable-case-index",
+            "PORTAL_JWT_ISSUER": "https://issuer.example.test",
+            "PORTAL_JWT_AUDIENCE": "portal",
         },
         clear=True,
     ), pytest.raises(ValueError, match="PORTAL_ENTRA_REQUIRED_APP_ROLE"):

@@ -65,6 +65,7 @@ export type ChatRequest = {
   question: string;
   selected_case_id?: string;
   session_id?: string | null;
+  client_request_id?: string;
 };
 
 export type ChatContextUsageSegment = {

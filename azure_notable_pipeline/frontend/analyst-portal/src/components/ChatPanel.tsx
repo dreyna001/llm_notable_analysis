@@ -244,6 +244,9 @@ export function ChatPanel({
             selected_case_id:
               mode === "selected_case" ? selectedCaseId : undefined,
             session_id: activeSessionId,
+            // Reuse the same key for the stale-session retry below so the
+            // backend can converge duplicate/partially completed writes.
+            client_request_id: turnId,
           },
           { signal: abortController.signal },
         );

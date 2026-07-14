@@ -56,6 +56,11 @@ delivery is expected and produces one report/case and idempotent side effects.
 Blob prefixes and retention are: `incoming/` (default 2 days), `reports/`
 (default 30 days), and `cases/`/`case_chunks/` (default 30 days when portal is
 enabled). Containers are private and encrypted with Microsoft-managed keys.
+Raw gzip downloads are bounded by `MAX_COMPRESSED_INPUT_BYTES` before SDK
+materialization, and decoded content is independently bounded by
+`MAX_DECOMPRESSED_INPUT_BYTES`. Authoritative payload finding IDs retain their
+stable report/case identity; inputs without one use a readable source basename
+plus a hash of the full source location so equal basenames cannot collide.
 The unchanged portal OpenAPI document is normative. Stable user ownership comes
 only from the validated `sub` claim. Responses are same-origin without
 permissive CORS.

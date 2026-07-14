@@ -15,7 +15,7 @@ from azure_notable_pipeline.config import Config
 
 
 class FakeCosmosStore:
-    def list_cases(self, _container: str, *, limit: int, before=None):
+    def list_cases(self, _container: str, *, limit: int, before=None, **_filters):
         rows = [
             {
                 "case_id": "case-1",
@@ -34,12 +34,22 @@ class FakeCosmosStore:
         return None
 
 
+class FakeBlobService:
+    def get_container_client(self, _container: str):
+        return self
+
+    def get_container_properties(self, *, timeout: int):
+        assert timeout == 5
+        return {"name": "output"}
+
+
 def portal_config(**overrides: Any) -> Config:
     values: dict[str, Any] = {
         "PORTAL_ENABLED": True,
         "PORTAL_AUTH_MODE": "jwt",
         "PORTAL_JWT_ISSUER": "https://issuer.example.test",
         "PORTAL_JWT_AUDIENCE": "portal",
+        "PORTAL_ENTRA_REQUIRED_APP_ROLE": "Case.Reader",
         "CASE_INDEX_CONTAINER": "case-index",
         "CASE_ARCHIVE_CONTAINER": "output",
         "OUTPUT_STORAGE_ACCOUNT_URL": "https://output.blob.core.windows.net",
@@ -80,7 +90,7 @@ def reset_handler(monkeypatch):
     portal_handler._chat_semaphore_limit = None
     monkeypatch.setattr(portal_handler, "load_config", lambda: portal_config())
     monkeypatch.setattr(portal_handler, "_cosmos_store", lambda _config: FakeCosmosStore())
-    monkeypatch.setattr(portal_handler, "_blob_service", lambda _config: object())
+    monkeypatch.setattr(portal_handler, "_blob_service", lambda _config: FakeBlobService())
     monkeypatch.setattr(
         portal_handler,
         "validate_portal_jwt",
@@ -88,6 +98,7 @@ def reset_handler(monkeypatch):
             "iss": "https://issuer.example.test",
             "aud": "portal",
             "sub": "user-1",
+            "roles": ["Case.Reader"],
         },
     )
 
@@ -117,6 +128,22 @@ def test_missing_subject_fails_closed(monkeypatch) -> None:
     )
 
     assert portal_handler.handle_request(request("/health")).status_code == 401
+
+
+def test_jwt_mode_requires_configured_role_or_delegated_scope(monkeypatch) -> None:
+    monkeypatch.setattr(
+        portal_handler,
+        "validate_portal_jwt",
+        lambda *_a, **_k: {"sub": "user-1", "roles": ["Other.Role"]},
+    )
+    assert portal_handler.handle_request(request("/health")).status_code == 403
+
+    monkeypatch.setattr(
+        portal_handler,
+        "validate_portal_jwt",
+        lambda *_a, **_k: {"sub": "user-1", "scp": "Case.Reader other.scope"},
+    )
+    assert portal_handler.handle_request(request("/health")).status_code == 200
 
 
 def test_entra_mode_requires_role_and_subject(monkeypatch) -> None:
@@ -151,7 +178,7 @@ def test_entra_mode_requires_role_and_subject(monkeypatch) -> None:
         },
     )
 
-    assert portal_handler.handle_request(denied).status_code == 401
+    assert portal_handler.handle_request(denied).status_code == 403
     assert portal_handler.handle_request(allowed).status_code == 200
 
 
@@ -193,6 +220,7 @@ def test_case_pagination_query_is_bounded_and_uses_public_keyset(monkeypatch) ->
 
     assert response.status_code == 200
     assert captured["limit"] == 999999
+    assert captured["start_date"] is None
     decoded = json.loads(base64.urlsafe_b64decode(captured["cursor"]))
     assert decoded == {
         "processed_at": "2026-07-13T12:00:00Z",
@@ -210,6 +238,90 @@ def test_partial_cursor_and_invalid_integer_are_rejected() -> None:
 
     assert partial.status_code == 400
     assert invalid.status_code == 400
+
+
+def test_case_filters_are_forwarded_and_invalid_dates_are_rejected(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_list_cases(**kwargs):
+        captured.update(kwargs)
+        return {"items": [], "limit": 50, "has_more": False, "next_cursor": None}
+
+    monkeypatch.setattr(portal_handler, "list_cases", fake_list_cases)
+    response = portal_handler.handle_request(
+        request(
+            "/api/cases",
+            params={
+                "start_date": "2026-07-01",
+                "end_date": "2026-07-14",
+                "verdict": "likely_true_positive",
+                "search_name": "Suspicious Login",
+            },
+        )
+    )
+    assert response.status_code == 200
+    assert captured["start_date"] == "2026-07-01"
+    assert captured["end_date"] == "2026-07-14"
+    assert captured["verdict"] == "likely_true_positive"
+    assert captured["search_name"] == "Suspicious Login"
+
+
+def test_ready_fails_when_archive_dependency_probe_fails(monkeypatch) -> None:
+    monkeypatch.setattr(portal_handler, "_blob_service", lambda _config: object())
+    response = portal_handler.handle_request(request("/ready"))
+    assert response.status_code == 503
+    assert response_json(response)["dependencies"]["archive_blob"] == "unavailable"
+
+
+def test_chat_readiness_uses_non_generative_gateway_probe(monkeypatch) -> None:
+    from azure_notable_pipeline import azure_clients
+
+    config = portal_config(
+        CASE_QA_ENABLED=True,
+        AZURE_OPENAI_ENDPOINT="https://openai.example.test",
+        AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT="embeddings",
+        AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT="chat",
+    )
+    monkeypatch.setattr(portal_handler, "load_config", lambda: config)
+    calls: list[str] = []
+    monkeypatch.setattr(
+        azure_clients,
+        "probe_azure_openai_endpoint",
+        lambda endpoint: calls.append(endpoint) or True,
+    )
+    response = portal_handler.handle_request(
+        request("/api/diagnostics/chat-readiness")
+    )
+    assert response.status_code == 200
+    assert calls == ["https://openai.example.test"]
+
+
+def test_client_request_id_is_validated_before_chat_execution(monkeypatch) -> None:
+    config = portal_config(CASE_QA_ENABLED=True)
+    monkeypatch.setattr(portal_handler, "load_config", lambda: config)
+    called = False
+
+    def chat_service(**_kwargs):
+        nonlocal called
+        called = True
+
+    response = portal_handler.handle_request(
+        request(
+            "/api/chat",
+            "POST",
+            body=json.dumps(
+                {
+                    "mode": "selected_case",
+                    "selected_case_id": "case-1",
+                    "question": "What happened?",
+                    "client_request_id": "bad id",
+                }
+            ).encode(),
+        ),
+        chat_service=chat_service,
+    )
+    assert response.status_code == 400
+    assert called is False
 
 
 def test_chat_body_size_limit_is_enforced() -> None:

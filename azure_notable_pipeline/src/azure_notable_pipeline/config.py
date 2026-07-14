@@ -198,6 +198,7 @@ class Config:
     AZURE_SEARCH_ENDPOINT: str = ""
     KEY_VAULT_URI: str = ""
     OUTPUT_PREFIX: str = "reports"
+    MAX_COMPRESSED_INPUT_BYTES: int = 1_048_576
     MAX_DECOMPRESSED_INPUT_BYTES: int = 1_048_576
     ALLOW_PRIVATE_OUTBOUND_ENDPOINTS: bool = False
 
@@ -472,11 +473,10 @@ class Config:
                 raise ValueError(
                     "PORTAL_JWT_AUDIENCE is required when portal JWT auth is enabled"
                 )
-        if self.PORTAL_ENABLED and self.PORTAL_AUTH_MODE == "iam":
-            if not self.PORTAL_ENTRA_REQUIRED_APP_ROLE.strip():
-                raise ValueError(
-                    "PORTAL_ENTRA_REQUIRED_APP_ROLE is required when portal Entra auth is enabled"
-                )
+        if self.PORTAL_ENABLED and not self.PORTAL_ENTRA_REQUIRED_APP_ROLE.strip():
+            raise ValueError(
+                "PORTAL_ENTRA_REQUIRED_APP_ROLE is required when the portal is enabled"
+            )
         self.AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT = self.AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT.strip()
         if self.CASE_QA_ENABLED and not self.PORTAL_ENABLED:
             raise ValueError("CASE_QA_ENABLED=true requires PORTAL_ENABLED=true")
@@ -547,6 +547,9 @@ def load_config() -> Config:
         AZURE_SEARCH_ENDPOINT=os.getenv("AZURE_SEARCH_ENDPOINT", ""),
         KEY_VAULT_URI=os.getenv("KEY_VAULT_URI", ""),
         OUTPUT_PREFIX=os.getenv("OUTPUT_PREFIX", "reports").strip() or "reports",
+        MAX_COMPRESSED_INPUT_BYTES=_positive_int_env(
+            "MAX_COMPRESSED_INPUT_BYTES", 1_048_576
+        ),
         MAX_DECOMPRESSED_INPUT_BYTES=_positive_int_env(
             "MAX_DECOMPRESSED_INPUT_BYTES", 1_048_576
         ),

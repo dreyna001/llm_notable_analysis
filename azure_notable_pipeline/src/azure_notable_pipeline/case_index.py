@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import re
+from datetime import date, datetime, time, timezone
 from typing import Any
 
 from .blob_store import read_blob
@@ -19,15 +21,35 @@ def list_cases(
     cosmos_store: CosmosStore,
     limit: int | None = None,
     cursor: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    verdict: str | None = None,
+    search_name: str | None = None,
 ) -> dict[str, Any]:
     """List cases with a bounded newest-first application keyset."""
 
     page_size = min(max(1, int(limit or config.PORTAL_PAGE_SIZE)), config.PORTAL_PAGE_SIZE)
     before = _decode_cursor(cursor) if cursor else None
+    normalized_start = _normalized_timestamp(start_date, field_name="start_date", end=False)
+    normalized_end = _normalized_timestamp(end_date, field_name="end_date", end=True)
+    if normalized_start and normalized_end and normalized_start > normalized_end:
+        raise ValueError("start_date must not be after end_date")
+    normalized_verdict = _bounded_filter(verdict, field_name="verdict", max_chars=64)
+    if normalized_verdict and not re.fullmatch(r"[A-Za-z0-9._-]+", normalized_verdict):
+        raise ValueError("verdict is invalid")
+    normalized_search = _bounded_filter(
+        search_name,
+        field_name="search_name",
+        max_chars=256,
+    )
     rows = cosmos_store.list_cases(
         config.CASE_INDEX_CONTAINER,
         limit=page_size + 1,
         before=before,
+        start_date=normalized_start,
+        end_date=normalized_end,
+        verdict=normalized_verdict,
+        search_name=normalized_search,
     )
     has_more = len(rows) > page_size
     rows = rows[:page_size]
@@ -211,3 +233,39 @@ def _float_or_none(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _bounded_filter(value: str | None, *, field_name: str, max_chars: int) -> str | None:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+    if len(normalized) > max_chars:
+        raise ValueError(f"{field_name} exceeds {max_chars} characters")
+    return normalized
+
+
+def _normalized_timestamp(
+    value: str | None,
+    *,
+    field_name: str,
+    end: bool,
+) -> str | None:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", normalized):
+            parsed_date = date.fromisoformat(normalized)
+            parsed = datetime.combine(
+                parsed_date,
+                time.max if end else time.min,
+                tzinfo=timezone.utc,
+            )
+        else:
+            parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                raise ValueError
+            parsed = parsed.astimezone(timezone.utc)
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must be an ISO-8601 date or timestamp") from exc
+    return parsed.isoformat().replace("+00:00", "Z")

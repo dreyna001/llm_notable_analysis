@@ -4,19 +4,22 @@ import { AppLayout } from "./components/Layout";
 import { CaseDetailPage } from "./pages/CaseDetailPage";
 import { CasesPage } from "./pages/CasesPage";
 import { HomePage } from "./pages/HomePage";
+import { PortalAuthBoundary } from "./auth/PortalAuth";
 
 export function App() {
   return (
     <AppErrorBoundary>
-      <BrowserRouter>
-        <Routes>
-          <Route index element={<HomePage />} />
-          <Route element={<AppLayout />}>
-            <Route path="cases" element={<CasesPage />} />
-            <Route path="cases/:caseId" element={<CaseDetailPage />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
+      <PortalAuthBoundary>
+        <BrowserRouter>
+          <Routes>
+            <Route index element={<HomePage />} />
+            <Route element={<AppLayout />}>
+              <Route path="cases" element={<CasesPage />} />
+              <Route path="cases/:caseId" element={<CaseDetailPage />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </PortalAuthBoundary>
     </AppErrorBoundary>
   );
 }

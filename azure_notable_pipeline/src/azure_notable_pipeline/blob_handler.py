@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
 import io
 import json
 import logging
@@ -247,6 +248,39 @@ def source_blob_stem(blob_name: str) -> str:
     return PurePosixPath(strip_gzip_suffix(filename)).stem
 
 
+def _fallback_source_identity(blob_name: str, *, source_container: str = "") -> str:
+    """Return a collision-safe identifier for input lacking an authoritative ID."""
+
+    raw_stem = source_blob_stem(blob_name)
+    stem = re.sub(r"[^A-Za-z0-9_.:-]+", "_", raw_stem).strip("._:-") or "source"
+    stem = validate_finding_id(stem[:111])
+    source_location = (
+        f"{source_container}/{blob_name}" if source_container else blob_name
+    )
+    digest = hashlib.sha256(source_location.encode("utf-8")).hexdigest()[:16]
+    # Preserve a readable basename while keeping the identifier within its contract.
+    return f"{stem[:111]}-{digest}"
+
+
+def _report_identity(source_blob_name: str, analysis_result: dict[str, Any]) -> str:
+    alert_payload = analysis_result.get("alert_payload")
+    if isinstance(alert_payload, dict):
+        for field in ("finding_id", "notable_id", "sid"):
+            candidate = alert_payload.get(field)
+            if candidate is not None and str(candidate).strip():
+                return validate_finding_id(str(candidate))
+    meta = analysis_result.get("meta")
+    source_container = (
+        str(meta.get("source_container") or "").strip()
+        if isinstance(meta, dict)
+        else ""
+    )
+    return _fallback_source_identity(
+        source_blob_name,
+        source_container=source_container,
+    )
+
+
 def extract_finding_id_from_blob_name(blob_name: str) -> str:
     """Derive the finding identifier from the Blob filename."""
 
@@ -363,7 +397,7 @@ def write_to_blob_sink(
     container = runtime_config.OUTPUT_CONTAINER_NAME.strip()
     if not container:
         raise PipelineSinkError("OUTPUT_CONTAINER_NAME is required")
-    base_name = source_blob_stem(source_blob_name)
+    base_name = _report_identity(source_blob_name, analysis_result)
     if not base_name:
         raise PipelineSinkError("Source Blob name cannot produce a report name")
     output_prefix = runtime_config.OUTPUT_PREFIX.strip().strip("/")
@@ -636,17 +670,24 @@ def process_blob_created(
         return {"blob_name": intake.blob_name, "status": "skipped", "reason": reason}
 
     max_bytes = runtime_config.MAX_DECOMPRESSED_INPUT_BYTES
-    if intake.size_bytes > max_bytes and not is_gzip_input(intake.blob_name):
+    compressed = is_gzip_input(intake.blob_name)
+    raw_max_bytes = (
+        runtime_config.MAX_COMPRESSED_INPUT_BYTES if compressed else max_bytes
+    )
+    if intake.size_bytes > raw_max_bytes:
+        setting_name = (
+            "MAX_COMPRESSED_INPUT_BYTES" if compressed
+            else "MAX_DECOMPRESSED_INPUT_BYTES"
+        )
         raise ValueError(
-            f"Blob {intake.blob_name!r} exceeds MAX_DECOMPRESSED_INPUT_BYTES "
-            f"({max_bytes})"
+            f"Blob {intake.blob_name!r} exceeds {setting_name} ({raw_max_bytes})"
         )
     try:
         downloaded: BlobReadResult = read_blob_result(
             intake.container_name,
             intake.blob_name,
             if_match=intake.etag,
-            max_bytes=None if is_gzip_input(intake.blob_name) else max_bytes,
+            max_bytes=raw_max_bytes,
             store=store,
         )
     except BlobConditionFailedError:

@@ -17,24 +17,43 @@ from azure_notable_pipeline.case_chat_history import (
     validate_chat_history_request,
 )
 from azure_notable_pipeline.config import Config
-from azure_notable_pipeline.cosmos_store import CreateOutcome
+from azure_notable_pipeline.cosmos_store import ConditionalOutcome, CreateOutcome
 
 
 class FakeChatStore:
     def __init__(self) -> None:
         self.sessions: dict[str, dict] = {}
         self.messages: dict[str, dict[str, dict]] = {}
+        self.etag = 0
+
+    def _with_etag(self, item):
+        self.etag += 1
+        value = dict(item)
+        value["_etag"] = f"etag-{self.etag}"
+        return value
 
     def create_chat_session(self, _container, item):
         session_id = item["session_id"]
         if session_id in self.sessions:
             return CreateOutcome(created=False)
-        self.sessions[session_id] = dict(item)
-        return CreateOutcome(created=True, item=dict(item))
+        value = self._with_etag(item)
+        self.sessions[session_id] = value
+        return CreateOutcome(created=True, item=dict(value))
 
     def upsert_chat_session(self, _container, item):
-        self.sessions[item["session_id"]] = dict(item)
-        return dict(item)
+        value = self._with_etag(item)
+        self.sessions[item["session_id"]] = value
+        return dict(value)
+
+    def replace_chat_session_if_match(self, _container, item, *, expected_etag):
+        current = self.sessions.get(item["session_id"])
+        if current is None:
+            return ConditionalOutcome(False, "not_found")
+        if current["_etag"] != expected_etag:
+            return ConditionalOutcome(False, "precondition_failed")
+        value = self._with_etag(item)
+        self.sessions[item["session_id"]] = value
+        return ConditionalOutcome(True, "replaced", dict(value))
 
     def get_chat_session(self, _container, *, session_id, user_id):
         item = self.sessions.get(session_id)
@@ -72,6 +91,10 @@ class FakeChatStore:
             return CreateOutcome(created=False)
         session[item["message_id"]] = dict(item)
         return CreateOutcome(created=True, item=dict(item))
+
+    def get_chat_message(self, _container, *, session_id, message_id):
+        value = self.messages.get(session_id, {}).get(message_id)
+        return dict(value) if value else None
 
     def list_chat_messages(self, _container, *, session_id, limit):
         rows = list(self.messages.get(session_id, {}).values())
@@ -210,6 +233,60 @@ def test_delete_last_turn_removes_latest_pair() -> None:
     assert len(store.messages[session_id]) == 2
 
 
+def test_delete_last_turn_seeds_counter_from_remaining_legacy_messages() -> None:
+    store = FakeChatStore()
+    config = history_config()
+    session_id = persist(store, config, user="user-1")
+    persist(store, config, user="user-1", session_id=session_id)
+    store.sessions[session_id].pop("message_count")
+
+    assert delete_last_chat_turn(
+        config=config,
+        cosmos_store=store,
+        session_id=session_id,
+        user_id="user-1",
+    ) == 2
+    assert store.sessions[session_id]["message_count"] == 2
+
+
 def test_utf8_storage_truncation_never_splits_codepoint() -> None:
     clipped = truncate_stored_message("café" * 2_000, 10)
     assert len(clipped.encode("utf-8")) <= 10
+
+
+def test_client_request_id_makes_turn_persistence_idempotent() -> None:
+    store = FakeChatStore()
+    config = history_config()
+    kwargs = {
+        "config": config,
+        "cosmos_store": store,
+        "mode": "selected_case",
+        "question": "What happened?",
+        "selected_case_id": "case-1",
+        "requested_session_id": None,
+        "user_id": "user-1",
+        "response": {"answer": "Suspicious login.", "answer_status": "answered"},
+        "client_request_id": "request-0001",
+    }
+    session_id = persist_chat_history(**kwargs)
+    # A lost first response can be retried before the client knows the session id.
+    assert persist_chat_history(**kwargs) == session_id
+    assert len(store.messages[session_id]) == 2
+    assert store.sessions[session_id]["message_count"] == 2
+
+
+def test_failed_message_write_releases_reserved_capacity() -> None:
+    class FailAssistantStore(FakeChatStore):
+        def create_chat_message(self, container, item):
+            if item["role"] == "assistant":
+                raise RuntimeError("injected write failure")
+            return super().create_chat_message(container, item)
+
+    store = FailAssistantStore()
+    config = history_config(CASE_QA_MAX_MESSAGES_PER_SESSION=2)
+    with pytest.raises(RuntimeError, match="injected"):
+        persist(store, config, user="user-1")
+    session = next(iter(store.sessions.values()))
+    assert session["message_count"] == 0
+    assert session["pending_turn_ids"] == []
+    assert store.messages[session["session_id"]] == {}

@@ -35,6 +35,7 @@ if ($deployPortal) {
         'PORTAL_JWT_ISSUER', 'PORTAL_JWT_AUDIENCE', 'APIM_PUBLISHER_EMAIL',
         'AZURE_OPENAI_ENDPOINT', 'AZURE_OPENAI_RESOURCE_ID',
         'AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT', 'AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT',
+        'PORTAL_OIDC_CLIENT_ID', 'PORTAL_OIDC_AUTHORITY', 'PORTAL_OIDC_API_SCOPE',
         'PORTAL_VALIDATION_BEARER_TOKEN'
     )
     foreach ($name in $portalRequired) {
@@ -42,11 +43,13 @@ if ($deployPortal) {
             throw "Required analyst-portal environment variable is unset: $name"
         }
     }
-    if (
-        $env:PORTAL_AUTH_MODE -ieq 'iam' -and
-        [string]::IsNullOrWhiteSpace($env:PORTAL_ENTRA_REQUIRED_APP_ROLE)
-    ) {
-        throw 'PORTAL_ENTRA_REQUIRED_APP_ROLE is required when PORTAL_AUTH_MODE=iam.'
+    if ([string]::IsNullOrWhiteSpace($env:PORTAL_ENTRA_REQUIRED_APP_ROLE)) {
+        throw 'PORTAL_ENTRA_REQUIRED_APP_ROLE is required when the analyst portal is enabled.'
+    }
+    $portalAuthMode = if ($env:PORTAL_AUTH_MODE) { $env:PORTAL_AUTH_MODE.ToLowerInvariant() } else { 'jwt' }
+    $delegatedScopeName = ($env:PORTAL_OIDC_API_SCOPE -split '/')[-1]
+    if ($portalAuthMode -eq 'jwt' -and $delegatedScopeName -ne $env:PORTAL_ENTRA_REQUIRED_APP_ROLE) {
+        throw 'In JWT mode, PORTAL_ENTRA_REQUIRED_APP_ROLE must match the final segment of PORTAL_OIDC_API_SCOPE.'
     }
 }
 if ($deploymentEnvironment -eq 'production' -and [string]::IsNullOrWhiteSpace($env:ALERT_ACTION_GROUP_RESOURCE_ID)) {
@@ -62,6 +65,41 @@ if ($dispositionSyncEnabled -ieq 'true') {
         }
     }
 }
+
+function Invoke-Preflight {
+    $python = if ($env:PYTHON) { $env:PYTHON } else { 'python' }
+    if (-not (Get-Command $python -ErrorAction SilentlyContinue)) { throw "Python is required: $python" }
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw 'Docker is required for the container preflight.' }
+    & $python -m pytest tests -q
+    if ($LASTEXITCODE -ne 0) { throw 'Backend test preflight failed.' }
+    & $python -m pytest tests/test_portal_openapi_contract.py -q
+    if ($LASTEXITCODE -ne 0) { throw 'OpenAPI contract preflight failed.' }
+    az bicep build --file deploy/azure/main.bicep --stdout | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Bicep compile preflight failed.' }
+    $preflightTag = "azure-notable-preflight:$($env:AZURE_DEPLOYMENT_PREFIX.ToLowerInvariant())"
+    docker build --platform linux/amd64 -f deploy/docker/Dockerfile -t $preflightTag .
+    if ($LASTEXITCODE -ne 0) { throw 'Container build preflight failed.' }
+    if ($deployPortal) {
+        if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { throw 'npm is required for the portal preflight.' }
+        $env:VITE_PORTAL_OIDC_CLIENT_ID = $env:PORTAL_OIDC_CLIENT_ID
+        $env:VITE_PORTAL_OIDC_AUTHORITY = $env:PORTAL_OIDC_AUTHORITY
+        $env:VITE_PORTAL_OIDC_API_SCOPE = $env:PORTAL_OIDC_API_SCOPE
+        Remove-Item Env:VITE_PORTAL_API_BASE_URL -ErrorAction SilentlyContinue
+        npm --prefix frontend/analyst-portal ci
+        if ($LASTEXITCODE -ne 0) { throw 'Portal npm install failed.' }
+        npm --prefix frontend/analyst-portal test
+        if ($LASTEXITCODE -ne 0) { throw 'Portal unit test preflight failed.' }
+        npm --prefix frontend/analyst-portal run build
+        if ($LASTEXITCODE -ne 0) { throw 'Portal production build preflight failed.' }
+    }
+}
+
+# Complete source, contract, IaC, and image checks before Azure mutation.
+Invoke-Preflight
+
+$apimId = ''
+$deploymentSucceeded = $false
+try {
 az account set --subscription $env:AZURE_SUBSCRIPTION_ID
 if ($env:ALERT_ACTION_GROUP_RESOURCE_ID) {
     $actionGroupType = "$(az resource show --ids $env:ALERT_ACTION_GROUP_RESOURCE_ID --query type -o tsv)".Trim()
@@ -118,6 +156,7 @@ $parameters = @(
     "ApiManagementPublisherName=$(if ($env:APIM_PUBLISHER_NAME) { $env:APIM_PUBLISHER_NAME } else { 'Notable Analysis' })",
     "PortalChatTimeoutSec=$(if ($env:PORTAL_CHAT_TIMEOUT_SEC) { $env:PORTAL_CHAT_TIMEOUT_SEC } else { '225' })",
     "AnalyzerMaxInstanceCount=$(if ($env:ANALYZER_MAX_INSTANCE_COUNT) { $env:ANALYZER_MAX_INSTANCE_COUNT } else { '5' })",
+    "MaxCompressedInputBytes=$(if ($env:MAX_COMPRESSED_INPUT_BYTES) { $env:MAX_COMPRESSED_INPUT_BYTES } else { '1048576' })",
     "EmbedMaxInstanceCount=$(if ($env:EMBED_MAX_INSTANCE_COUNT) { $env:EMBED_MAX_INSTANCE_COUNT } else { '5' })",
     "DeploymentEnvironment=$deploymentEnvironment",
     "AlertActionGroupResourceId=$($env:ALERT_ACTION_GROUP_RESOURCE_ID)",
@@ -142,6 +181,12 @@ $apim = "$(az deployment group show --name $deploymentName --resource-group $env
 $frontDoorProfile = "$(az deployment group show --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --query properties.outputs.PortalFrontDoorProfileName.value -o tsv)".Trim()
 $frontDoorHost = "$(az deployment group show --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --query properties.outputs.PortalFrontDoorHostName.value -o tsv)".Trim()
 $workspaceCustomerId = "$(az deployment group show --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --query properties.outputs.LogAnalyticsWorkspaceCustomerId.value -o tsv)".Trim()
+if ($apim) {
+    # Resolve this immediately so finally can fail closed during every
+    # post-deployment validation, not only after portal asset upload succeeds.
+    $apimId = "$(az apim show --resource-group $env:AZURE_RESOURCE_GROUP --name $apim --query id -o tsv)".Trim()
+    if (-not $apimId) { throw 'Could not resolve the deployed APIM resource ID.' }
+}
 
 $forbiddenSettingPattern = '^(AZUREWEBJOBSSTORAGE|AZUREWEBJOBSDASHBOARD|WEBSITE_CONTENTAZUREFILECONNECTIONSTRING|WEBSITE_CONTENTSHARE)$|(^|_)(DOCKER_REGISTRY_SERVER|ACR|AZURE_CONTAINER_REGISTRY|CONTAINER_REGISTRY)(_|$).*(USERNAME|PASSWORD|API_?KEY|ACCESS_?KEY|KEY|TOKEN|SECRET|CREDENTIAL|CONNECTION_?STRING)|(^|_)(AZURE_)?(STORAGE|BLOB|QUEUE|TABLE|FILE|FILES)(_|$).*(ACCOUNT_?KEY|ACCESS_?KEY|API_?KEY|KEY|CONNECTION_?STRING|SAS(_TOKEN)?|PASSWORD|SECRET)|(^|_)(AZURE_AI_FOUNDRY|AI_FOUNDRY|FOUNDRY|ANTHROPIC|AZURE_OPENAI|OPENAI|AZURE_SEARCH|COGNITIVE_SEARCH|SEARCH_SERVICE|SEARCH|COSMOSDB|COSMOS|AZURE_COSMOS)(_|$).*(API_?KEY|ACCOUNT_?KEY|ACCESS_?KEY|PRIMARY_?KEY|SECONDARY_?KEY|MASTER_?KEY|KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|CONNECTION_?STRING)'
 
@@ -330,39 +375,38 @@ function Assert-MonitoringAlerts {
 
 Assert-MonitoringAlerts
 
-function Approve-PendingPrivateConnections {
-    param([Parameter(Mandatory = $true)][string]$TargetResourceId)
+function Approve-ExpectedFrontDoorConnection {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetResourceId,
+        [Parameter(Mandatory = $true)][string]$ExpectedDescription,
+        [Parameter(Mandatory = $true)][string]$OriginGroup,
+        [Parameter(Mandatory = $true)][string]$OriginName
+    )
+    $originState = "$(az afd origin show --resource-group $env:AZURE_RESOURCE_GROUP --profile-name $frontDoorProfile --origin-group-name $OriginGroup --origin-name $OriginName --query sharedPrivateLinkResource.status -o tsv)".Trim()
+    Assert-AzSucceeded -Operation "reading Front Door origin $OriginName"
+    if ($originState -eq 'Approved') { return }
     $connectionIds = @(
         az network private-endpoint-connection list `
             --id $TargetResourceId `
-            --query "[?properties.privateLinkServiceConnectionState.status=='Pending'].id" `
+            --query "[?properties.privateLinkServiceConnectionState.status=='Pending' && properties.privateLinkServiceConnectionState.description=='$ExpectedDescription'].id" `
             -o tsv
     ) | ForEach-Object { "$_".Trim() } | Where-Object { $_ }
     Assert-AzSucceeded -Operation "discovering pending Front Door connections on $TargetResourceId"
-    foreach ($connectionId in $connectionIds) {
-        az network private-endpoint-connection approve `
-            --id $connectionId `
-            --description 'Approved Front Door Premium managed private origin' `
-            --output none
-        Assert-AzSucceeded -Operation "approving a Front Door connection on $TargetResourceId"
+    if ($connectionIds.Count -ne 1) {
+        throw "Expected exactly one pending Front Door request '$ExpectedDescription' on $TargetResourceId."
     }
-}
-
-function Wait-PrivateConnectionsApproved {
-    param([Parameter(Mandatory = $true)][string]$TargetResourceId)
+    $connectionId = $connectionIds[0]
+    az network private-endpoint-connection approve `
+        --id $connectionId `
+        --description 'Approved Front Door Premium managed private origin' `
+        --output none
+    Assert-AzSucceeded -Operation "approving a Front Door connection on $TargetResourceId"
     foreach ($attempt in 1..30) {
-        $states = @(
-            az network private-endpoint-connection list `
-                --id $TargetResourceId `
-                --query '[].properties.privateLinkServiceConnectionState.status' `
-                -o tsv
-        ) | ForEach-Object { "$_".Trim() } | Where-Object { $_ }
-        if ($LASTEXITCODE -eq 0 -and $states.Count -gt 0 -and @($states | Where-Object { $_ -ne 'Approved' }).Count -eq 0) {
-            return
-        }
+        $connectionState = "$(az network private-endpoint-connection show --id $connectionId --query properties.privateLinkServiceConnectionState.status -o tsv)".Trim()
+        if ($LASTEXITCODE -eq 0 -and $connectionState -eq 'Approved') { return }
         Start-Sleep -Seconds 10
     }
-    throw "Private endpoint connections did not all reach Approved on $TargetResourceId."
+    throw "Front Door private endpoint connection did not reach Approved on $TargetResourceId."
 }
 
 function Assert-DirectOriginDenied {
@@ -393,13 +437,6 @@ if ($deployPortal) {
     Assert-ManagedIdentityConfiguration -App $portal
     Wait-FunctionHost -App $portal -ExpectedFunctions @('portal_http')
 
-    Remove-Item Env:VITE_PORTAL_API_BASE_URL -ErrorAction SilentlyContinue
-    npm --prefix frontend/analyst-portal ci
-    if ($LASTEXITCODE -ne 0) { throw 'Portal npm install failed.' }
-    npm --prefix frontend/analyst-portal test
-    if ($LASTEXITCODE -ne 0) { throw 'Portal unit tests failed.' }
-    npm --prefix frontend/analyst-portal run build
-    if ($LASTEXITCODE -ne 0) { throw 'Portal production build failed.' }
     $uploadReady = $false
     foreach ($attempt in 1..18) {
         az storage blob upload-batch `
@@ -420,11 +457,9 @@ if ($deployPortal) {
     $subscriptionId = "$(az account show --query id -o tsv)".Trim()
     $portalStorageId = "/subscriptions/$subscriptionId/resourceGroups/$($env:AZURE_RESOURCE_GROUP)/providers/Microsoft.Storage/storageAccounts/$($env:PORTAL_UI_STORAGE_ACCOUNT_NAME)"
     $portalFunctionId = "$(az functionapp show --resource-group $env:AZURE_RESOURCE_GROUP --name $portal --query id -o tsv)".Trim()
-    $apimId = "$(az apim show --resource-group $env:AZURE_RESOURCE_GROUP --name $apim --query id -o tsv)".Trim()
-    foreach ($targetId in @($portalStorageId, $portalFunctionId, $apimId)) {
-        Approve-PendingPrivateConnections -TargetResourceId $targetId
-        Wait-PrivateConnectionsApproved -TargetResourceId $targetId
-    }
+    Approve-ExpectedFrontDoorConnection -TargetResourceId $portalStorageId -ExpectedDescription 'Front Door private static website origin' -OriginGroup 'portal-ui' -OriginName 'portal-web'
+    Approve-ExpectedFrontDoorConnection -TargetResourceId $portalFunctionId -ExpectedDescription 'Front Door private chat origin' -OriginGroup 'portal-chat' -OriginName 'portal-function'
+    Approve-ExpectedFrontDoorConnection -TargetResourceId $apimId -ExpectedDescription 'Front Door private APIM origin' -OriginGroup 'portal-api' -OriginName 'portal-apim'
 
     $origins = @(
         @{ Group = 'portal-chat'; Name = 'portal-function' },
@@ -482,4 +517,14 @@ if ($deployPortal) {
     }
 }
 
-Write-Host "Deployment $deploymentName completed: $analyzer, $embed, $disposition$(if ($portal) { ", $portal" })."
+    $deploymentSucceeded = $true
+    Write-Host "Deployment $deploymentName completed: $analyzer, $embed, $disposition$(if ($portal) { ", $portal" })."
+}
+finally {
+    if (-not $deploymentSucceeded -and $apimId) {
+        az resource update --ids $apimId --set properties.publicNetworkAccess=Disabled --output none 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning 'Failed to disable APIM public access during deployment cleanup.'
+        }
+    }
+}

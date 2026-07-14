@@ -17,10 +17,7 @@ param portalEntraRequiredAppRole string = ''
 var portalOpenIdConfigurationUrl = endsWith(portalJwtIssuer, '/')
   ? '${portalJwtIssuer}.well-known/openid-configuration'
   : '${portalJwtIssuer}/.well-known/openid-configuration'
-var requiredRoleClaim = portalAuthMode == 'iam'
-  ? '<claim name="roles" match="any"><value>${portalEntraRequiredAppRole}</value></claim>'
-  : ''
-var apiPolicy = '<policies><inbound><base /><validate-jwt header-name="Authorization" require-scheme="Bearer" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized" require-expiration-time="true" require-signed-tokens="true"><openid-config url="${portalOpenIdConfigurationUrl}" /><audiences><audience>${portalJwtAudience}</audience></audiences><issuers><issuer>${portalJwtIssuer}</issuer></issuers><required-claims><claim name="sub" match="any" />${requiredRoleClaim}</required-claims></validate-jwt></inbound><backend><forward-request timeout="30" /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
+var apiPolicy = '<policies><inbound><base /><validate-jwt header-name="Authorization" require-scheme="Bearer" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized" require-expiration-time="true" require-signed-tokens="true" output-token-variable-name="portalJwt"><openid-config url="${portalOpenIdConfigurationUrl}" /><audiences><audience>${portalJwtAudience}</audience></audiences><issuers><issuer>${portalJwtIssuer}</issuer></issuers><required-claims><claim name="sub" match="any" /></required-claims></validate-jwt><choose><when condition="@{ var jwt = (Jwt)context.Variables[&quot;portalJwt&quot;]; var required = &quot;${portalEntraRequiredAppRole}&quot;; var roles = jwt.Claims.GetValueOrDefault(&quot;roles&quot;, new string[0]); var scopes = jwt.Claims.GetValueOrDefault(&quot;scp&quot;, new string[0]).SelectMany(value => value.Split(&apos; &apos;)); return !roles.Concat(scopes).Contains(required); }"><return-response><set-status code="403" reason="Forbidden" /><set-body>{&quot;error&quot;:&quot;Forbidden&quot;}</set-body></return-response></when></choose></inbound><backend><forward-request timeout="30" /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
 
 resource apiManagement 'Microsoft.ApiManagement/service@2024-05-01' = {
   name: apiManagementName

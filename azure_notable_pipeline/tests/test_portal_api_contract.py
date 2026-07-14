@@ -20,7 +20,7 @@ def _authorize(monkeypatch) -> None:
     monkeypatch.setattr(
         portal_handler,
         "validate_portal_jwt",
-        lambda *_args, **_kwargs: {"sub": "user-1"},
+        lambda *_args, **_kwargs: {"sub": "user-1", "roles": ["Case.Reader"]},
     )
 
 

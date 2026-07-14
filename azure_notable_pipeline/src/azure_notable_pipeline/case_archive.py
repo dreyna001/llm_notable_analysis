@@ -62,7 +62,11 @@ def archive_case(
     expires = processed + timedelta(days=config.CASE_RETENTION_DAYS)
     alert_payload = analysis_result.get("alert_payload")
     analysis = analysis_result.get("llm_response")
-    finding_id = _resolve_finding_id(alert_payload, source.input_key)
+    finding_id = _resolve_finding_id(
+        alert_payload,
+        source.input_key,
+        source_bucket=source.input_bucket,
+    )
     case_id = _build_case_id(finding_id)
     correlation_id = _extract_first_string(alert_payload, CORRELATION_FIELDS)
     completeness, archived_alert, archived_analysis = _bounded_archive_values(
@@ -191,7 +195,12 @@ def _replay_result(
     )
 
 
-def _resolve_finding_id(alert_payload: Any, source_key: str) -> str:
+def _resolve_finding_id(
+    alert_payload: Any,
+    source_key: str,
+    *,
+    source_bucket: str = "",
+) -> str:
     candidate = _extract_first_string(alert_payload, IDENTIFIER_FIELDS)
     if not candidate:
         filename = PurePosixPath(source_key).name
@@ -200,7 +209,11 @@ def _resolve_finding_id(alert_payload: Any, source_key: str) -> str:
             filename = filename[:-5]
         elif lower.endswith(".gz"):
             filename = filename[:-3]
-        candidate = filename.rsplit(".", 1)[0]
+        raw_stem = filename.rsplit(".", 1)[0]
+        stem = re.sub(r"[^A-Za-z0-9_.:-]+", "_", raw_stem).strip("._:-") or "source"
+        digest_source = f"{source_bucket}/{source_key}" if source_bucket else source_key
+        digest = hashlib.sha256(digest_source.encode("utf-8")).hexdigest()[:16]
+        candidate = f"{stem[:111]}-{digest}"
     finding_id = str(candidate or "").strip()
     if not FINDING_ID_RE.fullmatch(finding_id):
         raise ValueError(

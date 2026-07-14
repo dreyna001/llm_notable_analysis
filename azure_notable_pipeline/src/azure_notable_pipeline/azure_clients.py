@@ -10,6 +10,8 @@ from __future__ import annotations
 import ipaddress
 import os
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from urllib.parse import urlparse
 
 from anthropic import AnthropicFoundry
@@ -261,6 +263,27 @@ def azure_openai_client(endpoint: str, api_version: str) -> AzureOpenAI:
     )
 
 
+def probe_azure_openai_endpoint(endpoint: str, *, timeout_seconds: float = 5.0) -> bool:
+    """Perform a bounded, non-generative identity and data-plane reachability probe."""
+
+    url = _service_url(endpoint, setting_name="AZURE_OPENAI_ENDPOINT") + "/"
+    token = _credential().get_token(_COGNITIVE_SERVICES_SCOPE).token
+    request = Request(
+        url,
+        method="HEAD",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    try:
+        with urlopen(request, timeout=max(0.1, float(timeout_seconds))) as response:
+            return 200 <= int(response.status) < 500
+    except HTTPError as exc:
+        # 404/405 still prove private DNS, TLS, identity acquisition, and data-plane
+        # reachability. Authentication/authorization failures do not.
+        return 200 <= int(exc.code) < 500 and int(exc.code) not in {401, 403}
+    except (OSError, URLError, ValueError):
+        return False
+
+
 def azure_search_client(endpoint: str, index_name: str) -> SearchClient:
     """Create a managed-identity Azure AI Search index client."""
 
@@ -329,6 +352,7 @@ __all__ = [
     "AzureClientConfigurationError",
     "anthropic_foundry_client",
     "azure_openai_client",
+    "probe_azure_openai_endpoint",
     "azure_search_client",
     "blob_service_client",
     "cosmos_client",

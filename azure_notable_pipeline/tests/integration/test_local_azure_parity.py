@@ -108,7 +108,7 @@ class _MemoryCosmos:
         )
         return dict(self.cases[case_id])
 
-    def list_cases(self, _container: str, *, limit: int, before=None):
+    def list_cases(self, _container: str, *, limit: int, before=None, **_filters):
         return list(self.cases.values())[:limit]
 
     def get_disposition(self, _container: str, snow_sys_id: str):
@@ -188,6 +188,7 @@ def _config(input_container: str, output_container: str, analyzer_queue: str, em
         AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT="local-deterministic",
         PORTAL_ENABLED=True,
         PORTAL_AUTH_MODE="jwt",
+        PORTAL_ENTRA_REQUIRED_APP_ROLE="Case.Reader",
         PORTAL_JWT_ISSUER="https://local.invalid",
         PORTAL_JWT_AUDIENCE="local-parity",
     )

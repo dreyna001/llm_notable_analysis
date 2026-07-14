@@ -173,6 +173,13 @@ def delete_last_chat_turn(
             session_id=normalized_id,
             message_id=row["message_id"],
         )
+    _decrement_message_count(
+        config=config,
+        cosmos_store=cosmos_store,
+        session_id=normalized_id,
+        user_id=_require_user(user_id),
+        decrement=len(targets),
+    )
     return len(targets)
 
 
@@ -214,6 +221,7 @@ def persist_chat_history(
     requested_session_id: str | None,
     user_id: str | None,
     response: dict[str, Any],
+    client_request_id: str | None = None,
 ) -> str:
     _require_enabled(config)
     normalized_user = _require_user(user_id)
@@ -224,13 +232,27 @@ def persist_chat_history(
         selected_case_id=selected_case_id,
         requested_session_id=requested_session_id,
         user_id=normalized_user,
+        client_request_id=client_request_id,
     )
     session_id = session["session_id"]
-    current = _message_rows(config, cosmos_store, session_id)
-    if len(current) + 2 > _max_messages(config):
-        raise ValueError(
-            f"Chat session exceeded the configured message limit of {_max_messages(config)}."
-        )
+    turn_id = _turn_id(client_request_id)
+    user_message_id = f"{turn_id}-user"
+    assistant_message_id = f"{turn_id}-assistant"
+    if client_request_id and cosmos_store.get_chat_message(
+        config.CHAT_MESSAGES_CONTAINER,
+        session_id=session_id,
+        message_id=assistant_message_id,
+    ):
+        return session_id
+    _reserve_turn(
+        config=config,
+        cosmos_store=cosmos_store,
+        session_id=session_id,
+        user_id=normalized_user,
+        mode=mode,
+        selected_case_id=selected_case_id,
+        turn_id=turn_id,
+    )
 
     max_bytes = max(1, int(config.CASE_QA_MAX_STORED_MESSAGE_BYTES))
     now = _utc_now()
@@ -238,7 +260,7 @@ def persist_chat_history(
     expires_epoch = int(expires_at.timestamp())
     messages = [
         {
-            "message_id": str(uuid.uuid4()),
+            "message_id": user_message_id,
             "session_id": session_id,
             "role": "user",
             "content": truncate_stored_message(question, max_bytes),
@@ -246,7 +268,7 @@ def persist_chat_history(
             "expires_at_epoch": expires_epoch,
         },
         {
-            "message_id": str(uuid.uuid4()),
+            "message_id": assistant_message_id,
             "session_id": session_id,
             "role": "assistant",
             "content": truncate_stored_message(str(response.get("answer") or ""), max_bytes),
@@ -257,19 +279,39 @@ def persist_chat_history(
     answer_status = normalize_stored_answer_status(response.get("answer_status"))
     if answer_status is not None:
         messages[1]["answer_status"] = answer_status
-    for message in messages:
-        outcome = cosmos_store.create_chat_message(config.CHAT_MESSAGES_CONTAINER, message)
-        if not outcome.created:
-            raise RuntimeError("generated chat message id already exists")
-
-    session.update(
-        {
-            "updated_at": now.isoformat(),
-            "expires_at": expires_at.isoformat(),
-            "expires_at_epoch": expires_epoch,
-        }
-    )
-    cosmos_store.upsert_chat_session(config.CHAT_SESSIONS_CONTAINER, session)
+    created_ids: list[str] = []
+    try:
+        for message in messages:
+            outcome = cosmos_store.create_chat_message(config.CHAT_MESSAGES_CONTAINER, message)
+            if not outcome.created:
+                if not client_request_id:
+                    raise RuntimeError("generated chat message id already exists")
+            else:
+                created_ids.append(message["message_id"])
+        _finish_turn(
+            config=config,
+            cosmos_store=cosmos_store,
+            session_id=session_id,
+            user_id=normalized_user,
+            turn_id=turn_id,
+            now=now,
+            expires_at=expires_at,
+        )
+    except Exception:
+        for message_id in created_ids:
+            cosmos_store.delete_chat_message(
+                config.CHAT_MESSAGES_CONTAINER,
+                session_id=session_id,
+                message_id=message_id,
+            )
+        _release_turn(
+            config=config,
+            cosmos_store=cosmos_store,
+            session_id=session_id,
+            user_id=normalized_user,
+            turn_id=turn_id,
+        )
+        raise
     return session_id
 
 
@@ -281,6 +323,7 @@ def _resolve_session(
     selected_case_id: str | None,
     requested_session_id: str | None,
     user_id: str,
+    client_request_id: str | None,
 ) -> dict[str, Any]:
     now = _utc_now()
     expires_at = _session_expires_at(config, now=now)
@@ -292,17 +335,14 @@ def _resolve_session(
             user_id=user_id,
             validate_scope=(mode, selected_case_id),
         )
-        record.update(
-            {
-                "updated_at": now.isoformat(),
-                "expires_at": expires_at.isoformat(),
-                "expires_at_epoch": int(expires_at.timestamp()),
-            }
-        )
-        return cosmos_store.upsert_chat_session(config.CHAT_SESSIONS_CONTAINER, record)
+        return record
 
     _enforce_user_session_cap(config, cosmos_store, user_id)
-    session_id = str(uuid.uuid4())
+    session_id = (
+        str(uuid.uuid5(uuid.NAMESPACE_URL, f"portal-chat-session:{user_id}:{client_request_id}"))
+        if client_request_id
+        else str(uuid.uuid4())
+    )
     created_at = now.isoformat()
     session = {
         "session_id": session_id,
@@ -314,11 +354,206 @@ def _resolve_session(
         "updated_at": created_at,
         "expires_at": expires_at.isoformat(),
         "expires_at_epoch": int(expires_at.timestamp()),
+        "message_count": 0,
+        "pending_turn_ids": [],
     }
     outcome = cosmos_store.create_chat_session(config.CHAT_SESSIONS_CONTAINER, session)
     if not outcome.created:
+        if client_request_id:
+            return _load_chat_session(
+                config=config,
+                cosmos_store=cosmos_store,
+                session_id=session_id,
+                user_id=user_id,
+                validate_scope=(mode, selected_case_id),
+            )
         raise RuntimeError("generated chat session id already exists")
     return outcome.item or session
+
+
+def _reserve_turn(
+    *,
+    config: Config,
+    cosmos_store: CosmosStore,
+    session_id: str,
+    user_id: str,
+    mode: str,
+    selected_case_id: str | None,
+    turn_id: str,
+) -> None:
+    for _attempt in range(5):
+        session = _load_chat_session(
+            config=config,
+            cosmos_store=cosmos_store,
+            session_id=session_id,
+            user_id=user_id,
+            validate_scope=(mode, selected_case_id),
+        )
+        etag = str(session.get("_etag") or "")
+        if not etag:
+            raise RuntimeError("chat session is missing its concurrency token")
+        pending = [str(value) for value in session.get("pending_turn_ids") or []]
+        if turn_id in pending:
+            return
+        message_count = session.get("message_count")
+        if not isinstance(message_count, int):
+            message_count = len(_message_rows(config, cosmos_store, session_id))
+        if message_count + 2 > _max_messages(config):
+            raise ValueError(
+                f"Chat session exceeded the configured message limit of {_max_messages(config)}."
+            )
+        replacement = dict(session)
+        replacement["message_count"] = message_count + 2
+        replacement["pending_turn_ids"] = pending + [turn_id]
+        outcome = cosmos_store.replace_chat_session_if_match(
+            config.CHAT_SESSIONS_CONTAINER,
+            replacement,
+            expected_etag=etag,
+        )
+        if outcome.applied:
+            return
+        if outcome.outcome != "precondition_failed":
+            raise ChatSessionNotFoundError("session_id was not found.")
+    raise RuntimeError("chat session concurrency retry limit was exceeded")
+
+
+def _finish_turn(
+    *,
+    config: Config,
+    cosmos_store: CosmosStore,
+    session_id: str,
+    user_id: str,
+    turn_id: str,
+    now: datetime,
+    expires_at: datetime,
+) -> None:
+    _update_turn_reservation(
+        config=config,
+        cosmos_store=cosmos_store,
+        session_id=session_id,
+        user_id=user_id,
+        turn_id=turn_id,
+        release_capacity=False,
+        timestamp=now,
+        expires_at=expires_at,
+    )
+
+
+def _release_turn(
+    *,
+    config: Config,
+    cosmos_store: CosmosStore,
+    session_id: str,
+    user_id: str,
+    turn_id: str,
+) -> None:
+    _update_turn_reservation(
+        config=config,
+        cosmos_store=cosmos_store,
+        session_id=session_id,
+        user_id=user_id,
+        turn_id=turn_id,
+        release_capacity=True,
+        timestamp=None,
+        expires_at=None,
+    )
+
+
+def _update_turn_reservation(
+    *,
+    config: Config,
+    cosmos_store: CosmosStore,
+    session_id: str,
+    user_id: str,
+    turn_id: str,
+    release_capacity: bool,
+    timestamp: datetime | None,
+    expires_at: datetime | None,
+) -> None:
+    for _attempt in range(5):
+        session = cosmos_store.get_chat_session(
+            config.CHAT_SESSIONS_CONTAINER,
+            session_id=session_id,
+            user_id=user_id,
+        )
+        if not session:
+            return
+        pending = [str(value) for value in session.get("pending_turn_ids") or []]
+        if turn_id not in pending:
+            return
+        etag = str(session.get("_etag") or "")
+        if not etag:
+            raise RuntimeError("chat session is missing its concurrency token")
+        replacement = dict(session)
+        replacement["pending_turn_ids"] = [value for value in pending if value != turn_id]
+        if release_capacity:
+            replacement["message_count"] = max(0, int(session.get("message_count") or 0) - 2)
+        if timestamp is not None and expires_at is not None:
+            replacement.update(
+                {
+                    "updated_at": timestamp.isoformat(),
+                    "expires_at": expires_at.isoformat(),
+                    "expires_at_epoch": int(expires_at.timestamp()),
+                }
+            )
+        outcome = cosmos_store.replace_chat_session_if_match(
+            config.CHAT_SESSIONS_CONTAINER,
+            replacement,
+            expected_etag=etag,
+        )
+        if outcome.applied:
+            return
+        if outcome.outcome != "precondition_failed":
+            return
+    raise RuntimeError("chat session concurrency retry limit was exceeded")
+
+
+def _turn_id(client_request_id: str | None) -> str:
+    if client_request_id is None:
+        return str(uuid.uuid4())
+    normalized = _validate_session_id(client_request_id)
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"portal-chat:{normalized}"))
+
+
+def _decrement_message_count(
+    *,
+    config: Config,
+    cosmos_store: CosmosStore,
+    session_id: str,
+    user_id: str,
+    decrement: int,
+) -> None:
+    for _attempt in range(5):
+        session = cosmos_store.get_chat_session(
+            config.CHAT_SESSIONS_CONTAINER,
+            session_id=session_id,
+            user_id=user_id,
+        )
+        if not session:
+            return
+        etag = str(session.get("_etag") or "")
+        if not etag:
+            raise RuntimeError("chat session is missing its concurrency token")
+        replacement = dict(session)
+        stored_count = session.get("message_count")
+        if isinstance(stored_count, int):
+            next_count = max(0, stored_count - max(0, decrement))
+        else:
+            # Legacy sessions predate the counter. Messages have already been
+            # deleted at this point, so use the remaining authoritative rows
+            # rather than subtracting twice or incorrectly seeding zero.
+            next_count = len(_message_rows(config, cosmos_store, session_id))
+        replacement["message_count"] = next_count
+        outcome = cosmos_store.replace_chat_session_if_match(
+            config.CHAT_SESSIONS_CONTAINER,
+            replacement,
+            expected_etag=etag,
+        )
+        if outcome.applied:
+            return
+        if outcome.outcome != "precondition_failed":
+            return
+    raise RuntimeError("chat session concurrency retry limit was exceeded")
 
 
 def _enforce_user_session_cap(config: Config, cosmos_store: CosmosStore, user_id: str) -> None:

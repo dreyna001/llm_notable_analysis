@@ -144,7 +144,11 @@ def test_report_writer_uses_deterministic_paths_and_optional_html(monkeypatch) -
     result = blob_handler.write_to_blob_sink(
         "incoming/finding-123.json.gz",
         "# Report",
-        {"llm_response": {"answer": "ok"}, "html": "<html></html>"},
+        {
+            "alert_payload": {"finding_id": "finding-123"},
+            "llm_response": {"answer": "ok"},
+            "html": "<html></html>",
+        },
         config=Config(HTML_REPORT_ENABLED=True),
     )
 
@@ -161,6 +165,84 @@ def test_report_writer_uses_deterministic_paths_and_optional_html(monkeypatch) -
         ("reports/finding-123.html", "text/html"),
     ]
     assert all(item[4] is True for item in writes)
+
+
+def test_report_fallback_identity_distinguishes_same_basename_in_other_prefixes(
+    monkeypatch,
+) -> None:
+    writes = []
+    monkeypatch.setattr(
+        blob_handler,
+        "write_text_blob",
+        lambda _container, name, _text, **_kwargs: writes.append(name),
+    )
+    analysis_result = {"llm_response": {"answer": "ok"}}
+
+    first = blob_handler.write_to_blob_sink(
+        "incoming/team-a/alert.json", "# A", analysis_result, config=Config()
+    )
+    second = blob_handler.write_to_blob_sink(
+        "incoming/team-b/alert.json", "# B", analysis_result, config=Config()
+    )
+
+    assert first["markdown_key"] != second["markdown_key"]
+    assert first["markdown_key"].startswith("reports/alert-")
+    assert second["markdown_key"].startswith("reports/alert-")
+    assert len(set(writes)) == 4
+
+    other_container = blob_handler.write_to_blob_sink(
+        "incoming/team-a/alert.json",
+        "# Other",
+        {
+            "llm_response": {"answer": "ok"},
+            "meta": {"source_container": "other-input"},
+        },
+        config=Config(),
+    )
+    assert other_container["markdown_key"] != first["markdown_key"]
+
+
+def test_report_fallback_identity_sanitizes_valid_blob_name_punctuation(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(blob_handler, "write_text_blob", lambda *_a, **_k: None)
+
+    result = blob_handler.write_to_blob_sink(
+        "incoming/team-a/Alert with spaces (1).json",
+        "# Report",
+        {"llm_response": {"answer": "ok"}},
+        config=Config(),
+    )
+
+    assert result["markdown_key"].startswith("reports/Alert_with_spaces_1-")
+    assert result["markdown_key"].endswith(".md")
+
+
+def test_gzip_download_is_bounded_before_readall(monkeypatch) -> None:
+    body = gzip.compress(b'{"finding_id":"finding-123"}')
+    reads = []
+
+    def read(container, name, **kwargs):
+        reads.append((container, name, kwargs))
+        return _read_result(body)
+
+    monkeypatch.setattr(blob_handler, "read_blob_result", read)
+    monkeypatch.setattr(blob_handler, "write_text_blob", lambda *_a, **_k: None)
+
+    blob_handler.process_blob_created(
+        _intake(blob_name="incoming/finding-123.json.gz", size_bytes=len(body)),
+        config=Config(MAX_COMPRESSED_INPUT_BYTES=128),
+        analyzer=FakeAnalyzer(),
+    )
+
+    assert reads[0][2]["max_bytes"] == 128
+
+    with pytest.raises(ValueError, match="MAX_COMPRESSED_INPUT_BYTES"):
+        blob_handler.process_blob_created(
+            _intake(blob_name="incoming/finding-123.json.gz", size_bytes=129),
+            config=Config(MAX_COMPRESSED_INPUT_BYTES=128),
+            analyzer=FakeAnalyzer(),
+        )
 
 
 def test_core_handler_reads_exact_etag_analyzes_and_writes_reports(monkeypatch) -> None:

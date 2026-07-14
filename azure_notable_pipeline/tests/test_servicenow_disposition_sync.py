@@ -13,6 +13,7 @@ from azure_notable_pipeline.config import Config
 from azure_notable_pipeline.servicenow_disposition_sync import (
     DispositionSyncAuthError,
     JOB_NAME,
+    SyncCursor,
     _iter_table_api_pages,
     _process_row,
     load_code_map,
@@ -212,7 +213,77 @@ def test_backfill_and_incremental_queries_preserve_state_policy(tmp_path, monkey
 
     assert "^incident_stateIN3,7" in calls[0]["params"]["sysparm_query"]
     assert "sys_updated_on>" in calls[1]["params"]["sysparm_query"]
+    assert "^NQsys_updated_on=" in calls[1]["params"]["sysparm_query"]
+    assert "^sys_id>" in calls[1]["params"]["sysparm_query"]
+    assert calls[1]["params"]["sysparm_query"].endswith(
+        "^ORDERBYsys_updated_on^ORDERBYsys_id"
+    )
     assert "incident_stateIN" not in calls[1]["params"]["sysparm_query"]
+
+
+def test_compound_cursor_drains_more_than_run_limit_at_same_timestamp(
+    tmp_path, monkeypatch
+) -> None:
+    config = _config(tmp_path)
+    store = MemoryStore()
+    rows = [
+        {**_row(), "sys_id": f"snow-{index:04d}", "number": f"SIR{index:04d}"}
+        for index in range(501)
+    ]
+    observed_cursors = []
+
+    def pages(**kwargs):
+        cursor = kwargs["cursor"]
+        observed_cursors.append(cursor)
+        if cursor is None:
+            return iter([rows[:500]])
+        assert cursor == SyncCursor(
+            datetime(2026, 1, 1, 10, 0, tzinfo=UTC), "snow-0499"
+        )
+        return iter([[rows[500]]])
+
+    monkeypatch.setattr(
+        "azure_notable_pipeline.servicenow_disposition_sync._iter_table_api_pages",
+        pages,
+    )
+
+    first = run_disposition_sync(config=config, cosmos_store=store)
+    second = run_disposition_sync(config=config, cosmos_store=store)
+
+    assert first["fetched"] == 500
+    assert second["fetched"] == 1
+    assert len(store.dispositions) == 501
+    assert observed_cursors[0] is None
+    assert store.checkpoints[JOB_NAME]["cursor_value"] == "2026-01-01T10:00:00Z"
+    assert store.checkpoints[JOB_NAME]["cursor_sys_id"] == "snow-0500"
+
+
+def test_timestamp_only_checkpoint_replays_boundary_for_backward_compatibility(
+    tmp_path, monkeypatch
+) -> None:
+    config = _config(tmp_path)
+    store = MemoryStore()
+    store.checkpoints[JOB_NAME] = {
+        "job_name": JOB_NAME,
+        "cursor_value": "2026-01-01T10:00:00Z",
+    }
+    observed = {}
+
+    def pages(**kwargs):
+        observed["cursor"] = kwargs["cursor"]
+        return iter([])
+
+    monkeypatch.setattr(
+        "azure_notable_pipeline.servicenow_disposition_sync._iter_table_api_pages",
+        pages,
+    )
+
+    result = run_disposition_sync(config=config, cosmos_store=store)
+
+    assert result["status"] == "success"
+    assert observed["cursor"] == SyncCursor(
+        datetime(2026, 1, 1, 10, 0, tzinfo=UTC), ""
+    )
 
 
 def test_key_vault_token_uses_native_secret_name(tmp_path, monkeypatch) -> None:

@@ -50,3 +50,13 @@ def test_foundry_anthropic_base_url_rejects_messages_operation(monkeypatch):
         assert "must end at /anthropic" in str(exc)
     else:
         raise AssertionError("full Messages operation URL must be rejected")
+
+
+def test_input_byte_limits_are_independently_configurable(monkeypatch):
+    monkeypatch.setenv("MAX_COMPRESSED_INPUT_BYTES", "2048")
+    monkeypatch.setenv("MAX_DECOMPRESSED_INPUT_BYTES", "4096")
+
+    config = load_config()
+
+    assert config.MAX_COMPRESSED_INPUT_BYTES == 2048
+    assert config.MAX_DECOMPRESSED_INPUT_BYTES == 4096

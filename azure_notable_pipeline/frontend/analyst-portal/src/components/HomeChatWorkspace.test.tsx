@@ -67,7 +67,7 @@ function resetApiMocks() {
 
 describe("HomeChatWorkspace attached case", () => {
   beforeEach(() => {
-    window.localStorage.clear();
+    window.sessionStorage.clear();
     vi.clearAllMocks();
     resetApiMocks();
   });
@@ -93,7 +93,7 @@ describe("HomeChatWorkspace attached case", () => {
 
 describe("HomeChatWorkspace new chat", () => {
   beforeEach(() => {
-    window.localStorage.clear();
+    window.sessionStorage.clear();
     vi.clearAllMocks();
     resetApiMocks();
     vi.mocked(fetchCapabilities).mockResolvedValue({
@@ -103,7 +103,7 @@ describe("HomeChatWorkspace new chat", () => {
   });
 
   it("does not create a chat session without an attached case", async () => {
-    window.localStorage.setItem(
+    window.sessionStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
         activeLocalId: "local-old",
@@ -144,7 +144,7 @@ describe("HomeChatWorkspace new chat", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: /^new chat$/i })[0]);
 
-    const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}");
+    const stored = JSON.parse(window.sessionStorage.getItem(STORAGE_KEY) ?? "{}");
     const active = stored.sessions.find(
       (session: { localId: string }) => session.localId === stored.activeLocalId,
     );
@@ -155,7 +155,7 @@ describe("HomeChatWorkspace new chat", () => {
 
 describe("HomeChatWorkspace startup failures", () => {
   beforeEach(() => {
-    window.localStorage.clear();
+    window.sessionStorage.clear();
     vi.clearAllMocks();
     resetApiMocks();
   });
@@ -229,13 +229,13 @@ describe("HomeChatWorkspace startup failures", () => {
 
 describe("HomeChatWorkspace server chat sessions", () => {
   beforeEach(() => {
-    window.localStorage.clear();
+    window.sessionStorage.clear();
     vi.clearAllMocks();
     resetApiMocks();
   });
 
   it("clears durable browser storage when server chat history is disabled", async () => {
-    window.localStorage.setItem(
+    window.sessionStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
         activeLocalId: "local-old",
@@ -277,12 +277,12 @@ describe("HomeChatWorkspace server chat sessions", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText("Stale chat")).not.toBeInTheDocument();
     expect(screen.queryByText("What happened?")).not.toBeInTheDocument();
-    expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
+    expect(window.sessionStorage.getItem(STORAGE_KEY)).toBeNull();
 
     fireEvent.click(screen.getAllByRole("button", { name: /^new chat$/i })[0]);
 
     await waitFor(() => {
-      expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
+      expect(window.sessionStorage.getItem(STORAGE_KEY)).toBeNull();
     });
   });
 

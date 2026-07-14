@@ -20,6 +20,12 @@ upload. Source credentials belong in the producer's approved secret store, not
 this stack. Workload identity/managed identity is preferred; scope access to the
 input container and deny output, portal, and host storage.
 
+JSON producers should include an authoritative `finding_id`, `notable_id`, or
+`sid`. When none is present, the pipeline derives a collision-safe identity from
+the complete container/key location rather than trusting the basename alone.
+Both the compressed object size (`MAX_COMPRESSED_INPUT_BYTES`) and decompressed
+content size (`MAX_DECOMPRESSED_INPUT_BYTES`) are enforced.
+
 ## Customer intake record
 
 Outside this repository record: primary/secondary profile; SIEM/SOAR and hosting

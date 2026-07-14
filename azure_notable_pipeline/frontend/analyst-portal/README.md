@@ -25,8 +25,9 @@ Deploy and operator runbooks:
   repo `.venv` / `nodeenv` bootstrap).
 - Deployed portal stack for browser validation, or mocked API responses for unit
   tests.
-- A JWT from the configured identity provider (`PortalJwtIssuer` /
-  `PortalJwtAudience`) for manual browser calls against protected routes.
+- An OIDC public-client SPA registration with authorization-code + PKCE enabled,
+  the Front Door origin registered as a redirect URI, and delegated access to
+  the portal API scope.
 
 ## Quick start
 
@@ -47,11 +48,13 @@ Open http://127.0.0.1:5173/
 
 ### Local dev against a deployed Azure portal
 
-Point the Vite app at the stack browser API origin and supply a JWT in the
-browser (see [Browser JWT auth](#browser-jwt-auth)):
+Point the Vite app at the stack browser API origin and configure browser OIDC:
 
 ```powershell
 $env:VITE_PORTAL_API_BASE_URL = "https://<portal-browser-api-origin>"
+$env:VITE_PORTAL_OIDC_CLIENT_ID = "<spa-client-id>"
+$env:VITE_PORTAL_OIDC_AUTHORITY = "https://login.microsoftonline.com/<tenant-id>"
+$env:VITE_PORTAL_OIDC_API_SCOPE = "api://<portal-api-app-id>/Portal.Access"
 npm --prefix frontend/analyst-portal run dev
 ```
 
@@ -78,6 +81,9 @@ VITE_PORTAL_API_BASE_URL=https://<portal-browser-api-origin>
 VITE_PORTAL_API_TARGET=http://127.0.0.1:8765
 VITE_PORTAL_DEV_USER=dev-preview@local
 VITE_PORTAL_DEV_PROXY_SECRET=portal-secret
+VITE_PORTAL_OIDC_CLIENT_ID=<spa-client-id>
+VITE_PORTAL_OIDC_AUTHORITY=https://login.microsoftonline.com/<tenant-id>
+VITE_PORTAL_OIDC_API_SCOPE=api://<portal-api-app-id>/Portal.Access
 ```
 
 - `VITE_PORTAL_API_BASE_URL` — baked at build time; also used at dev time for
@@ -86,19 +92,19 @@ VITE_PORTAL_DEV_PROXY_SECRET=portal-secret
 - `VITE_PORTAL_API_TARGET` / `VITE_PORTAL_DEV_*` — Vite dev proxy only; ignored
   in production static assets.
 
-## Browser JWT auth
+## Browser OIDC authentication
 
-The client sends `Authorization: Bearer <token>` when a token is present under
-`notable.portal.jwt` in `sessionStorage` or `localStorage`.
+The SPA uses MSAL authorization-code + PKCE. A clean browser displays **Sign
+in**, processes the redirect, silently refreshes API access tokens, and clears
+MSAL, legacy token, and chat-session state on logout. The app registration must
+allow the exact production Front Door origin as a SPA redirect URI. Do not bake
+tokens or client secrets into `.env` files or static assets; this is a public
+client and requires no secret.
 
-For manual validation in a browser console:
-
-```javascript
-sessionStorage.setItem("notable.portal.jwt", "<jwt>");
-```
-
-Do not bake JWTs into `.env` files or static assets. Tokens should come from the
-customer identity provider or an approved front-door auth flow.
+In JWT mode, the final scope name in `VITE_PORTAL_OIDC_API_SCOPE` must equal
+`PORTAL_ENTRA_REQUIRED_APP_ROLE` (for example, both use `Portal.Access`). APIM
+and the Function enforce that same value from the token's `scp` or `roles`
+claim.
 
 ## Build
 
@@ -166,10 +172,11 @@ pattern, not the Azure Front Door deployment), also set `PORTAL_E2E_USER` and
 `PORTAL_E2E_PASSWORD`. The default Playwright config still sends basic-auth
 credentials; clear or override them when the front door is JWT-only.
 
-JWT-protected Azure portals require a valid browser token before protected routes
-load. The E2E harness does not inject JWTs automatically; set
-`notable.portal.jwt` through your IdP flow or an approved test hook before
-running chat and case-detail steps.
+OIDC-protected Azure portals redirect an empty browser through the configured
+identity provider. Interactive E2E runs must complete that sign-in; unattended
+CI should use an organization-approved Playwright authentication setup with a
+short-lived test identity. The portal does not support bearer-token injection
+through persistent browser storage.
 
 Environment variables:
 

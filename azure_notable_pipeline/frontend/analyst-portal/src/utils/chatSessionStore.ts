@@ -357,7 +357,10 @@ export function loadChatSessionStore(
     return emptyStore();
   }
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    // Chat contents are confidential and must not survive the browser session.
+    // Delete any data retained by older releases before loading session state.
+    window.localStorage.removeItem(STORAGE_KEY);
+    const raw = window.sessionStorage.getItem(STORAGE_KEY);
     if (!raw) {
       return emptyStore();
     }
@@ -376,7 +379,8 @@ export function saveChatSessionStore(
   }
   const normalized = normalizeStore(store, maxSessions);
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+    window.localStorage.removeItem(STORAGE_KEY);
+    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
   } catch {
     // Storage can be unavailable or full; chat still works without local persistence.
   }
@@ -387,6 +391,7 @@ export function clearChatSessionStore(): void {
     return;
   }
   try {
+    window.sessionStorage.removeItem(STORAGE_KEY);
     window.localStorage.removeItem(STORAGE_KEY);
   } catch {
     // Storage can be unavailable; clearing is best-effort.

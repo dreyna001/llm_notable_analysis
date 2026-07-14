@@ -30,6 +30,9 @@ param reportSinkMode string = 'blob'
 param capabilityProfiles string = 'core'
 
 @minValue(1)
+param maxCompressedInputBytes int = 1048576
+
+@minValue(1)
 param maxInstanceCount int = 5
 
 @minValue(30)
@@ -79,6 +82,7 @@ var applicationSettings = concat(azureWebJobsStorage, [
   { name: 'CASE_INDEX_CONTAINER', value: caseIndexContainerName }
   { name: 'REPORT_SINK_MODE', value: reportSinkMode }
   { name: 'CAPABILITY_PROFILES', value: capabilityProfiles }
+  { name: 'MAX_COMPRESSED_INPUT_BYTES', value: string(maxCompressedInputBytes) }
   { name: 'KEY_VAULT_URI', value: keyVaultUri }
   { name: 'AzureWebJobs.intake_blob.Disabled', value: 'false' }
   { name: 'AzureWebJobs.analyzer_queue.Disabled', value: 'false' }
