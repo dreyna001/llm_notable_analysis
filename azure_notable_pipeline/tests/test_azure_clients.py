@@ -18,6 +18,15 @@ class Capture:
         return object()
 
 
+class CaptureConnectionString:
+    calls: list[dict[str, Any]] = []
+
+    @classmethod
+    def from_connection_string(cls, **kwargs: Any) -> object:
+        cls.calls.append(kwargs)
+        return object()
+
+
 def test_blob_client_uses_explicit_user_assigned_identity_and_timeouts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -46,6 +55,116 @@ def test_clients_fail_closed_without_user_assigned_identity(
     with pytest.raises(
         azure_clients.AzureClientConfigurationError,
         match="AZURE_CLIENT_ID is required",
+    ):
+        azure_clients.blob_service_client("https://input.blob.core.windows.net")
+
+
+def test_blob_client_uses_azurite_connection_string_only_when_explicitly_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection_string = (
+        "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;"
+        "AccountKey=local-only;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+        "QueueEndpoint=http://azurite:10001/devstoreaccount1"
+    )
+    CaptureConnectionString.calls = []
+    monkeypatch.setenv("LOCAL_EMULATION", "true")
+    monkeypatch.setenv("AZURITE_CONNECTION_STRING", connection_string)
+    monkeypatch.delenv("AZURE_CLIENT_ID", raising=False)
+    monkeypatch.setattr(azure_clients, "BlobServiceClient", CaptureConnectionString)
+
+    azure_clients.blob_service_client("http://azurite:10000/devstoreaccount1")
+
+    assert CaptureConnectionString.calls == [
+        {
+            "conn_str": connection_string,
+            "connection_timeout": 10,
+            "read_timeout": 60,
+            "retry_total": 2,
+        }
+    ]
+
+
+def test_queue_client_uses_named_queue_from_azurite_connection_string(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection_string = (
+        "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;"
+        "AccountKey=local-only;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+        "QueueEndpoint=http://azurite:10001/devstoreaccount1"
+    )
+    CaptureConnectionString.calls = []
+    monkeypatch.setenv("LOCAL_EMULATION", "true")
+    monkeypatch.setenv("AZURITE_CONNECTION_STRING", connection_string)
+    monkeypatch.setattr(azure_clients, "QueueClient", CaptureConnectionString)
+
+    azure_clients.queue_client(
+        "http://azurite:10001/devstoreaccount1",
+        "notable-analysis-jobs",
+    )
+
+    assert CaptureConnectionString.calls[0]["conn_str"] == connection_string
+    assert CaptureConnectionString.calls[0]["queue_name"] == "notable-analysis-jobs"
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "http://192.0.2.10:10000/devstoreaccount1",
+        "http://storage:10000/devstoreaccount1",
+        "https://storage.example.com/devstoreaccount1",
+        "http://user:password@localhost:10000/devstoreaccount1",
+    ],
+)
+def test_local_storage_rejects_nonlocal_or_credentialed_endpoints(
+    monkeypatch: pytest.MonkeyPatch,
+    endpoint: str,
+) -> None:
+    monkeypatch.setenv("LOCAL_EMULATION", "true")
+    monkeypatch.setenv("AZURITE_CONNECTION_STRING", "UseDevelopmentStorage=true")
+
+    with pytest.raises(
+        azure_clients.AzureClientConfigurationError,
+        match="local HTTP|local Docker",
+    ):
+        azure_clients.blob_service_client(endpoint)
+
+
+@pytest.mark.parametrize(
+    "connection_string",
+    [
+        (
+            "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;"
+            "AccountKey=local-only;BlobEndpoint=https://storage.example.com/account"
+        ),
+        (
+            "UseDevelopmentStorage=true;"
+            "DevelopmentStorageProxyUri=https://proxy.example.com"
+        ),
+    ],
+)
+def test_azurite_connection_string_rejects_remote_endpoints(
+    monkeypatch: pytest.MonkeyPatch,
+    connection_string: str,
+) -> None:
+    monkeypatch.setenv("LOCAL_EMULATION", "true")
+    monkeypatch.setenv("AZURITE_CONNECTION_STRING", connection_string)
+
+    with pytest.raises(
+        azure_clients.AzureClientConfigurationError,
+        match="local Docker hostname",
+    ):
+        azure_clients.blob_service_client("http://azurite:10000/devstoreaccount1")
+
+
+def test_invalid_local_emulation_flag_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LOCAL_EMULATION", "1")
+
+    with pytest.raises(
+        azure_clients.AzureClientConfigurationError,
+        match="must be true or false",
     ):
         azure_clients.blob_service_client("https://input.blob.core.windows.net")
 
@@ -130,6 +249,48 @@ def test_cosmos_client_requests_strong_consistency(
     assert cosmos_factory.kwargs["consistency_level"] == "Strong"
     assert cosmos_factory.kwargs["connection_timeout"] == 10
     assert cosmos_factory.kwargs["request_timeout"] == 60
+
+
+def test_cosmos_emulator_uses_local_endpoint_and_explicit_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cosmos_factory = Capture()
+    monkeypatch.setenv("LOCAL_EMULATION", "true")
+    monkeypatch.setenv("COSMOS_EMULATOR_KEY", "local-emulator-key")
+    monkeypatch.delenv("AZURE_CLIENT_ID", raising=False)
+    monkeypatch.setattr(azure_clients, "CosmosClient", cosmos_factory)
+
+    azure_clients.cosmos_client("https://localhost:8081")
+
+    assert cosmos_factory.kwargs["url"] == "https://localhost:8081"
+    assert cosmos_factory.kwargs["credential"] == "local-emulator-key"
+    assert cosmos_factory.kwargs["consistency_level"] == "Strong"
+
+
+def test_cosmos_emulator_rejects_remote_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LOCAL_EMULATION", "true")
+    monkeypatch.setenv("COSMOS_EMULATOR_KEY", "local-emulator-key")
+
+    with pytest.raises(
+        azure_clients.AzureClientConfigurationError,
+        match="local Docker hostname",
+    ):
+        azure_clients.cosmos_client("https://qualified.documents.azure.com")
+
+
+def test_cosmos_emulator_requires_explicit_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LOCAL_EMULATION", "true")
+    monkeypatch.delenv("COSMOS_EMULATOR_KEY", raising=False)
+
+    with pytest.raises(
+        azure_clients.AzureClientConfigurationError,
+        match="COSMOS_EMULATOR_KEY is required",
+    ):
+        azure_clients.cosmos_client("https://localhost:8081")
 
 
 def test_queue_and_search_names_must_be_nonblank(

@@ -29,3 +29,8 @@ az bicep build --file deploy/azure/main.bicep
 ```
 
 Default unit tests do not call live Azure services.
+
+For account-free integration coverage, start Azurite and the Cosmos DB Linux
+emulator with [`deploy/local/bootstrap.sh`](deploy/local/bootstrap.sh) or
+[`deploy/local/bootstrap.ps1`](deploy/local/bootstrap.ps1), then run the
+[`local parity harness`](docs/operations/LOCAL_AZURE_PARITY.md).

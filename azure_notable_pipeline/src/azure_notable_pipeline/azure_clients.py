@@ -7,6 +7,7 @@ modules receive native clients or call a narrow application boundary.
 
 from __future__ import annotations
 
+import ipaddress
 import os
 from typing import Any
 from urllib.parse import urlparse
@@ -31,6 +32,19 @@ _MAX_RETRIES = 2
 
 class AzureClientConfigurationError(ValueError):
     """A native Azure client cannot be built from the runtime configuration."""
+
+
+def _local_emulation_enabled() -> bool:
+    """Return whether explicitly configured local service emulation is enabled."""
+
+    value = os.getenv("LOCAL_EMULATION", "false").strip().lower()
+    if value == "true":
+        return True
+    if value in {"", "false"}:
+        return False
+    raise AzureClientConfigurationError(
+        "LOCAL_EMULATION must be true or false"
+    )
 
 
 def _require_text(value: str, *, setting_name: str) -> str:
@@ -71,6 +85,96 @@ def _service_url(
     return url
 
 
+def _local_service_url(value: str, *, setting_name: str) -> str:
+    """Validate an emulator URL without permitting non-local network targets."""
+
+    url = _require_text(value, setting_name=setting_name).rstrip("/")
+    parsed = urlparse(url)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise AzureClientConfigurationError(
+            f"{setting_name} must be a local HTTP(S) service URL without "
+            "userinfo, query, or fragment"
+        )
+
+    hostname = parsed.hostname.lower()
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        # Only the repository's Compose service names and Docker Desktop host
+        # gateways are accepted; arbitrary single-label names can expand via a
+        # DNS search suffix to a remote host.
+        is_local = (
+            hostname
+            in {
+                "localhost",
+                "host.docker.internal",
+                "gateway.docker.internal",
+                "azurite",
+                "cosmos",
+                "cosmos-emulator",
+            }
+        )
+    else:
+        is_local = address.is_loopback
+    if not is_local:
+        raise AzureClientConfigurationError(
+            f"{setting_name} must use localhost, a loopback address, or a "
+            "local Docker hostname when LOCAL_EMULATION=true"
+        )
+    return url
+
+
+def _azurite_connection_string(*, service: str) -> str:
+    connection_string = _require_text(
+        os.getenv("AZURITE_CONNECTION_STRING", ""),
+        setting_name="AZURITE_CONNECTION_STRING",
+    )
+    fields: dict[str, str] = {}
+    for component in connection_string.split(";"):
+        if not component:
+            continue
+        name, separator, value = component.partition("=")
+        if not separator:
+            raise AzureClientConfigurationError(
+                "AZURITE_CONNECTION_STRING must be a valid storage connection string"
+            )
+        fields[name.strip().lower()] = value.strip()
+
+    for endpoint_name in ("blobendpoint", "queueendpoint"):
+        if fields.get(endpoint_name):
+            _local_service_url(
+                fields[endpoint_name],
+                setting_name=(
+                    f"AZURITE_CONNECTION_STRING {endpoint_name[:-8].title()}Endpoint"
+                ),
+            )
+
+    if fields.get("usedevelopmentstorage", "").lower() == "true":
+        proxy_uri = fields.get("developmentstorageproxyuri", "")
+        if proxy_uri:
+            _local_service_url(
+                proxy_uri,
+                setting_name=(
+                    "AZURITE_CONNECTION_STRING DevelopmentStorageProxyUri"
+                ),
+            )
+        return connection_string
+
+    endpoint_name = f"{service.lower()}endpoint"
+    _require_text(
+        fields.get(endpoint_name, ""),
+        setting_name=f"AZURITE_CONNECTION_STRING {service}Endpoint",
+    )
+    return connection_string
+
+
 def _credential() -> ManagedIdentityCredential:
     client_id = _require_text(
         os.getenv("AZURE_CLIENT_ID", ""),
@@ -81,6 +185,15 @@ def _credential() -> ManagedIdentityCredential:
 
 def blob_service_client(account_url: str) -> BlobServiceClient:
     """Create a managed-identity Blob service client."""
+
+    if _local_emulation_enabled():
+        _local_service_url(account_url, setting_name="storage account URL")
+        return BlobServiceClient.from_connection_string(
+            conn_str=_azurite_connection_string(service="Blob"),
+            connection_timeout=_CONNECT_TIMEOUT_SECONDS,
+            read_timeout=_READ_TIMEOUT_SECONDS,
+            retry_total=_MAX_RETRIES,
+        )
 
     return BlobServiceClient(
         account_url=_service_url(
@@ -164,6 +277,18 @@ def azure_search_client(endpoint: str, index_name: str) -> SearchClient:
 def cosmos_client(endpoint: str) -> CosmosClient:
     """Create the strongly-consistent, managed-identity Cosmos client."""
 
+    if _local_emulation_enabled():
+        return CosmosClient(
+            url=_local_service_url(endpoint, setting_name="COSMOS_ENDPOINT"),
+            credential=_require_text(
+                os.getenv("COSMOS_EMULATOR_KEY", ""),
+                setting_name="COSMOS_EMULATOR_KEY",
+            ),
+            consistency_level="Strong",
+            connection_timeout=_CONNECT_TIMEOUT_SECONDS,
+            request_timeout=_READ_TIMEOUT_SECONDS,
+        )
+
     return CosmosClient(
         url=_service_url(endpoint, setting_name="COSMOS_ENDPOINT"),
         credential=_credential(),
@@ -176,12 +301,23 @@ def cosmos_client(endpoint: str) -> CosmosClient:
 def queue_client(account_url: str, queue_name: str) -> QueueClient:
     """Create a managed-identity Storage Queue client."""
 
+    normalized_queue_name = _require_text(queue_name, setting_name="queue name")
+    if _local_emulation_enabled():
+        _local_service_url(account_url, setting_name="storage account URL")
+        return QueueClient.from_connection_string(
+            conn_str=_azurite_connection_string(service="Queue"),
+            queue_name=normalized_queue_name,
+            connection_timeout=_CONNECT_TIMEOUT_SECONDS,
+            read_timeout=_READ_TIMEOUT_SECONDS,
+            retry_total=_MAX_RETRIES,
+        )
+
     return QueueClient(
         account_url=_service_url(
             account_url,
             setting_name="storage account URL",
         ),
-        queue_name=_require_text(queue_name, setting_name="queue name"),
+        queue_name=normalized_queue_name,
         credential=_credential(),
         connection_timeout=_CONNECT_TIMEOUT_SECONDS,
         read_timeout=_READ_TIMEOUT_SECONDS,

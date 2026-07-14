@@ -8,6 +8,7 @@
 | Analyst portal | [`analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](analyst_portal/ANALYST_PORTAL_OPERATIONS.md) |
 | Portal deployment gate | [`ANALYST_PORTAL_DEPLOYMENT.md`](ANALYST_PORTAL_DEPLOYMENT.md) |
 | Monitoring, poison replay, escalation | [`AZURE_MONITORING_AND_RECOVERY.md`](AZURE_MONITORING_AND_RECOVERY.md) |
+| Account-free local parity lab | [`LOCAL_AZURE_PARITY.md`](LOCAL_AZURE_PARITY.md) |
 | ServiceNow disposition sync | [`integrations/SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md`](integrations/SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md) |
 | SIEM/SOAR private intake | [`integrations/SIEM_SOAR_PRIVATE_INTAKE_OPERATIONS.md`](integrations/SIEM_SOAR_PRIVATE_INTAKE_OPERATIONS.md) |
 

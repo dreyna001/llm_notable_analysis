@@ -5,6 +5,7 @@ __pycache__/
 .venv/
 .env
 local.settings.json
+deploy/local/local.env
 frontend/analyst-portal/node_modules/
 frontend/analyst-portal/dist/
 !frontend/analyst-portal/src/lib/

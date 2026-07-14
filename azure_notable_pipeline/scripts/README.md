@@ -36,3 +36,7 @@ authenticated `/ready` through Front Door.
 See [`ANALYST_PORTAL_DEPLOYMENT.md`](../docs/operations/ANALYST_PORTAL_DEPLOYMENT.md).
 The complete staging inputs and production gate are in
 [`AZURE_READINESS.md`](../docs/delivery_package/AZURE_READINESS.md).
+
+`test-local-parity.sh` and `test-local-parity.ps1` run the opt-in account-free
+Azurite/Cosmos emulator harness described in
+[`LOCAL_AZURE_PARITY.md`](../docs/operations/LOCAL_AZURE_PARITY.md).

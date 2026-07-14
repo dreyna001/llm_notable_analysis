@@ -1,0 +1,58 @@
+name: azure-notable-local
+
+services:
+  azurite:
+    image: ${AZURITE_IMAGE:-mcr.microsoft.com/azure-storage/azurite:3.35.0}
+    command:
+      - azurite
+      - --blobHost
+      - 0.0.0.0
+      - --queueHost
+      - 0.0.0.0
+      - --tableHost
+      - 0.0.0.0
+      - --location
+      - /data
+      - --debug
+      - /data/debug.log
+    ports:
+      - "127.0.0.1:10000:10000"
+      - "127.0.0.1:10001:10001"
+      - "127.0.0.1:10002:10002"
+    volumes:
+      - azurite-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          const net=require('net');const s=net.connect(10000,'127.0.0.1',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1));
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 5s
+    restart: unless-stopped
+
+  cosmos:
+    image: ${COSMOS_EMULATOR_IMAGE:-mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-latest}
+    environment:
+      ENABLE_EXPLORER: "true"
+      PROTOCOL: http
+    ports:
+      - "127.0.0.1:8081:8081"
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:1234:1234"
+    volumes:
+      - cosmos-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 36
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  azurite-data:
+  cosmos-data:
