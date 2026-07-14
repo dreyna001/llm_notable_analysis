@@ -32,6 +32,7 @@ param serviceNowDispositionCodeMap string = '/home/site/wwwroot/deploy/serviceno
 param serviceNowDispositionBackfillDays int = 90
 param dispositionRetentionDays int = 365
 param allowPrivateOutboundEndpoints bool = false
+param zoneRedundant bool = false
 
 var applicationSettings = [
   { name: 'FUNCTIONS_EXTENSION_VERSION', value: '~4' }
@@ -158,7 +159,7 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
       http20Enabled: true
       linuxFxVersion: 'DOCKER|${containerImageUri}'
       minTlsVersion: '1.2'
-      minimumElasticInstanceCount: 1
+      minimumElasticInstanceCount: zoneRedundant ? 2 : 1
       use32BitWorkerProcess: false
       vnetRouteAllEnabled: true
       appSettings: applicationSettings

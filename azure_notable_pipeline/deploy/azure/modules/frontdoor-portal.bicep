@@ -7,8 +7,6 @@ param portalUiStorageId string
 param portalUiHostName string
 param apiManagementId string
 param apiManagementHostName string
-param portalFunctionId string
-param portalFunctionHostName string
 
 resource profile 'Microsoft.Cdn/profiles@2024-09-01' = {
   name: profileName
@@ -28,39 +26,6 @@ resource endpoint 'Microsoft.Cdn/profiles/afdEndpoints@2024-09-01' = {
 
 // Every origin group is intentionally single-origin and has no healthProbeSettings.
 // Portal availability is monitored by an authenticated synthetic /ready request.
-resource chatOriginGroup 'Microsoft.Cdn/profiles/originGroups@2024-09-01' = {
-  parent: profile
-  name: 'portal-chat'
-  properties: {
-    sessionAffinityState: 'Disabled'
-    loadBalancingSettings: {
-      sampleSize: 4
-      successfulSamplesRequired: 3
-      additionalLatencyInMilliseconds: 50
-    }
-  }
-}
-resource chatOrigin 'Microsoft.Cdn/profiles/originGroups/origins@2024-09-01' = {
-  parent: chatOriginGroup
-  name: 'portal-function'
-  properties: {
-    enabledState: 'Enabled'
-    hostName: portalFunctionHostName
-    originHostHeader: portalFunctionHostName
-    httpPort: 80
-    httpsPort: 443
-    priority: 1
-    weight: 1000
-    enforceCertificateNameCheck: true
-    sharedPrivateLinkResource: {
-      privateLink: { id: portalFunctionId }
-      privateLinkLocation: location
-      groupId: 'sites'
-      requestMessage: 'Front Door private chat origin'
-    }
-  }
-}
-
 resource apiOriginGroup 'Microsoft.Cdn/profiles/originGroups@2024-09-01' = {
   parent: profile
   name: 'portal-api'
@@ -127,20 +92,6 @@ resource uiOrigin 'Microsoft.Cdn/profiles/originGroups/origins@2024-09-01' = {
   }
 }
 
-// Declare the exact chat route before the wildcard API route.
-resource chatRoute 'Microsoft.Cdn/profiles/afdEndpoints/routes@2024-09-01' = {
-  parent: endpoint
-  name: 'api-chat'
-  properties: {
-    originGroup: { id: chatOriginGroup.id }
-    supportedProtocols: ['Http', 'Https']
-    patternsToMatch: ['/api/chat']
-    forwardingProtocol: 'HttpsOnly'
-    linkToDefaultDomain: 'Enabled'
-    httpsRedirect: 'Enabled'
-  }
-  dependsOn: [chatOrigin]
-}
 resource apiRoute 'Microsoft.Cdn/profiles/afdEndpoints/routes@2024-09-01' = {
   parent: endpoint
   name: 'api'
@@ -152,7 +103,7 @@ resource apiRoute 'Microsoft.Cdn/profiles/afdEndpoints/routes@2024-09-01' = {
     linkToDefaultDomain: 'Enabled'
     httpsRedirect: 'Enabled'
   }
-  dependsOn: [apiOrigin, chatRoute]
+  dependsOn: [apiOrigin]
 }
 resource healthRoute 'Microsoft.Cdn/profiles/afdEndpoints/routes@2024-09-01' = {
   parent: endpoint
@@ -212,13 +163,12 @@ resource uiRoute 'Microsoft.Cdn/profiles/afdEndpoints/routes@2024-09-01' = {
       }
     }
   }
-  dependsOn: [uiOrigin, chatRoute, apiRoute, healthRoute, readyRoute, spaShellRoute]
+  dependsOn: [uiOrigin, apiRoute, healthRoute, readyRoute, spaShellRoute]
 }
 
 output profileName string = profile.name
 output profileId string = profile.id
 output endpointName string = endpoint.name
 output endpointHostName string = endpoint.properties.hostName
-output chatOriginId string = chatOrigin.id
 output apiOriginId string = apiOrigin.id
 output uiOriginId string = uiOrigin.id

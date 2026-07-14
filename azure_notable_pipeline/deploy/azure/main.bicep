@@ -47,6 +47,7 @@ param DispositionContainerName string = '${DeploymentPrefix}-servicenow-disposit
 param DispositionSyncStateContainerName string = '${DeploymentPrefix}-disposition-sync-state'
 param ChatSessionsContainerName string = '${DeploymentPrefix}-chat-sessions'
 param ChatMessagesContainerName string = '${DeploymentPrefix}-chat-messages'
+param ChatQuotaContainerName string = '${DeploymentPrefix}-chat-quota'
 
 @description('Provision disposition persistence and grants for the future timer app.')
 param ServiceNowDispositionSyncEnabled bool = false
@@ -55,6 +56,26 @@ param ServiceNowDispositionSyncEnabled bool = false
 param CaseQaChatHistoryEnabled bool = false
 
 param FunctionsHostStorageAccountName string
+@description('Opt in to one Functions host storage account per app. This changes host state placement and requires four globally unique account names; deploy through staging before production.')
+param IsolateFunctionsHostStorage bool = false
+param AnalyzerHostStorageAccountName string = ''
+param EmbedHostStorageAccountName string = ''
+param DispositionHostStorageAccountName string = ''
+param PortalHostStorageAccountName string = ''
+
+@allowed(['Standard_LRS', 'Standard_ZRS'])
+param StorageSkuName string = 'Standard_LRS'
+
+@description('Enable blob and container soft delete plus blob versioning on input/output data accounts.')
+param BlobDataProtectionEnabled bool = false
+@minValue(1)
+@maxValue(365)
+param BlobSoftDeleteRetentionDays int = 30
+@minValue(1)
+@maxValue(365)
+param ContainerSoftDeleteRetentionDays int = 30
+@minValue(1)
+param PreviousVersionRetentionDays int = 30
 param StorageAccountNameInput string
 param StorageAccountNameOutput string
 param StorageAccountNamePortalUi string = ''
@@ -90,8 +111,39 @@ param EmbedMaxInstanceCount int = 5
 @maxValue(225)
 param PortalChatTimeoutSec int = 225
 
+@description('Use Cosmos-backed per-user chat admission control. Keep enabled for live analyst deployments.')
+param PortalChatDistributedQuotaEnabled bool = true
+@minValue(1)
+@maxValue(16)
+param PortalChatPerUserMaxConcurrency int = 2
+@minValue(60)
+@maxValue(86400)
+param PortalChatQuotaWindowSeconds int = 3600
+@minValue(1)
+@maxValue(2048)
+param PortalChatMaxRequestsPerWindow int = 30
+@minValue(1)
+param PortalChatMaxBudgetUnitsPerWindow int = 100000
+@minValue(1)
+param PortalChatBudgetUnitsPerRequest int = 5000
+@minValue(226)
+@maxValue(3600)
+param PortalChatLeaseSeconds int = 300
+@minValue(60)
+@maxValue(86400)
+param PortalChatRequestDedupeSeconds int = 3600
+
 @allowed(['EP1', 'EP2', 'EP3'])
 param FunctionPlanSkuName string = 'EP1'
+
+@description('Enable zone redundancy on the Elastic Premium Functions plan. Confirm regional support and capacity before enabling.')
+param FunctionPlanZoneRedundant bool = false
+
+@description('Enable zone redundancy for a newly created serverless Cosmos account. Existing non-zonal serverless accounts require migration to a new account.')
+param CosmosZoneRedundant bool = false
+
+@description('Use Cosmos continuous seven-day backup instead of periodic backup.')
+param CosmosContinuousBackupEnabled bool = false
 
 @allowed(['StandardV2'])
 param ApiManagementSkuName string = 'StandardV2'
@@ -184,12 +236,55 @@ var validatedKeyVaultName = ServiceNowDispositionSyncEnabled && empty(KeyVaultNa
 var validatedDispositionTokenSecretName = ServiceNowDispositionSyncEnabled && empty(ServiceNowDispositionSyncTokenSecretName)
   ? fail('ServiceNowDispositionSyncTokenSecretName is required when ServiceNowDispositionSyncEnabled=true.')
   : ServiceNowDispositionSyncTokenSecretName
+var validatedBlobDataProtection = isProduction && !BlobDataProtectionEnabled
+  ? fail('BlobDataProtectionEnabled must be true when DeploymentEnvironment=production.')
+  : BlobDataProtectionEnabled
+var validatedCosmosContinuousBackup = isProduction && !CosmosContinuousBackupEnabled
+  ? fail('CosmosContinuousBackupEnabled must be true when DeploymentEnvironment=production.')
+  : CosmosContinuousBackupEnabled
+var validatedStorageSkuName = FunctionPlanZoneRedundant && StorageSkuName != 'Standard_ZRS'
+  ? fail('StorageSkuName must be Standard_ZRS when FunctionPlanZoneRedundant=true.')
+  : StorageSkuName
+var portalChatQuotaOverlapWindows = ((PortalChatRequestDedupeSeconds + PortalChatQuotaWindowSeconds - 1) / PortalChatQuotaWindowSeconds) + 1
+var validatedPortalChatMaxRequestsPerWindow = portalChatQuotaOverlapWindows * PortalChatMaxRequestsPerWindow > 4096
+  ? fail('Portal chat quota settings can retain at most 4096 recent request IDs; reduce the request rate or dedupe interval.')
+  : PortalChatMaxRequestsPerWindow
+var validatedAnalyzerHostStorageAccountName = IsolateFunctionsHostStorage && empty(AnalyzerHostStorageAccountName)
+  ? fail('AnalyzerHostStorageAccountName is required when IsolateFunctionsHostStorage=true.')
+  : AnalyzerHostStorageAccountName
+var validatedEmbedHostStorageAccountName = IsolateFunctionsHostStorage && empty(EmbedHostStorageAccountName)
+  ? fail('EmbedHostStorageAccountName is required when IsolateFunctionsHostStorage=true.')
+  : EmbedHostStorageAccountName
+var validatedDispositionHostStorageAccountName = IsolateFunctionsHostStorage && empty(DispositionHostStorageAccountName)
+  ? fail('DispositionHostStorageAccountName is required when IsolateFunctionsHostStorage=true.')
+  : DispositionHostStorageAccountName
+var validatedPortalHostStorageAccountName = IsolateFunctionsHostStorage && empty(PortalHostStorageAccountName)
+  ? fail('PortalHostStorageAccountName is required when IsolateFunctionsHostStorage=true.')
+  : PortalHostStorageAccountName
+var functionHostStorageAccountNames = IsolateFunctionsHostStorage
+  ? [
+      validatedAnalyzerHostStorageAccountName
+      validatedEmbedHostStorageAccountName
+      validatedDispositionHostStorageAccountName
+      validatedPortalHostStorageAccountName
+    ]
+  : [FunctionsHostStorageAccountName]
 
 module storage 'modules/storage.bicep' = {
   name: '${DeploymentPrefix}-storage'
   params: {
     location: Location
     functionsHostStorageAccountName: FunctionsHostStorageAccountName
+    isolateFunctionsHostStorage: IsolateFunctionsHostStorage
+    analyzerHostStorageAccountName: validatedAnalyzerHostStorageAccountName
+    embedHostStorageAccountName: validatedEmbedHostStorageAccountName
+    dispositionHostStorageAccountName: validatedDispositionHostStorageAccountName
+    portalHostStorageAccountName: validatedPortalHostStorageAccountName
+    storageSkuName: validatedStorageSkuName
+    blobDataProtectionEnabled: validatedBlobDataProtection
+    blobSoftDeleteRetentionDays: BlobSoftDeleteRetentionDays
+    containerSoftDeleteRetentionDays: ContainerSoftDeleteRetentionDays
+    previousVersionRetentionDays: PreviousVersionRetentionDays
     inputStorageAccountName: StorageAccountNameInput
     outputStorageAccountName: StorageAccountNameOutput
     portalUiStorageAccountName: StorageAccountNamePortalUi
@@ -207,7 +302,7 @@ module network 'modules/network.bicep' = {
     namePrefix: DeploymentPrefix
     inputStorageAccountName: StorageAccountNameInput
     outputStorageAccountName: StorageAccountNameOutput
-    functionsHostStorageAccountName: FunctionsHostStorageAccountName
+    functionsHostStorageAccountNames: functionHostStorageAccountNames
     portalUiStorageAccountName: StorageAccountNamePortalUi
   }
   dependsOn: [storage]
@@ -234,20 +329,24 @@ module cosmos 'modules/cosmos.bicep' = {
     dispositionSyncStateContainerName: DispositionSyncStateContainerName
     chatSessionsContainerName: ChatSessionsContainerName
     chatMessagesContainerName: ChatMessagesContainerName
+    chatQuotaContainerName: ChatQuotaContainerName
     deployCaseIndex: hasAnalystPortalProfile
     deployDispositionContainers: ServiceNowDispositionSyncEnabled
     deployChatHistoryContainers: deployChatHistoryContainers
+    deployChatQuota: deployPortal && PortalChatDistributedQuotaEnabled
     analyzerPrincipalId: identities.outputs.analyzer.principalId
     embedPrincipalId: identities.outputs.embed.principalId
     dispositionPrincipalId: identities.outputs.disposition.principalId
     portalPrincipalId: identities.outputs.portal.principalId
+    zoneRedundant: CosmosZoneRedundant
+    continuousBackupEnabled: validatedCosmosContinuousBackup
   }
 }
 
 module analyzerHostAccess 'modules/host-storage-access.bicep' = {
   name: '${DeploymentPrefix}-analyzer-host-storage'
   params: {
-    functionsHostStorageAccountName: FunctionsHostStorageAccountName
+    functionsHostStorageAccountName: IsolateFunctionsHostStorage ? validatedAnalyzerHostStorageAccountName : FunctionsHostStorageAccountName
     identityResourceId: identities.outputs.analyzer.id
     identityPrincipalId: identities.outputs.analyzer.principalId
   }
@@ -255,7 +354,7 @@ module analyzerHostAccess 'modules/host-storage-access.bicep' = {
 module embedHostAccess 'modules/host-storage-access.bicep' = {
   name: '${DeploymentPrefix}-embed-host-storage'
   params: {
-    functionsHostStorageAccountName: FunctionsHostStorageAccountName
+    functionsHostStorageAccountName: IsolateFunctionsHostStorage ? validatedEmbedHostStorageAccountName : FunctionsHostStorageAccountName
     identityResourceId: identities.outputs.embed.id
     identityPrincipalId: identities.outputs.embed.principalId
   }
@@ -263,7 +362,7 @@ module embedHostAccess 'modules/host-storage-access.bicep' = {
 module dispositionHostAccess 'modules/host-storage-access.bicep' = {
   name: '${DeploymentPrefix}-disposition-host-storage'
   params: {
-    functionsHostStorageAccountName: FunctionsHostStorageAccountName
+    functionsHostStorageAccountName: IsolateFunctionsHostStorage ? validatedDispositionHostStorageAccountName : FunctionsHostStorageAccountName
     identityResourceId: identities.outputs.disposition.id
     identityPrincipalId: identities.outputs.disposition.principalId
   }
@@ -271,7 +370,7 @@ module dispositionHostAccess 'modules/host-storage-access.bicep' = {
 module portalHostAccess 'modules/host-storage-access.bicep' = {
   name: '${DeploymentPrefix}-portal-host-storage'
   params: {
-    functionsHostStorageAccountName: FunctionsHostStorageAccountName
+    functionsHostStorageAccountName: IsolateFunctionsHostStorage ? validatedPortalHostStorageAccountName : FunctionsHostStorageAccountName
     identityResourceId: identities.outputs.portal.id
     identityPrincipalId: identities.outputs.portal.principalId
   }
@@ -346,11 +445,11 @@ resource functionPlan 'Microsoft.Web/serverfarms@2023-12-01' = {
   name: '${DeploymentPrefix}-functions-plan'
   location: Location
   kind: 'elastic'
-  sku: { name: FunctionPlanSkuName, tier: 'ElasticPremium', capacity: 1 }
+  sku: { name: FunctionPlanSkuName, tier: 'ElasticPremium', capacity: FunctionPlanZoneRedundant ? 3 : 1 }
   properties: {
     maximumElasticWorkerCount: max(AnalyzerMaxInstanceCount, EmbedMaxInstanceCount)
     reserved: true
-    zoneRedundant: false
+    zoneRedundant: FunctionPlanZoneRedundant
   }
 }
 
@@ -371,9 +470,9 @@ module analyzerFunction 'modules/functions-analyzer.bicep' = {
     inputQueueServiceUri: storage.outputs.inputQueueServiceUri
     outputBlobServiceUri: storage.outputs.outputBlobServiceUri
     outputQueueServiceUri: storage.outputs.outputQueueServiceUri
-    hostBlobServiceUri: storage.outputs.hostBlobServiceUri
-    hostQueueServiceUri: storage.outputs.hostQueueServiceUri
-    hostTableServiceUri: storage.outputs.hostTableServiceUri
+    hostBlobServiceUri: storage.outputs.analyzerHostBlobServiceUri
+    hostQueueServiceUri: storage.outputs.analyzerHostQueueServiceUri
+    hostTableServiceUri: storage.outputs.analyzerHostTableServiceUri
     applicationInsightsConnectionString: observabilityBase.outputs.applicationInsightsConnectionString
     keyVaultUri: empty(validatedKeyVaultName) ? '' : keyVaultAccess!.outputs.keyVaultUri
     azureAiFoundryAnthropicBaseUrl: AzureAiFoundryAnthropicBaseUrl
@@ -388,6 +487,7 @@ module analyzerFunction 'modules/functions-analyzer.bicep' = {
     maxInstanceCount: AnalyzerMaxInstanceCount
     maxCompressedInputBytes: MaxCompressedInputBytes
     timeoutSeconds: AnalyzerTimeoutSeconds
+    zoneRedundant: FunctionPlanZoneRedundant
   }
   dependsOn: [registryAccess, foundryAccess, analyzerHostAccess]
 }
@@ -406,9 +506,9 @@ module embedFunction 'modules/functions-embed.bicep' = {
     outputStorageAccountName: StorageAccountNameOutput
     outputBlobServiceUri: storage.outputs.outputBlobServiceUri
     outputQueueServiceUri: storage.outputs.outputQueueServiceUri
-    hostBlobServiceUri: storage.outputs.hostBlobServiceUri
-    hostQueueServiceUri: storage.outputs.hostQueueServiceUri
-    hostTableServiceUri: storage.outputs.hostTableServiceUri
+    hostBlobServiceUri: storage.outputs.embedHostBlobServiceUri
+    hostQueueServiceUri: storage.outputs.embedHostQueueServiceUri
+    hostTableServiceUri: storage.outputs.embedHostTableServiceUri
     applicationInsightsConnectionString: observabilityBase.outputs.applicationInsightsConnectionString
     azureOpenAiEndpoint: AzureOpenAiEndpoint
     azureOpenAiApiVersion: AzureOpenAiApiVersion
@@ -418,6 +518,7 @@ module embedFunction 'modules/functions-embed.bicep' = {
     caseIndexContainerName: cosmos.outputs.caseIndexContainerName
     capabilityProfiles: CapabilityProfiles
     maxInstanceCount: EmbedMaxInstanceCount
+    zoneRedundant: FunctionPlanZoneRedundant
   }
   dependsOn: [registryAccess, embedHostAccess, openAiAccess]
 }
@@ -438,9 +539,9 @@ module dispositionFunction 'modules/functions-disposition.bicep' = {
     outputStorageAccountName: StorageAccountNameOutput
     outputBlobServiceUri: storage.outputs.outputBlobServiceUri
     outputQueueServiceUri: storage.outputs.outputQueueServiceUri
-    hostBlobServiceUri: storage.outputs.hostBlobServiceUri
-    hostQueueServiceUri: storage.outputs.hostQueueServiceUri
-    hostTableServiceUri: storage.outputs.hostTableServiceUri
+    hostBlobServiceUri: storage.outputs.dispositionHostBlobServiceUri
+    hostQueueServiceUri: storage.outputs.dispositionHostQueueServiceUri
+    hostTableServiceUri: storage.outputs.dispositionHostTableServiceUri
     applicationInsightsConnectionString: observabilityBase.outputs.applicationInsightsConnectionString
     keyVaultUri: empty(validatedKeyVaultName) ? '' : keyVaultAccess!.outputs.keyVaultUri
     cosmosEndpoint: cosmos.outputs.endpoint
@@ -457,6 +558,7 @@ module dispositionFunction 'modules/functions-disposition.bicep' = {
     serviceNowDispositionBackfillDays: ServiceNowDispositionBackfillDays
     dispositionRetentionDays: DispositionRetentionDays
     allowPrivateOutboundEndpoints: AllowPrivateOutboundEndpoints
+    zoneRedundant: FunctionPlanZoneRedundant
   }
   dependsOn: [registryAccess, dispositionHostAccess]
 }
@@ -476,15 +578,16 @@ module portalFunction 'modules/functions-portal.bicep' = if (deployPortal) {
     portalIdentityPrincipalId: identities.outputs.portal.principalId
     outputStorageAccountName: StorageAccountNameOutput
     outputBlobServiceUri: storage.outputs.outputBlobServiceUri
-    hostBlobServiceUri: storage.outputs.hostBlobServiceUri
-    hostQueueServiceUri: storage.outputs.hostQueueServiceUri
-    hostTableServiceUri: storage.outputs.hostTableServiceUri
+    hostBlobServiceUri: storage.outputs.portalHostBlobServiceUri
+    hostQueueServiceUri: storage.outputs.portalHostQueueServiceUri
+    hostTableServiceUri: storage.outputs.portalHostTableServiceUri
     applicationInsightsConnectionString: observabilityBase.outputs.applicationInsightsConnectionString
     cosmosEndpoint: cosmos.outputs.endpoint
     cosmosDatabaseName: cosmos.outputs.databaseName
     caseIndexContainerName: cosmos.outputs.caseIndexContainerName
     chatSessionsContainerName: deployChatHistoryContainers ? cosmos.outputs.chatSessionsContainerName : ''
     chatMessagesContainerName: deployChatHistoryContainers ? cosmos.outputs.chatMessagesContainerName : ''
+    chatQuotaContainerName: cosmos.outputs.chatQuotaContainerName
     azureOpenAiEndpoint: AzureOpenAiEndpoint
     azureOpenAiApiVersion: AzureOpenAiApiVersion
     azureOpenAiEmbeddingsDeployment: AzureOpenAiEmbeddingsDeployment
@@ -496,8 +599,17 @@ module portalFunction 'modules/functions-portal.bicep' = if (deployPortal) {
     portalJwtIssuer: PortalJwtIssuer
     portalJwtAudience: PortalJwtAudience
     portalEntraRequiredAppRole: PortalEntraRequiredAppRole
+    portalChatDistributedQuotaEnabled: PortalChatDistributedQuotaEnabled
+    portalChatPerUserMaxConcurrency: PortalChatPerUserMaxConcurrency
+    portalChatQuotaWindowSeconds: PortalChatQuotaWindowSeconds
+    portalChatMaxRequestsPerWindow: validatedPortalChatMaxRequestsPerWindow
+    portalChatMaxBudgetUnitsPerWindow: PortalChatMaxBudgetUnitsPerWindow
+    portalChatBudgetUnitsPerRequest: PortalChatBudgetUnitsPerRequest
+    portalChatLeaseSeconds: PortalChatLeaseSeconds
+    portalChatRequestDedupeSeconds: PortalChatRequestDedupeSeconds
     caseQaChatHistoryEnabled: deployChatHistoryContainers
     portalChatTimeoutSec: PortalChatTimeoutSec
+    zoneRedundant: FunctionPlanZoneRedundant
   }
   dependsOn: [registryAccess, portalHostAccess, openAiAccess, searchAccess]
 }
@@ -512,7 +624,6 @@ module portalApiManagement 'modules/apim-portal.bicep' = if (deployPortal) {
     publisherName: ApiManagementPublisherName
     apimSubnetId: network.outputs.apimSubnetId
     portalFunctionHostName: portalFunction!.outputs.defaultHostName
-    portalAuthMode: PortalAuthMode
     portalJwtIssuer: PortalJwtIssuer
     portalJwtAudience: PortalJwtAudience
     portalEntraRequiredAppRole: PortalEntraRequiredAppRole
@@ -529,8 +640,6 @@ module portalFrontDoor 'modules/frontdoor-portal.bicep' = if (deployPortal) {
     portalUiHostName: storage.outputs.portalWebHostName
     apiManagementId: portalApiManagement!.outputs.apiManagementId
     apiManagementHostName: portalApiManagement!.outputs.gatewayHostName
-    portalFunctionId: portalFunction!.outputs.functionAppId
-    portalFunctionHostName: portalFunction!.outputs.defaultHostName
   }
 }
 
@@ -591,6 +700,7 @@ output DispositionContainerName string = cosmos.outputs.dispositionContainerName
 output DispositionSyncStateContainerName string = cosmos.outputs.dispositionSyncStateContainerName
 output ChatSessionsContainerName string = cosmos.outputs.chatSessionsContainerName
 output ChatMessagesContainerName string = cosmos.outputs.chatMessagesContainerName
+output ChatQuotaContainerName string = cosmos.outputs.chatQuotaContainerName
 output PortalApiUrl string = deployPortal ? 'https://${portalFrontDoor!.outputs.endpointHostName}/api' : ''
 output PortalChatUrl string = deployPortal ? 'https://${portalFrontDoor!.outputs.endpointHostName}/api/chat' : ''
 output PortalBrowserApiBaseUrl string = deployPortal ? 'https://${portalFrontDoor!.outputs.endpointHostName}' : ''

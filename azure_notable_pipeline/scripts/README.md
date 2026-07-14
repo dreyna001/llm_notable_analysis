@@ -10,6 +10,9 @@ the following:
   identity pull enabled for that same client ID;
 - Functions host storage uses that UAMI plus explicit HTTPS Blob, Queue, and
   Table service URIs, and the Functions host reports `Running`;
+- production requires explicit Blob soft-delete/versioning and Cosmos continuous
+  backup settings; zone redundancy and per-app host accounts are guarded opt-ins
+  documented in `docs/operations/AZURE_RESILIENCE_PROFILE.md`;
 - the analyzer app enumerates exactly `intake_blob` and `analyzer_queue`, while
   the embed app enumerates exactly `case_embed_queue`;
 - app-setting names contain no ACR credentials, storage keys/connection strings,
@@ -29,7 +32,7 @@ disposition dry run, and managed-identity service smoke.
 
 For `analyst_portal`, both deployment helpers also build/test the same-origin
 SPA, upload `$web` with Microsoft Entra authentication, approve and poll all
-Front Door managed private endpoints (`web`, `Gateway`, and `sites`), and only
+Front Door managed private endpoints (`web` and `Gateway`), and only
 then disable APIM public access. The final gate rejects a successful direct
 APIM request, asserts disabled public access on Function/Storage, and requires
 authenticated `/ready` through Front Door.

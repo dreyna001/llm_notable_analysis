@@ -21,6 +21,12 @@ customer-specific values in the approved customer system, not this repository.
   approval boundaries recorded.
 - [ ] Alert action group, exact thresholds/windows, on-call, and escalation
   recorded.
+- [ ] Storage and Functions/Cosmos zone support is confirmed for the selected
+  region; LRS/ZRS and zone-redundancy cost exceptions are recorded.
+- [ ] Functions host-storage topology and globally unique per-app names are
+  approved; any shared-to-isolated cutover has a drain/replay/rollback plan.
+- [ ] Cosmos RTO/RPO and single-region serverless limitation are accepted, or a
+  separately rehearsed provisioned multi-region migration is approved.
 
 ## Deployment and security gate
 
@@ -28,6 +34,8 @@ customer-specific values in the approved customer system, not this repository.
   prior qualified digest is available.
 - [ ] Bicep deploy is reproducible; each Function uses a distinct UAMI for ACR,
   host storage, and least-privilege data access.
+- [ ] Blob/container soft delete and Blob versioning are enabled with bounded
+  previous-version retention; Cosmos continuous backup is enabled.
 - [ ] No storage/ACR/Foundry/OpenAI/Search/Cosmos key or connection string exists
   in app settings, image, logs, or committed files.
 - [ ] Storage, Function, APIM, and `$web` origins are private; Front Door private
@@ -51,7 +59,8 @@ customer-specific values in the approved customer system, not this repository.
   duplicate writeback.
 - [ ] OpenAPI is unchanged; negative auth, required role, same-origin CORS, two-
   identity ownership, direct-origin denial, and authenticated Front Door pass.
-- [ ] Chat timeout chain is 220/225/240 seconds.
+- [ ] Chat timeout chain is browser 220 / Function 225 / APIM 230 / Front Door
+  240 seconds; non-chat APIM operations retain the 30-second default.
 - [ ] Disposition disabled-path dry run and fake mapping/checkpoint tests pass;
   any live test uses only the isolated ServiceNow test instance/read credential.
 

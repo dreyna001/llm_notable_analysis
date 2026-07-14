@@ -26,6 +26,29 @@ case "${deployment_environment}" in
   development|staging|production) ;;
   *) echo 'DEPLOYMENT_ENVIRONMENT must be development, staging, or production.' >&2; exit 2 ;;
 esac
+isolate_host_storage="${ISOLATE_FUNCTIONS_HOST_STORAGE:-false}"
+if [[ "${isolate_host_storage,,}" == 'true' ]]; then
+  for name in ANALYZER_HOST_STORAGE_ACCOUNT_NAME EMBED_HOST_STORAGE_ACCOUNT_NAME DISPOSITION_HOST_STORAGE_ACCOUNT_NAME PORTAL_HOST_STORAGE_ACCOUNT_NAME; do
+    if [[ -z "${!name:-}" ]]; then
+      echo "${name} is required when ISOLATE_FUNCTIONS_HOST_STORAGE=true." >&2
+      exit 2
+    fi
+  done
+fi
+blob_data_protection_enabled="${BLOB_DATA_PROTECTION_ENABLED:-false}"
+cosmos_continuous_backup_enabled="${COSMOS_CONTINUOUS_BACKUP_ENABLED:-false}"
+cosmos_continuous_backup_migration_acknowledged="${COSMOS_CONTINUOUS_BACKUP_MIGRATION_ACKNOWLEDGED:-false}"
+cosmos_zone_redundant="${COSMOS_ZONE_REDUNDANT:-false}"
+function_plan_zone_redundant="${FUNCTION_PLAN_ZONE_REDUNDANT:-false}"
+storage_sku_name="${STORAGE_SKU_NAME:-Standard_LRS}"
+if [[ "${function_plan_zone_redundant,,}" == 'true' && "${storage_sku_name}" != 'Standard_ZRS' ]]; then
+  echo 'FUNCTION_PLAN_ZONE_REDUNDANT=true requires STORAGE_SKU_NAME=Standard_ZRS.' >&2
+  exit 2
+fi
+if [[ "${deployment_environment}" == 'production' ]]; then
+  [[ "${blob_data_protection_enabled,,}" == 'true' ]] || { echo 'BLOB_DATA_PROTECTION_ENABLED=true is required for production.' >&2; exit 2; }
+  [[ "${cosmos_continuous_backup_enabled,,}" == 'true' ]] || { echo 'COSMOS_CONTINUOUS_BACKUP_ENABLED=true is required for production.' >&2; exit 2; }
+fi
 disposition_sync_enabled="${SERVICENOW_DISPOSITION_SYNC_ENABLED:-false}"
 if [[ ",${capability_profiles,,}," == *,analyst_portal,* ]]; then
   deploy_portal=true
@@ -73,8 +96,8 @@ if [[ "${disposition_sync_enabled,,}" == 'true' ]]; then
   done
 fi
 
-if [[ "${CONTAINER_IMAGE_URI}" != *@sha256:* ]]; then
-  echo 'CONTAINER_IMAGE_URI must be pinned to an immutable @sha256: digest.' >&2
+if [[ ! "${CONTAINER_IMAGE_URI}" =~ ^.+@sha256:[0-9a-fA-F]{64}$ ]]; then
+  echo 'CONTAINER_IMAGE_URI must be pinned to an immutable @sha256 digest with exactly 64 hexadecimal characters.' >&2
   exit 2
 fi
 
@@ -103,10 +126,13 @@ run_preflight() {
 run_preflight
 
 apim_id=''
+if [[ "${deploy_portal}" == true ]]; then
+  apim_id="/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.ApiManagement/service/${AZURE_DEPLOYMENT_PREFIX}-portal-apim"
+fi
 deployment_succeeded=false
 disable_apim_on_failure() {
   local exit_code=$?
-  if [[ ${exit_code} -ne 0 && -n "${apim_id}" && "${deployment_succeeded}" != true ]]; then
+  if [[ ${exit_code} -ne 0 && "${deployment_succeeded}" != true && "${deploy_portal}" == true ]]; then
     az resource update --ids "${apim_id}" \
       --set properties.publicNetworkAccess=Disabled --output none >/dev/null 2>&1 || true
   fi
@@ -115,6 +141,26 @@ disable_apim_on_failure() {
 trap disable_apim_on_failure EXIT
 
 az account set --subscription "${AZURE_SUBSCRIPTION_ID}"
+if [[ "${cosmos_continuous_backup_enabled,,}" == 'true' ]]; then
+  existing_cosmos_backup_type="$(az cosmosdb show \
+    --resource-group "${AZURE_RESOURCE_GROUP}" \
+    --name "${COSMOS_ACCOUNT_NAME}" \
+    --query 'backupPolicy.type' -o tsv 2>/dev/null || true)"
+  if [[ "${existing_cosmos_backup_type,,}" == 'periodic' && "${cosmos_continuous_backup_migration_acknowledged,,}" != 'true' ]]; then
+    echo 'Enabling continuous backup on an existing Periodic Cosmos account is one-way; set COSMOS_CONTINUOUS_BACKUP_MIGRATION_ACKNOWLEDGED=true to acknowledge the migration.' >&2
+    exit 2
+  fi
+fi
+if [[ "${cosmos_zone_redundant,,}" == 'true' ]]; then
+  existing_cosmos_zone="$(az cosmosdb show \
+    --resource-group "${AZURE_RESOURCE_GROUP}" \
+    --name "${COSMOS_ACCOUNT_NAME}" \
+    --query 'locations[0].isZoneRedundant' -o tsv 2>/dev/null || true)"
+  if [[ -n "${existing_cosmos_zone}" && "${existing_cosmos_zone,,}" != 'true' ]]; then
+    echo 'COSMOS_ZONE_REDUNDANT cannot be enabled in place on an existing non-zonal serverless account; create a new zonal account and migrate.' >&2
+    exit 2
+  fi
+fi
 if [[ -n "${ALERT_ACTION_GROUP_RESOURCE_ID:-}" ]]; then
   action_group_type="$(az resource show --ids "${ALERT_ACTION_GROUP_RESOURCE_ID}" --query type -o tsv)"
   if [[ "${action_group_type,,}" != 'microsoft.insights/actiongroups' ]]; then
@@ -165,6 +211,16 @@ az deployment group create \
     AllowPrivateOutboundEndpoints="${ALLOW_PRIVATE_OUTBOUND_ENDPOINTS:-false}" \
     CaseQaChatHistoryEnabled="${CASE_QA_CHAT_HISTORY_ENABLED:-false}" \
     FunctionsHostStorageAccountName="${FUNCTIONS_HOST_STORAGE_ACCOUNT_NAME}" \
+    IsolateFunctionsHostStorage="${isolate_host_storage}" \
+    AnalyzerHostStorageAccountName="${ANALYZER_HOST_STORAGE_ACCOUNT_NAME:-}" \
+    EmbedHostStorageAccountName="${EMBED_HOST_STORAGE_ACCOUNT_NAME:-}" \
+    DispositionHostStorageAccountName="${DISPOSITION_HOST_STORAGE_ACCOUNT_NAME:-}" \
+    PortalHostStorageAccountName="${PORTAL_HOST_STORAGE_ACCOUNT_NAME:-}" \
+    StorageSkuName="${storage_sku_name}" \
+    BlobDataProtectionEnabled="${blob_data_protection_enabled}" \
+    BlobSoftDeleteRetentionDays="${BLOB_SOFT_DELETE_RETENTION_DAYS:-30}" \
+    ContainerSoftDeleteRetentionDays="${CONTAINER_SOFT_DELETE_RETENTION_DAYS:-30}" \
+    PreviousVersionRetentionDays="${PREVIOUS_VERSION_RETENTION_DAYS:-30}" \
     StorageAccountNameInput="${INPUT_STORAGE_ACCOUNT_NAME}" \
     StorageAccountNameOutput="${OUTPUT_STORAGE_ACCOUNT_NAME}" \
     StorageAccountNamePortalUi="${PORTAL_UI_STORAGE_ACCOUNT_NAME:-}" \
@@ -176,9 +232,21 @@ az deployment group create \
     ApiManagementPublisherEmail="${APIM_PUBLISHER_EMAIL:-}" \
     ApiManagementPublisherName="${APIM_PUBLISHER_NAME:-Notable Analysis}" \
     PortalChatTimeoutSec="${PORTAL_CHAT_TIMEOUT_SEC:-225}" \
+    PortalChatDistributedQuotaEnabled="${PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED:-true}" \
+    ChatQuotaContainerName="${PORTAL_CHAT_QUOTA_CONTAINER:-${AZURE_DEPLOYMENT_PREFIX}-chat-quota}" \
+    PortalChatPerUserMaxConcurrency="${PORTAL_CHAT_PER_USER_MAX_CONCURRENCY:-2}" \
+    PortalChatQuotaWindowSeconds="${PORTAL_CHAT_QUOTA_WINDOW_SECONDS:-3600}" \
+    PortalChatMaxRequestsPerWindow="${PORTAL_CHAT_MAX_REQUESTS_PER_WINDOW:-30}" \
+    PortalChatMaxBudgetUnitsPerWindow="${PORTAL_CHAT_MAX_BUDGET_UNITS_PER_WINDOW:-100000}" \
+    PortalChatBudgetUnitsPerRequest="${PORTAL_CHAT_BUDGET_UNITS_PER_REQUEST:-5000}" \
+    PortalChatLeaseSeconds="${PORTAL_CHAT_LEASE_SECONDS:-300}" \
+    PortalChatRequestDedupeSeconds="${PORTAL_CHAT_REQUEST_DEDUPE_SECONDS:-3600}" \
     AnalyzerMaxInstanceCount="${ANALYZER_MAX_INSTANCE_COUNT:-5}" \
     MaxCompressedInputBytes="${MAX_COMPRESSED_INPUT_BYTES:-1048576}" \
     EmbedMaxInstanceCount="${EMBED_MAX_INSTANCE_COUNT:-5}" \
+    FunctionPlanZoneRedundant="${function_plan_zone_redundant}" \
+    CosmosZoneRedundant="${cosmos_zone_redundant}" \
+    CosmosContinuousBackupEnabled="${cosmos_continuous_backup_enabled}" \
     DeploymentEnvironment="${deployment_environment}" \
     AlertActionGroupResourceId="${ALERT_ACTION_GROUP_RESOURCE_ID:-}" \
     PortalSyntheticCheckName="${PORTAL_SYNTHETIC_CHECK_NAME:-}" \
@@ -442,12 +510,10 @@ if [[ "${deploy_portal}" == true ]]; then
   portal_storage_id="/subscriptions/${subscription_id}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Storage/storageAccounts/${PORTAL_UI_STORAGE_ACCOUNT_NAME}"
   portal_function_id="$(az functionapp show --resource-group "${AZURE_RESOURCE_GROUP}" --name "${portal_name}" --query id -o tsv)"
   approve_expected_frontdoor_connection "${portal_storage_id}" 'Front Door private static website origin' portal-ui portal-web
-  approve_expected_frontdoor_connection "${portal_function_id}" 'Front Door private chat origin' portal-chat portal-function
   approve_expected_frontdoor_connection "${apim_id}" 'Front Door private APIM origin' portal-api portal-apim
 
-  for origin in portal-function portal-apim portal-web; do
+  for origin in portal-apim portal-web; do
     case "${origin}" in
-      portal-function) group=portal-chat ;;
       portal-apim) group=portal-api ;;
       portal-web) group=portal-ui ;;
     esac

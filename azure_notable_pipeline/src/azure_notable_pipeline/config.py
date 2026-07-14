@@ -13,6 +13,7 @@ from .runtime_security import validate_https_url
 _TRUE_VALUES = {"true", "1", "yes"}
 _FALSE_VALUES = {"false", "0", "no"}
 _COSMOS_CONTAINER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{3,255}$")
+_MAX_CHAT_QUOTA_RECENT_REQUEST_IDS = 4_096
 _FOUNDRY_RESOURCE_ID_PATTERN = re.compile(
     r"^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/"
     r"Microsoft\.CognitiveServices/accounts/[^/]+$",
@@ -312,6 +313,15 @@ class Config:
     PORTAL_CORS_ALLOWED_ORIGINS: str = ""
     PORTAL_CHAT_TIMEOUT_SEC: int = 225
     PORTAL_CHAT_MAX_CONCURRENCY: int = 18
+    PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED: bool = True
+    PORTAL_CHAT_QUOTA_CONTAINER: str = "notable-chat-quota"
+    PORTAL_CHAT_PER_USER_MAX_CONCURRENCY: int = 2
+    PORTAL_CHAT_QUOTA_WINDOW_SECONDS: int = 3_600
+    PORTAL_CHAT_MAX_REQUESTS_PER_WINDOW: int = 30
+    PORTAL_CHAT_MAX_BUDGET_UNITS_PER_WINDOW: int = 100_000
+    PORTAL_CHAT_BUDGET_UNITS_PER_REQUEST: int = 5_000
+    PORTAL_CHAT_LEASE_SECONDS: int = 300
+    PORTAL_CHAT_REQUEST_DEDUPE_SECONDS: int = 3_600
     AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT: str = ""
     PORTAL_ENTRA_REQUIRED_APP_ROLE: str = ""
 
@@ -480,6 +490,57 @@ class Config:
         self.AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT = self.AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT.strip()
         if self.CASE_QA_ENABLED and not self.PORTAL_ENABLED:
             raise ValueError("CASE_QA_ENABLED=true requires PORTAL_ENABLED=true")
+        if self.CASE_QA_ENABLED and self.PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED:
+            self.PORTAL_CHAT_QUOTA_CONTAINER = _validate_cosmos_container_name(
+                self.PORTAL_CHAT_QUOTA_CONTAINER,
+                setting_name="PORTAL_CHAT_QUOTA_CONTAINER",
+            )
+            if self.PORTAL_CHAT_LEASE_SECONDS <= self.PORTAL_CHAT_TIMEOUT_SEC:
+                raise ValueError(
+                    "PORTAL_CHAT_LEASE_SECONDS must exceed PORTAL_CHAT_TIMEOUT_SEC"
+                )
+            if (
+                self.PORTAL_CHAT_REQUEST_DEDUPE_SECONDS
+                < self.PORTAL_CHAT_LEASE_SECONDS
+            ):
+                raise ValueError(
+                    "PORTAL_CHAT_REQUEST_DEDUPE_SECONDS must be >= "
+                    "PORTAL_CHAT_LEASE_SECONDS"
+                )
+            if (
+                self.PORTAL_CHAT_BUDGET_UNITS_PER_REQUEST
+                > self.PORTAL_CHAT_MAX_BUDGET_UNITS_PER_WINDOW
+            ):
+                raise ValueError(
+                    "PORTAL_CHAT_BUDGET_UNITS_PER_REQUEST must be <= "
+                    "PORTAL_CHAT_MAX_BUDGET_UNITS_PER_WINDOW"
+                )
+            # A dedupe interval can overlap one more fixed quota window than
+            # its rounded-up duration. Bound the worst-case retained IDs so
+            # their 128-character values remain comfortably below Cosmos DB's
+            # 2 MB item limit (4096 entries are under 1 MB serialized).
+            overlapping_windows = (
+                (
+                    self.PORTAL_CHAT_REQUEST_DEDUPE_SECONDS
+                    + self.PORTAL_CHAT_QUOTA_WINDOW_SECONDS
+                    - 1
+                )
+                // self.PORTAL_CHAT_QUOTA_WINDOW_SECONDS
+            ) + 1
+            if (
+                overlapping_windows * self.PORTAL_CHAT_MAX_REQUESTS_PER_WINDOW
+                > _MAX_CHAT_QUOTA_RECENT_REQUEST_IDS
+            ):
+                raise ValueError(
+                    "PORTAL_CHAT_MAX_REQUESTS_PER_WINDOW and "
+                    "PORTAL_CHAT_REQUEST_DEDUPE_SECONDS can retain at most "
+                    f"{_MAX_CHAT_QUOTA_RECENT_REQUEST_IDS} recent request IDs"
+                )
+        elif self.PORTAL_CHAT_QUOTA_CONTAINER:
+            self.PORTAL_CHAT_QUOTA_CONTAINER = _validate_cosmos_container_name(
+                self.PORTAL_CHAT_QUOTA_CONTAINER,
+                setting_name="PORTAL_CHAT_QUOTA_CONTAINER",
+            )
         self.CASE_EMBED_QUEUE_NAME = self.CASE_EMBED_QUEUE_NAME.strip()
         if self.CASE_QA_ENABLED and not self.CASE_EMBED_QUEUE_NAME:
             raise ValueError("CASE_EMBED_QUEUE_NAME is required when Case Q&A is enabled")
@@ -791,6 +852,33 @@ def load_config() -> Config:
         ),
         PORTAL_CHAT_MAX_CONCURRENCY=_positive_int_env(
             "PORTAL_CHAT_MAX_CONCURRENCY", 18, max_value=64
+        ),
+        PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED=_bool_env(
+            "PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED", True
+        ),
+        PORTAL_CHAT_QUOTA_CONTAINER=os.getenv(
+            "PORTAL_CHAT_QUOTA_CONTAINER", "notable-chat-quota"
+        ),
+        PORTAL_CHAT_PER_USER_MAX_CONCURRENCY=_positive_int_env(
+            "PORTAL_CHAT_PER_USER_MAX_CONCURRENCY", 2, max_value=16
+        ),
+        PORTAL_CHAT_QUOTA_WINDOW_SECONDS=_positive_int_env(
+            "PORTAL_CHAT_QUOTA_WINDOW_SECONDS", 3_600, max_value=86_400
+        ),
+        PORTAL_CHAT_MAX_REQUESTS_PER_WINDOW=_positive_int_env(
+            "PORTAL_CHAT_MAX_REQUESTS_PER_WINDOW", 30, max_value=2_048
+        ),
+        PORTAL_CHAT_MAX_BUDGET_UNITS_PER_WINDOW=_positive_int_env(
+            "PORTAL_CHAT_MAX_BUDGET_UNITS_PER_WINDOW", 100_000, max_value=100_000_000
+        ),
+        PORTAL_CHAT_BUDGET_UNITS_PER_REQUEST=_positive_int_env(
+            "PORTAL_CHAT_BUDGET_UNITS_PER_REQUEST", 5_000, max_value=1_000_000
+        ),
+        PORTAL_CHAT_LEASE_SECONDS=_positive_int_env(
+            "PORTAL_CHAT_LEASE_SECONDS", 300, max_value=3_600
+        ),
+        PORTAL_CHAT_REQUEST_DEDUPE_SECONDS=_positive_int_env(
+            "PORTAL_CHAT_REQUEST_DEDUPE_SECONDS", 3_600, max_value=86_400
         ),
         AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT=_optional_str_env(
             "AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT"

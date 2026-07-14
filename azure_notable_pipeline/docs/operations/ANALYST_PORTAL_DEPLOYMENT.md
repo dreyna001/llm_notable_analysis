@@ -20,14 +20,27 @@ storage, build/test the same-origin SPA, and upload `$web` with Microsoft Entra
 authentication.
 
 Front Door Premium creates managed private endpoint connections for the
-Storage `web`, APIM `Gateway`, and Function `sites` origins. The scripts approve
-only the request whose description matches each declared Front Door origin and poll both target
+Storage `web` and APIM `Gateway` origins. The scripts approve only the request
+whose description matches each declared Front Door origin and poll both target
 connections and Front Door origin status. APIM public access is disabled only
-after all three report `Approved`. The gate then confirms storage and Function
-public access remain disabled, a direct APIM request does not succeed, and
+after both report `Approved`. APIM reaches the private Function backend through
+its dedicated VNet-integration subnet. That subnet has an attached NSG with
+explicit HTTPS egress for APIM's Storage and Key Vault dependencies, Entra OIDC
+metadata, and the private VNet backend. The NSG intentionally retains Azure's
+default Internet outbound rule because TLS revocation and APIM platform egress
+have not yet been converted to a complete explicit allowlist; do not add a blanket
+deny until those dependencies are validated for the target cloud. The gate then
+confirms storage and Function public access remain disabled, a direct APIM
+request does not succeed, and
 authenticated `/ready` succeeds through Front Door. A private deployment runner
 can legitimately reach the Function and `$web` private endpoints, so their
 public denial is asserted from their control-plane `publicNetworkAccess` state.
+
+All `/api/*` requests follow the same Front Door-to-APIM path. APIM retains a
+30-second API-level backend timeout and overrides only `POST /api/chat` to 230
+seconds. The browser stops at 220 seconds, the Function host at 225 seconds,
+and Front Door at 240 seconds. This preserves the synchronous chat contract
+without bypassing centralized API authentication and policy.
 
 All portal routes are authenticated, including `/health` and `/ready`.
 Single-origin Front Door health probes are intentionally absent because they

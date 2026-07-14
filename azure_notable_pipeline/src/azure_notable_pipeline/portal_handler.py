@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import logging
 import re
 import threading
 from collections.abc import Callable, Mapping
@@ -25,6 +26,7 @@ from .case_chat_history import (
     validate_chat_history_request,
 )
 from .case_index import get_case_detail, get_case_raw_section, list_cases
+from .chat_quota import ChatQuotaDecision, CosmosChatQuota
 from .config import Config, load_config
 from .cosmos_store import CosmosStore
 from .portal_api_models import (
@@ -52,6 +54,7 @@ ChatService = Callable[..., Any]
 _configured_chat_service: ChatService | None = None
 _chat_semaphore: threading.BoundedSemaphore | None = None
 _chat_semaphore_limit: int | None = None
+_LOGGER = logging.getLogger(__name__)
 
 
 class PortalForbiddenError(PermissionError):
@@ -293,7 +296,12 @@ def _handle_chat_gate(
 ) -> func.HttpResponse:
     semaphore = _get_chat_semaphore(config.PORTAL_CHAT_MAX_CONCURRENCY)
     if not semaphore.acquire(blocking=False):
-        return _json_response(429, {"error": CHAT_LIMIT_MESSAGE})
+        return _chat_limit_response(
+            ChatQuotaDecision(False, "local", 1, "local_capacity")
+        )
+    quota: CosmosChatQuota | None = None
+    quota_request_id: str | None = None
+    user_quota_acquired = False
     try:
         payload = _json_body(request)
         mode = str(payload.get("mode") or "selected_case").strip()
@@ -324,6 +332,9 @@ def _handle_chat_gate(
             raise ValueError("client_request_id must be 8-128 URL-safe characters")
         store = _cosmos_store(config)
         if config.CASE_QA_CHAT_HISTORY_ENABLED:
+            # Validate ownership, retention, scope, and message capacity before
+            # reserving the request ID in the distributed dedupe document. A
+            # client may then recover from a stale session with the same ID.
             validate_chat_history_request(
                 config=config,
                 cosmos_store=store,
@@ -332,6 +343,24 @@ def _handle_chat_gate(
                 requested_session_id=session_id,
                 user_id=user_id,
             )
+        if config.PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED:
+            quota = _distributed_chat_quota(config, store)
+            try:
+                decision = quota.acquire(
+                    user_id=user_id,
+                    request_id=client_request_id,
+                    budget_units=config.PORTAL_CHAT_BUDGET_UNITS_PER_REQUEST,
+                )
+            except Exception:
+                _LOGGER.exception("chat_quota_evaluation_failed")
+                return _json_response(
+                    503,
+                    {"error": "Chat admission control is temporarily unavailable."},
+                )
+            quota_request_id = decision.request_id
+            if not decision.allowed:
+                return _chat_limit_response(decision)
+            user_quota_acquired = True
         prior_transcript = None
         if config.CASE_QA_CHAT_HISTORY_ENABLED and session_id:
             prior_transcript = load_session_transcript(
@@ -372,6 +401,13 @@ def _handle_chat_gate(
     except RuntimeError as exc:
         return _json_response(503, {"error": str(exc)})
     finally:
+        if quota is not None and user_quota_acquired and quota_request_id:
+            try:
+                quota.release(user_id=user_id, request_id=quota_request_id)
+            except Exception:  # Lease expiry is the fail-safe recovery path.
+                _LOGGER.exception(
+                    "chat_quota_release_failed request_id=%s", quota_request_id
+                )
         semaphore.release()
 
 
@@ -418,6 +454,27 @@ def _get_chat_semaphore(limit: int) -> threading.BoundedSemaphore:
         _chat_semaphore = threading.BoundedSemaphore(limit)
         _chat_semaphore_limit = limit
     return _chat_semaphore
+
+
+def _distributed_chat_quota(config: Config, store: CosmosStore) -> CosmosChatQuota:
+    return CosmosChatQuota(
+        store,
+        container_name=config.PORTAL_CHAT_QUOTA_CONTAINER,
+        max_concurrency=config.PORTAL_CHAT_PER_USER_MAX_CONCURRENCY,
+        window_seconds=config.PORTAL_CHAT_QUOTA_WINDOW_SECONDS,
+        max_requests_per_window=config.PORTAL_CHAT_MAX_REQUESTS_PER_WINDOW,
+        max_budget_units_per_window=config.PORTAL_CHAT_MAX_BUDGET_UNITS_PER_WINDOW,
+        lease_seconds=config.PORTAL_CHAT_LEASE_SECONDS,
+        dedupe_seconds=config.PORTAL_CHAT_REQUEST_DEDUPE_SECONDS,
+    )
+
+
+def _chat_limit_response(decision: ChatQuotaDecision) -> func.HttpResponse:
+    return _json_response(
+        429,
+        {"error": CHAT_LIMIT_MESSAGE, "reason": decision.reason},
+        headers={"Retry-After": str(max(1, decision.retry_after_seconds))},
+    )
 
 
 def _handle_chat_readiness(config: Config) -> func.HttpResponse:
@@ -478,8 +535,17 @@ def _probe_chat_dependencies(config: Config) -> dict[str, str]:
         "llm_gateway": "unavailable",
     }
     portal_status = _probe_portal_dependencies(config)
-    if all(value == "ready" for value in portal_status.values()):
+    if all(
+        portal_status.get(name) == "ready"
+        for name in ("case_index", "archive_blob")
+    ):
         status["archive_retrieval"] = "ready"
+    if config.CASE_QA_CHAT_HISTORY_ENABLED:
+        status["chat_history"] = portal_status.get("chat_history", "unavailable")
+    if config.PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED:
+        status["chat_admission"] = portal_status.get(
+            "chat_admission", "unavailable"
+        )
     if (
         config.AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT
         and config.AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT
@@ -497,25 +563,33 @@ def _probe_chat_dependencies(config: Config) -> dict[str, str]:
 
 def _probe_portal_dependencies(config: Config) -> dict[str, str]:
     status = {"case_index": "unavailable", "archive_blob": "unavailable"}
+    if config.CASE_QA_CHAT_HISTORY_ENABLED:
+        status["chat_history"] = "unavailable"
+    if config.PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED:
+        status["chat_admission"] = "unavailable"
     try:
         store = _cosmos_store(config)
-        store.get_case(config.CASE_INDEX_CONTAINER, "__readiness__")
-        status["case_index"] = "ready"
-        if config.CASE_QA_CHAT_HISTORY_ENABLED:
-            store.read_item(
-                config.CHAT_SESSIONS_CONTAINER,
-                item_id="__readiness__",
-                partition_key="__readiness__",
-            )
-            store.read_item(
-                config.CHAT_MESSAGES_CONTAINER,
-                item_id="__readiness__",
-                partition_key="__readiness__",
-            )
-            status["chat_history"] = "ready"
     except Exception:  # Dependency probe must degrade without leaking provider failures.
+        store = None
+    if store is not None:
+        try:
+            store.probe_container(config.CASE_INDEX_CONTAINER)
+            status["case_index"] = "ready"
+        except Exception:  # Dependency probe must degrade without leaking provider failures.
+            pass
         if config.CASE_QA_CHAT_HISTORY_ENABLED:
-            status["chat_history"] = "unavailable"
+            try:
+                store.probe_container(config.CHAT_SESSIONS_CONTAINER)
+                store.probe_container(config.CHAT_MESSAGES_CONTAINER)
+                status["chat_history"] = "ready"
+            except Exception:  # Dependency probe must degrade without leaking provider failures.
+                pass
+        if config.PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED:
+            try:
+                store.probe_container(config.PORTAL_CHAT_QUOTA_CONTAINER)
+                status["chat_admission"] = "ready"
+            except Exception:  # Dependency probe must degrade without leaking provider failures.
+                pass
     try:
         _blob_service(config).get_container_client(
             config.CASE_ARCHIVE_CONTAINER
@@ -750,12 +824,19 @@ def _model_response(model: Any, payload: Any) -> func.HttpResponse:
     return _json_response(200, validated)
 
 
-def _json_response(status_code: int, payload: dict[str, Any]) -> func.HttpResponse:
+def _json_response(
+    status_code: int,
+    payload: dict[str, Any],
+    *,
+    headers: Mapping[str, str] | None = None,
+) -> func.HttpResponse:
     # Same-origin production contract: intentionally no Access-Control-* headers.
+    response_headers = {"content-type": "application/json"}
+    response_headers.update(headers or {})
     return func.HttpResponse(
         body=json.dumps(payload, default=str),
         status_code=status_code,
-        headers={"content-type": "application/json"},
+        headers=response_headers,
         mimetype="application/json",
         charset="utf-8",
     )

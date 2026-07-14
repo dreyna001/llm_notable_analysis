@@ -23,6 +23,7 @@ CONTAINER_PARTITION_KEYS: dict[str, str] = {
     "disposition_sync_state": "/job_name",
     "chat_sessions": "/user_id",
     "chat_messages": "/session_id",
+    "chat_quota": "/user_id",
 }
 
 
@@ -106,6 +107,18 @@ class CosmosStore:
                 return CreateOutcome(created=False)
             raise
         return CreateOutcome(created=True, item=_plain_item(created))
+
+    def probe_container(self, container_name: str) -> None:
+        """Verify that a container exists and the identity can read its metadata.
+
+        A sentinel item read cannot distinguish a missing item from a missing
+        container because both are native 404 responses.  Reading container
+        metadata is non-mutating and preserves that distinction for readiness
+        checks.
+        """
+
+        container = self._container(container_name)
+        self._call(container_name, "probe", container.read)
 
     def read_item(
         self,
