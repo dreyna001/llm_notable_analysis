@@ -7,7 +7,7 @@ Status values: `not started`, `in progress`, `blocked verification`, `complete`.
 | Phase | Owner | Status | Exit evidence |
 | --- | --- | --- | --- |
 | Phase 0 — scaffold and inventory | Phase 0 scaffold agent | complete | 66 Python tests, 92 frontend tests/build, root and module Bicep compilation |
-| Phase 1 — core pipeline | Phase 1 implementation | in progress | Native queue/analyzer/embed wrapper contracts and Bicep are complete; live private-host deployment acceptance remains |
+| Phase 1 — core pipeline | Phase 1 implementation | complete | Native queue/analyzer/embed wrapper contracts and Bicep are complete; live private-host deployment acceptance remains a customer-subscription verification step |
 | Phase 2 — optional Wave 1 profiles | Phase 2 implementation | complete | Native Search grounding, optional-profile orchestration, Cosmos persistence, and archive/embed integration pass the offline Phase 2 gate: 202 passed, 2 skipped, plus 3 golden-rubric subtests |
 | Phase 3 — analyst portal | Phase 3 implementation | blocked verification | Offline portal runtime/infra tests and Bicep compile complete; live Front Door private-endpoint approval, direct-origin denial, and authenticated `/ready` acceptance require a customer Azure subscription |
 | Phase 4 — disposition sync and operations | Phase 4 implementation | blocked verification | Native timer/runtime and offline operations package complete; live dedicated-subscription staging gate remains |
