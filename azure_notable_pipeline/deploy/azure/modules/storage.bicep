@@ -2,10 +2,31 @@ targetScope = 'resourceGroup'
 
 param location string
 param functionsHostStorageAccountName string
+param analyzerHostStorageAccountName string = ''
+param embedHostStorageAccountName string = ''
+param dispositionHostStorageAccountName string = ''
+param portalHostStorageAccountName string = ''
+param isolateFunctionsHostStorage bool = false
 param inputStorageAccountName string
 param outputStorageAccountName string
 param portalUiStorageAccountName string = ''
 param portalUiDeployerPrincipalId string = ''
+
+@allowed(['Standard_LRS', 'Standard_ZRS'])
+param storageSkuName string = 'Standard_LRS'
+
+param blobDataProtectionEnabled bool = false
+
+@minValue(1)
+@maxValue(365)
+param blobSoftDeleteRetentionDays int = 30
+
+@minValue(1)
+@maxValue(365)
+param containerSoftDeleteRetentionDays int = 30
+
+@minValue(1)
+param previousVersionRetentionDays int = 30
 
 @minValue(1)
 param inputRetentionDays int = 2
@@ -39,19 +60,28 @@ var commonProperties = {
   }
 }
 
-resource hostStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
-  name: functionsHostStorageAccountName
+var hostStorageAccountNames = isolateFunctionsHostStorage
+  ? [
+      analyzerHostStorageAccountName
+      embedHostStorageAccountName
+      dispositionHostStorageAccountName
+      portalHostStorageAccountName
+    ]
+  : [functionsHostStorageAccountName]
+
+resource hostStorages 'Microsoft.Storage/storageAccounts@2023-05-01' = [for accountName in hostStorageAccountNames: {
+  name: accountName
   location: location
   kind: 'StorageV2'
-  sku: { name: 'Standard_LRS' }
+  sku: { name: storageSkuName }
   properties: commonProperties
-}
+}]
 
 resource inputStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: inputStorageAccountName
   location: location
   kind: 'StorageV2'
-  sku: { name: 'Standard_LRS' }
+  sku: { name: storageSkuName }
   properties: commonProperties
 }
 
@@ -59,7 +89,7 @@ resource outputStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: outputStorageAccountName
   location: location
   kind: 'StorageV2'
-  sku: { name: 'Standard_LRS' }
+  sku: { name: storageSkuName }
   properties: commonProperties
 }
 
@@ -67,7 +97,7 @@ resource portalStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = if (!emp
   name: portalUiStorageAccountName
   location: location
   kind: 'StorageV2'
-  sku: { name: 'Standard_LRS' }
+  sku: { name: storageSkuName }
   properties: commonProperties
 }
 
@@ -97,8 +127,15 @@ resource inputBlobService 'Microsoft.Storage/storageAccounts/blobServices@2023-0
   parent: inputStorage
   name: 'default'
   properties: {
-    deleteRetentionPolicy: { enabled: false }
-    isVersioningEnabled: false
+    deleteRetentionPolicy: {
+      enabled: blobDataProtectionEnabled
+      days: blobDataProtectionEnabled ? blobSoftDeleteRetentionDays : null
+    }
+    containerDeleteRetentionPolicy: {
+      enabled: blobDataProtectionEnabled
+      days: blobDataProtectionEnabled ? containerSoftDeleteRetentionDays : null
+    }
+    isVersioningEnabled: blobDataProtectionEnabled
   }
 }
 
@@ -117,8 +154,15 @@ resource outputBlobService 'Microsoft.Storage/storageAccounts/blobServices@2023-
   parent: outputStorage
   name: 'default'
   properties: {
-    deleteRetentionPolicy: { enabled: false }
-    isVersioningEnabled: false
+    deleteRetentionPolicy: {
+      enabled: blobDataProtectionEnabled
+      days: blobDataProtectionEnabled ? blobSoftDeleteRetentionDays : null
+    }
+    containerDeleteRetentionPolicy: {
+      enabled: blobDataProtectionEnabled
+      days: blobDataProtectionEnabled ? containerSoftDeleteRetentionDays : null
+    }
+    isVersioningEnabled: blobDataProtectionEnabled
   }
 }
 
@@ -143,20 +187,20 @@ resource embedQueue 'Microsoft.Storage/storageAccounts/queueServices/queues@2023
   name: 'case-embed-invocations'
 }
 
-resource hostBlobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
-  parent: hostStorage
+resource hostBlobServices 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = [for (accountName, i) in hostStorageAccountNames: {
+  parent: hostStorages[i]
   name: 'default'
-}
+}]
 
-resource hostQueueService 'Microsoft.Storage/storageAccounts/queueServices@2023-05-01' = {
-  parent: hostStorage
+resource hostQueueServices 'Microsoft.Storage/storageAccounts/queueServices@2023-05-01' = [for (accountName, i) in hostStorageAccountNames: {
+  parent: hostStorages[i]
   name: 'default'
-}
+}]
 
-resource hostTableService 'Microsoft.Storage/storageAccounts/tableServices@2023-05-01' = {
-  parent: hostStorage
+resource hostTableServices 'Microsoft.Storage/storageAccounts/tableServices@2023-05-01' = [for (accountName, i) in hostStorageAccountNames: {
+  parent: hostStorages[i]
   name: 'default'
-}
+}]
 
 resource inputLifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@2023-05-01' = {
   parent: inputStorage
@@ -169,7 +213,12 @@ resource inputLifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@20
           enabled: true
           type: 'Lifecycle'
           definition: {
-            actions: { baseBlob: { delete: { daysAfterModificationGreaterThan: inputRetentionDays } } }
+            actions: union(
+              { baseBlob: { delete: { daysAfterModificationGreaterThan: inputRetentionDays } } },
+              blobDataProtectionEnabled
+                ? { version: { delete: { daysAfterCreationGreaterThan: previousVersionRetentionDays } } }
+                : {}
+            )
             filters: { blobTypes: ['blockBlob'], prefixMatch: ['input/incoming/'] }
           }
         }
@@ -189,7 +238,12 @@ resource outputLifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@2
           enabled: true
           type: 'Lifecycle'
           definition: {
-            actions: { baseBlob: { delete: { daysAfterModificationGreaterThan: outputRetentionDays } } }
+            actions: union(
+              { baseBlob: { delete: { daysAfterModificationGreaterThan: outputRetentionDays } } },
+              blobDataProtectionEnabled
+                ? { version: { delete: { daysAfterCreationGreaterThan: previousVersionRetentionDays } } }
+                : {}
+            )
             filters: { blobTypes: ['blockBlob'], prefixMatch: ['output/reports/'] }
           }
         }
@@ -198,7 +252,12 @@ resource outputLifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@2
           enabled: true
           type: 'Lifecycle'
           definition: {
-            actions: { baseBlob: { delete: { daysAfterModificationGreaterThan: caseRetentionDays } } }
+            actions: union(
+              { baseBlob: { delete: { daysAfterModificationGreaterThan: caseRetentionDays } } },
+              blobDataProtectionEnabled
+                ? { version: { delete: { daysAfterCreationGreaterThan: previousVersionRetentionDays } } }
+                : {}
+            )
             filters: { blobTypes: ['blockBlob'], prefixMatch: ['output/cases/', 'output/case_chunks/'] }
           }
         }
@@ -207,7 +266,7 @@ resource outputLifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@2
   }
 }
 
-output hostStorageId string = hostStorage.id
+output hostStorageIds array = [for (accountName, i) in hostStorageAccountNames: hostStorages[i].id]
 output inputStorageId string = inputStorage.id
 output inputContainerId string = inputContainer.id
 output inputQueueServiceId string = inputQueueService.id
@@ -226,6 +285,15 @@ output inputBlobServiceUri string = 'https://${inputStorage.name}.blob.${environ
 output inputQueueServiceUri string = 'https://${inputStorage.name}.queue.${environment().suffixes.storage}'
 output outputBlobServiceUri string = 'https://${outputStorage.name}.blob.${environment().suffixes.storage}'
 output outputQueueServiceUri string = 'https://${outputStorage.name}.queue.${environment().suffixes.storage}'
-output hostBlobServiceUri string = 'https://${hostStorage.name}.blob.${environment().suffixes.storage}'
-output hostQueueServiceUri string = 'https://${hostStorage.name}.queue.${environment().suffixes.storage}'
-output hostTableServiceUri string = 'https://${hostStorage.name}.table.${environment().suffixes.storage}'
+output analyzerHostBlobServiceUri string = 'https://${isolateFunctionsHostStorage ? analyzerHostStorageAccountName : functionsHostStorageAccountName}.blob.${environment().suffixes.storage}'
+output analyzerHostQueueServiceUri string = 'https://${isolateFunctionsHostStorage ? analyzerHostStorageAccountName : functionsHostStorageAccountName}.queue.${environment().suffixes.storage}'
+output analyzerHostTableServiceUri string = 'https://${isolateFunctionsHostStorage ? analyzerHostStorageAccountName : functionsHostStorageAccountName}.table.${environment().suffixes.storage}'
+output embedHostBlobServiceUri string = 'https://${isolateFunctionsHostStorage ? embedHostStorageAccountName : functionsHostStorageAccountName}.blob.${environment().suffixes.storage}'
+output embedHostQueueServiceUri string = 'https://${isolateFunctionsHostStorage ? embedHostStorageAccountName : functionsHostStorageAccountName}.queue.${environment().suffixes.storage}'
+output embedHostTableServiceUri string = 'https://${isolateFunctionsHostStorage ? embedHostStorageAccountName : functionsHostStorageAccountName}.table.${environment().suffixes.storage}'
+output dispositionHostBlobServiceUri string = 'https://${isolateFunctionsHostStorage ? dispositionHostStorageAccountName : functionsHostStorageAccountName}.blob.${environment().suffixes.storage}'
+output dispositionHostQueueServiceUri string = 'https://${isolateFunctionsHostStorage ? dispositionHostStorageAccountName : functionsHostStorageAccountName}.queue.${environment().suffixes.storage}'
+output dispositionHostTableServiceUri string = 'https://${isolateFunctionsHostStorage ? dispositionHostStorageAccountName : functionsHostStorageAccountName}.table.${environment().suffixes.storage}'
+output portalHostBlobServiceUri string = 'https://${isolateFunctionsHostStorage ? portalHostStorageAccountName : functionsHostStorageAccountName}.blob.${environment().suffixes.storage}'
+output portalHostQueueServiceUri string = 'https://${isolateFunctionsHostStorage ? portalHostStorageAccountName : functionsHostStorageAccountName}.queue.${environment().suffixes.storage}'
+output portalHostTableServiceUri string = 'https://${isolateFunctionsHostStorage ? portalHostStorageAccountName : functionsHostStorageAccountName}.table.${environment().suffixes.storage}'

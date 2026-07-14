@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -151,20 +152,26 @@ def test_apim_is_standard_v2_authenticated_and_staged_for_private_only_access() 
     assert "GetValueOrDefault(&quot;scp&quot;" in apim
     assert "code=\"403\" reason=\"Forbidden\"" in apim
     assert "forward-request timeout=\"30\"" in apim
+    assert "name: 'api_chat_api_chat_post'" in apim
+    assert "forward-request timeout=\"230\"" in apim
+    openapi = json.loads(_read(ROOT / "docs" / "contracts" / "portal.openapi.json"))
+    chat_operation_id = openapi["paths"]["/api/chat"]["post"]["operationId"]
+    assert f"name: '{chat_operation_id}'" in apim
 
 
 def test_frontdoor_routes_private_origins_without_single_origin_probes_or_api_cache() -> None:
     frontdoor = _read(AZURE / "modules" / "frontdoor-portal.bicep")
     assert "Premium_AzureFrontDoor" in frontdoor
     assert "originResponseTimeoutSeconds: 240" in frontdoor
-    assert frontdoor.index("resource chatRoute") < frontdoor.index("resource apiRoute")
-    assert "patternsToMatch: ['/api/chat']" in frontdoor
     assert "patternsToMatch: ['/api/*']" in frontdoor
     assert "patternsToMatch: ['/health']" in frontdoor
     assert "patternsToMatch: ['/ready']" in frontdoor
     assert "patternsToMatch: ['/', '/index.html']" in frontdoor
-    for group_id in ("'web'", "'Gateway'", "'sites'"):
+    for group_id in ("'web'", "'Gateway'"):
         assert f"groupId: {group_id}" in frontdoor
+    assert "resource chatOrigin" not in frontdoor
+    assert "resource chatRoute" not in frontdoor
+    assert "Front Door private chat origin" not in frontdoor
     assert "healthProbeSettings:" not in frontdoor
     api_prefix = frontdoor[: frontdoor.index("resource uiRoute")]
     assert "cacheConfiguration:" not in api_prefix
@@ -173,7 +180,6 @@ def test_frontdoor_routes_private_origins_without_single_origin_probes_or_api_ca
 def test_portal_deploy_flow_approves_every_origin_before_disabling_apim() -> None:
     for name in ("setup-and-deploy.sh", "setup-and-deploy.ps1"):
         script = _read(ROOT / "scripts" / name)
-        assert "portal-function" in script
         assert "portal-apim" in script
         assert "portal-web" in script
         assert "private-endpoint-connection approve" in script
@@ -203,8 +209,8 @@ def test_portal_deploy_flow_approves_every_origin_before_disabling_apim() -> Non
             assert oidc_setting in script
         assert "privateLinkServiceConnectionState.description" in script
         assert "Front Door private static website origin" in script
-        assert "Front Door private chat origin" in script
         assert "Front Door private APIM origin" in script
+        assert "Front Door private chat origin" not in script
 
 
 def test_deployment_preflights_run_before_azure_mutation_and_cleanup_apim() -> None:
@@ -306,15 +312,60 @@ def test_deployment_script_setting_denylist_is_complete_and_name_only() -> None:
         assert "--query '[].name'" in script
 
 
-def test_cosmos_is_single_region_serverless_strong_and_keyless() -> None:
+def test_cosmos_is_single_region_serverless_strong_keyless_and_resilience_parameterized() -> None:
     cosmos = _read(AZURE / "modules" / "cosmos.bicep")
     assert "{ name: 'EnableServerless' }" in cosmos
     assert "defaultConsistencyLevel: 'Strong'" in cosmos
     assert cosmos.count("locationName: location") == 1
     assert "enableAutomaticFailover: false" in cosmos
+    assert "isZoneRedundant: zoneRedundant" in cosmos
+    assert "continuousBackupEnabled" in cosmos
+    assert "type: 'Continuous'" in cosmos
+    assert "tier: 'Continuous7Days'" in cosmos
     assert "disableLocalAuth: true" in cosmos
     assert "disableKeyBasedMetadataWriteAccess: true" in cosmos
     assert not re.search(r"\b(?:throughput|autoscaleSettings)\s*:", cosmos)
+
+
+def test_storage_and_functions_resilience_are_guarded_and_per_app_host_capable() -> None:
+    main = _read(AZURE / "main.bicep")
+    storage = _read(AZURE / "modules" / "storage.bicep")
+    network = _read(AZURE / "modules" / "network.bicep")
+    assert "IsolateFunctionsHostStorage bool = false" in main
+    for app in ("Analyzer", "Embed", "Disposition", "Portal"):
+        assert f"{app}HostStorageAccountName" in main
+        assert f"{app.lower()}HostStorageAccountName" in storage
+        assert f"{app.lower()}HostBlobServiceUri" in storage
+    assert "functionsHostStorageAccountNames" in network
+    assert "hostEndpointSpecs = flatten" in network
+    assert "StorageSkuName string = 'Standard_LRS'" in main
+    assert "@allowed(['Standard_LRS', 'Standard_ZRS'])" in main
+    assert "BlobDataProtectionEnabled must be true" in main
+    assert "isVersioningEnabled: blobDataProtectionEnabled" in storage
+    assert "containerDeleteRetentionPolicy" in storage
+    assert "previousVersionRetentionDays" in storage
+    assert "zoneRedundant: FunctionPlanZoneRedundant" in main
+    assert "capacity: FunctionPlanZoneRedundant ? 2 : 1" in main
+
+
+def test_deployment_scripts_pass_and_preflight_production_resilience_contracts() -> None:
+    for name in ("setup-and-deploy.sh", "setup-and-deploy.ps1"):
+        script = _read(ROOT / "scripts" / name)
+        for setting in (
+            "ISOLATE_FUNCTIONS_HOST_STORAGE",
+            "ANALYZER_HOST_STORAGE_ACCOUNT_NAME",
+            "EMBED_HOST_STORAGE_ACCOUNT_NAME",
+            "DISPOSITION_HOST_STORAGE_ACCOUNT_NAME",
+            "PORTAL_HOST_STORAGE_ACCOUNT_NAME",
+            "STORAGE_SKU_NAME",
+            "BLOB_DATA_PROTECTION_ENABLED",
+            "COSMOS_CONTINUOUS_BACKUP_ENABLED",
+            "FUNCTION_PLAN_ZONE_REDUNDANT",
+            "COSMOS_ZONE_REDUNDANT",
+        ):
+            assert setting in script
+        assert "BLOB_DATA_PROTECTION_ENABLED=true is required for production." in script
+        assert "COSMOS_CONTINUOUS_BACKUP_ENABLED=true is required for production." in script
 
 
 def test_cosmos_container_partition_and_ttl_contracts_are_exact() -> None:
@@ -326,6 +377,7 @@ def test_cosmos_container_partition_and_ttl_contracts_are_exact() -> None:
         "dispositionSyncState": "/job_name",
         "chatSessions": "/user_id",
         "chatMessages": "/session_id",
+        "chatQuota": "/user_id",
     }
     resource_starts = list(
         re.finditer(
@@ -354,6 +406,7 @@ def test_cosmos_container_partition_and_ttl_contracts_are_exact() -> None:
         "disposition",
         "chatSessions",
         "chatMessages",
+        "chatQuota",
     }
     for resource_name in ttl_resources:
         assert "defaultTtl: -1" in resource_bodies[resource_name]
@@ -392,6 +445,7 @@ def test_cosmos_sql_rbac_is_container_scoped_and_capability_gated() -> None:
         "dispositionSyncState.id",
         "chatSessions.id",
         "chatMessages.id",
+        "chatQuota.id",
     ):
         assert f"scope: {aggregate_scope}" in cosmos
     for identity in ("analyzer", "embed", "disposition", "portal"):
@@ -407,6 +461,33 @@ def test_cosmos_sql_rbac_is_container_scoped_and_capability_gated() -> None:
     assert "deployCaseIndex: hasAnalystPortalProfile" in main
     assert "deployDispositionContainers: ServiceNowDispositionSyncEnabled" in main
     assert "deployChatHistoryContainers: deployChatHistoryContainers" in main
+    assert "deployChatQuota: deployPortal && PortalChatDistributedQuotaEnabled" in main
+
+
+def test_distributed_chat_quota_is_configurable_and_least_privilege() -> None:
+    main = _read(AZURE / "main.bicep")
+    portal = _read(AZURE / "modules" / "functions-portal.bicep")
+    cosmos = _read(AZURE / "modules" / "cosmos.bicep")
+    assert "ChatQuotaContainerName string" in main
+    assert "chatQuotaContainerName: cosmos.outputs.chatQuotaContainerName" in main
+    assert "PORTAL_CHAT_QUOTA_CONTAINER" in portal
+    assert "PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED" in portal
+    assert "resource portalChatQuotaContributor" in cosmos
+    assert "scope: chatQuota.id" in cosmos
+    for name in ("setup-and-deploy.sh", "setup-and-deploy.ps1"):
+        script = _read(ROOT / "scripts" / name)
+        for setting in (
+            "PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED",
+            "PORTAL_CHAT_QUOTA_CONTAINER",
+            "PORTAL_CHAT_PER_USER_MAX_CONCURRENCY",
+            "PORTAL_CHAT_QUOTA_WINDOW_SECONDS",
+            "PORTAL_CHAT_MAX_REQUESTS_PER_WINDOW",
+            "PORTAL_CHAT_MAX_BUDGET_UNITS_PER_WINDOW",
+            "PORTAL_CHAT_BUDGET_UNITS_PER_REQUEST",
+            "PORTAL_CHAT_LEASE_SECONDS",
+            "PORTAL_CHAT_REQUEST_DEDUPE_SECONDS",
+        ):
+            assert setting in script
 
 
 def test_cosmos_app_settings_use_endpoint_and_scoped_container_names_only() -> None:

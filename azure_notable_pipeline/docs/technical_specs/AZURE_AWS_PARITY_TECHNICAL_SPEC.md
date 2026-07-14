@@ -83,8 +83,10 @@ before persistence or action.
 
 The region, preview/Anthropic hosting and data-processing terms, content filters,
 model deployments, quota, and rollback model require recorded customer
-approval. Chat timeout chain is browser/gateway 220 seconds, Function 225
-seconds, Front Door 240 seconds.
+approval. Chat remains synchronous and follows one policy path through APIM:
+browser 220 seconds, Function 225 seconds, chat-operation APIM policy 230
+seconds, and Front Door 240 seconds. Other API operations retain APIM's
+30-second backend timeout.
 
 ## Security and external integrations
 

@@ -10,11 +10,11 @@ and upload `dist/` to `$web` with `az storage blob upload-batch --auth-mode
 login`; shared keys and SAS tokens are not supported. The deployment runner
 must resolve and reach the storage private endpoint.
 
-Front Door routes `/api/chat` directly to the private Function origin before
-`/api/*`, routes `/health` and `/ready` through private APIM, and serves all
-other paths from the private `$web` origin. API caching is disabled. The
-synchronous chat timeout chain is browser 220 seconds, Function 225 seconds,
-and Front Door 240 seconds.
+Front Door routes `/api/*`, including chat, through private APIM and serves all
+other paths from the private `$web` origin. APIM keeps its 30-second default
+backend timeout but gives only `POST /api/chat` 230 seconds. API caching is
+disabled. The synchronous chat timeout chain is browser 220 seconds, Function
+225 seconds, APIM 230 seconds, and Front Door 240 seconds.
 
 Deploy and operator runbooks:
 [`docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../../docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md).
@@ -119,9 +119,10 @@ Output: `dist/`.
 **Front Door same-origin deployment (required):** leave
 `VITE_PORTAL_API_BASE_URL` unset. The deployment helpers upload `dist/` to the
 dedicated account's `$web` container using Entra auth. Front Door routes
-`/api/*` to APIM, `/api/chat` directly to the Function origin, and uses
-`index.html` as the Storage static-site 404 document. All three origins use
-Private Link and have public network access disabled.
+`/api/*` to APIM and uses `index.html` as the Storage static-site 404 document.
+Both Front Door origins use Private Link; APIM reaches the private Function
+backend through its VNet integration. Public network access is disabled after
+origin approval.
 
 **Split UI and API hostnames:** set the API base at build time:
 

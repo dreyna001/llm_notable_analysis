@@ -3,6 +3,12 @@ targetScope = 'resourceGroup'
 @description('Azure region for the single-region Cosmos account.')
 param location string
 
+@description('Enable availability-zone placement in the write region. The selected region must support Cosmos availability zones.')
+param zoneRedundant bool = false
+
+@description('Use continuous seven-day backup. False preserves the account default periodic backup contract.')
+param continuousBackupEnabled bool = false
+
 @description('Globally unique Cosmos DB account name.')
 param accountName string
 
@@ -15,6 +21,7 @@ param dispositionContainerName string
 param dispositionSyncStateContainerName string
 param chatSessionsContainerName string
 param chatMessagesContainerName string
+param chatQuotaContainerName string
 
 @description('Create the case-index aggregate for the analyst_portal profile.')
 param deployCaseIndex bool = false
@@ -24,6 +31,9 @@ param deployDispositionContainers bool = false
 
 @description('Create chat-history aggregates only for analyst_portal deployments with history enabled.')
 param deployChatHistoryContainers bool = false
+
+@description('Create the per-user distributed chat admission-control aggregate for analyst portal deployments.')
+param deployChatQuota bool = false
 
 param analyzerPrincipalId string
 param embedPrincipalId string
@@ -48,7 +58,7 @@ resource account 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
   name: accountName
   location: location
   kind: 'GlobalDocumentDB'
-  properties: {
+  properties: union({
     databaseAccountOfferType: 'Standard'
     capabilities: [
       { name: 'EnableServerless' }
@@ -63,10 +73,17 @@ resource account 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
       {
         locationName: location
         failoverPriority: 0
-        isZoneRedundant: false
+        isZoneRedundant: zoneRedundant
       }
     ]
-  }
+  }, continuousBackupEnabled ? {
+    backupPolicy: {
+      type: 'Continuous'
+      continuousModeProperties: {
+        tier: 'Continuous7Days'
+      }
+    }
+  } : {})
 }
 
 resource database 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases@2024-05-15' = {
@@ -225,6 +242,23 @@ resource chatMessages 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/contai
   }
 }
 
+resource chatQuota 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = if (deployChatQuota) {
+  parent: database
+  name: chatQuotaContainerName
+  properties: {
+    resource: {
+      id: chatQuotaContainerName
+      partitionKey: {
+        paths: ['/user_id']
+        kind: 'Hash'
+        version: 2
+      }
+      defaultTtl: -1
+      indexingPolicy: defaultIndexingPolicy
+    }
+  }
+}
+
 resource analyzerSideEffectContributor 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = {
   parent: account
   name: guid(sideEffectIdempotency.id, analyzerPrincipalId, dataContributorRoleDefinitionId)
@@ -315,6 +349,16 @@ resource portalChatMessagesContributor 'Microsoft.DocumentDB/databaseAccounts/sq
   }
 }
 
+resource portalChatQuotaContributor 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = if (deployChatQuota) {
+  parent: account
+  name: guid(chatQuota.id, portalPrincipalId, dataContributorRoleDefinitionId)
+  properties: {
+    principalId: portalPrincipalId
+    roleDefinitionId: '${account.id}/sqlRoleDefinitions/${dataContributorRoleDefinitionId}'
+    scope: chatQuota.id
+  }
+}
+
 output accountId string = account.id
 output endpoint string = account.properties.documentEndpoint
 output databaseName string = database.name
@@ -324,3 +368,4 @@ output dispositionContainerName string = deployDispositionContainers ? dispositi
 output dispositionSyncStateContainerName string = deployDispositionContainers ? dispositionSyncState.name : ''
 output chatSessionsContainerName string = deployChatHistoryContainers ? chatSessions.name : ''
 output chatMessagesContainerName string = deployChatHistoryContainers ? chatMessages.name : ''
+output chatQuotaContainerName string = deployChatQuota ? chatQuota.name : ''

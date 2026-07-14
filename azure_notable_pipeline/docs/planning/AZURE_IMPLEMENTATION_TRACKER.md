@@ -254,13 +254,14 @@ remain assigned to their owning implementation phase.
   `$web` static website for `core,analyst_portal`. Portal app settings preserve
   the 225-second runtime timeout and native Cosmos, Blob, Search, and OpenAI
   contracts without Azure service keys or connection strings.
-- Front Door declares `/api/chat` before `/api/*`, sends chat directly to the
-  private Function `sites` origin, sends other APIs plus authenticated
+- Front Door sends all `/api/*` traffic, including chat, plus authenticated
   `/health` and `/ready` to the private APIM `Gateway` origin, and uses a private
-  Storage `web` origin for the SPA. API routes have no cache configuration and
-  all single-origin groups omit unauthenticated health probes.
+  Storage `web` origin for the SPA. APIM gives only the imported chat operation
+  a 230-second backend timeout; all other operations keep the 30-second API
+  default. API routes have no cache configuration and all single-origin groups
+  omit unauthenticated health probes.
 - Bash and PowerShell deployment gates build/test and upload the SPA with Entra
-  auth, approve and poll all three generated Front Door managed private endpoint
+  auth, approve and poll both generated Front Door managed private endpoint
   connections, then disable APIM public access. They verify direct APIM denial,
   disabled Function/Storage public access, and authenticated Front Door `/ready`
   without logging the bearer token. Both scripts fail before mutation when Entra

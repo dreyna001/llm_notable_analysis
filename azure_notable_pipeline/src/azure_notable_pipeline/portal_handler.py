@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import logging
 import re
 import threading
 from collections.abc import Callable, Mapping
@@ -25,6 +26,7 @@ from .case_chat_history import (
     validate_chat_history_request,
 )
 from .case_index import get_case_detail, get_case_raw_section, list_cases
+from .chat_quota import ChatQuotaDecision, CosmosChatQuota
 from .config import Config, load_config
 from .cosmos_store import CosmosStore
 from .portal_api_models import (
@@ -52,6 +54,7 @@ ChatService = Callable[..., Any]
 _configured_chat_service: ChatService | None = None
 _chat_semaphore: threading.BoundedSemaphore | None = None
 _chat_semaphore_limit: int | None = None
+_LOGGER = logging.getLogger(__name__)
 
 
 class PortalForbiddenError(PermissionError):
@@ -293,7 +296,12 @@ def _handle_chat_gate(
 ) -> func.HttpResponse:
     semaphore = _get_chat_semaphore(config.PORTAL_CHAT_MAX_CONCURRENCY)
     if not semaphore.acquire(blocking=False):
-        return _json_response(429, {"error": CHAT_LIMIT_MESSAGE})
+        return _chat_limit_response(
+            ChatQuotaDecision(False, "local", 1, "local_capacity")
+        )
+    quota: CosmosChatQuota | None = None
+    quota_request_id: str | None = None
+    user_quota_acquired = False
     try:
         payload = _json_body(request)
         mode = str(payload.get("mode") or "selected_case").strip()
@@ -323,6 +331,24 @@ def _handle_chat_gate(
         ):
             raise ValueError("client_request_id must be 8-128 URL-safe characters")
         store = _cosmos_store(config)
+        if config.PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED:
+            quota = _distributed_chat_quota(config, store)
+            try:
+                decision = quota.acquire(
+                    user_id=user_id,
+                    request_id=client_request_id,
+                    budget_units=config.PORTAL_CHAT_BUDGET_UNITS_PER_REQUEST,
+                )
+            except Exception:
+                _LOGGER.exception("chat_quota_evaluation_failed")
+                return _json_response(
+                    503,
+                    {"error": "Chat admission control is temporarily unavailable."},
+                )
+            quota_request_id = decision.request_id
+            if not decision.allowed:
+                return _chat_limit_response(decision)
+            user_quota_acquired = True
         if config.CASE_QA_CHAT_HISTORY_ENABLED:
             validate_chat_history_request(
                 config=config,
@@ -372,6 +398,13 @@ def _handle_chat_gate(
     except RuntimeError as exc:
         return _json_response(503, {"error": str(exc)})
     finally:
+        if quota is not None and user_quota_acquired and quota_request_id:
+            try:
+                quota.release(user_id=user_id, request_id=quota_request_id)
+            except Exception:  # Lease expiry is the fail-safe recovery path.
+                _LOGGER.exception(
+                    "chat_quota_release_failed request_id=%s", quota_request_id
+                )
         semaphore.release()
 
 
@@ -418,6 +451,27 @@ def _get_chat_semaphore(limit: int) -> threading.BoundedSemaphore:
         _chat_semaphore = threading.BoundedSemaphore(limit)
         _chat_semaphore_limit = limit
     return _chat_semaphore
+
+
+def _distributed_chat_quota(config: Config, store: CosmosStore) -> CosmosChatQuota:
+    return CosmosChatQuota(
+        store,
+        container_name=config.PORTAL_CHAT_QUOTA_CONTAINER,
+        max_concurrency=config.PORTAL_CHAT_PER_USER_MAX_CONCURRENCY,
+        window_seconds=config.PORTAL_CHAT_QUOTA_WINDOW_SECONDS,
+        max_requests_per_window=config.PORTAL_CHAT_MAX_REQUESTS_PER_WINDOW,
+        max_budget_units_per_window=config.PORTAL_CHAT_MAX_BUDGET_UNITS_PER_WINDOW,
+        lease_seconds=config.PORTAL_CHAT_LEASE_SECONDS,
+        dedupe_seconds=config.PORTAL_CHAT_REQUEST_DEDUPE_SECONDS,
+    )
+
+
+def _chat_limit_response(decision: ChatQuotaDecision) -> func.HttpResponse:
+    return _json_response(
+        429,
+        {"error": CHAT_LIMIT_MESSAGE, "reason": decision.reason},
+        headers={"Retry-After": str(max(1, decision.retry_after_seconds))},
+    )
 
 
 def _handle_chat_readiness(config: Config) -> func.HttpResponse:
@@ -750,12 +804,19 @@ def _model_response(model: Any, payload: Any) -> func.HttpResponse:
     return _json_response(200, validated)
 
 
-def _json_response(status_code: int, payload: dict[str, Any]) -> func.HttpResponse:
+def _json_response(
+    status_code: int,
+    payload: dict[str, Any],
+    *,
+    headers: Mapping[str, str] | None = None,
+) -> func.HttpResponse:
     # Same-origin production contract: intentionally no Access-Control-* headers.
+    response_headers = {"content-type": "application/json"}
+    response_headers.update(headers or {})
     return func.HttpResponse(
         body=json.dumps(payload, default=str),
         status_code=status_code,
-        headers={"content-type": "application/json"},
+        headers=response_headers,
         mimetype="application/json",
         charset="utf-8",
     )

@@ -21,6 +21,7 @@ param cosmosDatabaseName string
 param caseIndexContainerName string
 param chatSessionsContainerName string = ''
 param chatMessagesContainerName string = ''
+param chatQuotaContainerName string = ''
 param azureOpenAiEndpoint string
 param azureOpenAiApiVersion string = '2024-10-21'
 param azureOpenAiEmbeddingsDeployment string
@@ -35,6 +36,26 @@ param portalJwtIssuer string
 param portalJwtAudience string
 param portalEntraRequiredAppRole string = ''
 param caseQaChatHistoryEnabled bool = false
+param portalChatDistributedQuotaEnabled bool = true
+@minValue(1)
+@maxValue(16)
+param portalChatPerUserMaxConcurrency int = 2
+@minValue(60)
+@maxValue(86400)
+param portalChatQuotaWindowSeconds int = 3600
+@minValue(1)
+@maxValue(10000)
+param portalChatMaxRequestsPerWindow int = 30
+@minValue(1)
+param portalChatMaxBudgetUnitsPerWindow int = 100000
+@minValue(1)
+param portalChatBudgetUnitsPerRequest int = 5000
+@minValue(226)
+@maxValue(3600)
+param portalChatLeaseSeconds int = 300
+@minValue(60)
+@maxValue(86400)
+param portalChatRequestDedupeSeconds int = 3600
 
 @minValue(30)
 @maxValue(225)
@@ -62,6 +83,7 @@ var applicationSettings = [
   { name: 'CASE_INDEX_CONTAINER', value: caseIndexContainerName }
   { name: 'CHAT_SESSIONS_CONTAINER', value: chatSessionsContainerName }
   { name: 'CHAT_MESSAGES_CONTAINER', value: chatMessagesContainerName }
+  { name: 'PORTAL_CHAT_QUOTA_CONTAINER', value: chatQuotaContainerName }
   { name: 'AZURE_OPENAI_ENDPOINT', value: azureOpenAiEndpoint }
   { name: 'AZURE_OPENAI_API_VERSION', value: azureOpenAiApiVersion }
   { name: 'AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT', value: azureOpenAiEmbeddingsDeployment }
@@ -75,6 +97,14 @@ var applicationSettings = [
   { name: 'PORTAL_ENTRA_REQUIRED_APP_ROLE', value: portalEntraRequiredAppRole }
   { name: 'PORTAL_CORS_ALLOWED_ORIGINS', value: '' }
   { name: 'PORTAL_CHAT_TIMEOUT_SEC', value: string(portalChatTimeoutSec) }
+  { name: 'PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED', value: string(portalChatDistributedQuotaEnabled) }
+  { name: 'PORTAL_CHAT_PER_USER_MAX_CONCURRENCY', value: string(portalChatPerUserMaxConcurrency) }
+  { name: 'PORTAL_CHAT_QUOTA_WINDOW_SECONDS', value: string(portalChatQuotaWindowSeconds) }
+  { name: 'PORTAL_CHAT_MAX_REQUESTS_PER_WINDOW', value: string(portalChatMaxRequestsPerWindow) }
+  { name: 'PORTAL_CHAT_MAX_BUDGET_UNITS_PER_WINDOW', value: string(portalChatMaxBudgetUnitsPerWindow) }
+  { name: 'PORTAL_CHAT_BUDGET_UNITS_PER_REQUEST', value: string(portalChatBudgetUnitsPerRequest) }
+  { name: 'PORTAL_CHAT_LEASE_SECONDS', value: string(portalChatLeaseSeconds) }
+  { name: 'PORTAL_CHAT_REQUEST_DEDUPE_SECONDS', value: string(portalChatRequestDedupeSeconds) }
   { name: 'CASE_QA_CHAT_HISTORY_ENABLED', value: string(caseQaChatHistoryEnabled) }
   { name: 'AzureWebJobs.intake_blob.Disabled', value: 'true' }
   { name: 'AzureWebJobs.analyzer_queue.Disabled', value: 'true' }

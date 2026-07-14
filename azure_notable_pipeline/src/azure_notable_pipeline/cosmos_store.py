@@ -23,6 +23,7 @@ CONTAINER_PARTITION_KEYS: dict[str, str] = {
     "disposition_sync_state": "/job_name",
     "chat_sessions": "/user_id",
     "chat_messages": "/session_id",
+    "chat_quota": "/user_id",
 }
 
 

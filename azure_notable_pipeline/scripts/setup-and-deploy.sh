@@ -26,6 +26,21 @@ case "${deployment_environment}" in
   development|staging|production) ;;
   *) echo 'DEPLOYMENT_ENVIRONMENT must be development, staging, or production.' >&2; exit 2 ;;
 esac
+isolate_host_storage="${ISOLATE_FUNCTIONS_HOST_STORAGE:-false}"
+if [[ "${isolate_host_storage,,}" == 'true' ]]; then
+  for name in ANALYZER_HOST_STORAGE_ACCOUNT_NAME EMBED_HOST_STORAGE_ACCOUNT_NAME DISPOSITION_HOST_STORAGE_ACCOUNT_NAME PORTAL_HOST_STORAGE_ACCOUNT_NAME; do
+    if [[ -z "${!name:-}" ]]; then
+      echo "${name} is required when ISOLATE_FUNCTIONS_HOST_STORAGE=true." >&2
+      exit 2
+    fi
+  done
+fi
+blob_data_protection_enabled="${BLOB_DATA_PROTECTION_ENABLED:-false}"
+cosmos_continuous_backup_enabled="${COSMOS_CONTINUOUS_BACKUP_ENABLED:-false}"
+if [[ "${deployment_environment}" == 'production' ]]; then
+  [[ "${blob_data_protection_enabled,,}" == 'true' ]] || { echo 'BLOB_DATA_PROTECTION_ENABLED=true is required for production.' >&2; exit 2; }
+  [[ "${cosmos_continuous_backup_enabled,,}" == 'true' ]] || { echo 'COSMOS_CONTINUOUS_BACKUP_ENABLED=true is required for production.' >&2; exit 2; }
+fi
 disposition_sync_enabled="${SERVICENOW_DISPOSITION_SYNC_ENABLED:-false}"
 if [[ ",${capability_profiles,,}," == *,analyst_portal,* ]]; then
   deploy_portal=true
@@ -165,6 +180,16 @@ az deployment group create \
     AllowPrivateOutboundEndpoints="${ALLOW_PRIVATE_OUTBOUND_ENDPOINTS:-false}" \
     CaseQaChatHistoryEnabled="${CASE_QA_CHAT_HISTORY_ENABLED:-false}" \
     FunctionsHostStorageAccountName="${FUNCTIONS_HOST_STORAGE_ACCOUNT_NAME}" \
+    IsolateFunctionsHostStorage="${isolate_host_storage}" \
+    AnalyzerHostStorageAccountName="${ANALYZER_HOST_STORAGE_ACCOUNT_NAME:-}" \
+    EmbedHostStorageAccountName="${EMBED_HOST_STORAGE_ACCOUNT_NAME:-}" \
+    DispositionHostStorageAccountName="${DISPOSITION_HOST_STORAGE_ACCOUNT_NAME:-}" \
+    PortalHostStorageAccountName="${PORTAL_HOST_STORAGE_ACCOUNT_NAME:-}" \
+    StorageSkuName="${STORAGE_SKU_NAME:-Standard_LRS}" \
+    BlobDataProtectionEnabled="${blob_data_protection_enabled}" \
+    BlobSoftDeleteRetentionDays="${BLOB_SOFT_DELETE_RETENTION_DAYS:-30}" \
+    ContainerSoftDeleteRetentionDays="${CONTAINER_SOFT_DELETE_RETENTION_DAYS:-30}" \
+    PreviousVersionRetentionDays="${PREVIOUS_VERSION_RETENTION_DAYS:-30}" \
     StorageAccountNameInput="${INPUT_STORAGE_ACCOUNT_NAME}" \
     StorageAccountNameOutput="${OUTPUT_STORAGE_ACCOUNT_NAME}" \
     StorageAccountNamePortalUi="${PORTAL_UI_STORAGE_ACCOUNT_NAME:-}" \
@@ -176,9 +201,21 @@ az deployment group create \
     ApiManagementPublisherEmail="${APIM_PUBLISHER_EMAIL:-}" \
     ApiManagementPublisherName="${APIM_PUBLISHER_NAME:-Notable Analysis}" \
     PortalChatTimeoutSec="${PORTAL_CHAT_TIMEOUT_SEC:-225}" \
+    PortalChatDistributedQuotaEnabled="${PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED:-true}" \
+    ChatQuotaContainerName="${PORTAL_CHAT_QUOTA_CONTAINER:-${AZURE_DEPLOYMENT_PREFIX}-chat-quota}" \
+    PortalChatPerUserMaxConcurrency="${PORTAL_CHAT_PER_USER_MAX_CONCURRENCY:-2}" \
+    PortalChatQuotaWindowSeconds="${PORTAL_CHAT_QUOTA_WINDOW_SECONDS:-3600}" \
+    PortalChatMaxRequestsPerWindow="${PORTAL_CHAT_MAX_REQUESTS_PER_WINDOW:-30}" \
+    PortalChatMaxBudgetUnitsPerWindow="${PORTAL_CHAT_MAX_BUDGET_UNITS_PER_WINDOW:-100000}" \
+    PortalChatBudgetUnitsPerRequest="${PORTAL_CHAT_BUDGET_UNITS_PER_REQUEST:-5000}" \
+    PortalChatLeaseSeconds="${PORTAL_CHAT_LEASE_SECONDS:-300}" \
+    PortalChatRequestDedupeSeconds="${PORTAL_CHAT_REQUEST_DEDUPE_SECONDS:-3600}" \
     AnalyzerMaxInstanceCount="${ANALYZER_MAX_INSTANCE_COUNT:-5}" \
     MaxCompressedInputBytes="${MAX_COMPRESSED_INPUT_BYTES:-1048576}" \
     EmbedMaxInstanceCount="${EMBED_MAX_INSTANCE_COUNT:-5}" \
+    FunctionPlanZoneRedundant="${FUNCTION_PLAN_ZONE_REDUNDANT:-false}" \
+    CosmosZoneRedundant="${COSMOS_ZONE_REDUNDANT:-false}" \
+    CosmosContinuousBackupEnabled="${cosmos_continuous_backup_enabled}" \
     DeploymentEnvironment="${deployment_environment}" \
     AlertActionGroupResourceId="${ALERT_ACTION_GROUP_RESOURCE_ID:-}" \
     PortalSyntheticCheckName="${PORTAL_SYNTHETIC_CHECK_NAME:-}" \
@@ -442,12 +479,10 @@ if [[ "${deploy_portal}" == true ]]; then
   portal_storage_id="/subscriptions/${subscription_id}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Storage/storageAccounts/${PORTAL_UI_STORAGE_ACCOUNT_NAME}"
   portal_function_id="$(az functionapp show --resource-group "${AZURE_RESOURCE_GROUP}" --name "${portal_name}" --query id -o tsv)"
   approve_expected_frontdoor_connection "${portal_storage_id}" 'Front Door private static website origin' portal-ui portal-web
-  approve_expected_frontdoor_connection "${portal_function_id}" 'Front Door private chat origin' portal-chat portal-function
   approve_expected_frontdoor_connection "${apim_id}" 'Front Door private APIM origin' portal-api portal-apim
 
-  for origin in portal-function portal-apim portal-web; do
+  for origin in portal-apim portal-web; do
     case "${origin}" in
-      portal-function) group=portal-chat ;;
       portal-apim) group=portal-api ;;
       portal-web) group=portal-ui ;;
     esac

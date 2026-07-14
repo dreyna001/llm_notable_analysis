@@ -11,6 +11,7 @@ import azure.functions as func
 import pytest
 
 from azure_notable_pipeline import portal_handler
+from azure_notable_pipeline.chat_quota import ChatQuotaDecision
 from azure_notable_pipeline.config import Config
 
 
@@ -55,6 +56,7 @@ def portal_config(**overrides: Any) -> Config:
         "OUTPUT_STORAGE_ACCOUNT_URL": "https://output.blob.core.windows.net",
         "COSMOS_ENDPOINT": "https://cosmos.example.test",
         "COSMOS_DATABASE_NAME": "notable",
+        "PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED": False,
     }
     values.update(overrides)
     return Config(**values)
@@ -366,6 +368,46 @@ def test_chat_service_seam_receives_native_dependencies_and_user(monkeypatch) ->
     assert captured["selected_case_id"] == "case-1"
     assert captured["cosmos_store"].__class__ is FakeCosmosStore
     assert response_json(response)["answer_status"] == "answered"
+
+
+def test_distributed_chat_quota_returns_retry_after_and_does_not_call_model(
+    monkeypatch,
+) -> None:
+    config = portal_config(
+        CASE_QA_ENABLED=True,
+        PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED=True,
+        PORTAL_CHAT_QUOTA_CONTAINER="chat-quota",
+    )
+    monkeypatch.setattr(portal_handler, "load_config", lambda: config)
+
+    class DenyQuota:
+        def acquire(self, **_kwargs):
+            return ChatQuotaDecision(False, "request-0001", 27, "budget_window")
+
+        def release(self, **_kwargs):
+            raise AssertionError("a denied lease must not be released")
+
+    monkeypatch.setattr(
+        portal_handler, "_distributed_chat_quota", lambda *_args: DenyQuota()
+    )
+    response = portal_handler.handle_request(
+        request(
+            "/api/chat",
+            "POST",
+            body=json.dumps(
+                {
+                    "selected_case_id": "case-1",
+                    "question": "What happened?",
+                    "client_request_id": "request-0001",
+                }
+            ).encode(),
+        ),
+        chat_service=lambda **_kwargs: pytest.fail("model must not be called"),
+    )
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "27"
+    assert response_json(response)["reason"] == "budget_window"
 
 
 def test_chat_history_ownership_failure_is_hidden_as_not_found(monkeypatch) -> None:

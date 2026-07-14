@@ -19,6 +19,8 @@ def test_default_config_preserves_core_behavior() -> None:
     assert config.OUTPUT_CONTAINER_NAME == "output"
     assert config.CASE_EMBED_QUEUE_NAME == "case-embed-invocations"
     assert config.PORTAL_CHAT_TIMEOUT_SEC == 225
+    assert config.PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED
+    assert config.PORTAL_CHAT_PER_USER_MAX_CONCURRENCY == 2
     assert not config.RAG_ENABLED
     assert not config.SPLUNK_SINK_ENABLED
     assert not config.PORTAL_ENABLED
@@ -62,6 +64,7 @@ def test_analyst_portal_profile_uses_cosmos_and_queue_contracts() -> None:
     assert config.CASE_ARCHIVE_CONTAINER == "output"
     assert config.CASE_INDEX_CONTAINER == "notable-case-index"
     assert config.CASE_EMBED_QUEUE_NAME == "case-embed-invocations"
+    assert config.PORTAL_CHAT_QUOTA_CONTAINER == "notable-chat-quota"
     assert not config.HTML_REPORT_ENABLED
     assert not config.SERVICENOW_CREATE_ENABLED
 
@@ -95,6 +98,23 @@ def test_portal_jwt_mode_requires_issuer() -> None:
         {"PORTAL_ENABLED": "true", "CASE_INDEX_CONTAINER": "notable-case-index"},
         clear=True,
     ), pytest.raises(ValueError, match="PORTAL_JWT_ISSUER"):
+        load_config()
+
+
+def test_chat_request_dedupe_must_cover_the_crash_recovery_lease() -> None:
+    with patch.dict(
+        "os.environ",
+        {
+            "CAPABILITY_PROFILES": "core,analyst_portal",
+            "CASE_INDEX_CONTAINER": "notable-case-index",
+            "PORTAL_JWT_ISSUER": "https://issuer.example.test",
+            "PORTAL_JWT_AUDIENCE": "portal",
+            "PORTAL_ENTRA_REQUIRED_APP_ROLE": "Portal.Access",
+            "PORTAL_CHAT_LEASE_SECONDS": "300",
+            "PORTAL_CHAT_REQUEST_DEDUPE_SECONDS": "60",
+        },
+        clear=True,
+    ), pytest.raises(ValueError, match="DEDUPE_SECONDS"):
         load_config()
 
 

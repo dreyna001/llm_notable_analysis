@@ -183,6 +183,7 @@ def test_container_partition_keys_match_native_aggregate_contract() -> None:
         "disposition_sync_state": "/job_name",
         "chat_sessions": "/user_id",
         "chat_messages": "/session_id",
+        "chat_quota": "/user_id",
     }
 
 

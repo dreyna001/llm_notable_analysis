@@ -4,7 +4,7 @@ param location string
 param namePrefix string
 param inputStorageAccountName string
 param outputStorageAccountName string
-param functionsHostStorageAccountName string
+param functionsHostStorageAccountNames array
 param portalUiStorageAccountName string = ''
 
 @description('CIDR for the regional application VNet.')
@@ -137,7 +137,7 @@ resource sitesDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@202
   }
 }
 
-var endpointSpecs = [
+var dataEndpointSpecs = [
   {
     name: 'input-blob'
     accountName: inputStorageAccountName
@@ -152,10 +152,14 @@ var endpointSpecs = [
   }
   { name: 'output-blob', accountName: outputStorageAccountName, subresource: 'blob', zoneId: blobDns.id }
   { name: 'output-queue', accountName: outputStorageAccountName, subresource: 'queue', zoneId: queueDns.id }
-  { name: 'host-blob', accountName: functionsHostStorageAccountName, subresource: 'blob', zoneId: blobDns.id }
-  { name: 'host-queue', accountName: functionsHostStorageAccountName, subresource: 'queue', zoneId: queueDns.id }
-  { name: 'host-table', accountName: functionsHostStorageAccountName, subresource: 'table', zoneId: tableDns.id }
 ]
+
+var hostEndpointSpecs = flatten(map(functionsHostStorageAccountNames, (accountName, i) => [
+    { name: 'host-blob-${i}', accountName: accountName, subresource: 'blob', zoneId: blobDns.id }
+    { name: 'host-queue-${i}', accountName: accountName, subresource: 'queue', zoneId: queueDns.id }
+    { name: 'host-table-${i}', accountName: accountName, subresource: 'table', zoneId: tableDns.id }
+]))
+var endpointSpecs = concat(dataEndpointSpecs, hostEndpointSpecs)
 
 resource storagePrivateEndpoints 'Microsoft.Network/privateEndpoints@2024-01-01' = [
   for spec in endpointSpecs: {
