@@ -23,6 +23,18 @@ previous versions, and Cosmos continuous seven-day backup. Lifecycle deletion of
 current input, report, and case blobs remains governed by the existing retention
 settings; soft delete adds a recovery window after lifecycle deletion.
 
+Changing an existing Cosmos account from Periodic to Continuous backup is a
+one-way migration. The deployment wrappers inspect the existing account and stop
+before ARM deployment unless an operator explicitly acknowledges that migration:
+
+```bash
+COSMOS_CONTINUOUS_BACKUP_MIGRATION_ACKNOWLEDGED=true
+```
+
+Do not set the acknowledgement routinely. It is unnecessary for a new account or
+an account already using Continuous backup, and it does not authorize any other
+Cosmos migration.
+
 For a region that supports availability zones, evaluate and then enable:
 
 ```bash
@@ -31,9 +43,12 @@ FUNCTION_PLAN_ZONE_REDUNDANT=true
 COSMOS_ZONE_REDUNDANT=true
 ```
 
-Zone-redundant Functions Premium starts with two workers instead of one. Confirm
-the region's Functions, Storage, and Cosmos zone support and quota before changing
-these settings. Apply and validate them in staging first.
+Zone-redundant Functions Premium provisions the new plan with capacity three and
+sets every Function app's minimum elastic instance count to two. Confirm the
+region's Functions, Storage, and Cosmos zone support and quota before changing
+these settings. Both Bicep and the deployment wrappers require
+`STORAGE_SKU_NAME=Standard_ZRS` when `FUNCTION_PLAN_ZONE_REDUNDANT=true`. Apply
+and validate them in staging first.
 
 ## Functions host-storage isolation
 
@@ -68,6 +83,10 @@ not pretend that a second region is a parameter-only change. A multi-region desi
 requires an RTO/RPO, read/write-region choice, consistency review, provisioned
 throughput and cost decision, private DNS/networking in every region, application
 failover behavior, and a rehearsed data migration.
+
+For serverless Cosmos, zone redundancy must be selected when the account is
+created. Do not set `COSMOS_ZONE_REDUNDANT=true` on an existing non-zonal
+serverless account; deploy a new zonal account and migrate instead.
 
 The recommended mature target is a new provisioned-throughput Cosmos account with
 zone-redundant regions and continuous backup, migrated and cut over through a

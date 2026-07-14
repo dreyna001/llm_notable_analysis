@@ -120,7 +120,7 @@ param PortalChatPerUserMaxConcurrency int = 2
 @maxValue(86400)
 param PortalChatQuotaWindowSeconds int = 3600
 @minValue(1)
-@maxValue(10000)
+@maxValue(2048)
 param PortalChatMaxRequestsPerWindow int = 30
 @minValue(1)
 param PortalChatMaxBudgetUnitsPerWindow int = 100000
@@ -139,7 +139,7 @@ param FunctionPlanSkuName string = 'EP1'
 @description('Enable zone redundancy on the Elastic Premium Functions plan. Confirm regional support and capacity before enabling.')
 param FunctionPlanZoneRedundant bool = false
 
-@description('Enable zone redundancy for the single Cosmos write region. Confirm regional support before enabling.')
+@description('Enable zone redundancy for a newly created serverless Cosmos account. Existing non-zonal serverless accounts require migration to a new account.')
 param CosmosZoneRedundant bool = false
 
 @description('Use Cosmos continuous seven-day backup instead of periodic backup.')
@@ -242,6 +242,13 @@ var validatedBlobDataProtection = isProduction && !BlobDataProtectionEnabled
 var validatedCosmosContinuousBackup = isProduction && !CosmosContinuousBackupEnabled
   ? fail('CosmosContinuousBackupEnabled must be true when DeploymentEnvironment=production.')
   : CosmosContinuousBackupEnabled
+var validatedStorageSkuName = FunctionPlanZoneRedundant && StorageSkuName != 'Standard_ZRS'
+  ? fail('StorageSkuName must be Standard_ZRS when FunctionPlanZoneRedundant=true.')
+  : StorageSkuName
+var portalChatQuotaOverlapWindows = ((PortalChatRequestDedupeSeconds + PortalChatQuotaWindowSeconds - 1) / PortalChatQuotaWindowSeconds) + 1
+var validatedPortalChatMaxRequestsPerWindow = portalChatQuotaOverlapWindows * PortalChatMaxRequestsPerWindow > 4096
+  ? fail('Portal chat quota settings can retain at most 4096 recent request IDs; reduce the request rate or dedupe interval.')
+  : PortalChatMaxRequestsPerWindow
 var validatedAnalyzerHostStorageAccountName = IsolateFunctionsHostStorage && empty(AnalyzerHostStorageAccountName)
   ? fail('AnalyzerHostStorageAccountName is required when IsolateFunctionsHostStorage=true.')
   : AnalyzerHostStorageAccountName
@@ -273,7 +280,7 @@ module storage 'modules/storage.bicep' = {
     embedHostStorageAccountName: validatedEmbedHostStorageAccountName
     dispositionHostStorageAccountName: validatedDispositionHostStorageAccountName
     portalHostStorageAccountName: validatedPortalHostStorageAccountName
-    storageSkuName: StorageSkuName
+    storageSkuName: validatedStorageSkuName
     blobDataProtectionEnabled: validatedBlobDataProtection
     blobSoftDeleteRetentionDays: BlobSoftDeleteRetentionDays
     containerSoftDeleteRetentionDays: ContainerSoftDeleteRetentionDays
@@ -438,7 +445,7 @@ resource functionPlan 'Microsoft.Web/serverfarms@2023-12-01' = {
   name: '${DeploymentPrefix}-functions-plan'
   location: Location
   kind: 'elastic'
-  sku: { name: FunctionPlanSkuName, tier: 'ElasticPremium', capacity: FunctionPlanZoneRedundant ? 2 : 1 }
+  sku: { name: FunctionPlanSkuName, tier: 'ElasticPremium', capacity: FunctionPlanZoneRedundant ? 3 : 1 }
   properties: {
     maximumElasticWorkerCount: max(AnalyzerMaxInstanceCount, EmbedMaxInstanceCount)
     reserved: true
@@ -480,6 +487,7 @@ module analyzerFunction 'modules/functions-analyzer.bicep' = {
     maxInstanceCount: AnalyzerMaxInstanceCount
     maxCompressedInputBytes: MaxCompressedInputBytes
     timeoutSeconds: AnalyzerTimeoutSeconds
+    zoneRedundant: FunctionPlanZoneRedundant
   }
   dependsOn: [registryAccess, foundryAccess, analyzerHostAccess]
 }
@@ -510,6 +518,7 @@ module embedFunction 'modules/functions-embed.bicep' = {
     caseIndexContainerName: cosmos.outputs.caseIndexContainerName
     capabilityProfiles: CapabilityProfiles
     maxInstanceCount: EmbedMaxInstanceCount
+    zoneRedundant: FunctionPlanZoneRedundant
   }
   dependsOn: [registryAccess, embedHostAccess, openAiAccess]
 }
@@ -549,6 +558,7 @@ module dispositionFunction 'modules/functions-disposition.bicep' = {
     serviceNowDispositionBackfillDays: ServiceNowDispositionBackfillDays
     dispositionRetentionDays: DispositionRetentionDays
     allowPrivateOutboundEndpoints: AllowPrivateOutboundEndpoints
+    zoneRedundant: FunctionPlanZoneRedundant
   }
   dependsOn: [registryAccess, dispositionHostAccess]
 }
@@ -592,13 +602,14 @@ module portalFunction 'modules/functions-portal.bicep' = if (deployPortal) {
     portalChatDistributedQuotaEnabled: PortalChatDistributedQuotaEnabled
     portalChatPerUserMaxConcurrency: PortalChatPerUserMaxConcurrency
     portalChatQuotaWindowSeconds: PortalChatQuotaWindowSeconds
-    portalChatMaxRequestsPerWindow: PortalChatMaxRequestsPerWindow
+    portalChatMaxRequestsPerWindow: validatedPortalChatMaxRequestsPerWindow
     portalChatMaxBudgetUnitsPerWindow: PortalChatMaxBudgetUnitsPerWindow
     portalChatBudgetUnitsPerRequest: PortalChatBudgetUnitsPerRequest
     portalChatLeaseSeconds: PortalChatLeaseSeconds
     portalChatRequestDedupeSeconds: PortalChatRequestDedupeSeconds
     caseQaChatHistoryEnabled: deployChatHistoryContainers
     portalChatTimeoutSec: PortalChatTimeoutSec
+    zoneRedundant: FunctionPlanZoneRedundant
   }
   dependsOn: [registryAccess, portalHostAccess, openAiAccess, searchAccess]
 }

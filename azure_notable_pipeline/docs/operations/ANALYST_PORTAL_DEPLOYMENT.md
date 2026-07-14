@@ -24,8 +24,14 @@ Storage `web` and APIM `Gateway` origins. The scripts approve only the request
 whose description matches each declared Front Door origin and poll both target
 connections and Front Door origin status. APIM public access is disabled only
 after both report `Approved`. APIM reaches the private Function backend through
-its VNet integration. The gate then confirms storage and Function
-public access remain disabled, a direct APIM request does not succeed, and
+its dedicated VNet-integration subnet. That subnet has an attached NSG with
+explicit HTTPS egress for APIM's Storage and Key Vault dependencies, Entra OIDC
+metadata, and the private VNet backend. The NSG intentionally retains Azure's
+default Internet outbound rule because TLS revocation and APIM platform egress
+have not yet been converted to a complete explicit allowlist; do not add a blanket
+deny until those dependencies are validated for the target cloud. The gate then
+confirms storage and Function public access remain disabled, a direct APIM
+request does not succeed, and
 authenticated `/ready` succeeds through Front Door. A private deployment runner
 can legitimately reach the Function and `$web` private endpoints, so their
 public denial is asserted from their control-plane `publicNetworkAccess` state.

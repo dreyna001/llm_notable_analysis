@@ -331,6 +331,18 @@ def _handle_chat_gate(
         ):
             raise ValueError("client_request_id must be 8-128 URL-safe characters")
         store = _cosmos_store(config)
+        if config.CASE_QA_CHAT_HISTORY_ENABLED:
+            # Validate ownership, retention, scope, and message capacity before
+            # reserving the request ID in the distributed dedupe document. A
+            # client may then recover from a stale session with the same ID.
+            validate_chat_history_request(
+                config=config,
+                cosmos_store=store,
+                mode=mode,
+                selected_case_id=selected_case_id,
+                requested_session_id=session_id,
+                user_id=user_id,
+            )
         if config.PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED:
             quota = _distributed_chat_quota(config, store)
             try:
@@ -349,15 +361,6 @@ def _handle_chat_gate(
             if not decision.allowed:
                 return _chat_limit_response(decision)
             user_quota_acquired = True
-        if config.CASE_QA_CHAT_HISTORY_ENABLED:
-            validate_chat_history_request(
-                config=config,
-                cosmos_store=store,
-                mode=mode,
-                selected_case_id=selected_case_id,
-                requested_session_id=session_id,
-                user_id=user_id,
-            )
         prior_transcript = None
         if config.CASE_QA_CHAT_HISTORY_ENABLED and session_id:
             prior_transcript = load_session_transcript(
@@ -532,8 +535,17 @@ def _probe_chat_dependencies(config: Config) -> dict[str, str]:
         "llm_gateway": "unavailable",
     }
     portal_status = _probe_portal_dependencies(config)
-    if all(value == "ready" for value in portal_status.values()):
+    if all(
+        portal_status.get(name) == "ready"
+        for name in ("case_index", "archive_blob")
+    ):
         status["archive_retrieval"] = "ready"
+    if config.CASE_QA_CHAT_HISTORY_ENABLED:
+        status["chat_history"] = portal_status.get("chat_history", "unavailable")
+    if config.PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED:
+        status["chat_admission"] = portal_status.get(
+            "chat_admission", "unavailable"
+        )
     if (
         config.AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT
         and config.AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT
@@ -551,25 +563,33 @@ def _probe_chat_dependencies(config: Config) -> dict[str, str]:
 
 def _probe_portal_dependencies(config: Config) -> dict[str, str]:
     status = {"case_index": "unavailable", "archive_blob": "unavailable"}
+    if config.CASE_QA_CHAT_HISTORY_ENABLED:
+        status["chat_history"] = "unavailable"
+    if config.PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED:
+        status["chat_admission"] = "unavailable"
     try:
         store = _cosmos_store(config)
-        store.get_case(config.CASE_INDEX_CONTAINER, "__readiness__")
-        status["case_index"] = "ready"
-        if config.CASE_QA_CHAT_HISTORY_ENABLED:
-            store.read_item(
-                config.CHAT_SESSIONS_CONTAINER,
-                item_id="__readiness__",
-                partition_key="__readiness__",
-            )
-            store.read_item(
-                config.CHAT_MESSAGES_CONTAINER,
-                item_id="__readiness__",
-                partition_key="__readiness__",
-            )
-            status["chat_history"] = "ready"
     except Exception:  # Dependency probe must degrade without leaking provider failures.
+        store = None
+    if store is not None:
+        try:
+            store.probe_container(config.CASE_INDEX_CONTAINER)
+            status["case_index"] = "ready"
+        except Exception:  # Dependency probe must degrade without leaking provider failures.
+            pass
         if config.CASE_QA_CHAT_HISTORY_ENABLED:
-            status["chat_history"] = "unavailable"
+            try:
+                store.probe_container(config.CHAT_SESSIONS_CONTAINER)
+                store.probe_container(config.CHAT_MESSAGES_CONTAINER)
+                status["chat_history"] = "ready"
+            except Exception:  # Dependency probe must degrade without leaking provider failures.
+                pass
+        if config.PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED:
+            try:
+                store.probe_container(config.PORTAL_CHAT_QUOTA_CONTAINER)
+                status["chat_admission"] = "ready"
+            except Exception:  # Dependency probe must degrade without leaking provider failures.
+                pass
     try:
         _blob_service(config).get_container_client(
             config.CASE_ARCHIVE_CONTAINER

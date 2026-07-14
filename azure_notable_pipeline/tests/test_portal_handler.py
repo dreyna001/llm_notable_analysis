@@ -34,6 +34,9 @@ class FakeCosmosStore:
     def get_case(self, _container: str, _case_id: str):
         return None
 
+    def probe_container(self, _container: str) -> None:
+        return None
+
 
 class FakeBlobService:
     def get_container_client(self, _container: str):
@@ -408,6 +411,125 @@ def test_distributed_chat_quota_returns_retry_after_and_does_not_call_model(
     assert response.status_code == 429
     assert response.headers["Retry-After"] == "27"
     assert response_json(response)["reason"] == "budget_window"
+
+
+def test_stale_chat_session_is_validated_before_request_id_is_reserved(
+    monkeypatch,
+) -> None:
+    config = portal_config(
+        CASE_QA_ENABLED=True,
+        CASE_QA_CHAT_HISTORY_ENABLED=True,
+        CHAT_SESSIONS_CONTAINER="chat-sessions",
+        CHAT_MESSAGES_CONTAINER="chat-messages",
+        PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED=True,
+        PORTAL_CHAT_QUOTA_CONTAINER="chat-quota",
+    )
+    monkeypatch.setattr(portal_handler, "load_config", lambda: config)
+    quota_calls: list[str | None] = []
+
+    class RecordingQuota:
+        def acquire(self, **kwargs):
+            request_id = kwargs.get("request_id")
+            quota_calls.append(request_id)
+            if quota_calls.count(request_id) > 1:
+                return ChatQuotaDecision(False, str(request_id), 60, "duplicate_request")
+            return ChatQuotaDecision(True, str(request_id))
+
+        def release(self, **_kwargs):
+            return None
+
+    gate = RecordingQuota()
+    monkeypatch.setattr(
+        portal_handler, "_distributed_chat_quota", lambda *_args: gate
+    )
+
+    def validate_history(**kwargs):
+        if kwargs["requested_session_id"]:
+            raise portal_handler.ChatSessionExpiredError("session_id has expired.")
+
+    monkeypatch.setattr(
+        portal_handler, "validate_chat_history_request", validate_history
+    )
+    monkeypatch.setattr(
+        portal_handler,
+        "persist_chat_history",
+        lambda **_kwargs: "new-session",
+    )
+    request_id = "request-0001"
+    stale = portal_handler.handle_request(
+        request(
+            "/api/chat",
+            "POST",
+            body=json.dumps(
+                {
+                    "selected_case_id": "case-1",
+                    "question": "What happened?",
+                    "session_id": "00000000-0000-0000-0000-000000000001",
+                    "client_request_id": request_id,
+                }
+            ).encode(),
+        ),
+        chat_service=lambda **_kwargs: pytest.fail(
+            "stale session must not run the model"
+        ),
+    )
+    retried = portal_handler.handle_request(
+        request(
+            "/api/chat",
+            "POST",
+            body=json.dumps(
+                {
+                    "selected_case_id": "case-1",
+                    "question": "What happened?",
+                    "client_request_id": request_id,
+                }
+            ).encode(),
+        ),
+        chat_service=lambda **_kwargs: SimpleNamespace(
+            answer="Recovered.", answer_status="answered", context_usage=None
+        ),
+    )
+
+    assert stale.status_code == 410
+    assert retried.status_code == 200
+    assert quota_calls == [request_id]
+
+
+@pytest.mark.parametrize("path", ["/ready", "/api/diagnostics/chat-readiness"])
+def test_chat_readiness_reports_distributed_admission_container_failure(
+    monkeypatch,
+    path: str,
+) -> None:
+    from azure_notable_pipeline import azure_clients
+
+    config = portal_config(
+        CASE_QA_ENABLED=True,
+        PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED=True,
+        PORTAL_CHAT_QUOTA_CONTAINER="chat-quota",
+        AZURE_OPENAI_ENDPOINT="https://openai.example.test",
+        AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT="embeddings",
+        AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT="chat",
+    )
+
+    class AdmissionUnavailableStore(FakeCosmosStore):
+        def probe_container(self, container: str) -> None:
+            if container == "chat-quota":
+                raise RuntimeError("container missing or forbidden")
+
+    monkeypatch.setattr(portal_handler, "load_config", lambda: config)
+    monkeypatch.setattr(
+        portal_handler, "_cosmos_store", lambda _config: AdmissionUnavailableStore()
+    )
+    monkeypatch.setattr(
+        azure_clients, "probe_azure_openai_endpoint", lambda _endpoint: True
+    )
+
+    response = portal_handler.handle_request(request(path))
+
+    assert response.status_code == 503
+    dependencies = response_json(response)["dependencies"]
+    assert dependencies["chat_admission"] == "unavailable"
+    assert dependencies["archive_retrieval"] == "ready"
 
 
 def test_chat_history_ownership_failure_is_hidden_as_not_found(monkeypatch) -> None:

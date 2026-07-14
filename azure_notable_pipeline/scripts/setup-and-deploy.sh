@@ -37,6 +37,14 @@ if [[ "${isolate_host_storage,,}" == 'true' ]]; then
 fi
 blob_data_protection_enabled="${BLOB_DATA_PROTECTION_ENABLED:-false}"
 cosmos_continuous_backup_enabled="${COSMOS_CONTINUOUS_BACKUP_ENABLED:-false}"
+cosmos_continuous_backup_migration_acknowledged="${COSMOS_CONTINUOUS_BACKUP_MIGRATION_ACKNOWLEDGED:-false}"
+cosmos_zone_redundant="${COSMOS_ZONE_REDUNDANT:-false}"
+function_plan_zone_redundant="${FUNCTION_PLAN_ZONE_REDUNDANT:-false}"
+storage_sku_name="${STORAGE_SKU_NAME:-Standard_LRS}"
+if [[ "${function_plan_zone_redundant,,}" == 'true' && "${storage_sku_name}" != 'Standard_ZRS' ]]; then
+  echo 'FUNCTION_PLAN_ZONE_REDUNDANT=true requires STORAGE_SKU_NAME=Standard_ZRS.' >&2
+  exit 2
+fi
 if [[ "${deployment_environment}" == 'production' ]]; then
   [[ "${blob_data_protection_enabled,,}" == 'true' ]] || { echo 'BLOB_DATA_PROTECTION_ENABLED=true is required for production.' >&2; exit 2; }
   [[ "${cosmos_continuous_backup_enabled,,}" == 'true' ]] || { echo 'COSMOS_CONTINUOUS_BACKUP_ENABLED=true is required for production.' >&2; exit 2; }
@@ -88,8 +96,8 @@ if [[ "${disposition_sync_enabled,,}" == 'true' ]]; then
   done
 fi
 
-if [[ "${CONTAINER_IMAGE_URI}" != *@sha256:* ]]; then
-  echo 'CONTAINER_IMAGE_URI must be pinned to an immutable @sha256: digest.' >&2
+if [[ ! "${CONTAINER_IMAGE_URI}" =~ ^.+@sha256:[0-9a-fA-F]{64}$ ]]; then
+  echo 'CONTAINER_IMAGE_URI must be pinned to an immutable @sha256 digest with exactly 64 hexadecimal characters.' >&2
   exit 2
 fi
 
@@ -118,10 +126,13 @@ run_preflight() {
 run_preflight
 
 apim_id=''
+if [[ "${deploy_portal}" == true ]]; then
+  apim_id="/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.ApiManagement/service/${AZURE_DEPLOYMENT_PREFIX}-portal-apim"
+fi
 deployment_succeeded=false
 disable_apim_on_failure() {
   local exit_code=$?
-  if [[ ${exit_code} -ne 0 && -n "${apim_id}" && "${deployment_succeeded}" != true ]]; then
+  if [[ ${exit_code} -ne 0 && "${deployment_succeeded}" != true && "${deploy_portal}" == true ]]; then
     az resource update --ids "${apim_id}" \
       --set properties.publicNetworkAccess=Disabled --output none >/dev/null 2>&1 || true
   fi
@@ -130,6 +141,26 @@ disable_apim_on_failure() {
 trap disable_apim_on_failure EXIT
 
 az account set --subscription "${AZURE_SUBSCRIPTION_ID}"
+if [[ "${cosmos_continuous_backup_enabled,,}" == 'true' ]]; then
+  existing_cosmos_backup_type="$(az cosmosdb show \
+    --resource-group "${AZURE_RESOURCE_GROUP}" \
+    --name "${COSMOS_ACCOUNT_NAME}" \
+    --query 'backupPolicy.type' -o tsv 2>/dev/null || true)"
+  if [[ "${existing_cosmos_backup_type,,}" == 'periodic' && "${cosmos_continuous_backup_migration_acknowledged,,}" != 'true' ]]; then
+    echo 'Enabling continuous backup on an existing Periodic Cosmos account is one-way; set COSMOS_CONTINUOUS_BACKUP_MIGRATION_ACKNOWLEDGED=true to acknowledge the migration.' >&2
+    exit 2
+  fi
+fi
+if [[ "${cosmos_zone_redundant,,}" == 'true' ]]; then
+  existing_cosmos_zone="$(az cosmosdb show \
+    --resource-group "${AZURE_RESOURCE_GROUP}" \
+    --name "${COSMOS_ACCOUNT_NAME}" \
+    --query 'locations[0].isZoneRedundant' -o tsv 2>/dev/null || true)"
+  if [[ -n "${existing_cosmos_zone}" && "${existing_cosmos_zone,,}" != 'true' ]]; then
+    echo 'COSMOS_ZONE_REDUNDANT cannot be enabled in place on an existing non-zonal serverless account; create a new zonal account and migrate.' >&2
+    exit 2
+  fi
+fi
 if [[ -n "${ALERT_ACTION_GROUP_RESOURCE_ID:-}" ]]; then
   action_group_type="$(az resource show --ids "${ALERT_ACTION_GROUP_RESOURCE_ID}" --query type -o tsv)"
   if [[ "${action_group_type,,}" != 'microsoft.insights/actiongroups' ]]; then
@@ -185,7 +216,7 @@ az deployment group create \
     EmbedHostStorageAccountName="${EMBED_HOST_STORAGE_ACCOUNT_NAME:-}" \
     DispositionHostStorageAccountName="${DISPOSITION_HOST_STORAGE_ACCOUNT_NAME:-}" \
     PortalHostStorageAccountName="${PORTAL_HOST_STORAGE_ACCOUNT_NAME:-}" \
-    StorageSkuName="${STORAGE_SKU_NAME:-Standard_LRS}" \
+    StorageSkuName="${storage_sku_name}" \
     BlobDataProtectionEnabled="${blob_data_protection_enabled}" \
     BlobSoftDeleteRetentionDays="${BLOB_SOFT_DELETE_RETENTION_DAYS:-30}" \
     ContainerSoftDeleteRetentionDays="${CONTAINER_SOFT_DELETE_RETENTION_DAYS:-30}" \
@@ -213,8 +244,8 @@ az deployment group create \
     AnalyzerMaxInstanceCount="${ANALYZER_MAX_INSTANCE_COUNT:-5}" \
     MaxCompressedInputBytes="${MAX_COMPRESSED_INPUT_BYTES:-1048576}" \
     EmbedMaxInstanceCount="${EMBED_MAX_INSTANCE_COUNT:-5}" \
-    FunctionPlanZoneRedundant="${FUNCTION_PLAN_ZONE_REDUNDANT:-false}" \
-    CosmosZoneRedundant="${COSMOS_ZONE_REDUNDANT:-false}" \
+    FunctionPlanZoneRedundant="${function_plan_zone_redundant}" \
+    CosmosZoneRedundant="${cosmos_zone_redundant}" \
     CosmosContinuousBackupEnabled="${cosmos_continuous_backup_enabled}" \
     DeploymentEnvironment="${deployment_environment}" \
     AlertActionGroupResourceId="${ALERT_ACTION_GROUP_RESOURCE_ID:-}" \

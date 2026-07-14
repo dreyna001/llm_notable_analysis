@@ -29,6 +29,7 @@ param azureOpenAiPortalChatDeployment string
 param azureSearchEndpoint string = ''
 param ragAzureSearchIndex string = ''
 param capabilityProfiles string = 'core,analyst_portal'
+param zoneRedundant bool = false
 
 @allowed(['jwt', 'iam'])
 param portalAuthMode string = 'jwt'
@@ -44,7 +45,7 @@ param portalChatPerUserMaxConcurrency int = 2
 @maxValue(86400)
 param portalChatQuotaWindowSeconds int = 3600
 @minValue(1)
-@maxValue(10000)
+@maxValue(2048)
 param portalChatMaxRequestsPerWindow int = 30
 @minValue(1)
 param portalChatMaxBudgetUnitsPerWindow int = 100000
@@ -162,7 +163,7 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
       http20Enabled: true
       linuxFxVersion: 'DOCKER|${containerImageUri}'
       minTlsVersion: '1.2'
-      minimumElasticInstanceCount: 1
+      minimumElasticInstanceCount: zoneRedundant ? 2 : 1
       use32BitWorkerProcess: false
       vnetRouteAllEnabled: true
       appSettings: applicationSettings

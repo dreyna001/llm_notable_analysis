@@ -38,6 +38,12 @@ if ($isolateHostStorage -ieq 'true') {
 }
 $blobDataProtectionEnabled = if ($env:BLOB_DATA_PROTECTION_ENABLED) { $env:BLOB_DATA_PROTECTION_ENABLED } else { 'false' }
 $cosmosContinuousBackupEnabled = if ($env:COSMOS_CONTINUOUS_BACKUP_ENABLED) { $env:COSMOS_CONTINUOUS_BACKUP_ENABLED } else { 'false' }
+$cosmosZoneRedundant = if ($env:COSMOS_ZONE_REDUNDANT) { $env:COSMOS_ZONE_REDUNDANT } else { 'false' }
+$functionPlanZoneRedundant = if ($env:FUNCTION_PLAN_ZONE_REDUNDANT) { $env:FUNCTION_PLAN_ZONE_REDUNDANT } else { 'false' }
+$storageSkuName = if ($env:STORAGE_SKU_NAME) { $env:STORAGE_SKU_NAME } else { 'Standard_LRS' }
+if ($functionPlanZoneRedundant -ieq 'true' -and $storageSkuName -cne 'Standard_ZRS') {
+    throw 'FUNCTION_PLAN_ZONE_REDUNDANT=true requires STORAGE_SKU_NAME=Standard_ZRS.'
+}
 if ($deploymentEnvironment -eq 'production' -and $blobDataProtectionEnabled -ine 'true') {
     throw 'BLOB_DATA_PROTECTION_ENABLED=true is required for production.'
 }
@@ -113,10 +119,25 @@ function Invoke-Preflight {
 # Complete source, contract, IaC, and image checks before Azure mutation.
 Invoke-Preflight
 
-$apimId = ''
+$apimId = if ($deployPortal) {
+    "/subscriptions/$($env:AZURE_SUBSCRIPTION_ID)/resourceGroups/$($env:AZURE_RESOURCE_GROUP)/providers/Microsoft.ApiManagement/service/$($env:AZURE_DEPLOYMENT_PREFIX)-portal-apim"
+}
+else { '' }
 $deploymentSucceeded = $false
 try {
 az account set --subscription $env:AZURE_SUBSCRIPTION_ID
+if ($cosmosContinuousBackupEnabled -ieq 'true') {
+    $existingCosmosBackupType = "$(az cosmosdb show --resource-group $env:AZURE_RESOURCE_GROUP --name $env:COSMOS_ACCOUNT_NAME --query 'backupPolicy.type' -o tsv 2>$null)".Trim()
+    if ($LASTEXITCODE -eq 0 -and $existingCosmosBackupType -ieq 'Periodic' -and $env:COSMOS_CONTINUOUS_BACKUP_MIGRATION_ACKNOWLEDGED -ine 'true') {
+        throw 'Enabling continuous backup on an existing Periodic Cosmos account is one-way; set COSMOS_CONTINUOUS_BACKUP_MIGRATION_ACKNOWLEDGED=true to acknowledge the migration.'
+    }
+}
+if ($cosmosZoneRedundant -ieq 'true') {
+    $existingCosmosZone = "$(az cosmosdb show --resource-group $env:AZURE_RESOURCE_GROUP --name $env:COSMOS_ACCOUNT_NAME --query 'locations[0].isZoneRedundant' -o tsv 2>$null)".Trim()
+    if ($LASTEXITCODE -eq 0 -and $existingCosmosZone -ine 'true') {
+        throw 'COSMOS_ZONE_REDUNDANT cannot be enabled in place on an existing non-zonal serverless account; create a new zonal account and migrate.'
+    }
+}
 if ($env:ALERT_ACTION_GROUP_RESOURCE_ID) {
     $actionGroupType = "$(az resource show --ids $env:ALERT_ACTION_GROUP_RESOURCE_ID --query type -o tsv)".Trim()
     if ($LASTEXITCODE -ne 0 -or $actionGroupType -ine 'Microsoft.Insights/actionGroups') {
@@ -165,7 +186,7 @@ $parameters = @(
     "EmbedHostStorageAccountName=$($env:EMBED_HOST_STORAGE_ACCOUNT_NAME)",
     "DispositionHostStorageAccountName=$($env:DISPOSITION_HOST_STORAGE_ACCOUNT_NAME)",
     "PortalHostStorageAccountName=$($env:PORTAL_HOST_STORAGE_ACCOUNT_NAME)",
-    "StorageSkuName=$(if ($env:STORAGE_SKU_NAME) { $env:STORAGE_SKU_NAME } else { 'Standard_LRS' })",
+    "StorageSkuName=$storageSkuName",
     "BlobDataProtectionEnabled=$blobDataProtectionEnabled",
     "BlobSoftDeleteRetentionDays=$(if ($env:BLOB_SOFT_DELETE_RETENTION_DAYS) { $env:BLOB_SOFT_DELETE_RETENTION_DAYS } else { '30' })",
     "ContainerSoftDeleteRetentionDays=$(if ($env:CONTAINER_SOFT_DELETE_RETENTION_DAYS) { $env:CONTAINER_SOFT_DELETE_RETENTION_DAYS } else { '30' })",
@@ -193,8 +214,8 @@ $parameters = @(
     "AnalyzerMaxInstanceCount=$(if ($env:ANALYZER_MAX_INSTANCE_COUNT) { $env:ANALYZER_MAX_INSTANCE_COUNT } else { '5' })",
     "MaxCompressedInputBytes=$(if ($env:MAX_COMPRESSED_INPUT_BYTES) { $env:MAX_COMPRESSED_INPUT_BYTES } else { '1048576' })",
     "EmbedMaxInstanceCount=$(if ($env:EMBED_MAX_INSTANCE_COUNT) { $env:EMBED_MAX_INSTANCE_COUNT } else { '5' })",
-    "FunctionPlanZoneRedundant=$(if ($env:FUNCTION_PLAN_ZONE_REDUNDANT) { $env:FUNCTION_PLAN_ZONE_REDUNDANT } else { 'false' })",
-    "CosmosZoneRedundant=$(if ($env:COSMOS_ZONE_REDUNDANT) { $env:COSMOS_ZONE_REDUNDANT } else { 'false' })",
+    "FunctionPlanZoneRedundant=$functionPlanZoneRedundant",
+    "CosmosZoneRedundant=$cosmosZoneRedundant",
     "CosmosContinuousBackupEnabled=$cosmosContinuousBackupEnabled",
     "DeploymentEnvironment=$deploymentEnvironment",
     "AlertActionGroupResourceId=$($env:ALERT_ACTION_GROUP_RESOURCE_ID)",
@@ -557,7 +578,7 @@ if ($deployPortal) {
     Write-Host "Deployment $deploymentName completed: $analyzer, $embed, $disposition$(if ($portal) { ", $portal" })."
 }
 finally {
-    if (-not $deploymentSucceeded -and $apimId) {
+    if (-not $deploymentSucceeded -and $deployPortal) {
         az resource update --ids $apimId --set properties.publicNetworkAccess=Disabled --output none 2>$null
         if ($LASTEXITCODE -ne 0) {
             Write-Warning 'Failed to disable APIM public access during deployment cleanup.'

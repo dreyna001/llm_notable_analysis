@@ -59,6 +59,14 @@ aggregate NAT traffic, review logs, then move to Block. Do not treat forwarded
 identity headers as trusted quota keys; authenticated `sub` remains the
 application quota identity.
 
+The quota document retains request IDs only for the configured dedupe interval.
+Startup rejects settings whose worst-case overlap of fixed rate windows could
+retain more than 4,096 IDs, keeping the document comfortably below Cosmos DB's
+2 MB item limit even when every client request ID uses all 128 allowed
+characters. `PORTAL_CHAT_MAX_REQUESTS_PER_WINDOW` is additionally capped at
+2,048. Reduce the dedupe interval or increase the quota-window duration before
+raising the request rate; do not bypass this validation.
+
 ## Authenticated synthetic monitor
 
 The customer owns a dedicated non-human identity with only the portal read role.
@@ -69,8 +77,11 @@ GET https://<front-door-host>/ready
 Authorization: Bearer <short-lived-token>
 ```
 
-Expected status is `200` with the published readiness response. Alert after the
-customer-approved consecutive-failure threshold. Record monitor location,
+Expected status is `200` with the published readiness response. When distributed
+admission is enabled, readiness reads the quota container metadata and reports
+`chat_admission: unavailable` with `503` if the container is missing or its RBAC
+grant is ineffective. Alert after the customer-approved consecutive-failure
+threshold. Record monitor location,
 identity object ID, token issuance method, renewal/rotation owner, action group,
 and escalation route. The stack does not store a browser token or IdP client
 credential. Front Door origin probes remain disabled because they cannot

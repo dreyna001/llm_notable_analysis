@@ -118,6 +118,33 @@ def test_chat_request_dedupe_must_cover_the_crash_recovery_lease() -> None:
         load_config()
 
 
+def test_chat_quota_rejects_a_dedupe_window_that_can_overgrow_its_document() -> None:
+    with patch.dict(
+        "os.environ",
+        {
+            "CAPABILITY_PROFILES": "core,analyst_portal",
+            "CASE_INDEX_CONTAINER": "notable-case-index",
+            "PORTAL_JWT_ISSUER": "https://issuer.example.test",
+            "PORTAL_JWT_AUDIENCE": "portal",
+            "PORTAL_ENTRA_REQUIRED_APP_ROLE": "Portal.Access",
+            "PORTAL_CHAT_QUOTA_WINDOW_SECONDS": "60",
+            "PORTAL_CHAT_MAX_REQUESTS_PER_WINDOW": "3",
+            "PORTAL_CHAT_REQUEST_DEDUPE_SECONDS": "86400",
+        },
+        clear=True,
+    ), pytest.raises(ValueError, match="4096 recent request IDs"):
+        load_config()
+
+
+def test_chat_quota_request_rate_has_a_conservative_per_window_ceiling() -> None:
+    with patch.dict(
+        "os.environ",
+        {"PORTAL_CHAT_MAX_REQUESTS_PER_WINDOW": "2049"},
+        clear=True,
+    ), pytest.raises(ValueError, match="PORTAL_CHAT_MAX_REQUESTS_PER_WINDOW"):
+        load_config()
+
+
 def test_portal_entra_mode_requires_app_role() -> None:
     with patch.dict(
         "os.environ",

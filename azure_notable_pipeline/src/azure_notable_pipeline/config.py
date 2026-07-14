@@ -13,6 +13,7 @@ from .runtime_security import validate_https_url
 _TRUE_VALUES = {"true", "1", "yes"}
 _FALSE_VALUES = {"false", "0", "no"}
 _COSMOS_CONTAINER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{3,255}$")
+_MAX_CHAT_QUOTA_RECENT_REQUEST_IDS = 4_096
 _FOUNDRY_RESOURCE_ID_PATTERN = re.compile(
     r"^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/"
     r"Microsoft\.CognitiveServices/accounts/[^/]+$",
@@ -514,6 +515,27 @@ class Config:
                     "PORTAL_CHAT_BUDGET_UNITS_PER_REQUEST must be <= "
                     "PORTAL_CHAT_MAX_BUDGET_UNITS_PER_WINDOW"
                 )
+            # A dedupe interval can overlap one more fixed quota window than
+            # its rounded-up duration. Bound the worst-case retained IDs so
+            # their 128-character values remain comfortably below Cosmos DB's
+            # 2 MB item limit (4096 entries are under 1 MB serialized).
+            overlapping_windows = (
+                (
+                    self.PORTAL_CHAT_REQUEST_DEDUPE_SECONDS
+                    + self.PORTAL_CHAT_QUOTA_WINDOW_SECONDS
+                    - 1
+                )
+                // self.PORTAL_CHAT_QUOTA_WINDOW_SECONDS
+            ) + 1
+            if (
+                overlapping_windows * self.PORTAL_CHAT_MAX_REQUESTS_PER_WINDOW
+                > _MAX_CHAT_QUOTA_RECENT_REQUEST_IDS
+            ):
+                raise ValueError(
+                    "PORTAL_CHAT_MAX_REQUESTS_PER_WINDOW and "
+                    "PORTAL_CHAT_REQUEST_DEDUPE_SECONDS can retain at most "
+                    f"{_MAX_CHAT_QUOTA_RECENT_REQUEST_IDS} recent request IDs"
+                )
         elif self.PORTAL_CHAT_QUOTA_CONTAINER:
             self.PORTAL_CHAT_QUOTA_CONTAINER = _validate_cosmos_container_name(
                 self.PORTAL_CHAT_QUOTA_CONTAINER,
@@ -844,7 +866,7 @@ def load_config() -> Config:
             "PORTAL_CHAT_QUOTA_WINDOW_SECONDS", 3_600, max_value=86_400
         ),
         PORTAL_CHAT_MAX_REQUESTS_PER_WINDOW=_positive_int_env(
-            "PORTAL_CHAT_MAX_REQUESTS_PER_WINDOW", 30, max_value=10_000
+            "PORTAL_CHAT_MAX_REQUESTS_PER_WINDOW", 30, max_value=2_048
         ),
         PORTAL_CHAT_MAX_BUDGET_UNITS_PER_WINDOW=_positive_int_env(
             "PORTAL_CHAT_MAX_BUDGET_UNITS_PER_WINDOW", 100_000, max_value=100_000_000

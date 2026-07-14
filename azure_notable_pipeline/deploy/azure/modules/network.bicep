@@ -13,6 +13,69 @@ param functionSubnetPrefix string = '10.42.0.0/24'
 param privateEndpointSubnetPrefix string = '10.42.1.0/24'
 param apimSubnetPrefix string = '10.42.2.0/24'
 
+resource apimNetworkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2024-01-01' = {
+  name: '${namePrefix}-apim-nsg'
+  location: location
+  properties: {
+    securityRules: [
+      {
+        name: 'AllowAzureStorageHttpsOutbound'
+        properties: {
+          priority: 100
+          direction: 'Outbound'
+          access: 'Allow'
+          protocol: 'Tcp'
+          sourcePortRange: '*'
+          destinationPortRange: '443'
+          sourceAddressPrefix: 'VirtualNetwork'
+          destinationAddressPrefix: 'Storage'
+        }
+      }
+      {
+        name: 'AllowAzureKeyVaultHttpsOutbound'
+        properties: {
+          priority: 110
+          direction: 'Outbound'
+          access: 'Allow'
+          protocol: 'Tcp'
+          sourcePortRange: '*'
+          destinationPortRange: '443'
+          sourceAddressPrefix: 'VirtualNetwork'
+          destinationAddressPrefix: 'AzureKeyVault'
+        }
+      }
+      {
+        // APIM resolves the Entra OpenID metadata URL used by validate-jwt.
+        name: 'AllowEntraHttpsOutbound'
+        properties: {
+          priority: 120
+          direction: 'Outbound'
+          access: 'Allow'
+          protocol: 'Tcp'
+          sourcePortRange: '*'
+          destinationPortRange: '443'
+          sourceAddressPrefix: 'VirtualNetwork'
+          destinationAddressPrefix: 'AzureActiveDirectory'
+        }
+      }
+      {
+        // The portal Function hostname resolves to its private endpoint in this VNet.
+        name: 'AllowBackendHttpsOutbound'
+        properties: {
+          priority: 130
+          direction: 'Outbound'
+          access: 'Allow'
+          protocol: 'Tcp'
+          sourcePortRange: '*'
+          destinationPortRange: '443'
+          sourceAddressPrefix: 'VirtualNetwork'
+          destinationAddressPrefix: 'VirtualNetwork'
+        }
+      }
+    ]
+  }
+}
+
 resource vnet 'Microsoft.Network/virtualNetworks@2024-01-01' = {
   name: '${namePrefix}-vnet'
   location: location
@@ -43,6 +106,9 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-01-01' = {
         name: 'apim-integration'
         properties: {
           addressPrefix: apimSubnetPrefix
+          networkSecurityGroup: {
+            id: apimNetworkSecurityGroup.id
+          }
           delegations: [
             {
               name: 'apim-serverfarms'

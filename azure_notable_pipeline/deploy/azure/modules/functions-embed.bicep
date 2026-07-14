@@ -22,6 +22,7 @@ param cosmosEndpoint string
 param cosmosDatabaseName string
 param caseIndexContainerName string = ''
 param capabilityProfiles string = 'core'
+param zoneRedundant bool = false
 
 @minValue(1)
 param maxInstanceCount int = 5
@@ -129,7 +130,7 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
       http20Enabled: true
       linuxFxVersion: 'DOCKER|${containerImageUri}'
       minTlsVersion: '1.2'
-      minimumElasticInstanceCount: 1
+      minimumElasticInstanceCount: zoneRedundant ? 2 : 1
       use32BitWorkerProcess: false
       vnetRouteAllEnabled: true
       appSettings: applicationSettings

@@ -45,6 +45,7 @@ class FakeContainer:
         self.items: dict[tuple[str, str], dict[str, Any]] = {}
         self.query_calls: list[dict[str, Any]] = []
         self._etag_counter = 0
+        self.metadata_reads = 0
 
     def _etagged(self, body: dict[str, Any]) -> dict[str, Any]:
         self._etag_counter += 1
@@ -69,6 +70,11 @@ class FakeContainer:
         result = self._etagged(body)
         self.items[key] = result
         return dict(result)
+
+    def read(self, **kwargs: Any) -> dict[str, Any]:
+        self._hook(kwargs, "1.0")
+        self.metadata_reads += 1
+        return {"id": self.name}
 
     def read_item(self, *, item: str, partition_key: str, **kwargs: Any) -> dict[str, Any]:
         self._hook(kwargs, "1.0")
@@ -185,6 +191,16 @@ def test_container_partition_keys_match_native_aggregate_contract() -> None:
         "chat_messages": "/session_id",
         "chat_quota": "/user_id",
     }
+
+
+def test_container_probe_reads_metadata_without_creating_an_item() -> None:
+    store, database = _store()
+
+    store.probe_container("cases")
+
+    container = database.containers["cases"]
+    assert container.metadata_reads == 1
+    assert container.items == {}
 
 
 def test_ttl_is_derived_from_business_expiry() -> None:

@@ -42,6 +42,15 @@ param portalPrincipalId string
 
 var dataReaderRoleDefinitionId = '00000000-0000-0000-0000-000000000001'
 var dataContributorRoleDefinitionId = '00000000-0000-0000-0000-000000000002'
+// Cosmos data-plane RBAC scopes use the NoSQL resource path, not the ARM child-resource ID.
+// ARM IDs contain provider/type segments that the Cosmos gateway does not accept as a scope.
+var sideEffectIdempotencyScope = '${account.id}/dbs/${databaseName}/colls/${sideEffectIdempotencyContainerName}'
+var caseIndexScope = '${account.id}/dbs/${databaseName}/colls/${caseIndexContainerName}'
+var dispositionScope = '${account.id}/dbs/${databaseName}/colls/${dispositionContainerName}'
+var dispositionSyncStateScope = '${account.id}/dbs/${databaseName}/colls/${dispositionSyncStateContainerName}'
+var chatSessionsScope = '${account.id}/dbs/${databaseName}/colls/${chatSessionsContainerName}'
+var chatMessagesScope = '${account.id}/dbs/${databaseName}/colls/${chatMessagesContainerName}'
+var chatQuotaScope = '${account.id}/dbs/${databaseName}/colls/${chatQuotaContainerName}'
 
 var defaultIndexingPolicy = {
   indexingMode: 'consistent'
@@ -265,7 +274,7 @@ resource analyzerSideEffectContributor 'Microsoft.DocumentDB/databaseAccounts/sq
   properties: {
     principalId: analyzerPrincipalId
     roleDefinitionId: '${account.id}/sqlRoleDefinitions/${dataContributorRoleDefinitionId}'
-    scope: sideEffectIdempotency.id
+    scope: sideEffectIdempotencyScope
   }
 }
 
@@ -275,7 +284,7 @@ resource analyzerCaseContributor 'Microsoft.DocumentDB/databaseAccounts/sqlRoleA
   properties: {
     principalId: analyzerPrincipalId
     roleDefinitionId: '${account.id}/sqlRoleDefinitions/${dataContributorRoleDefinitionId}'
-    scope: caseIndex.id
+    scope: caseIndexScope
   }
 }
 
@@ -285,7 +294,7 @@ resource embedCaseContributor 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssi
   properties: {
     principalId: embedPrincipalId
     roleDefinitionId: '${account.id}/sqlRoleDefinitions/${dataContributorRoleDefinitionId}'
-    scope: caseIndex.id
+    scope: caseIndexScope
   }
 }
 
@@ -295,7 +304,7 @@ resource portalCaseReader 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignme
   properties: {
     principalId: portalPrincipalId
     roleDefinitionId: '${account.id}/sqlRoleDefinitions/${dataReaderRoleDefinitionId}'
-    scope: caseIndex.id
+    scope: caseIndexScope
   }
 }
 
@@ -305,7 +314,7 @@ resource dispositionCaseReader 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAss
   properties: {
     principalId: dispositionPrincipalId
     roleDefinitionId: '${account.id}/sqlRoleDefinitions/${dataReaderRoleDefinitionId}'
-    scope: caseIndex.id
+    scope: caseIndexScope
   }
 }
 
@@ -315,7 +324,7 @@ resource dispositionDataContributor 'Microsoft.DocumentDB/databaseAccounts/sqlRo
   properties: {
     principalId: dispositionPrincipalId
     roleDefinitionId: '${account.id}/sqlRoleDefinitions/${dataContributorRoleDefinitionId}'
-    scope: disposition.id
+    scope: dispositionScope
   }
 }
 
@@ -325,7 +334,7 @@ resource dispositionSyncStateContributor 'Microsoft.DocumentDB/databaseAccounts/
   properties: {
     principalId: dispositionPrincipalId
     roleDefinitionId: '${account.id}/sqlRoleDefinitions/${dataContributorRoleDefinitionId}'
-    scope: dispositionSyncState.id
+    scope: dispositionSyncStateScope
   }
 }
 
@@ -335,7 +344,7 @@ resource portalChatSessionsContributor 'Microsoft.DocumentDB/databaseAccounts/sq
   properties: {
     principalId: portalPrincipalId
     roleDefinitionId: '${account.id}/sqlRoleDefinitions/${dataContributorRoleDefinitionId}'
-    scope: chatSessions.id
+    scope: chatSessionsScope
   }
 }
 
@@ -345,7 +354,7 @@ resource portalChatMessagesContributor 'Microsoft.DocumentDB/databaseAccounts/sq
   properties: {
     principalId: portalPrincipalId
     roleDefinitionId: '${account.id}/sqlRoleDefinitions/${dataContributorRoleDefinitionId}'
-    scope: chatMessages.id
+    scope: chatMessagesScope
   }
 }
 
@@ -355,7 +364,7 @@ resource portalChatQuotaContributor 'Microsoft.DocumentDB/databaseAccounts/sqlRo
   properties: {
     principalId: portalPrincipalId
     roleDefinitionId: '${account.id}/sqlRoleDefinitions/${dataContributorRoleDefinitionId}'
-    scope: chatQuota.id
+    scope: chatQuotaScope
   }
 }
 

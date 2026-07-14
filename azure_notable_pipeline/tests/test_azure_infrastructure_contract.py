@@ -201,6 +201,8 @@ def test_portal_deploy_flow_approves_every_origin_before_disabling_apim() -> Non
         assert "storage blob upload-batch" in script
         assert "--auth-mode login" in script
         assert "VITE_PORTAL_API_BASE_URL" in script
+        assert "providers/Microsoft.ApiManagement/service/" in script
+        assert "AZURE_DEPLOYMENT_PREFIX" in script
         for oidc_setting in (
             "PORTAL_OIDC_CLIENT_ID",
             "PORTAL_OIDC_AUTHORITY",
@@ -345,7 +347,42 @@ def test_storage_and_functions_resilience_are_guarded_and_per_app_host_capable()
     assert "containerDeleteRetentionPolicy" in storage
     assert "previousVersionRetentionDays" in storage
     assert "zoneRedundant: FunctionPlanZoneRedundant" in main
-    assert "capacity: FunctionPlanZoneRedundant ? 2 : 1" in main
+    assert "capacity: FunctionPlanZoneRedundant ? 3 : 1" in main
+    assert "StorageSkuName must be Standard_ZRS when FunctionPlanZoneRedundant=true." in main
+    for module_name in (
+        "functions-analyzer.bicep",
+        "functions-embed.bicep",
+        "functions-disposition.bicep",
+        "functions-portal.bicep",
+    ):
+        function_module = _read(AZURE / "modules" / module_name)
+        assert "param zoneRedundant bool = false" in function_module
+        assert "minimumElasticInstanceCount: zoneRedundant ? 2 : 1" in function_module
+
+
+def test_apim_outbound_integration_subnet_has_required_dedicated_nsg() -> None:
+    network = _read(AZURE / "modules" / "network.bicep")
+    assert "resource apimNetworkSecurityGroup" in network
+    assert "networkSecurityGroup:" in network
+    assert "id: apimNetworkSecurityGroup.id" in network
+    assert "serviceName: 'Microsoft.Web/serverFarms'" in network
+    for rule_name, destination in (
+        ("AllowAzureStorageHttpsOutbound", "Storage"),
+        ("AllowAzureKeyVaultHttpsOutbound", "AzureKeyVault"),
+        ("AllowEntraHttpsOutbound", "AzureActiveDirectory"),
+        ("AllowBackendHttpsOutbound", "VirtualNetwork"),
+    ):
+        rule_start = network.index(f"name: '{rule_name}'")
+        rule_end = network.index("\n      }", rule_start)
+        rule = network[rule_start:rule_end]
+        assert "direction: 'Outbound'" in rule
+        assert "access: 'Allow'" in rule
+        assert "protocol: 'Tcp'" in rule
+        assert "destinationPortRange: '443'" in rule
+        assert f"destinationAddressPrefix: '{destination}'" in rule
+    # Do not deny all Internet egress until TLS revocation and APIM platform/monitor
+    # dependencies have explicit allow rules.
+    assert "name: 'DenyOtherOutbound'" not in network
 
 
 def test_deployment_scripts_pass_and_preflight_production_resilience_contracts() -> None:
@@ -360,12 +397,24 @@ def test_deployment_scripts_pass_and_preflight_production_resilience_contracts()
             "STORAGE_SKU_NAME",
             "BLOB_DATA_PROTECTION_ENABLED",
             "COSMOS_CONTINUOUS_BACKUP_ENABLED",
+            "COSMOS_CONTINUOUS_BACKUP_MIGRATION_ACKNOWLEDGED",
             "FUNCTION_PLAN_ZONE_REDUNDANT",
             "COSMOS_ZONE_REDUNDANT",
         ):
             assert setting in script
         assert "BLOB_DATA_PROTECTION_ENABLED=true is required for production." in script
         assert "COSMOS_CONTINUOUS_BACKUP_ENABLED=true is required for production." in script
+        assert "FUNCTION_PLAN_ZONE_REDUNDANT=true requires STORAGE_SKU_NAME=Standard_ZRS." in script
+        assert "backupPolicy.type" in script
+        assert "existing Periodic Cosmos account is one-way" in script
+        assert "cannot be enabled in place on an existing non-zonal serverless account" in script
+
+
+def test_deployment_scripts_require_an_exact_immutable_sha256_digest() -> None:
+    bash = _read(ROOT / "scripts" / "setup-and-deploy.sh")
+    powershell = _read(ROOT / "scripts" / "setup-and-deploy.ps1")
+    assert "^.+@sha256:[0-9a-fA-F]{64}$" in bash
+    assert "@sha256:[0-9a-fA-F]{64}$" in powershell
 
 
 def test_cosmos_container_partition_and_ttl_contracts_are_exact() -> None:
@@ -438,16 +487,33 @@ def test_cosmos_sql_rbac_is_container_scoped_and_capability_gated() -> None:
     main = _read(AZURE / "main.bicep")
     assert "00000000-0000-0000-0000-000000000001" in cosmos
     assert "00000000-0000-0000-0000-000000000002" in cosmos
-    for aggregate_scope in (
-        "sideEffectIdempotency.id",
-        "caseIndex.id",
-        "disposition.id",
-        "dispositionSyncState.id",
-        "chatSessions.id",
-        "chatMessages.id",
-        "chatQuota.id",
+    for scope_variable, container_name in (
+        ("sideEffectIdempotencyScope", "sideEffectIdempotencyContainerName"),
+        ("caseIndexScope", "caseIndexContainerName"),
+        ("dispositionScope", "dispositionContainerName"),
+        ("dispositionSyncStateScope", "dispositionSyncStateContainerName"),
+        ("chatSessionsScope", "chatSessionsContainerName"),
+        ("chatMessagesScope", "chatMessagesContainerName"),
+        ("chatQuotaScope", "chatQuotaContainerName"),
     ):
-        assert f"scope: {aggregate_scope}" in cosmos
+        assert (
+            f"var {scope_variable} = "
+            f"'${{account.id}}/dbs/${{databaseName}}/colls/${{{container_name}}}'"
+        ) in cosmos
+        assert f"scope: {scope_variable}" in cosmos
+    for container_resource in (
+        "sideEffectIdempotency",
+        "caseIndex",
+        "disposition",
+        "dispositionSyncState",
+        "chatSessions",
+        "chatMessages",
+        "chatQuota",
+    ):
+        # The role-assignment GUID references the container ARM ID, preserving an
+        # implicit deployment dependency while its scope uses the Cosmos data path.
+        assert f"guid({container_resource}.id," in cosmos
+    assert not re.search(r"\bscope:\s+\w+\.id\b", cosmos)
     for identity in ("analyzer", "embed", "disposition", "portal"):
         assert f"{identity}PrincipalId" in cosmos
         assert f"identities.outputs.{identity}.principalId" in main
@@ -472,8 +538,9 @@ def test_distributed_chat_quota_is_configurable_and_least_privilege() -> None:
     assert "chatQuotaContainerName: cosmos.outputs.chatQuotaContainerName" in main
     assert "PORTAL_CHAT_QUOTA_CONTAINER" in portal
     assert "PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED" in portal
+    assert "can retain at most 4096 recent request IDs" in main
     assert "resource portalChatQuotaContributor" in cosmos
-    assert "scope: chatQuota.id" in cosmos
+    assert "scope: chatQuotaScope" in cosmos
     for name in ("setup-and-deploy.sh", "setup-and-deploy.ps1"):
         script = _read(ROOT / "scripts" / name)
         for setting in (
