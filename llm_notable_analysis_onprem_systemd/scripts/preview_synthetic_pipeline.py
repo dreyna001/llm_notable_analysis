@@ -43,11 +43,11 @@ class PreviewAlertSpec:
 
 
 PREVIEW_ALERT_SPECS: tuple[PreviewAlertSpec, ...] = (
-    PreviewAlertSpec(1, "beaconing", "Malware Beaconing"),
-    PreviewAlertSpec(2, "impossible-travel", "Impossible Travel"),
-    PreviewAlertSpec(3, "powershell", "Suspicious PowerShell"),
-    PreviewAlertSpec(4, "privilege-escalation", "Privilege Escalation Attempt"),
-    PreviewAlertSpec(5, "lateral-movement-rdp", "Suspicious RDP Lateral Movement"),
+    PreviewAlertSpec(1, "beaconing", "Endpoint Beaconing to Newly Registered Domain"),
+    PreviewAlertSpec(2, "impossible-travel", "Microsoft Entra ID Impossible Travel with MFA"),
+    PreviewAlertSpec(3, "powershell", "Office Application Spawning Encoded PowerShell"),
+    PreviewAlertSpec(4, "privilege-escalation", "Non-Privileged User Added to Local Administrators"),
+    PreviewAlertSpec(5, "lateral-movement-rdp", "Service Account Interactive RDP to Tier-0 Asset"),
 )
 
 
