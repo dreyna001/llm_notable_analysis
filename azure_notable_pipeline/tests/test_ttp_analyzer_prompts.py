@@ -13,7 +13,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from azure_notable_pipeline.ttp_analyzer import (
-    AnthropicAnalyzer,
+    AzureOpenAIAnalyzer,
     REPAIR_PROMPT_TEMPLATE,
 )
 
@@ -22,7 +22,7 @@ class TTPAnalyzerPromptTests(unittest.TestCase):
     """Prompt layout and repair-template contract tests."""
 
     def setUp(self) -> None:
-        self.analyzer = AnthropicAnalyzer(deployment="test-model", gateway=object())
+        self.analyzer = AzureOpenAIAnalyzer(deployment="test-model", gateway=object())
 
     def test_build_prompt_is_contract_first_for_tool_mode(self) -> None:
         prompt = self.analyzer._build_prompt(

@@ -2,6 +2,8 @@ targetScope = 'resourceGroup'
 
 param keyVaultName string
 param secretReaderPrincipalIds array
+param customerManagedKeyEnabled bool = false
+param customerManagedKeyIdentityResourceId string = ''
 
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
   name: keyVaultName
@@ -19,5 +21,16 @@ resource secretReaderAssignments 'Microsoft.Authorization/roleAssignments@2022-0
     }
   }
 ]
+
+var keyVaultCryptoUserRoleId = 'e147488a-f6f5-4113-8e2d-b22465e65bf6'
+resource customerManagedKeyAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (customerManagedKeyEnabled) {
+  name: guid(keyVault.id, customerManagedKeyIdentityResourceId, keyVaultCryptoUserRoleId)
+  scope: keyVault
+  properties: {
+    principalId: reference(customerManagedKeyIdentityResourceId, '2018-11-30').principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', keyVaultCryptoUserRoleId)
+  }
+}
 
 output keyVaultUri string = keyVault.properties.vaultUri

@@ -11,6 +11,7 @@ from azure_notable_pipeline.case_chat_history import (
     ChatSessionNotFoundError,
     delete_last_chat_turn,
     get_chat_session_messages,
+    get_idempotent_chat_response,
     list_chat_sessions,
     persist_chat_history,
     truncate_stored_message,
@@ -273,6 +274,50 @@ def test_client_request_id_makes_turn_persistence_idempotent() -> None:
     assert persist_chat_history(**kwargs) == session_id
     assert len(store.messages[session_id]) == 2
     assert store.sessions[session_id]["message_count"] == 2
+
+
+def test_completed_client_request_replays_with_fingerprint_before_model_or_quota() -> None:
+    store = FakeChatStore()
+    config = history_config()
+    kwargs = {
+        "config": config,
+        "cosmos_store": store,
+        "mode": "selected_case",
+        "question": "What happened?",
+        "selected_case_id": "case-1",
+        "requested_session_id": None,
+        "user_id": "user-1",
+        "response": {"answer": "Recovered.", "answer_status": "answered"},
+        "client_request_id": "request-0002",
+    }
+    session_id = persist_chat_history(**kwargs)
+
+    replay = get_idempotent_chat_response(
+        config=config,
+        cosmos_store=store,
+        mode="selected_case",
+        selected_case_id="case-1",
+        question="What happened?",
+        requested_session_id=None,
+        user_id="user-1",
+        client_request_id="request-0002",
+    )
+    assert replay == {
+        "answer": "Recovered.",
+        "answer_status": "answered",
+        "session_id": session_id,
+    }
+    with pytest.raises(ValueError, match="reused"):
+        get_idempotent_chat_response(
+            config=config,
+            cosmos_store=store,
+            mode="selected_case",
+            selected_case_id="case-1",
+            question="Different question",
+            requested_session_id=None,
+            user_id="user-1",
+            client_request_id="request-0002",
+        )
 
 
 def test_failed_message_write_releases_reserved_capacity() -> None:

@@ -255,6 +255,42 @@ class CosmosStore:
         body["id"] = case_id
         return self.create_if_absent(container_name, body)
 
+    def publish_case_run_if_latest(
+        self,
+        container_name: str,
+        *,
+        case_id: str,
+        run_id: str,
+        run_record: Mapping[str, Any],
+        expected_etag: str,
+        processed_at: str,
+    ) -> ConditionalOutcome:
+        """Publish an immutable run while preserving a newer latest pointer."""
+
+        body = self.get_case(container_name, _required_text(case_id, "case_id"))
+        if body is None:
+            return ConditionalOutcome(False, "not_found")
+        runs = body.get("runs")
+        run_map = dict(runs) if isinstance(runs, Mapping) else {}
+        run_map[_required_text(run_id, "run_id")] = dict(run_record)
+        replacement = dict(body)
+        replacement["runs"] = run_map
+        current_latest = str(body.get("latest_run_at") or "")
+        if not current_latest or str(processed_at) >= current_latest:
+            replacement.update(
+                {
+                    "latest_run_id": run_id,
+                    "latest_run_key": str(run_record.get("envelope_key") or ""),
+                    "latest_run_at": processed_at,
+                    "case_envelope_key": str(run_record.get("envelope_key") or ""),
+                }
+            )
+        return self.replace_if_match(
+            container_name,
+            replacement,
+            expected_etag=_required_text(expected_etag, "expected_etag"),
+        )
+
     def update_case_retrieval_status(
         self,
         container_name: str,

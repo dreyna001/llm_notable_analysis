@@ -216,7 +216,7 @@ def read_blob_result(
             }
         )
     if max_bytes is not None:
-        download_kwargs["length"] = max_bytes + 1
+        download_kwargs.update(offset=0, length=max_bytes + 1)
     try:
         downloader = sdk_client.download_blob(**download_kwargs)
         body = downloader.readall()

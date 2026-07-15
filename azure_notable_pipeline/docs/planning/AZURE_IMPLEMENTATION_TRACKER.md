@@ -78,7 +78,7 @@ remain assigned to their owning implementation phase.
   and report-facing output contract. The runtime performs no transport retry;
   the Anthropic SDK client is the sole transport retry owner.
 - `azure_anthropic_gateway.py` calls native `AnthropicFoundry.messages.create()`
-  with deployment default `claude-sonnet-4-6`, forced `analyze_notable` tool use,
+  with a customer-provided Azure OpenAI deployment, forced `analyze_notable` tool use,
   `disable_parallel_tool_use=true`, and no thinking, effort, raw-JSON, Azure
   OpenAI, or API-key fallback path.
 - Focused analyzer/gateway/prompt/golden suite: `20 passed, 1 skipped`, plus 3
@@ -250,22 +250,21 @@ remain assigned to their owning implementation phase.
 ## Phase 3 private portal infrastructure verification log
 
 - The root conditionally deploys one portal Function App from the same immutable
-  digest, APIM Standard v2, Front Door Premium, and a dedicated private/keyless
+  digest, Front Door Premium, and a dedicated private/keyless
   `$web` static website for `core,analyst_portal`. Portal app settings preserve
   the 225-second runtime timeout and native Cosmos, Blob, Search, and OpenAI
   contracts without Azure service keys or connection strings.
 - Front Door sends all `/api/*` traffic, including chat, plus authenticated
-  `/health` and `/ready` to the private APIM `Gateway` origin, and uses a private
-  Storage `web` origin for the SPA. APIM gives only the imported chat operation
-  a 230-second backend timeout; all other operations keep the 30-second API
-  default. API routes have no cache configuration and all single-origin groups
+  `/health` and `/ready` directly to the private Function `sites` origin, and
+  uses a private Storage `web` origin for the SPA. API routes have no cache
+  configuration and all single-origin groups
   omit unauthenticated health probes.
 - Bash and PowerShell deployment gates build/test and upload the SPA with Entra
   auth, approve and poll both generated Front Door managed private endpoint
-  connections, then disable APIM public access. They verify direct APIM denial,
+  connections. They verify direct Function denial,
   disabled Function/Storage public access, and authenticated Front Door `/ready`
   without logging the bearer token. Both scripts fail before mutation when Entra
-  `iam` mode omits its required app role, preventing an empty APIM/Easy Auth role
+  `iam` mode omits its required app role, preventing an empty Function role
   contract from reaching deployment.
 - Bicep CLI 0.45.15 compiles the root and every module. The focused static
   infrastructure/scaffold gate reports `22 passed`; Bash syntax validation and

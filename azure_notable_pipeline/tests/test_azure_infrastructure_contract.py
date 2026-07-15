@@ -72,12 +72,27 @@ def test_four_identities_receive_acr_and_host_storage_contracts() -> None:
     assert "container-registry-access.bicep" in main
 
 
-def test_analyzer_has_foundry_and_polling_blob_trigger_rbac() -> None:
+def test_analyzer_has_azure_openai_and_polling_blob_trigger_rbac() -> None:
     main = _read(AZURE / "main.bicep")
     analyzer = _read(AZURE / "modules" / "functions-analyzer.bicep")
-    foundry = _read(AZURE / "modules" / "foundry-access.bicep")
-    assert "foundry-access.bicep" in main
-    assert "a97b65f3-24c7-4388-baec-2e87135dc908" in foundry
+    openai = _read(AZURE / "modules" / "openai-access.bicep")
+    search = _read(AZURE / "modules" / "search-access.bicep")
+    assert "openai-access.bicep" in main
+    assert "5e0bd9bd-7b93-4f28-af87-19fc36ad61bd" in openai
+    assert "analyzerPrincipalId: identities.outputs.analyzer.principalId" in main
+    assert "resource analyzerOpenAiAccess" in openai
+    assert "analyzerPrincipalId: identities.outputs.analyzer.principalId" in main
+    assert "searchIndexDataContributorRoleId = '8ebe5a00-799e-43f5-93ac-243d3dce84a7'" in search
+    assert "resource analyzerIndexContributor" in search
+    assert "resource portalIndexReader" in search
+    assert "principalIds array" not in search
+    assert "content_vector must be 1024 dimensions" in main
+    assert "RAG_INGEST_QUEUE_NAME" in analyzer
+    assert "rag-ingest-invocations" in _read(AZURE / "modules" / "storage.bicep")
+    assert "ragIngestPoisonQueue" in _read(AZURE / "modules" / "storage.bicep")
+    assert "ragSourceBlobReader" in analyzer
+    assert "AZURE_OPENAI_ANALYSIS_DEPLOYMENT" in analyzer
+    assert "AZURE_AI_FOUNDRY" not in analyzer
     assert "blobOwnerRoleId" in analyzer
     assert "queueContributorRoleId" in analyzer
     assert "InputStorage__blobServiceUri" in analyzer
@@ -90,7 +105,10 @@ def test_single_digest_image_and_wrapper_isolation_are_explicit() -> None:
     embed = _read(AZURE / "modules" / "functions-embed.bicep")
     disposition = _read(AZURE / "modules" / "functions-disposition.bicep")
     portal = _read(AZURE / "modules" / "functions-portal.bicep")
-    assert main.count("containerImageUri: ContainerImageUri") == 4
+    assert main.count("containerImageUri: validatedContainerImageUri") == 4
+    assert "usgovvirginia" in main
+    assert "AzureUSGovernment" in main
+    assert "@sha256:" in main
     assert "@sha256" in main
     expected_wrappers = {
         "intake_blob": {"analyzer": "false", "embed": "true", "disposition": "true", "portal": "true"},
@@ -136,27 +154,14 @@ def test_portal_storage_function_and_identity_contracts_are_private_and_keyless(
     assert "1407120a-92aa-4202-b7e9-c0e197c71c8f" in search
 
 
-def test_apim_is_standard_v2_authenticated_and_staged_for_private_only_access() -> None:
+def test_portal_edge_uses_frontdoor_private_link_directly_to_function() -> None:
     main = _read(AZURE / "main.bicep")
-    apim = _read(AZURE / "modules" / "apim-portal.bicep")
-    assert "@allowed(['StandardV2'])" in main
-    assert "publicNetworkAccess: 'Enabled'" in apim
-    assert "virtualNetworkConfiguration" in apim
-    assert "format: 'openapi+json'" in apim
-    assert "validate-jwt" in apim
-    assert "openid-config" in apim
-    assert "require-scheme=\"Bearer\"" in apim
-    assert "require-expiration-time=\"true\"" in apim
-    assert "<claim name=\"sub\"" in apim
-    assert "GetValueOrDefault(&quot;roles&quot;" in apim
-    assert "GetValueOrDefault(&quot;scp&quot;" in apim
-    assert "code=\"403\" reason=\"Forbidden\"" in apim
-    assert "forward-request timeout=\"30\"" in apim
-    assert "name: 'api_chat_api_chat_post'" in apim
-    assert "forward-request timeout=\"230\"" in apim
-    openapi = json.loads(_read(ROOT / "docs" / "contracts" / "portal.openapi.json"))
-    chat_operation_id = openapi["paths"]["/api/chat"]["post"]["operationId"]
-    assert f"name: '{chat_operation_id}'" in apim
+    frontdoor = _read(AZURE / "modules" / "frontdoor-portal.bicep")
+    assert "ApiManagement" not in main
+    assert "portalFunctionId" in frontdoor
+    assert "portalFunctionHostName" in frontdoor
+    assert "groupId: 'sites'" in frontdoor
+    assert "Front Door private portal Function origin" in frontdoor
 
 
 def test_frontdoor_routes_private_origins_without_single_origin_probes_or_api_cache() -> None:
@@ -167,7 +172,7 @@ def test_frontdoor_routes_private_origins_without_single_origin_probes_or_api_ca
     assert "patternsToMatch: ['/health']" in frontdoor
     assert "patternsToMatch: ['/ready']" in frontdoor
     assert "patternsToMatch: ['/', '/index.html']" in frontdoor
-    for group_id in ("'web'", "'Gateway'"):
+    for group_id in ("'web'", "'sites'"):
         assert f"groupId: {group_id}" in frontdoor
     assert "resource chatOrigin" not in frontdoor
     assert "resource chatRoute" not in frontdoor
@@ -177,17 +182,14 @@ def test_frontdoor_routes_private_origins_without_single_origin_probes_or_api_ca
     assert "cacheConfiguration:" not in api_prefix
 
 
-def test_portal_deploy_flow_approves_every_origin_before_disabling_apim() -> None:
+def test_portal_deploy_flow_approves_every_private_origin() -> None:
     for name in ("setup-and-deploy.sh", "setup-and-deploy.ps1"):
         script = _read(ROOT / "scripts" / name)
-        assert "portal-apim" in script
+        assert "portal-function" in script
         assert "portal-web" in script
         assert "private-endpoint-connection approve" in script
         assert "sharedPrivateLinkResource.status" in script
-        assert "properties.publicNetworkAccess=Disabled" in script
-        assert script.index("sharedPrivateLinkResource.status") < script.rindex(
-            "properties.publicNetworkAccess=Disabled"
-        )
+        assert "publicNetworkAccess" in script
         assert "PORTAL_VALIDATION_BEARER_TOKEN" in script
         assert (
             "PORTAL_ENTRA_REQUIRED_APP_ROLE is required when the analyst portal is enabled."
@@ -201,7 +203,7 @@ def test_portal_deploy_flow_approves_every_origin_before_disabling_apim() -> Non
         assert "storage blob upload-batch" in script
         assert "--auth-mode login" in script
         assert "VITE_PORTAL_API_BASE_URL" in script
-        assert "providers/Microsoft.ApiManagement/service/" in script
+        assert "functionapp show" in script
         assert "AZURE_DEPLOYMENT_PREFIX" in script
         for oidc_setting in (
             "PORTAL_OIDC_CLIENT_ID",
@@ -211,11 +213,11 @@ def test_portal_deploy_flow_approves_every_origin_before_disabling_apim() -> Non
             assert oidc_setting in script
         assert "privateLinkServiceConnectionState.description" in script
         assert "Front Door private static website origin" in script
-        assert "Front Door private APIM origin" in script
+        assert "Front Door private portal Function origin" in script
         assert "Front Door private chat origin" not in script
 
 
-def test_deployment_preflights_run_before_azure_mutation_and_cleanup_apim() -> None:
+def test_deployment_preflights_run_before_azure_mutation() -> None:
     for name in ("setup-and-deploy.sh", "setup-and-deploy.ps1"):
         script = _read(ROOT / "scripts" / name)
         mutation = script.index("az group create")
@@ -228,16 +230,7 @@ def test_deployment_preflights_run_before_azure_mutation_and_cleanup_apim() -> N
             "npm --prefix frontend/analyst-portal run build",
         ):
             assert script.index(gate) < mutation
-        assert script.count("properties.publicNetworkAccess=Disabled") >= 2
-
-    bash = _read(ROOT / "scripts" / "setup-and-deploy.sh")
-    powershell = _read(ROOT / "scripts" / "setup-and-deploy.ps1")
-    assert bash.index('apim_id="$(az apim show') < bash.index(
-        'verify_no_forbidden_settings "${portal_name}"'
-    )
-    assert powershell.index('$apimId = "$(az apim show') < powershell.index(
-        "Assert-NoForbiddenSettings -App $portal"
-    )
+        assert "Front Door private portal Function origin" in script
 
 
 def test_deployment_scripts_gate_on_host_identity_storage_and_exact_functions() -> None:
@@ -342,7 +335,8 @@ def test_storage_and_functions_resilience_are_guarded_and_per_app_host_capable()
     assert "hostEndpointSpecs = flatten" in network
     assert "StorageSkuName string = 'Standard_LRS'" in main
     assert "@allowed(['Standard_LRS', 'Standard_ZRS'])" in main
-    assert "BlobDataProtectionEnabled must be true" in main
+    assert "var validatedBlobDataProtection = BlobDataProtectionEnabled" in main
+    assert "var validatedCosmosContinuousBackup = CosmosContinuousBackupEnabled" in main
     assert "isVersioningEnabled: blobDataProtectionEnabled" in storage
     assert "containerDeleteRetentionPolicy" in storage
     assert "previousVersionRetentionDays" in storage
@@ -360,29 +354,11 @@ def test_storage_and_functions_resilience_are_guarded_and_per_app_host_capable()
         assert "minimumElasticInstanceCount: zoneRedundant ? 2 : 1" in function_module
 
 
-def test_apim_outbound_integration_subnet_has_required_dedicated_nsg() -> None:
+def test_portal_edge_does_not_provision_an_unused_apim_subnet() -> None:
     network = _read(AZURE / "modules" / "network.bicep")
-    assert "resource apimNetworkSecurityGroup" in network
-    assert "networkSecurityGroup:" in network
-    assert "id: apimNetworkSecurityGroup.id" in network
+    assert "apim" not in network.lower()
     assert "serviceName: 'Microsoft.Web/serverFarms'" in network
-    for rule_name, destination in (
-        ("AllowAzureStorageHttpsOutbound", "Storage"),
-        ("AllowAzureKeyVaultHttpsOutbound", "AzureKeyVault"),
-        ("AllowEntraHttpsOutbound", "AzureActiveDirectory"),
-        ("AllowBackendHttpsOutbound", "VirtualNetwork"),
-    ):
-        rule_start = network.index(f"name: '{rule_name}'")
-        rule_end = network.index("\n      }", rule_start)
-        rule = network[rule_start:rule_end]
-        assert "direction: 'Outbound'" in rule
-        assert "access: 'Allow'" in rule
-        assert "protocol: 'Tcp'" in rule
-        assert "destinationPortRange: '443'" in rule
-        assert f"destinationAddressPrefix: '{destination}'" in rule
-    # Do not deny all Internet egress until TLS revocation and APIM platform/monitor
-    # dependencies have explicit allow rules.
-    assert "name: 'DenyOtherOutbound'" not in network
+    assert "private-endpoints" in network
 
 
 def test_deployment_scripts_pass_and_preflight_production_resilience_contracts() -> None:
@@ -402,8 +378,8 @@ def test_deployment_scripts_pass_and_preflight_production_resilience_contracts()
             "COSMOS_ZONE_REDUNDANT",
         ):
             assert setting in script
-        assert "BLOB_DATA_PROTECTION_ENABLED=true is required for production." in script
-        assert "COSMOS_CONTINUOUS_BACKUP_ENABLED=true is required for production." in script
+        assert "BLOB_DATA_PROTECTION_ENABLED=true is required for production." not in script
+        assert "COSMOS_CONTINUOUS_BACKUP_ENABLED=true is required for production." not in script
         assert "FUNCTION_PLAN_ZONE_REDUNDANT=true requires STORAGE_SKU_NAME=Standard_ZRS." in script
         assert "backupPolicy.type" in script
         assert "existing Periodic Cosmos account is one-way" in script
@@ -650,7 +626,6 @@ def test_monitoring_alerts_are_conditional_complete_and_action_group_only() -> N
     for alert_signal in (
         "function-failures",
         "function-timeouts",
-        "ModelRequests",
         "AzureOpenAIRequests",
         "TotalRequests",
         "Percentage5XX",

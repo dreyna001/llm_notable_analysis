@@ -1,8 +1,8 @@
 # Azure analyst portal operations
 
 The browser, API, and chat share one Front Door Premium hostname. Static `$web`,
-APIM Standard v2, and the portal Function backend are private. Front Door sends
-all API requests through APIM; direct origin access must fail. Every API route,
+the portal Function backend, and the `$web` origin are private. Front Door sends
+all API requests directly to the Function; direct origin access must fail. Every API route,
 including `/health` and `/ready`, requires a valid bearer token.
 
 ## Authentication and ownership
@@ -21,8 +21,7 @@ Before enablement, test missing, expired, wrong-issuer, wrong-audience,
 missing-`sub`, and missing-role tokens. Use two valid test identities to prove
 one cannot read, append to, or delete the other's chat session. Run the copied
 OpenAPI contract unchanged. Browser chat timeout is 220 seconds, Function
-timeout 225 seconds, the chat-operation APIM timeout 230 seconds, and Front Door
-origin timeout 240 seconds. Non-chat APIM operations retain 30 seconds.
+timeout 225 seconds and Front Door origin timeout 240 seconds.
 
 ## Chat abuse and cost controls
 
@@ -89,9 +88,9 @@ authenticate.
 
 ## Operations and recovery
 
-Monitor Front Door/APIM 5xx, portal Function failures/timeouts, Cosmos 429s,
+Monitor Front Door 5xx, portal Function failures/timeouts, Cosmos 429s,
 OpenAI errors, synthetic failure, and chat context/latency. A failed `/ready`
-requires checking Front Door private-link approval, APIM public-network state,
+requires checking Front Door private-link approval, Function public-network state,
 Function health, identity/RBAC, Cosmos, Search, and OpenAI—not bypassing the
 edge.
 
@@ -108,7 +107,7 @@ traces
 ```
 
 Deploy UI and API together when their contract changes. Roll back to the last
-qualified UI artifact plus immutable Function image digest. Never make APIM,
+qualified UI artifact plus immutable Function image digest. Never make Function,
 Function, or `$web` public to recover service. If the synthetic credential
 fails, rotate it through the customer IdP and prove an analyst identity still
 works before classifying the event as application downtime.

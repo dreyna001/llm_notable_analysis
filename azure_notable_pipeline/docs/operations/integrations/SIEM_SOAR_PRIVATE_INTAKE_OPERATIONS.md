@@ -50,3 +50,8 @@ reason, and outcome. Never replay all poison queues blindly.
 
 Rollback disables the producer or bridge and leaves queued/durable objects for
 reconciliation. It does not enable public storage or delete failed evidence.
+
+For Splunk SOAR/Phantom, the optional producer helper is documented at
+[`scripts/soar_playbook/README.md`](../../../scripts/soar_playbook/README.md).
+It is customer-configurable for managed identity or runtime-injected service
+principal use and contains no secret values.

@@ -1,6 +1,7 @@
 targetScope = 'resourceGroup'
 
 param openAiAccountName string
+param analyzerPrincipalId string = ''
 param embedPrincipalId string
 param portalPrincipalId string = ''
 
@@ -14,6 +15,16 @@ resource embedOpenAiAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' 
   scope: openAi
   properties: {
     principalId: embedPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', openAiUserRoleId)
+  }
+}
+
+resource analyzerOpenAiAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(analyzerPrincipalId)) {
+  name: guid(openAi.id, analyzerPrincipalId, openAiUserRoleId)
+  scope: openAi
+  properties: {
+    principalId: analyzerPrincipalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', openAiUserRoleId)
   }

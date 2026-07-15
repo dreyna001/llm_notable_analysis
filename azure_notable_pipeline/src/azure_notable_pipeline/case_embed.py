@@ -7,9 +7,10 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from .azure_openai_gateway import embed_texts
+from .azure_search_retrieval import application_managed_search_enabled, config_value, tenant_id_for
 from .blob_store import delete_blobs, list_blobs, read_blob, write_blob
 from .config import Config
 from .cosmos_store import CosmosStore
@@ -73,6 +74,7 @@ def embed_case_envelope(
     blob_store: Any | None = None,
     cosmos: CosmosStore | Any | None = None,
     embedding_gateway: Any | None = None,
+    search_adapter: Any | None = None,
 ) -> EmbedResult:
     """Load one envelope, replace its chunks, and converge Cosmos retrieval state."""
 
@@ -88,14 +90,24 @@ def embed_case_envelope(
         if not case_id:
             raise ValueError("case envelope is missing case_id")
         chunks = build_case_chunks(envelope, config)
-        rewrite_case_chunks(
-            container_name=container_name,
-            case_id=case_id,
-            chunks=chunks,
-            config=config,
-            blob_store=blob_store,
-            embedding_gateway=embedding_gateway,
-        )
+        if application_managed_search_enabled(config, case=True):
+            rewrite_case_chunks_in_search(
+                case_id=case_id,
+                envelope=envelope,
+                chunks=chunks,
+                config=config,
+                embedding_gateway=embedding_gateway,
+                search_adapter=search_adapter,
+            )
+        else:
+            rewrite_case_chunks(
+                container_name=container_name,
+                case_id=case_id,
+                chunks=chunks,
+                config=config,
+                blob_store=blob_store,
+                embedding_gateway=embedding_gateway,
+            )
         update_retrieval_status(
             cosmos=persistence,
             config=config,
@@ -220,6 +232,113 @@ def rewrite_case_chunks(
             overwrite=True,
             store=blob_store,
         )
+
+
+def rewrite_case_chunks_in_search(
+    *,
+    case_id: str,
+    envelope: dict[str, Any],
+    chunks: list[CaseChunk],
+    config: Config,
+    embedding_gateway: Any | None = None,
+    search_adapter: Any | None = None,
+) -> str:
+    """Stage a complete case generation, then deactivate the prior generation."""
+
+    from .azure_search_adapter import AzureSearchAdapter, build_filter
+
+    index_name = str(
+        config_value(
+            config,
+            "CASE_QA_AZURE_SEARCH_INDEX",
+            config_value(config, "CASE_AZURE_SEARCH_INDEX", ""),
+        )
+        or ""
+    ).strip()
+    if not index_name:
+        raise ValueError("CASE_QA_AZURE_SEARCH_INDEX is required for Search case embedding")
+    tenant_id = tenant_id_for(config, required=True)
+    adapter = search_adapter or AzureSearchAdapter.from_config(config, index_name=index_name)
+    generation = case_generation_id(envelope)
+    vectors = embed_texts(
+        [chunk.search_text for chunk in chunks],
+        gateway=embedding_gateway,
+        deployment=getattr(config, "AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT", "") or None,
+    )
+    if len(vectors) != len(chunks):
+        raise ValueError("embedding response count did not match case chunks")
+    expected_dimensions = int(getattr(config, "CASE_QA_VECTOR_DIMENSIONS", 1024))
+    if any(len(vector) != expected_dimensions for vector in vectors):
+        raise ValueError("Azure OpenAI embedding dimensions did not match config")
+    documents: list[dict[str, Any]] = []
+    for chunk, embedding in zip(chunks, vectors, strict=True):
+        body = {
+            "id": f"{chunk.chunk_id}:{generation}",
+            "document_id": f"{chunk.chunk_id}:{generation}",
+            "chunk_id": chunk.chunk_id,
+            "case_id": case_id,
+            "tenant_id": tenant_id,
+            "corpus_id": "case_chunks",
+            "run_id": generation,
+            "active": True,
+            "text": chunk.text,
+            "search_text": chunk.search_text,
+            "embedding": embedding,
+            "embedding_model": getattr(config, "AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT", ""),
+            "source_container": container_name_for_case(config),
+            "source_blob_name": str(envelope.get("source", {}).get("input_key", ""))
+            if isinstance(envelope.get("source"), dict)
+            else "",
+            "source_file": str(chunk.metadata.get("source_filename", "")),
+            "section": chunk.section,
+            "field_path": chunk.field_path,
+            "metadata": dict(chunk.metadata),
+            "created_at": _utc_now(),
+        }
+        documents.append(body)
+    if hasattr(adapter, "upload_documents"):
+        adapter.upload_documents(index=index_name, documents=documents)
+    else:
+        adapter.index_documents(index=index_name, documents=documents)
+
+    old_documents = adapter.search(
+        index=index_name,
+        filter=build_filter(
+            tenant_id=tenant_id,
+            corpus_id="case_chunks",
+            case_id=case_id,
+            active_only=True,
+        ),
+        select=["id", "run_id"],
+        top=10_000,
+    )
+    old_ids = [
+        str(document.get("id", ""))
+        for document in old_documents
+        if str(document.get("run_id", "")) != generation
+        and str(document.get("id", "")).strip()
+    ]
+    if old_ids:
+        tombstones = [{"id": value, "active": False, "tombstoned_at": _utc_now()} for value in old_ids]
+        if hasattr(adapter, "merge_documents"):
+            adapter.merge_documents(index=index_name, documents=tombstones)
+        else:
+            adapter.update_documents(index=index_name, documents=tombstones)
+    return generation
+
+
+def case_generation_id(envelope: Mapping[str, Any]) -> str:
+    """Derive a replay-stable generation from the immutable envelope content."""
+
+    explicit = str(envelope.get("run_id") or envelope.get("analysis_run_id") or "").strip()
+    if explicit:
+        return _safe_component(explicit)[:64]
+    canonical = json.dumps(envelope, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:24]
+
+
+def container_name_for_case(config: Any) -> str:
+    return str(getattr(config, "CASE_ARCHIVE_CONTAINER", "output") or "output")
 
 
 def update_retrieval_status(
@@ -360,4 +479,14 @@ def _utc_now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-__all__ = ["CaseChunk", "EmbedResult", "build_case_chunks", "build_chunk_id", "embed_case_envelope", "rewrite_case_chunks", "update_retrieval_status"]
+__all__ = [
+    "CaseChunk",
+    "EmbedResult",
+    "build_case_chunks",
+    "build_chunk_id",
+    "case_generation_id",
+    "embed_case_envelope",
+    "rewrite_case_chunks",
+    "rewrite_case_chunks_in_search",
+    "update_retrieval_status",
+]

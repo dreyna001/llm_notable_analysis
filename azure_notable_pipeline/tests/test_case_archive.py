@@ -27,6 +27,39 @@ class FakeCosmos:
         return SimpleNamespace(created=True)
 
 
+class ImmutableFakeCosmos(FakeCosmos):
+    def __init__(self):
+        super().__init__()
+        self.etag = 0
+
+    def get_case(self, container, case_id):
+        value = super().get_case(container, case_id)
+        return {**value, "_etag": str(self.etag)} if value else None
+
+    def create_case_if_absent(self, container, item):
+        self.etag += 1
+        self.item = {**item, "_etag": str(self.etag)}
+        self.creates.append(item)
+        return SimpleNamespace(created=True, item=dict(self.item))
+
+    def replace_if_match(self, _container, item, *, expected_etag):
+        if str(expected_etag) != str(self.etag):
+            return SimpleNamespace(applied=False, outcome="precondition_failed")
+        self.etag += 1
+        self.item = {**item, "_etag": str(self.etag)}
+        return SimpleNamespace(applied=True, outcome="replaced", item=dict(self.item))
+
+    def publish_case_run_if_latest(self, _container, *, run_id, run_record, **_kwargs):
+        self.item["runs"] = {**self.item.get("runs", {}), run_id: dict(run_record)}
+        self.item["latest_run_id"] = run_id
+        self.item["latest_run_key"] = run_record["envelope_key"]
+        self.item["latest_run_at"] = run_record["completed_at"]
+        self.item["case_envelope_key"] = run_record["envelope_key"]
+        self.etag += 1
+        self.item["_etag"] = str(self.etag)
+        return SimpleNamespace(applied=True, outcome="replaced", item=dict(self.item))
+
+
 def _config(**overrides):
     values = {
         "CASE_ARCHIVE_ENABLED": True,
@@ -109,6 +142,33 @@ def test_oversized_payload_marks_missing_without_truncation(monkeypatch):
     envelope = json.loads(writes[0][2])
     assert result.source_completeness == "missing_alert"
     assert envelope["alert_payload"] is None
+
+
+def test_etag_processing_identity_writes_immutable_run_and_publishes_latest(monkeypatch):
+    writes = []
+    monkeypatch.setattr(case_archive, "write_blob", lambda *args, **kwargs: writes.append((args, kwargs)))
+    cosmos = ImmutableFakeCosmos()
+    source = SourceContext(
+        "input", "incoming/example.json", "example.json", "json", False,
+        source_etag='"etag-1"',
+    )
+
+    first = archive_case(
+        analysis_result=_analysis(), config=_config(), source=source,
+        sink_result=_sink(), cosmos=cosmos, processed_at="2026-06-15T10:30:00Z",
+    )
+    second = archive_case(
+        analysis_result=_analysis(), config=_config(), source=source,
+        sink_result=_sink(), cosmos=cosmos, processed_at="2026-06-15T10:30:00Z",
+    )
+
+    assert first.status == "success"
+    assert "/run-" in first.case_envelope_key
+    assert writes[0][1]["overwrite"] is False
+    assert cosmos.item["latest_run_id"].startswith("run-")
+    assert second.status == "success"
+    assert "replay" in second.message
+    assert len(writes) == 1
 
 
 def test_fallback_case_identity_uses_full_source_location(monkeypatch):

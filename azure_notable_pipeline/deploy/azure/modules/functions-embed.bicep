@@ -18,9 +18,12 @@ param applicationInsightsConnectionString string
 param azureOpenAiEndpoint string = ''
 param azureOpenAiApiVersion string = '2024-10-21'
 param azureOpenAiEmbeddingsDeployment string = ''
+@minValue(1)
+param caseEmbedQueueTtlSeconds int = 86400
 param cosmosEndpoint string
 param cosmosDatabaseName string
 param caseIndexContainerName string = ''
+param caseQaAzureSearchIndex string = ''
 param capabilityProfiles string = 'core'
 param zoneRedundant bool = false
 
@@ -51,9 +54,12 @@ var applicationSettings = [
   { name: 'AZURE_OPENAI_ENDPOINT', value: azureOpenAiEndpoint }
   { name: 'AZURE_OPENAI_API_VERSION', value: azureOpenAiApiVersion }
   { name: 'AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT', value: azureOpenAiEmbeddingsDeployment }
+  { name: 'CASE_EMBED_QUEUE_TTL_SECONDS', value: string(caseEmbedQueueTtlSeconds) }
   { name: 'COSMOS_ENDPOINT', value: cosmosEndpoint }
   { name: 'COSMOS_DATABASE_NAME', value: cosmosDatabaseName }
   { name: 'CASE_INDEX_CONTAINER', value: caseIndexContainerName }
+  { name: 'CASE_QA_RETRIEVAL_BACKEND', value: 'azure_search' }
+  { name: 'CASE_QA_AZURE_SEARCH_INDEX', value: caseQaAzureSearchIndex }
   { name: 'CAPABILITY_PROFILES', value: capabilityProfiles }
   { name: 'AzureWebJobs.intake_blob.Disabled', value: 'true' }
   { name: 'AzureWebJobs.analyzer_queue.Disabled', value: 'true' }

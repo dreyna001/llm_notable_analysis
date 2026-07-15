@@ -21,6 +21,7 @@ if app is not None:
         publish_blob_trigger_input,
     )
     from .embed_handler import dispatch_embed_queue_message
+    from .rag_ingest_handler import dispatch_queue_message
     from .disposition_sync_handler import handle_timer
     from .portal_handler import handle_request
     from .queue_monitor import emit_queue_depth_traces
@@ -69,6 +70,21 @@ if app is not None:
             dispatch_embed_queue_message(message.get_body())
         except Exception:
             logger.exception("Case embed queue processing failed")
+            raise
+
+    @app.function_name(name="rag_ingest_queue")
+    @app.queue_trigger(
+        arg_name="message",
+        queue_name="%RAG_INGEST_QUEUE_NAME%",
+        connection="OutputStorage",
+    )
+    def rag_ingest_queue(message: func.QueueMessage) -> None:
+        """Validate and ingest one immutable manifest; failures reach poison handling."""
+
+        try:
+            dispatch_queue_message(message.get_body())
+        except Exception:
+            logger.exception("RAG manifest ingestion failed")
             raise
 
     @app.function_name(name="disposition_sync_timer")

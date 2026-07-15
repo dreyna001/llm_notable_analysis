@@ -14,7 +14,6 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from urllib.parse import urlparse
 
-from anthropic import AnthropicFoundry
 from azure.cosmos import CosmosClient
 from azure.identity import ManagedIdentityCredential, get_bearer_token_provider
 from azure.keyvault.secrets import SecretClient
@@ -23,12 +22,10 @@ from azure.storage.blob import BlobServiceClient
 from azure.storage.queue import QueueClient
 from openai import AzureOpenAI
 
-_AI_FOUNDRY_SCOPE = "https://ai.azure.com/.default"
-_COGNITIVE_SERVICES_SCOPE = "https://cognitiveservices.azure.com/.default"
+_COGNITIVE_SERVICES_SCOPE = "https://cognitiveservices.azure.us/.default"
 _CONNECT_TIMEOUT_SECONDS = 10
 _READ_TIMEOUT_SECONDS = 60
 _OPENAI_TIMEOUT_SECONDS = 220
-_ANTHROPIC_TIMEOUT_SECONDS = 300
 _MAX_RETRIES = 2
 
 
@@ -83,6 +80,23 @@ def _service_url(
     elif parsed.path not in {"", "/"}:
         raise AzureClientConfigurationError(
             f"{setting_name} must identify the service root"
+        )
+    return url
+
+
+def _sovereign_service_url(
+    value: str,
+    *,
+    setting_name: str,
+    host_suffixes: tuple[str, ...],
+) -> str:
+    """Validate a production Azure Government data-plane endpoint."""
+
+    url = _service_url(value, setting_name=setting_name)
+    hostname = (urlparse(url).hostname or "").lower().rstrip(".")
+    if not any(hostname.endswith(suffix) for suffix in host_suffixes):
+        raise AzureClientConfigurationError(
+            f"{setting_name} must use an Azure Government endpoint"
         )
     return url
 
@@ -198,9 +212,14 @@ def blob_service_client(account_url: str) -> BlobServiceClient:
         )
 
     return BlobServiceClient(
-        account_url=_service_url(
+        account_url=_sovereign_service_url(
             account_url,
             setting_name="storage account URL",
+            host_suffixes=(
+                ".blob.core.usgovcloudapi.net",
+                ".queue.core.usgovcloudapi.net",
+                ".table.core.usgovcloudapi.net",
+            ),
         ),
         credential=_credential(),
         connection_timeout=_CONNECT_TIMEOUT_SECONDS,
@@ -213,7 +232,11 @@ def secret_client(vault_url: str) -> SecretClient:
     """Create a managed-identity Key Vault secret client."""
 
     return SecretClient(
-        vault_url=_service_url(vault_url, setting_name="KEY_VAULT_URI"),
+        vault_url=_sovereign_service_url(
+            vault_url,
+            setting_name="KEY_VAULT_URI",
+            host_suffixes=(".vault.usgovcloudapi.net",),
+        ),
         credential=_credential(),
         connection_timeout=_CONNECT_TIMEOUT_SECONDS,
         read_timeout=_READ_TIMEOUT_SECONDS,
@@ -221,27 +244,8 @@ def secret_client(vault_url: str) -> SecretClient:
     )
 
 
-def anthropic_foundry_client(base_url: str) -> AnthropicFoundry:
-    """Create the native Anthropic Foundry client with an Entra token provider."""
-
-    token_provider = get_bearer_token_provider(_credential(), _AI_FOUNDRY_SCOPE)
-    return AnthropicFoundry(
-        base_url=_service_url(
-            base_url,
-            setting_name="AZURE_AI_FOUNDRY_ANTHROPIC_BASE_URL",
-            required_path="/anthropic",
-        ),
-        # AnthropicFoundry otherwise reads ANTHROPIC_FOUNDRY_API_KEY from the
-        # ambient environment even when an Entra provider is supplied.
-        api_key="",
-        azure_ad_token_provider=token_provider,
-        timeout=_ANTHROPIC_TIMEOUT_SECONDS,
-        max_retries=_MAX_RETRIES,
-    )
-
-
 def azure_openai_client(endpoint: str, api_version: str) -> AzureOpenAI:
-    """Create the portal-chat/embedding Azure OpenAI client without an API key."""
+    """Create the Azure Government OpenAI client without an API key."""
 
     normalized_version = _require_text(
         api_version,
@@ -252,9 +256,10 @@ def azure_openai_client(endpoint: str, api_version: str) -> AzureOpenAI:
         _COGNITIVE_SERVICES_SCOPE,
     )
     return AzureOpenAI(
-        azure_endpoint=_service_url(
+        azure_endpoint=_sovereign_service_url(
             endpoint,
             setting_name="AZURE_OPENAI_ENDPOINT",
+            host_suffixes=(".openai.azure.us",),
         ),
         api_version=normalized_version,
         azure_ad_token_provider=token_provider,
@@ -266,7 +271,11 @@ def azure_openai_client(endpoint: str, api_version: str) -> AzureOpenAI:
 def probe_azure_openai_endpoint(endpoint: str, *, timeout_seconds: float = 5.0) -> bool:
     """Perform a bounded, non-generative identity and data-plane reachability probe."""
 
-    url = _service_url(endpoint, setting_name="AZURE_OPENAI_ENDPOINT") + "/"
+    url = _sovereign_service_url(
+        endpoint,
+        setting_name="AZURE_OPENAI_ENDPOINT",
+        host_suffixes=(".openai.azure.us",),
+    ) + "/"
     token = _credential().get_token(_COGNITIVE_SERVICES_SCOPE).token
     request = Request(
         url,
@@ -288,7 +297,11 @@ def azure_search_client(endpoint: str, index_name: str) -> SearchClient:
     """Create a managed-identity Azure AI Search index client."""
 
     return SearchClient(
-        endpoint=_service_url(endpoint, setting_name="AZURE_SEARCH_ENDPOINT"),
+        endpoint=_sovereign_service_url(
+            endpoint,
+            setting_name="AZURE_SEARCH_ENDPOINT",
+            host_suffixes=(".search.azure.us",),
+        ),
         index_name=_require_text(index_name, setting_name="Azure Search index name"),
         credential=_credential(),
         connection_timeout=_CONNECT_TIMEOUT_SECONDS,
@@ -313,7 +326,11 @@ def cosmos_client(endpoint: str) -> CosmosClient:
         )
 
     return CosmosClient(
-        url=_service_url(endpoint, setting_name="COSMOS_ENDPOINT"),
+        url=_sovereign_service_url(
+            endpoint,
+            setting_name="COSMOS_ENDPOINT",
+            host_suffixes=(".documents.azure.us",),
+        ),
         credential=_credential(),
         consistency_level="Strong",
         connection_timeout=_CONNECT_TIMEOUT_SECONDS,
@@ -336,9 +353,14 @@ def queue_client(account_url: str, queue_name: str) -> QueueClient:
         )
 
     return QueueClient(
-        account_url=_service_url(
+        account_url=_sovereign_service_url(
             account_url,
             setting_name="storage account URL",
+            host_suffixes=(
+                ".blob.core.usgovcloudapi.net",
+                ".queue.core.usgovcloudapi.net",
+                ".table.core.usgovcloudapi.net",
+            ),
         ),
         queue_name=normalized_queue_name,
         credential=_credential(),
@@ -350,7 +372,6 @@ def queue_client(account_url: str, queue_name: str) -> QueueClient:
 
 __all__ = [
     "AzureClientConfigurationError",
-    "anthropic_foundry_client",
     "azure_openai_client",
     "probe_azure_openai_endpoint",
     "azure_search_client",

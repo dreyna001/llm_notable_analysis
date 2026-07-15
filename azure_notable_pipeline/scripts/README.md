@@ -33,8 +33,8 @@ disposition dry run, and managed-identity service smoke.
 For `analyst_portal`, both deployment helpers also build/test the same-origin
 SPA, upload `$web` with Microsoft Entra authentication, approve and poll all
 Front Door managed private endpoints (`web` and `Gateway`), and only
-then disable APIM public access. The final gate rejects a successful direct
-APIM request, asserts disabled public access on Function/Storage, and requires
+then verify both origins. The final gate rejects a successful direct Function
+request, asserts disabled public access on Function/Storage, and requires
 authenticated `/ready` through Front Door.
 See [`ANALYST_PORTAL_DEPLOYMENT.md`](../docs/operations/ANALYST_PORTAL_DEPLOYMENT.md).
 The complete staging inputs and production gate are in

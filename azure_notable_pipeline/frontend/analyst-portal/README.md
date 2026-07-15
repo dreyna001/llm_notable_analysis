@@ -10,11 +10,10 @@ and upload `dist/` to `$web` with `az storage blob upload-batch --auth-mode
 login`; shared keys and SAS tokens are not supported. The deployment runner
 must resolve and reach the storage private endpoint.
 
-Front Door routes `/api/*`, including chat, through private APIM and serves all
-other paths from the private `$web` origin. APIM keeps its 30-second default
-backend timeout but gives only `POST /api/chat` 230 seconds. API caching is
-disabled. The synchronous chat timeout chain is browser 220 seconds, Function
-225 seconds, APIM 230 seconds, and Front Door 240 seconds.
+Front Door routes `/api/*`, including chat, directly to the private portal
+Function and serves all other paths from the private `$web` origin. API caching
+is disabled. The synchronous chat timeout chain is browser 220 seconds,
+Function 225 seconds, and Front Door 240 seconds.
 
 Deploy and operator runbooks:
 [`docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../../docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md).
@@ -53,7 +52,7 @@ Point the Vite app at the stack browser API origin and configure browser OIDC:
 ```powershell
 $env:VITE_PORTAL_API_BASE_URL = "https://<portal-browser-api-origin>"
 $env:VITE_PORTAL_OIDC_CLIENT_ID = "<spa-client-id>"
-$env:VITE_PORTAL_OIDC_AUTHORITY = "https://login.microsoftonline.com/<tenant-id>"
+$env:VITE_PORTAL_OIDC_AUTHORITY = "https://login.microsoftonline.us/<tenant-id>"
 $env:VITE_PORTAL_OIDC_API_SCOPE = "api://<portal-api-app-id>/Portal.Access"
 npm --prefix frontend/analyst-portal run dev
 ```
@@ -82,7 +81,7 @@ VITE_PORTAL_API_TARGET=http://127.0.0.1:8765
 VITE_PORTAL_DEV_USER=dev-preview@local
 VITE_PORTAL_DEV_PROXY_SECRET=portal-secret
 VITE_PORTAL_OIDC_CLIENT_ID=<spa-client-id>
-VITE_PORTAL_OIDC_AUTHORITY=https://login.microsoftonline.com/<tenant-id>
+VITE_PORTAL_OIDC_AUTHORITY=https://login.microsoftonline.us/<tenant-id>
 VITE_PORTAL_OIDC_API_SCOPE=api://<portal-api-app-id>/Portal.Access
 ```
 
@@ -102,9 +101,8 @@ tokens or client secrets into `.env` files or static assets; this is a public
 client and requires no secret.
 
 In JWT mode, the final scope name in `VITE_PORTAL_OIDC_API_SCOPE` must equal
-`PORTAL_ENTRA_REQUIRED_APP_ROLE` (for example, both use `Portal.Access`). APIM
-and the Function enforce that same value from the token's `scp` or `roles`
-claim.
+`PORTAL_ENTRA_REQUIRED_APP_ROLE` (for example, both use `Portal.Access`). The
+Function enforces that value from the token's `scp` or `roles` claim.
 
 ## Build
 
@@ -119,10 +117,9 @@ Output: `dist/`.
 **Front Door same-origin deployment (required):** leave
 `VITE_PORTAL_API_BASE_URL` unset. The deployment helpers upload `dist/` to the
 dedicated account's `$web` container using Entra auth. Front Door routes
-`/api/*` to APIM and uses `index.html` as the Storage static-site 404 document.
-Both Front Door origins use Private Link; APIM reaches the private Function
-backend through its VNet integration. Public network access is disabled after
-origin approval.
+`/api/*` directly to the portal Function and uses `index.html` as the Storage
+static-site 404 document. Both origins use Private Link, and direct public
+origin access remains disabled.
 
 **Split UI and API hostnames:** set the API base at build time:
 

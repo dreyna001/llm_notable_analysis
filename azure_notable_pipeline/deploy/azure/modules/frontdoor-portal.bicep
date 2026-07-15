@@ -5,8 +5,8 @@ param profileName string
 param endpointName string
 param portalUiStorageId string
 param portalUiHostName string
-param apiManagementId string
-param apiManagementHostName string
+param portalFunctionId string
+param portalFunctionHostName string
 
 resource profile 'Microsoft.Cdn/profiles@2024-09-01' = {
   name: profileName
@@ -40,21 +40,21 @@ resource apiOriginGroup 'Microsoft.Cdn/profiles/originGroups@2024-09-01' = {
 }
 resource apiOrigin 'Microsoft.Cdn/profiles/originGroups/origins@2024-09-01' = {
   parent: apiOriginGroup
-  name: 'portal-apim'
+  name: 'portal-function'
   properties: {
     enabledState: 'Enabled'
-    hostName: apiManagementHostName
-    originHostHeader: apiManagementHostName
+    hostName: portalFunctionHostName
+    originHostHeader: portalFunctionHostName
     httpPort: 80
     httpsPort: 443
     priority: 1
     weight: 1000
     enforceCertificateNameCheck: true
     sharedPrivateLinkResource: {
-      privateLink: { id: apiManagementId }
+      privateLink: { id: portalFunctionId }
       privateLinkLocation: location
-      groupId: 'Gateway'
-      requestMessage: 'Front Door private APIM origin'
+      groupId: 'sites'
+      requestMessage: 'Front Door private portal Function origin'
     }
   }
 }

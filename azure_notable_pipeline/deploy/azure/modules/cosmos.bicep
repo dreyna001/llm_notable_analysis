@@ -8,6 +8,9 @@ param zoneRedundant bool = false
 
 @description('Use continuous seven-day backup. False preserves the account default periodic backup contract.')
 param continuousBackupEnabled bool = false
+param customerManagedKeyEnabled bool = false
+param customerManagedKeyUri string = ''
+param customerManagedKeyIdentityResourceId string = ''
 
 @description('Globally unique Cosmos DB account name.')
 param accountName string
@@ -67,6 +70,10 @@ resource account 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
   name: accountName
   location: location
   kind: 'GlobalDocumentDB'
+  identity: customerManagedKeyEnabled ? {
+    type: 'UserAssigned'
+    userAssignedIdentities: { '${customerManagedKeyIdentityResourceId}': {} }
+  } : null
   properties: union({
     databaseAccountOfferType: 'Standard'
     capabilities: [
@@ -78,6 +85,8 @@ resource account 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
     disableKeyBasedMetadataWriteAccess: true
     disableLocalAuth: true
     enableAutomaticFailover: false
+    publicNetworkAccess: 'Disabled'
+    keyVaultKeyUri: customerManagedKeyEnabled ? customerManagedKeyUri : null
     locations: [
       {
         locationName: location

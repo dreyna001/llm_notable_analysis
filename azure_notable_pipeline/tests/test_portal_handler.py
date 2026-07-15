@@ -37,6 +37,12 @@ class FakeCosmosStore:
     def probe_container(self, _container: str) -> None:
         return None
 
+    def get_chat_session(self, _container: str, **_kwargs):
+        return None
+
+    def get_chat_message(self, _container: str, **_kwargs):
+        return None
+
 
 class FakeBlobService:
     def get_container_client(self, _container: str):
@@ -425,6 +431,19 @@ def test_stale_chat_session_is_validated_before_request_id_is_reserved(
         PORTAL_CHAT_QUOTA_CONTAINER="chat-quota",
     )
     monkeypatch.setattr(portal_handler, "load_config", lambda: config)
+
+    class ExpiredSessionStore(FakeCosmosStore):
+        def get_chat_session(self, _container: str, **_kwargs):
+            return {
+                "user_id": "user-1",
+                "mode": "selected_case",
+                "selected_case_id": "case-1",
+                "expires_at_epoch": 0,
+            }
+
+    monkeypatch.setattr(
+        portal_handler, "_cosmos_store", lambda _config: ExpiredSessionStore()
+    )
     quota_calls: list[str | None] = []
 
     class RecordingQuota:

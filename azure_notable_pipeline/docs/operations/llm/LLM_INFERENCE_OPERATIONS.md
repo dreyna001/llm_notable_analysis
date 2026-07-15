@@ -1,29 +1,30 @@
-# Azure AI inference operations
+# Azure OpenAI inference operations
 
-The analyzer uses Claude Sonnet 4.6 through Microsoft Foundry's
-Anthropic-hosted Messages API. Portal chat and 1024-dimensional embeddings use
-Azure OpenAI. There is no model fallback between these lanes and no API-key
-fallback; each Function App uses its assigned managed identity.
+The Azure Government profile uses customer-owned Azure OpenAI deployments for
+analysis, portal chat, and 1024-dimensional embeddings. There is no model
+fallback between these lanes and no API-key fallback; each Function App uses
+its assigned managed identity. Any legacy Foundry/Anthropic settings in the
+source tree are not a substitute for this profile and require separate
+customer qualification before use.
 
 ## Mandatory customer approval
 
-Before deployment, record explicit approval for the preview Sonnet offering,
-that inference is hosted/processed on Anthropic infrastructure through Foundry,
-applicable data-residency and processing terms, preview support/SLA limitations,
-content-filter behavior, qualified deployment name, quota, and rollback model.
-If those terms are not approved, stop; do not silently substitute Azure OpenAI
-or a different Claude deployment.
+Before deployment, record explicit approval for the Azure OpenAI model
+deployment, applicable data-processing and residency terms, support/SLA
+limitations, content-filter behavior, qualified deployment name, quota, and
+rollback model. If those terms are not approved, stop; do not silently
+substitute a different model or endpoint.
 
-All Functions, the qualified Foundry deployment, and Azure OpenAI deployments
-must be in the selected v1 region (default `eastus`). Inputs may contain case
-data; customer classification and residency approval therefore apply to the
-full prompt and response, not only extracted IOCs.
+All Functions, Azure OpenAI deployments, and Azure AI Search resources must be
+qualified in Azure Government `usgovvirginia` by default. Inputs may contain
+case data; customer classification and residency approval therefore apply to
+the full prompt and response, not only extracted IOCs.
 
 ## Runtime contract
 
 | Lane | Settings | Identity permission | Operational bound |
 | --- | --- | --- | --- |
-| Analysis | `AZURE_AI_FOUNDRY_ANTHROPIC_BASE_URL`, `AZURE_AI_FOUNDRY_RESOURCE_ID`, `AZURE_AI_FOUNDRY_ANALYSIS_DEPLOYMENT` | analyzer MI inference role | forced `analyze_notable` tool; queue concurrency cap |
+| Analysis | `AZURE_OPENAI_ENDPOINT`, customer analyzer deployment name | analyzer MI OpenAI user | strict structured output; queue concurrency cap |
 | Chat | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT` | portal MI OpenAI user | gateway 220s, Function 225s, Front Door 240s |
 | Embeddings | `AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT` | embed/portal MI OpenAI user | exactly 1024 dimensions |
 
@@ -45,8 +46,8 @@ status as an operational failure and follow customer policy for redaction or
 manual review. Never weaken filtering ad hoc in production.
 
 The staging live smoke uses committed synthetic alerts and proves analyzer MI,
-forced output contract, Azure OpenAI embeddings/chat where enabled, and no API
-keys. Default CI remains mocked and never calls live models.
+Azure OpenAI structured output, embeddings/chat where enabled, and no API keys.
+Default CI remains mocked and never calls live models.
 
 Rollback is configuration redeployment to the last customer-qualified
 deployment name/image digest. Record who owns quota escalation and who approves

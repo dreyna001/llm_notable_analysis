@@ -50,7 +50,9 @@ def test_analyst_portal_profile_uses_cosmos_and_queue_contracts() -> None:
         {
             "CAPABILITY_PROFILES": "core,analyst_portal",
             "CASE_INDEX_CONTAINER": "notable-case-index",
-            "PORTAL_JWT_ISSUER": "https://issuer.example.test",
+            "RAG_TENANT_ID": "customer-tenant",
+            "CASE_QA_AZURE_SEARCH_INDEX": "case-index",
+                "PORTAL_JWT_ISSUER": "https://login.microsoftonline.us/tenant/v2.0",
                 "PORTAL_JWT_AUDIENCE": "notable-portal",
                 "PORTAL_ENTRA_REQUIRED_APP_ROLE": "Case.Reader",
         },
@@ -107,7 +109,9 @@ def test_chat_request_dedupe_must_cover_the_crash_recovery_lease() -> None:
         {
             "CAPABILITY_PROFILES": "core,analyst_portal",
             "CASE_INDEX_CONTAINER": "notable-case-index",
-            "PORTAL_JWT_ISSUER": "https://issuer.example.test",
+            "RAG_TENANT_ID": "customer-tenant",
+            "CASE_QA_AZURE_SEARCH_INDEX": "case-index",
+            "PORTAL_JWT_ISSUER": "https://login.microsoftonline.us/tenant/v2.0",
             "PORTAL_JWT_AUDIENCE": "portal",
             "PORTAL_ENTRA_REQUIRED_APP_ROLE": "Portal.Access",
             "PORTAL_CHAT_LEASE_SECONDS": "300",
@@ -124,7 +128,9 @@ def test_chat_quota_rejects_a_dedupe_window_that_can_overgrow_its_document() -> 
         {
             "CAPABILITY_PROFILES": "core,analyst_portal",
             "CASE_INDEX_CONTAINER": "notable-case-index",
-            "PORTAL_JWT_ISSUER": "https://issuer.example.test",
+            "RAG_TENANT_ID": "customer-tenant",
+            "CASE_QA_AZURE_SEARCH_INDEX": "case-index",
+            "PORTAL_JWT_ISSUER": "https://login.microsoftonline.us/tenant/v2.0",
             "PORTAL_JWT_AUDIENCE": "portal",
             "PORTAL_ENTRA_REQUIRED_APP_ROLE": "Portal.Access",
             "PORTAL_CHAT_QUOTA_WINDOW_SECONDS": "60",
@@ -165,7 +171,7 @@ def test_portal_jwt_mode_requires_app_role_after_issuer_and_audience() -> None:
             "PORTAL_ENABLED": "true",
             "PORTAL_AUTH_MODE": "jwt",
             "CASE_INDEX_CONTAINER": "notable-case-index",
-            "PORTAL_JWT_ISSUER": "https://issuer.example.test",
+            "PORTAL_JWT_ISSUER": "https://login.microsoftonline.us/tenant/v2.0",
             "PORTAL_JWT_AUDIENCE": "portal",
         },
         clear=True,
@@ -185,8 +191,70 @@ def test_aws_runtime_names_are_not_aliases() -> None:
     ):
         config = load_config()
 
-    assert config.AZURE_AI_FOUNDRY_ANALYSIS_DEPLOYMENT == "claude-sonnet-4-6"
+    assert config.AZURE_CLOUD_ENVIRONMENT == "AzureUSGovernment"
+    assert config.AZURE_REGION == "usgovvirginia"
+    assert config.AZURE_OPENAI_ANALYSIS_DEPLOYMENT == ""
     assert config.REPORT_SINK_MODE == "blob"
     assert config.OUTPUT_CONTAINER_NAME == "output"
     assert not hasattr(config, "BEDROCK_MODEL_ID")
     assert not hasattr(config, "OUTPUT_BUCKET_NAME")
+
+
+def test_commercial_cloud_and_endpoint_contracts_fail_closed() -> None:
+    with patch.dict(
+        "os.environ",
+        {"AZURE_CLOUD_ENVIRONMENT": "AzureCloud"},
+        clear=True,
+    ), pytest.raises(ValueError, match="AzureUSGovernment"):
+        load_config()
+
+    with patch.dict(
+        "os.environ",
+        {"AZURE_OPENAI_ENDPOINT": "https://resource.openai.azure.com"},
+        clear=True,
+    ), pytest.raises(ValueError, match="Azure Government endpoint"):
+        load_config()
+
+
+def test_queue_retention_and_customer_key_contracts_fail_closed() -> None:
+    with patch.dict(
+        "os.environ",
+        {"INPUT_RETENTION_DAYS": "1", "QUEUE_RECOVERY_WINDOW_SECONDS": "86400"},
+        clear=True,
+    ), pytest.raises(ValueError, match="INPUT_RETENTION_DAYS"):
+        load_config()
+
+    with patch.dict(
+        "os.environ",
+        {"CUSTOMER_MANAGED_KEY_ENABLED": "true"},
+        clear=True,
+    ), pytest.raises(ValueError, match="CUSTOMER_MANAGED_KEY_URI"):
+        load_config()
+
+
+def test_rag_contract_uses_government_search_and_versioned_blob_source() -> None:
+    with patch.dict(
+        "os.environ",
+        {
+            "CAPABILITY_PROFILES": "core,rag",
+            "AZURE_SEARCH_ENDPOINT": "https://tenant.search.azure.us",
+            "RAG_TENANT_ID": "customer-tenant",
+            "RAG_SOURCE_CONTAINER": "knowledge",
+            "RAG_SOURCE_PREFIX": "rag-sources",
+            "RAG_SOURCE_STORAGE_ACCOUNT_URL": "https://source.blob.core.usgovcloudapi.net",
+            "RAG_AZURE_SEARCH_INDEX": "soc-knowledge",
+        },
+        clear=True,
+    ):
+        config = load_config()
+
+    assert config.RAG_RETRIEVAL_BACKEND == "azure_search"
+    assert config.RAG_INGEST_QUEUE_NAME == "rag-ingest-invocations"
+    assert config.RAG_TENANT_ID == "customer-tenant"
+
+    with patch.dict(
+        "os.environ",
+        {"RAG_RETRIEVAL_BACKEND": "commercial_search"},
+        clear=True,
+    ), pytest.raises(ValueError, match="RAG_RETRIEVAL_BACKEND"):
+        load_config()

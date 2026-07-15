@@ -6,10 +6,11 @@ targetScope = 'resourceGroup'
 param DeploymentPrefix string
 
 @description('Azure deployment region. Customer-managed model resources must use this region in v1.')
-param Location string = 'eastus'
+@allowed(['usgovvirginia', 'usgovarizona'])
+param Location string = 'usgovvirginia'
 
-@allowed(['AzureCloud', 'AzureUSGovernment'])
-param cloudEnvironment string = 'AzureCloud'
+@allowed(['AzureUSGovernment'])
+param cloudEnvironment string = 'AzureUSGovernment'
 
 @description('Full immutable ACR image URI. Production deploys must use @sha256:<digest>.')
 param ContainerImageUri string
@@ -17,25 +18,38 @@ param ContainerImageUri string
 @description('Resource ID of the ACR that owns ContainerImageUri.')
 param ContainerRegistryResourceId string
 
+@description('Azure OpenAI data-plane endpoint in Azure Government.')
 @minLength(1)
-param AzureAiFoundryAnthropicBaseUrl string
+param AzureOpenAiEndpoint string
 
-@description('Resource ID of the existing customer Foundry account that exposes Claude.')
+@description('Resource ID of the existing customer Azure OpenAI account.')
 @minLength(1)
-param AzureAiFoundryResourceId string
+param AzureOpenAiResourceId string
 
-param AzureAiFoundryAnalysisDeployment string = 'claude-sonnet-4-6'
+@description('Customer-owned Azure OpenAI analyzer deployment name.')
+@minLength(1)
+param AzureOpenAiAnalysisDeployment string
 
-param AzureOpenAiEndpoint string = ''
-param AzureOpenAiResourceId string = ''
 param AzureOpenAiApiVersion string = '2024-10-21'
 param AzureOpenAiResourceRegion string = Location
 param AzureOpenAiEmbeddingsDeployment string = ''
 param AzureOpenAiPortalChatDeployment string = ''
 param AzureSearchEndpoint string = ''
 param AzureSearchResourceId string = ''
+@description('Existing customer-provisioned Government Search index. Bootstrap contract: content_vector must be 1024 dimensions with tenant_id filtering.')
 param RagAzureSearchIndex string = ''
+@description('Existing customer-provisioned Government Search case index. Bootstrap contract: content_vector must be 1024 dimensions with tenant_id, case_id, and run_id filtering.')
+param CaseQaAzureSearchIndex string = ''
+param RagTenantId string = ''
+param RagSourceContainer string = ''
+param RagSourcePrefix string = 'rag-sources'
+param RagSourceStorageAccountName string = ''
+param RagSourceStorageAccountUrl string = ''
+param RagIngestQueueName string = 'rag-ingest-invocations'
 param KeyVaultName string = ''
+param CustomerManagedKeyEnabled bool = false
+param CustomerManagedKeyUri string = ''
+param CustomerManagedKeyIdentityResourceId string = ''
 @minLength(3)
 param CosmosAccountName string
 @minLength(1)
@@ -86,8 +100,6 @@ param PortalAuthMode string = 'jwt'
 param PortalJwtIssuer string = ''
 param PortalJwtAudience string = ''
 param PortalEntraRequiredAppRole string = ''
-param ApiManagementPublisherEmail string = ''
-param ApiManagementPublisherName string = 'Notable Analysis'
 
 @allowed(['blob', 'notable_rest'])
 param ReportSinkMode string = 'blob'
@@ -145,8 +157,6 @@ param CosmosZoneRedundant bool = false
 @description('Use Cosmos continuous seven-day backup instead of periodic backup.')
 param CosmosContinuousBackupEnabled bool = false
 
-@allowed(['StandardV2'])
-param ApiManagementSkuName string = 'StandardV2'
 
 param AlertActionGroupResourceId string = ''
 
@@ -176,6 +186,16 @@ param DispositionCompletionGraceHours int = 26
 @minValue(5)
 param QueueTelemetryMaxAgeMinutes int = 10
 
+@minValue(1)
+@maxValue(7)
+param AnalyzerQueueTtlDays int = 1
+@minValue(1)
+@maxValue(7)
+param CaseEmbedQueueTtlDays int = 1
+@minValue(1)
+param QueueRecoveryWindowDays int = 1
+
+
 param ServiceNowBaseUrl string = 'https://your-instance.service-now.com'
 @minValue(1)
 @maxValue(300)
@@ -202,14 +222,8 @@ var acrIdSegments = split(ContainerRegistryResourceId, '/')
 var acrSubscriptionId = acrIdSegments[2]
 var acrResourceGroupName = acrIdSegments[4]
 var acrName = acrIdSegments[8]
-var foundryIdSegments = split(AzureAiFoundryResourceId, '/')
-var foundrySubscriptionId = foundryIdSegments[2]
-var foundryResourceGroupName = foundryIdSegments[4]
-var foundryName = foundryIdSegments[8]
 var openAiIdSegments = split(
-  empty(AzureOpenAiResourceId)
-    ? '/subscriptions/none/resourceGroups/none/providers/Microsoft.CognitiveServices/accounts/none'
-    : AzureOpenAiResourceId,
+  AzureOpenAiResourceId,
   '/'
 )
 var searchIdSegments = split(
@@ -220,28 +234,62 @@ var searchIdSegments = split(
 )
 var normalizedCapabilityProfiles = split(toLower(replace(CapabilityProfiles, ' ', '')), ',')
 var hasAnalystPortalProfile = contains(normalizedCapabilityProfiles, 'analyst_portal')
+var hasRagProfile = contains(normalizedCapabilityProfiles, 'rag')
 var deployPortal = hasAnalystPortalProfile && !empty(StorageAccountNamePortalUi)
 var deployChatHistoryContainers = hasAnalystPortalProfile && CaseQaChatHistoryEnabled
 var queueDepthTracePrefix = 'notable.queue.depth.v1 '
 var isProduction = DeploymentEnvironment == 'production'
+var validatedCloudEnvironment = cloudEnvironment != 'AzureUSGovernment'
+  ? fail('cloudEnvironment must be AzureUSGovernment.')
+  : cloudEnvironment
+var validatedStorageSuffix = environment().suffixes.storage != 'core.usgovcloudapi.net'
+  ? fail('The deployment target must resolve to Azure Government storage suffix core.usgovcloudapi.net.')
+  : environment().suffixes.storage
+var validatedContainerImageUri = !contains(toLower(ContainerImageUri), '.azurecr.us/') || !contains(toLower(ContainerImageUri), '@sha256:')
+  ? fail('ContainerImageUri must reference an Azure Government ACR image with an immutable sha256 digest.')
+  : ContainerImageUri
+var validatedOpenAiEndpoint = !contains(toLower(AzureOpenAiEndpoint), '.openai.azure.us')
+  ? fail('AzureOpenAiEndpoint must use the Azure Government OpenAI suffix.')
+  : AzureOpenAiEndpoint
+var validatedSearchEndpoint = empty(AzureSearchEndpoint) || contains(toLower(AzureSearchEndpoint), '.search.azure.us')
+  ? AzureSearchEndpoint
+  : fail('AzureSearchEndpoint must use the Azure Government Search suffix.')
+var validatedRagContract = hasRagProfile && (empty(AzureSearchEndpoint) || empty(AzureSearchResourceId) || empty(RagAzureSearchIndex) || empty(RagTenantId) || empty(RagSourceContainer) || empty(RagSourceStorageAccountName) || empty(RagSourceStorageAccountUrl))
+  ? fail('The rag profile requires Azure Search, tenant, source storage, source container, source URL, and index parameters.')
+  : true
+var validatedCaseQaContract = hasAnalystPortalProfile && (empty(AzureSearchEndpoint) || empty(AzureSearchResourceId) || empty(CaseQaAzureSearchIndex) || empty(RagTenantId))
+  ? fail('The analyst_portal profile requires an existing 1024-d Azure Search case index, tenant, endpoint, and resource ID.')
+  : true
+var validatedRagSourceUrl = empty(RagSourceStorageAccountUrl) || contains(toLower(RagSourceStorageAccountUrl), '.core.usgovcloudapi.net')
+  ? RagSourceStorageAccountUrl
+  : fail('RagSourceStorageAccountUrl must use an Azure Government Storage endpoint.')
+var validatedAnalyzerTtlSeconds = AnalyzerQueueTtlDays * 86400
+var validatedEmbedTtlSeconds = CaseEmbedQueueTtlDays * 86400
+var validatedQueueRecoverySeconds = QueueRecoveryWindowDays * 86400
+var validatedInputRetention = InputRetentionDays * 86400 < max(validatedAnalyzerTtlSeconds, validatedEmbedTtlSeconds) + validatedQueueRecoverySeconds
+  ? fail('InputRetentionDays must cover queue TTL plus QueueRecoveryWindowDays.')
+  : InputRetentionDays
+var validatedCustomerManagedKey = CustomerManagedKeyEnabled && (empty(CustomerManagedKeyUri) || empty(CustomerManagedKeyIdentityResourceId))
+  ? fail('CustomerManagedKeyUri and CustomerManagedKeyIdentityResourceId are required when CustomerManagedKeyEnabled=true.')
+  : CustomerManagedKeyEnabled
+var validatedCustomerManagedKeyUri = CustomerManagedKeyEnabled && !contains(toLower(CustomerManagedKeyUri), '.vault.usgovcloudapi.net/keys/')
+  ? fail('CustomerManagedKeyUri must reference a key in an Azure Government Key Vault.')
+  : CustomerManagedKeyUri
 var validatedAlertActionGroupResourceId = isProduction && empty(AlertActionGroupResourceId)
   ? fail('AlertActionGroupResourceId is required when DeploymentEnvironment=production.')
   : AlertActionGroupResourceId
 var validatedSyntheticCheckName = isProduction && deployPortal && empty(PortalSyntheticCheckName)
   ? fail('PortalSyntheticCheckName is required for a production analyst portal.')
   : PortalSyntheticCheckName
-var validatedKeyVaultName = ServiceNowDispositionSyncEnabled && empty(KeyVaultName)
-  ? fail('KeyVaultName is required when ServiceNowDispositionSyncEnabled=true.')
+var validatedKeyVaultName = (ServiceNowDispositionSyncEnabled || CustomerManagedKeyEnabled) && empty(KeyVaultName)
+  ? fail('KeyVaultName is required when ServiceNowDispositionSyncEnabled or CustomerManagedKeyEnabled is true.')
   : KeyVaultName
 var validatedDispositionTokenSecretName = ServiceNowDispositionSyncEnabled && empty(ServiceNowDispositionSyncTokenSecretName)
   ? fail('ServiceNowDispositionSyncTokenSecretName is required when ServiceNowDispositionSyncEnabled=true.')
   : ServiceNowDispositionSyncTokenSecretName
-var validatedBlobDataProtection = isProduction && !BlobDataProtectionEnabled
-  ? fail('BlobDataProtectionEnabled must be true when DeploymentEnvironment=production.')
-  : BlobDataProtectionEnabled
-var validatedCosmosContinuousBackup = isProduction && !CosmosContinuousBackupEnabled
-  ? fail('CosmosContinuousBackupEnabled must be true when DeploymentEnvironment=production.')
-  : CosmosContinuousBackupEnabled
+// Recovery controls remain an explicit customer deployment choice in this phase.
+var validatedBlobDataProtection = BlobDataProtectionEnabled
+var validatedCosmosContinuousBackup = CosmosContinuousBackupEnabled
 var validatedStorageSkuName = FunctionPlanZoneRedundant && StorageSkuName != 'Standard_ZRS'
   ? fail('StorageSkuName must be Standard_ZRS when FunctionPlanZoneRedundant=true.')
   : StorageSkuName
@@ -289,9 +337,13 @@ module storage 'modules/storage.bicep' = {
     outputStorageAccountName: StorageAccountNameOutput
     portalUiStorageAccountName: StorageAccountNamePortalUi
     portalUiDeployerPrincipalId: PortalUiDeployerPrincipalId
-    inputRetentionDays: InputRetentionDays
+    inputRetentionDays: validatedInputRetention
     outputRetentionDays: OutputRetentionDays
     caseRetentionDays: CaseRetentionDays
+    ragIngestQueueName: RagIngestQueueName
+    customerManagedKeyEnabled: validatedCustomerManagedKey
+    customerManagedKeyUri: validatedCustomerManagedKeyUri
+    customerManagedKeyIdentityResourceId: CustomerManagedKeyIdentityResourceId
   }
 }
 
@@ -302,10 +354,12 @@ module network 'modules/network.bicep' = {
     namePrefix: DeploymentPrefix
     inputStorageAccountName: StorageAccountNameInput
     outputStorageAccountName: StorageAccountNameOutput
+    cosmosAccountName: CosmosAccountName
+    ragSourceStorageAccountName: RagSourceStorageAccountName
     functionsHostStorageAccountNames: functionHostStorageAccountNames
     portalUiStorageAccountName: StorageAccountNamePortalUi
   }
-  dependsOn: [storage]
+  dependsOn: [storage, cosmos]
 }
 
 module identities 'modules/identities.bicep' = {
@@ -340,6 +394,9 @@ module cosmos 'modules/cosmos.bicep' = {
     portalPrincipalId: identities.outputs.portal.principalId
     zoneRedundant: CosmosZoneRedundant
     continuousBackupEnabled: validatedCosmosContinuousBackup
+    customerManagedKeyEnabled: validatedCustomerManagedKey
+    customerManagedKeyUri: validatedCustomerManagedKeyUri
+    customerManagedKeyIdentityResourceId: CustomerManagedKeyIdentityResourceId
   }
 }
 
@@ -390,20 +447,12 @@ module registryAccess 'modules/container-registry-access.bicep' = {
   }
 }
 
-module foundryAccess 'modules/foundry-access.bicep' = {
-  name: '${DeploymentPrefix}-foundry-access'
-  scope: resourceGroup(foundrySubscriptionId, foundryResourceGroupName)
-  params: {
-    foundryAccountName: foundryName
-    analyzerPrincipalId: identities.outputs.analyzer.principalId
-  }
-}
-
-module openAiAccess 'modules/openai-access.bicep' = if (!empty(AzureOpenAiResourceId)) {
+module openAiAccess 'modules/openai-access.bicep' = {
   name: '${DeploymentPrefix}-openai-access'
   scope: resourceGroup(openAiIdSegments[2], openAiIdSegments[4])
   params: {
     openAiAccountName: openAiIdSegments[8]
+    analyzerPrincipalId: identities.outputs.analyzer.principalId
     embedPrincipalId: identities.outputs.embed.principalId
     portalPrincipalId: deployPortal ? identities.outputs.portal.principalId : ''
   }
@@ -414,9 +463,8 @@ module searchAccess 'modules/search-access.bicep' = if (!empty(AzureSearchResour
   scope: resourceGroup(searchIdSegments[2], searchIdSegments[4])
   params: {
     searchServiceName: searchIdSegments[8]
-    principalIds: deployPortal
-      ? [identities.outputs.analyzer.principalId, identities.outputs.portal.principalId]
-      : [identities.outputs.analyzer.principalId]
+    analyzerPrincipalId: identities.outputs.analyzer.principalId
+    portalPrincipalId: deployPortal ? identities.outputs.portal.principalId : ''
   }
 }
 
@@ -424,6 +472,8 @@ module keyVaultAccess 'modules/keyvault-access.bicep' = if (!empty(validatedKeyV
   name: '${DeploymentPrefix}-keyvault-access'
   params: {
     keyVaultName: validatedKeyVaultName
+    customerManagedKeyEnabled: validatedCustomerManagedKey
+    customerManagedKeyIdentityResourceId: CustomerManagedKeyIdentityResourceId
     secretReaderPrincipalIds: concat(
       [identities.outputs.analyzer.principalId],
       ServiceNowDispositionSyncEnabled ? [identities.outputs.disposition.principalId] : []
@@ -460,7 +510,7 @@ module analyzerFunction 'modules/functions-analyzer.bicep' = {
     functionAppName: '${DeploymentPrefix}-notable-analyzer-queue'
     serverFarmId: functionPlan.id
     functionSubnetId: network.outputs.functionSubnetId
-    containerImageUri: ContainerImageUri
+    containerImageUri: validatedContainerImageUri
     analyzerIdentityResourceId: identities.outputs.analyzer.id
     analyzerIdentityClientId: identities.outputs.analyzer.clientId
     analyzerIdentityPrincipalId: identities.outputs.analyzer.principalId
@@ -475,9 +525,21 @@ module analyzerFunction 'modules/functions-analyzer.bicep' = {
     hostTableServiceUri: storage.outputs.analyzerHostTableServiceUri
     applicationInsightsConnectionString: observabilityBase.outputs.applicationInsightsConnectionString
     keyVaultUri: empty(validatedKeyVaultName) ? '' : keyVaultAccess!.outputs.keyVaultUri
-    azureAiFoundryAnthropicBaseUrl: AzureAiFoundryAnthropicBaseUrl
-    azureAiFoundryResourceId: AzureAiFoundryResourceId
-    azureAiFoundryAnalysisDeployment: AzureAiFoundryAnalysisDeployment
+    azureOpenAiEndpoint: validatedOpenAiEndpoint
+    azureOpenAiApiVersion: AzureOpenAiApiVersion
+    azureOpenAiAnalysisDeployment: AzureOpenAiAnalysisDeployment
+    azureSearchEndpoint: validatedSearchEndpoint
+    analyzerQueueTtlSeconds: validatedAnalyzerTtlSeconds
+    inputRetentionDays: validatedInputRetention
+    queueRecoveryWindowSeconds: validatedQueueRecoverySeconds
+    ragTenantId: validatedRagContract ? RagTenantId : ''
+    ragSourceContainer: RagSourceContainer
+    ragSourcePrefix: RagSourcePrefix
+    ragSourceStorageAccountName: RagSourceStorageAccountName
+    ragSourceStorageAccountUrl: validatedRagSourceUrl
+    ragAzureSearchIndex: RagAzureSearchIndex
+    caseQaAzureSearchIndex: CaseQaAzureSearchIndex
+    ragIngestQueueName: RagIngestQueueName
     cosmosEndpoint: cosmos.outputs.endpoint
     cosmosDatabaseName: cosmos.outputs.databaseName
     sideEffectIdempotencyContainerName: cosmos.outputs.sideEffectIdempotencyContainerName
@@ -489,7 +551,7 @@ module analyzerFunction 'modules/functions-analyzer.bicep' = {
     timeoutSeconds: AnalyzerTimeoutSeconds
     zoneRedundant: FunctionPlanZoneRedundant
   }
-  dependsOn: [registryAccess, foundryAccess, analyzerHostAccess]
+  dependsOn: [registryAccess, openAiAccess, analyzerHostAccess]
 }
 
 module embedFunction 'modules/functions-embed.bicep' = {
@@ -499,7 +561,7 @@ module embedFunction 'modules/functions-embed.bicep' = {
     functionAppName: '${DeploymentPrefix}-notable-case-embed'
     serverFarmId: functionPlan.id
     functionSubnetId: network.outputs.functionSubnetId
-    containerImageUri: ContainerImageUri
+    containerImageUri: validatedContainerImageUri
     embedIdentityResourceId: identities.outputs.embed.id
     embedIdentityClientId: identities.outputs.embed.clientId
     embedIdentityPrincipalId: identities.outputs.embed.principalId
@@ -513,6 +575,8 @@ module embedFunction 'modules/functions-embed.bicep' = {
     azureOpenAiEndpoint: AzureOpenAiEndpoint
     azureOpenAiApiVersion: AzureOpenAiApiVersion
     azureOpenAiEmbeddingsDeployment: AzureOpenAiEmbeddingsDeployment
+    caseEmbedQueueTtlSeconds: validatedEmbedTtlSeconds
+    caseQaAzureSearchIndex: CaseQaAzureSearchIndex
     cosmosEndpoint: cosmos.outputs.endpoint
     cosmosDatabaseName: cosmos.outputs.databaseName
     caseIndexContainerName: cosmos.outputs.caseIndexContainerName
@@ -530,7 +594,7 @@ module dispositionFunction 'modules/functions-disposition.bicep' = {
     functionAppName: '${DeploymentPrefix}-notable-disposition-sync'
     serverFarmId: functionPlan.id
     functionSubnetId: network.outputs.functionSubnetId
-    containerImageUri: ContainerImageUri
+    containerImageUri: validatedContainerImageUri
     dispositionIdentityResourceId: identities.outputs.disposition.id
     dispositionIdentityClientId: identities.outputs.disposition.clientId
     dispositionIdentityPrincipalId: identities.outputs.disposition.principalId
@@ -572,7 +636,7 @@ module portalFunction 'modules/functions-portal.bicep' = if (deployPortal) {
     functionSubnetId: network.outputs.functionSubnetId
     privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
     sitesPrivateDnsZoneId: network.outputs.sitesPrivateDnsZoneId
-    containerImageUri: ContainerImageUri
+    containerImageUri: validatedContainerImageUri
     portalIdentityResourceId: identities.outputs.portal.id
     portalIdentityClientId: identities.outputs.portal.clientId
     portalIdentityPrincipalId: identities.outputs.portal.principalId
@@ -592,8 +656,12 @@ module portalFunction 'modules/functions-portal.bicep' = if (deployPortal) {
     azureOpenAiApiVersion: AzureOpenAiApiVersion
     azureOpenAiEmbeddingsDeployment: AzureOpenAiEmbeddingsDeployment
     azureOpenAiPortalChatDeployment: AzureOpenAiPortalChatDeployment
-    azureSearchEndpoint: AzureSearchEndpoint
+    azureSearchEndpoint: validatedSearchEndpoint
     ragAzureSearchIndex: RagAzureSearchIndex
+    ragTenantId: validatedCaseQaContract ? RagTenantId : ''
+    ragRetrievalBackend: 'azure_search'
+    caseQaRetrievalBackend: 'azure_search'
+    caseQaAzureSearchIndex: CaseQaAzureSearchIndex
     capabilityProfiles: CapabilityProfiles
     portalAuthMode: PortalAuthMode
     portalJwtIssuer: PortalJwtIssuer
@@ -614,22 +682,6 @@ module portalFunction 'modules/functions-portal.bicep' = if (deployPortal) {
   dependsOn: [registryAccess, portalHostAccess, openAiAccess, searchAccess]
 }
 
-module portalApiManagement 'modules/apim-portal.bicep' = if (deployPortal) {
-  name: '${DeploymentPrefix}-portal-apim'
-  params: {
-    location: Location
-    apiManagementName: '${DeploymentPrefix}-portal-apim'
-    apiManagementSkuName: ApiManagementSkuName
-    publisherEmail: ApiManagementPublisherEmail
-    publisherName: ApiManagementPublisherName
-    apimSubnetId: network.outputs.apimSubnetId
-    portalFunctionHostName: portalFunction!.outputs.defaultHostName
-    portalJwtIssuer: PortalJwtIssuer
-    portalJwtAudience: PortalJwtAudience
-    portalEntraRequiredAppRole: PortalEntraRequiredAppRole
-  }
-}
-
 module portalFrontDoor 'modules/frontdoor-portal.bicep' = if (deployPortal) {
   name: '${DeploymentPrefix}-portal-frontdoor'
   params: {
@@ -638,8 +690,8 @@ module portalFrontDoor 'modules/frontdoor-portal.bicep' = if (deployPortal) {
     endpointName: '${DeploymentPrefix}-portal'
     portalUiStorageId: storage.outputs.portalStorageId
     portalUiHostName: storage.outputs.portalWebHostName
-    apiManagementId: portalApiManagement!.outputs.apiManagementId
-    apiManagementHostName: portalApiManagement!.outputs.gatewayHostName
+    portalFunctionId: portalFunction!.outputs.functionAppId
+    portalFunctionHostName: portalFunction!.outputs.defaultHostName
   }
 }
 
@@ -653,7 +705,6 @@ module observabilityAlerts 'modules/observability.bicep' = if (!empty(validatedA
     alertActionGroupResourceId: validatedAlertActionGroupResourceId
     inputQueueServiceResourceId: storage.outputs.inputQueueServiceId
     outputQueueServiceResourceId: storage.outputs.outputQueueServiceId
-    foundryResourceId: AzureAiFoundryResourceId
     azureOpenAiResourceId: AzureOpenAiResourceId
     cosmosResourceId: cosmos.outputs.accountId
     frontDoorProfileResourceId: deployPortal ? portalFrontDoor!.outputs.profileId : ''
@@ -675,17 +726,16 @@ module observabilityAlerts 'modules/observability.bicep' = if (!empty(validatedA
 }
 
 output DeploymentLocation string = Location
-output ConfiguredCloud string = cloudEnvironment
+output ConfiguredCloud string = validatedCloudEnvironment
 output AnalyzerFunctionAppName string = analyzerFunction.outputs.functionAppName
 output EmbedFunctionAppName string = embedFunction.outputs.functionAppName
 output DispositionFunctionAppName string = dispositionFunction.outputs.functionAppName
 output PortalFunctionAppName string = deployPortal ? portalFunction!.outputs.functionAppName : ''
-output PortalApiManagementName string = deployPortal ? portalApiManagement!.outputs.apiManagementName : ''
 output PortalFrontDoorProfileName string = deployPortal ? portalFrontDoor!.outputs.profileName : ''
 output MonitoringAlertRuleNames array = empty(validatedAlertActionGroupResourceId) ? [] : observabilityAlerts!.outputs.alertRuleNames
 output ApplicationInsightsName string = '${DeploymentPrefix}-insights'
 output LogAnalyticsWorkspaceCustomerId string = observabilityBase.outputs.workspaceCustomerId
-output AnalysisDeployment string = AzureAiFoundryAnalysisDeployment
+output AnalysisDeployment string = AzureOpenAiAnalysisDeployment
 output AzureOpenAiRegion string = AzureOpenAiResourceRegion
 output ReportSinkMode string = ReportSinkMode
 output InputStorageAccountName string = StorageAccountNameInput

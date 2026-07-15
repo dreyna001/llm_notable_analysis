@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from .azure_openai_gateway import embed_texts
+from .azure_search_adapter import AzureSearchAdapter, build_filter
+from .azure_search_retrieval import application_managed_search_enabled, config_value, tenant_id_for
 from .blob_store import list_blobs, read_blob
 from .config import Config
 
@@ -75,6 +78,84 @@ class BlobCaseChunkSource:
         return chunks
 
 
+class AzureSearchCaseChunkSource:
+    """Dedicated Search case index source; it never lists or reads chunk Blobs."""
+
+    def __init__(
+        self,
+        *,
+        index_name: str,
+        tenant_id: str,
+        adapter: Any | None = None,
+        run_id: str = "",
+    ) -> None:
+        self.index_name = str(index_name or "").strip()
+        self.tenant_id = str(tenant_id or "").strip()
+        self.adapter = adapter
+        self.run_id = str(run_id or "").strip()
+        if not self.index_name:
+            raise ValueError("CASE_QA_AZURE_SEARCH_INDEX is required")
+        if not self.tenant_id:
+            raise ValueError("RAG_TENANT_ID is required for case Search retrieval")
+
+    def _adapter(self) -> Any:
+        return self.adapter or AzureSearchAdapter.from_config(
+            SimpleConfig(index=self.index_name),
+            index_name=self.index_name,
+        )
+
+    def load_chunks(self, case_id: str, *, limit: int) -> list[dict[str, Any]]:
+        documents = self._adapter().search(
+            index=self.index_name,
+            filter=build_filter(
+                tenant_id=self.tenant_id,
+                corpus_id="case_chunks",
+                case_id=str(case_id).strip(),
+                run_id=self.run_id,
+                active_only=True,
+            ),
+            select=False,
+            top=min(max(1, int(limit)), 1000),
+        )
+        return [_case_document(document) for document in documents]
+
+    def retrieve(
+        self,
+        *,
+        case_id: str,
+        question: str,
+        query_embedding: list[float],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        documents = self._adapter().hybrid_search(
+            index=self.index_name,
+            query_text=question,
+            query_embedding=query_embedding,
+            tenant_id=self.tenant_id,
+            corpus_id="case_chunks",
+            case_id=str(case_id).strip(),
+            run_id=self.run_id,
+            top_k=min(max(1, int(top_k)), 1000),
+        )
+        return [_case_document(document) for document in documents]
+
+
+class SimpleConfig:
+    """Minimal adapter config used when callers inject no full Config object."""
+
+    def __init__(self, *, index: str) -> None:
+        self.AZURE_SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT", "")
+        self.RAG_AZURE_SEARCH_INDEX = index
+
+
+def _case_document(document: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(document)
+    normalized.setdefault("chunk_id", normalized.get("id", ""))
+    normalized.setdefault("text", normalized.get("search_text", ""))
+    normalized.setdefault("search_text", normalized.get("text", ""))
+    return normalized
+
+
 @dataclass
 class RankedChunk:
     """One chunk candidate with retrieval rank metadata."""
@@ -93,17 +174,48 @@ def load_all_case_chunks(
     config: Config,
     case_store: Any,
     chunk_source: CaseChunkSource | None = None,
+    case_metadata: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Load bounded Blob chunk JSON only when case retrieval is ready."""
 
     normalized_case_id = str(case_id or "").strip()
     if not normalized_case_id:
         raise ValueError("case_id is required")
-    metadata = case_store.get_case(config.CASE_INDEX_CONTAINER, normalized_case_id)
+    metadata = case_metadata or case_store.get_case(
+        config.CASE_INDEX_CONTAINER, normalized_case_id
+    )
     if not metadata:
         raise LookupError("case not found")
     if str(metadata.get("retrieval_status", "")).lower() != "ready":
         return []
+
+    if application_managed_search_enabled(config, case=True):
+        index_name = str(
+            config_value(
+                config,
+                "CASE_QA_AZURE_SEARCH_INDEX",
+                config_value(config, "CASE_AZURE_SEARCH_INDEX", ""),
+            )
+            or ""
+        ).strip()
+        run_id = str(
+            metadata.get("retrieval_run_id")
+            or metadata.get("active_run_id")
+            or metadata.get("run_id")
+            or metadata.get("latest_run_id")
+            or ""
+        ).strip()
+        source = chunk_source
+        if source is None or isinstance(source, BlobCaseChunkSource):
+            source = AzureSearchCaseChunkSource(
+                index_name=index_name,
+                tenant_id=tenant_id_for(config, required=True),
+                run_id=run_id,
+            )
+        return source.load_chunks(
+            normalized_case_id,
+            limit=config.CASE_QA_MAX_INDEX_CHUNKS_PER_CASE,
+        )
 
     source = chunk_source or BlobCaseChunkSource(
         container_name=config.CASE_ARCHIVE_CONTAINER,
@@ -267,17 +379,76 @@ def retrieve_case_chunks_for_question(
     case_store: Any,
     chunk_source: CaseChunkSource | None = None,
     embedding_gateway: Any | None = None,
+    search_adapter: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Retrieve ranked chunks using native Azure OpenAI query embeddings."""
 
     normalized_question = str(question or "").strip()
     if not normalized_question:
         raise ValueError("question is required")
+    metadata = case_store.get_case(config.CASE_INDEX_CONTAINER, str(case_id).strip())
+    if not metadata:
+        raise LookupError("case not found")
+    if str(metadata.get("retrieval_status", "")).lower() != "ready":
+        return []
+    if application_managed_search_enabled(config, case=True):
+        index_name = str(
+            config_value(
+                config,
+                "CASE_QA_AZURE_SEARCH_INDEX",
+                config_value(config, "CASE_AZURE_SEARCH_INDEX", ""),
+            )
+            or ""
+        ).strip()
+        run_id = str(
+            metadata.get("retrieval_run_id")
+            or metadata.get("active_run_id")
+            or metadata.get("run_id")
+            or metadata.get("latest_run_id")
+            or ""
+        ).strip()
+        source = chunk_source
+        if source is None or isinstance(source, BlobCaseChunkSource):
+            source = AzureSearchCaseChunkSource(
+                index_name=index_name,
+                tenant_id=tenant_id_for(config, required=True),
+                adapter=search_adapter,
+                run_id=run_id,
+            )
+        query_embedding = embed_texts(
+            [normalized_question],
+            gateway=embedding_gateway,
+            deployment=getattr(config, "AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT", "") or None,
+        )[0]
+        if not hasattr(source, "retrieve"):
+            raise TypeError("Azure Search case source must implement retrieve")
+        return _trim_chunks(
+            [
+                RankedChunk(
+                    chunk_id=str(chunk.get("chunk_id", "")),
+                    case_id=str(chunk.get("case_id", case_id)),
+                    chunk=chunk,
+                    rank=index + 1,
+                    score=float(chunk.get("@search.score", chunk.get("score", 0.0)) or 0.0),
+                )
+                for index, chunk in enumerate(
+                    source.retrieve(
+                        case_id=str(case_id).strip(),
+                        question=normalized_question,
+                        query_embedding=query_embedding,
+                        top_k=int(getattr(config, "CASE_QA_VECTOR_TOP_K", 30)),
+                    )
+                )
+            ],
+            config,
+        )
+
     chunks = load_all_case_chunks(
         case_id=case_id,
         config=config,
         case_store=case_store,
         chunk_source=chunk_source,
+        case_metadata=metadata,
     )
     if not chunks:
         return []
@@ -343,6 +514,7 @@ def _cosine_similarity(left: list[float], right: list[float]) -> float:
 
 __all__ = [
     "BlobCaseChunkSource",
+    "AzureSearchCaseChunkSource",
     "CaseChunkSource",
     "RankedChunk",
     "bm25_rank",

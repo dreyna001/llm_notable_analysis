@@ -39,9 +39,14 @@ from .queue_publisher import enqueue_analyzer_job, enqueue_case_embed
 from .query_result_enrichment import enrich_analysis_with_query_results
 from .runtime_security import validate_https_url
 from .secret_provider import read_secret_field
+from .servicenow import (
+    build_servicenow_incident_draft,
+    create_servicenow_incident,
+    extract_servicenow_create_approval,
+)
 from .spl_query_grounding import retrieve_spl_query_grounding
 from .splunk_investigation import HttpSplunkMcpClient, execute_hypothesis_queries
-from .ttp_analyzer import AnthropicAnalyzer
+from .ttp_analyzer import AzureOpenAIAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -523,6 +528,69 @@ def _elasticsearch_api_key(config: Config) -> str:
         return ""
 
 
+def _servicenow_api_token(config: Config) -> str:
+    secret_name = str(getattr(config, "SERVICENOW_API_TOKEN_SECRET_NAME", "")).strip()
+    if not secret_name:
+        return ""
+    return read_secret_field(secret_name, field="token", fallback_fields=("api_token",), allow_plain_text=True)
+
+
+def _servicenow_approval_key(config: Config) -> str:
+    secret_name = str(getattr(config, "SERVICENOW_APPROVAL_HMAC_SECRET_NAME", "")).strip()
+    if not secret_name:
+        return ""
+    return read_secret_field(secret_name, field="key", fallback_fields=("secret",), allow_plain_text=True)
+
+
+def _attach_servicenow_results(
+    analysis_result: dict[str, Any],
+    *,
+    config: Config,
+    finding_id: str,
+) -> None:
+    """Add draft/create results to the durable report without bypassing approval."""
+
+    if not bool(getattr(config, "SERVICENOW_DRAFT_ENABLED", False)) and not bool(
+        getattr(config, "SERVICENOW_CREATE_ENABLED", False)
+    ):
+        return
+    llm_response = analysis_result.get("llm_response")
+    if not isinstance(llm_response, dict):
+        llm_response = {}
+    draft = build_servicenow_incident_draft(
+        llm_response,
+        config=config,
+        notable_id=finding_id,
+        finding_id=finding_id,
+    )
+    analysis_result["servicenow_draft"] = draft
+    if not bool(getattr(config, "SERVICENOW_CREATE_ENABLED", False)):
+        return
+    payload = draft.get("incident_payload") if isinstance(draft, dict) else None
+    if not isinstance(payload, dict):
+        analysis_result["servicenow_create"] = {
+            "status": "denied",
+            "operation": "create",
+            "message": "ServiceNow create requires a valid incident draft",
+        }
+        return
+    try:
+        token = _servicenow_api_token(config)
+        approval_key = _servicenow_approval_key(config)
+    except Exception as exc:
+        analysis_result["servicenow_create"] = {
+            "status": "error",
+            "operation": "create",
+            "message": str(exc),
+        }
+        return
+    analysis_result["servicenow_create"] = create_servicenow_incident(
+        payload,
+        config=config,
+        api_token=token,
+        approval=extract_servicenow_create_approval(analysis_result.get("alert_payload")),
+        approval_hmac_key=approval_key,
+    )
 def write_to_splunk_rest(
     analysis_result: dict[str, Any],
     source_blob_name: str,
@@ -631,14 +699,8 @@ def _assert_phase1_capabilities(
     *,
     case_archive_workflow: Callable[..., CaseEnvelopeReference | None] | None,
 ) -> None:
-    unsupported: list[str] = []
-    if config.SERVICENOW_DRAFT_ENABLED or config.SERVICENOW_CREATE_ENABLED:
-        unsupported.append("ServiceNow")
-    if unsupported:
-        raise UnsupportedPipelineCapabilityError(
-            "Native workflow not yet available for enabled capability: "
-            + ", ".join(unsupported)
-        )
+    # ServiceNow is now part of the analyzer's bounded report orchestration.
+    return None
 
 
 def process_blob_created(
@@ -722,9 +784,9 @@ def process_blob_created(
         config=runtime_config,
     )
     alert_payload = normalize_notable(decoded.content, decoded.content_type)
-    analysis_engine = analyzer or AnthropicAnalyzer(
-        deployment=runtime_config.AZURE_AI_FOUNDRY_ANALYSIS_DEPLOYMENT,
-        base_url=runtime_config.AZURE_AI_FOUNDRY_ANTHROPIC_BASE_URL,
+    analysis_engine = analyzer or AzureOpenAIAnalyzer(
+        deployment=runtime_config.AZURE_OPENAI_ANALYSIS_DEPLOYMENT,
+        base_url=runtime_config.AZURE_OPENAI_ENDPOINT,
         propagate_retryable=True,
     )
     alert_text = analysis_engine.format_alert_input(
@@ -877,7 +939,7 @@ def process_blob_created(
         "scored_ttps": scored_ttps,
         "alert_payload": alert_payload,
         "meta": {
-            "model_deployment": runtime_config.AZURE_AI_FOUNDRY_ANALYSIS_DEPLOYMENT,
+            "model_deployment": runtime_config.AZURE_OPENAI_ANALYSIS_DEPLOYMENT,
             "execution_time_seconds": round(time.monotonic() - started, 2),
             "ttp_count": len(scored_ttps),
             "source_container": intake.container_name,
@@ -885,6 +947,15 @@ def process_blob_created(
             "source_etag": intake.etag,
         },
     }
+    _attach_servicenow_results(
+        analysis_result,
+        config=runtime_config,
+        finding_id=_resolve_finding_id_for_writeback(
+            analysis_result,
+            intake.blob_name,
+            runtime_config,
+        ),
+    )
     if runtime_config.REPORT_SINK_MODE == "blob":
         sink_result = write_to_blob_sink(
             intake.blob_name,
@@ -977,6 +1048,10 @@ def _archive_case_from_pipeline(
             source_filename=PurePosixPath(intake.blob_name).name,
             content_type=decoded_notable.content_type,
             was_compressed=decoded_notable.was_compressed,
+            source_etag=intake.etag,
+            processing_id=hashlib.sha256(
+                f"{intake.container_name}\x1f{intake.blob_name}\x1f{intake.etag}".encode("utf-8")
+            ).hexdigest()[:32],
         ),
         sink_result=sink_result,
         blob_store=blob_store,

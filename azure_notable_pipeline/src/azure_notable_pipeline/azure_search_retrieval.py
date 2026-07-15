@@ -19,6 +19,8 @@ from azure.core.exceptions import (
 )
 
 from .azure_clients import AzureClientConfigurationError, azure_search_client
+from .azure_openai_gateway import embed_texts
+from .azure_search_adapter import AzureSearchAdapter, AzureSearchAdapterError
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +90,26 @@ class GroundingContextResult:
     context: str = ""
     snippet_count: int = 0
     message: str = ""
+
+
+@dataclass(frozen=True)
+class RetrievedDocument:
+    """Tenant/corpus-scoped document with durable source provenance."""
+
+    document_id: str
+    text: str
+    score: float
+    tenant_id: str
+    corpus_id: str
+    case_id: str = ""
+    run_id: str = ""
+    source_container: str = ""
+    source_blob_name: str = ""
+    source_version_id: str = ""
+    source_etag: str = ""
+    source_file: str = ""
+    section: str = ""
+    metadata: dict[str, Any] | None = None
 
 
 def _required_text(value: str, *, name: str) -> str:
@@ -393,6 +415,8 @@ def retrieve_soc_context(
 
     if not config.RAG_ENABLED:
         return GroundingContextResult(status="skipped", message="RAG disabled")
+    if application_managed_search_enabled(config):
+        return _retrieve_application_managed_soc_context(alert_text, config, client=client)
     index_name = str(config.RAG_AZURE_SEARCH_INDEX or "").strip()
     if not index_name:
         message = "RAG_AZURE_SEARCH_INDEX is required when RAG is enabled"
@@ -436,6 +460,175 @@ def result_section(result: RetrievalResult) -> str:
     return _first_text(metadata, _SECTION_FIELDS) or "root"
 
 
+def config_value(config: Any, name: str, default: Any = "") -> Any:
+    value = getattr(config, name, None)
+    if value not in (None, ""):
+        return value
+    return os.getenv(name, default)
+
+
+def retrieval_backend(config: Any, *, case: bool = False) -> str:
+    names = ("CASE_QA_RETRIEVAL_BACKEND", "CASE_QA_SEARCH_BACKEND") if case else (
+        "RAG_RETRIEVAL_BACKEND", "RAG_SEARCH_BACKEND"
+    )
+    for name in names:
+        value = str(config_value(config, name, "") or "").strip().lower()
+        if value:
+            if value not in {"legacy", "azure_search", "azure-ai-search", "search"}:
+                raise ValueError(f"{name} must be legacy or azure_search")
+            return "azure_search" if value in {"azure_search", "azure-ai-search", "search"} else "legacy"
+    return "legacy"
+
+
+def application_managed_search_enabled(config: Any, *, case: bool = False) -> bool:
+    index_name = config_value(
+        config,
+        "CASE_QA_AZURE_SEARCH_INDEX" if case else "RAG_AZURE_SEARCH_INDEX",
+        "",
+    )
+    return (
+        retrieval_backend(config, case=case) == "azure_search"
+        and bool(str(index_name or "").strip())
+    )
+
+
+def tenant_id_for(config: Any, *, required: bool = False) -> str:
+    value = str(config_value(config, "RAG_TENANT_ID", "") or "").strip()
+    if required and not value:
+        raise ValueError("RAG_TENANT_ID is required for Azure Search retrieval")
+    return value
+
+
+def retrieve_hybrid_documents(
+    *,
+    query_text: str,
+    index: str,
+    tenant_id: str,
+    corpus_id: str,
+    top_k: int,
+    adapter: Any,
+    query_embedding: list[float] | None = None,
+    case_id: str = "",
+    run_id: str = "",
+) -> list[RetrievedDocument]:
+    """Execute a hybrid query and preserve source and generation provenance."""
+
+    normalized_query = _required_text(query_text, name="query_text") if not query_embedding else str(query_text or "").strip()
+    embedding = query_embedding or embed_texts([normalized_query])[0]
+    if hasattr(adapter, "hybrid_search"):
+        raw_documents = adapter.hybrid_search(
+            index=index,
+            query_text=normalized_query,
+            query_embedding=embedding,
+            tenant_id=tenant_id,
+            corpus_id=corpus_id,
+            case_id=case_id,
+            run_id=run_id,
+            top_k=_max_results(top_k),
+        )
+    else:
+        raw_documents = adapter.search(
+            index=index,
+            query_text=normalized_query,
+            query_embedding=embedding,
+            tenant_id=tenant_id,
+            corpus_id=corpus_id,
+            case_id=case_id,
+            run_id=run_id,
+            top_k=_max_results(top_k),
+        )
+    documents: list[RetrievedDocument] = []
+    for raw in raw_documents:
+        document = _mapping(raw)
+        metadata = _metadata(document.get("metadata"))
+        provenance = {
+            key: str(document.get(key, ""))
+            for key in (
+                "tenant_id", "corpus_id", "case_id", "run_id", "chunk_id",
+                "source_container", "source_blob_name", "source_version_id",
+                "source_etag", "source_file", "manifest_id", "manifest_version",
+                "embedding_model",
+            )
+        }
+        metadata.setdefault("provenance", provenance)
+        documents.append(
+            RetrievedDocument(
+                document_id=str(document.get("id") or document.get("document_id") or document.get("chunk_id") or ""),
+                text=str(document.get("text") or document.get("search_text") or "").strip(),
+                score=float(document.get("@search.score", document.get("score", 0.0)) or 0.0),
+                tenant_id=str(document.get("tenant_id", tenant_id)),
+                corpus_id=str(document.get("corpus_id", corpus_id)),
+                case_id=str(document.get("case_id", case_id)),
+                run_id=str(document.get("run_id", run_id)),
+                source_container=str(document.get("source_container", "")),
+                source_blob_name=str(document.get("source_blob_name", document.get("source_key", ""))),
+                source_version_id=str(document.get("source_version_id", "")),
+                source_etag=str(document.get("source_etag", "")),
+                source_file=str(document.get("source_file", "")),
+                section=str(document.get("section", "")),
+                metadata=metadata,
+            )
+        )
+    return documents
+
+
+def render_hybrid_documents(
+    documents: list[RetrievedDocument],
+    *,
+    budget_chars: int,
+) -> str:
+    rendered: list[str] = []
+    remaining = max(0, int(budget_chars))
+    for index, document in enumerate(documents, 1):
+        if not document.text or remaining <= 0:
+            continue
+        source = document.source_file or document.source_blob_name or "azure_ai_search"
+        prefix = f"[{index}] Source: {source}"
+        if document.section:
+            prefix += f" :: {document.section}"
+        prefix += "\n"
+        text = document.text[: max(0, remaining - len(prefix))].strip()
+        if not text:
+            continue
+        block = prefix + text
+        rendered.append(block)
+        remaining -= len(block) + 2
+    return "\n\n".join(rendered)
+
+
+def _retrieve_application_managed_soc_context(
+    alert_text: str,
+    config: Any,
+    *,
+    client: Any | None,
+) -> GroundingContextResult:
+    index = str(config_value(config, "RAG_AZURE_SEARCH_INDEX", "") or "").strip()
+    corpus = str(config_value(config, "RAG_CORPUS_ID", "soc") or "").strip()
+    try:
+        tenant = tenant_id_for(config, required=True)
+        adapter = client or AzureSearchAdapter.from_config(config, index_name=index)
+        documents = retrieve_hybrid_documents(
+            query_text=alert_text,
+            index=index,
+            tenant_id=tenant,
+            corpus_id=corpus,
+            top_k=int(config_value(config, "RAG_MAX_SNIPPETS", 4)),
+            adapter=adapter,
+        )
+    except Exception as exc:
+        message = f"Azure AI Search RAG retrieval failed: {exc}"
+        if str(config_value(config, "RAG_FAILURE_MODE", "suppress")) == "fail_closed":
+            raise RuntimeError(message) from exc
+        return GroundingContextResult(status="failed", message=message)
+    context = render_hybrid_documents(
+        documents,
+        budget_chars=int(config_value(config, "RAG_CONTEXT_BUDGET_CHARS", 1600)),
+    )
+    if not context:
+        return GroundingContextResult(status="no_match", message="No RAG snippets returned")
+    return GroundingContextResult(status="success", context=context, snippet_count=len(documents))
+
+
 __all__ = [
     "AzureSearchAuthenticationError",
     "AzureSearchConfigurationError",
@@ -446,8 +639,15 @@ __all__ = [
     "GroundingContextResult",
     "MAX_RETRIEVAL_RESULTS",
     "RetrievalResult",
+    "RetrievedDocument",
+    "application_managed_search_enabled",
+    "config_value",
     "render_soc_context",
+    "render_hybrid_documents",
     "result_section",
+    "retrieve_hybrid_documents",
     "retrieve_grounding",
     "retrieve_soc_context",
+    "retrieval_backend",
+    "tenant_id_for",
 ]

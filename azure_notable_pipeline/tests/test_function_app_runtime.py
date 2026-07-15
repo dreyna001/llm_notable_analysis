@@ -21,6 +21,7 @@ def test_runtime_enumerates_native_wrappers_with_bicep_function_names() -> None:
         "intake_blob",
         "analyzer_queue",
         "case_embed_queue",
+        "rag_ingest_queue",
         "disposition_sync_timer",
         "operations_monitor_timer",
         "portal_http",
@@ -30,6 +31,12 @@ def test_runtime_enumerates_native_wrappers_with_bicep_function_names() -> None:
     assert binding["name"] == "message"
     assert binding["queueName"] == "%CASE_EMBED_QUEUE_NAME%"
     assert binding["connection"] == "OutputStorage"
+
+    rag_binding = registered["rag_ingest_queue"].get_bindings()[0].get_dict_repr()
+    assert rag_binding["type"] == "queueTrigger"
+    assert rag_binding["name"] == "message"
+    assert rag_binding["queueName"] == "%RAG_INGEST_QUEUE_NAME%"
+    assert rag_binding["connection"] == "OutputStorage"
 
     portal_binding = registered["portal_http"].get_bindings()[0].get_dict_repr()
     assert portal_binding["type"] == "httpTrigger"

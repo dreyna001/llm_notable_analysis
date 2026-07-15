@@ -77,7 +77,7 @@ def test_embeddings_never_fall_back_to_analyzer_deployment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT", raising=False)
-    monkeypatch.setenv("AZURE_AI_FOUNDRY_ANALYSIS_DEPLOYMENT", "claude-sonnet-4-6")
+    monkeypatch.setenv("AZURE_OPENAI_ANALYSIS_DEPLOYMENT", "customer-analysis-deployment")
 
     with pytest.raises(
         gateway.AzureOpenAIConfigurationError,
@@ -153,7 +153,7 @@ def test_chat_never_falls_back_to_analyzer_deployment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT", raising=False)
-    monkeypatch.setenv("AZURE_AI_FOUNDRY_ANALYSIS_DEPLOYMENT", "claude-sonnet-4-6")
+    monkeypatch.setenv("AZURE_OPENAI_ANALYSIS_DEPLOYMENT", "customer-analysis-deployment")
 
     with pytest.raises(
         gateway.AzureOpenAIConfigurationError,

@@ -22,17 +22,17 @@ configuration/Bicep deployments, not code changes.
 | Capability | Azure implementation |
 | --- | --- |
 | Private intake | polling Blob trigger on `input/incoming/{name}` plus input queue receipts |
-| Analyzer | strict Storage Queue job, Premium Function, Foundry Claude Sonnet 4.6 |
+| Analyzer | strict Storage Queue job, Premium Function, customer-owned Azure OpenAI deployment |
 | Reports/archive | private output Blob `reports/`, `cases/`, `case_chunks/` |
 | Embed | versioned queue job, Azure OpenAI 1024-d embeddings |
 | Persistence | native Cosmos application operations with Strong point-read semantics |
 | Grounding | Azure AI Search stable retrieval objects and attribution |
-| Portal | Front Door Premium, private `$web`/APIM Standard v2/Function origins |
+| Portal | Front Door Premium with private `$web` and Function origins |
 | Disposition | daily timer, read-only ServiceNow pull, Cosmos state/cursor |
 
 One immutable `linux/amd64` image digest runs four isolated Function Apps, each
 with its own UAMI. Managed identity is mandatory for ACR, Functions host
-storage, Blob/Queue, Foundry, Azure OpenAI, Search, Cosmos, and Key Vault. Azure
+storage, Blob/Queue, Azure OpenAI, Azure AI Search, Cosmos, and Key Vault. Azure
 service keys, storage connections, ACR credentials, and public-origin fallback
 are forbidden. Key Vault holds only external integration secrets that cannot
 use managed identity.
@@ -73,19 +73,18 @@ retention, replay, and ownership are parity contracts.
 
 ## AI and evidence boundary
 
-Analysis uses the customer-qualified Anthropic-hosted Sonnet deployment through
-Foundry and forces `analyze_notable` structured output. Chat and embeddings use
-explicit Azure OpenAI deployment names; no lane substitutes for another.
-Embeddings are exactly 1024 dimensions. General/Search grounding is advisory
+Analysis, chat, and embeddings use explicit customer-owned Azure OpenAI
+deployment names; no lane substitutes for another. Structured output is parsed,
+validated, and policy checked before persistence. Embeddings are exactly 1024
+dimensions. General/Search grounding is advisory
 and source-attributed; it cannot be represented as current-case evidence.
 Model output is parsed, validated, optionally repaired once, and policy checked
 before persistence or action.
 
-The region, preview/Anthropic hosting and data-processing terms, content filters,
-model deployments, quota, and rollback model require recorded customer
-approval. Chat remains synchronous and follows one policy path through APIM:
-browser 220 seconds, Function 225 seconds, chat-operation APIM policy 230
-seconds, and Front Door 240 seconds. Other API operations retain APIM's
+The Government region, Azure OpenAI data-processing terms, content filters, model
+deployments, quota, and rollback model require recorded customer approval. Chat
+remains synchronous and follows one private Front Door path:
+browser 220 seconds, Function 225 seconds, and Front Door 240 seconds. Other API operations retain the application's
 30-second backend timeout.
 
 ## Security and external integrations
@@ -106,7 +105,7 @@ synthetic check; the stack stores no long-lived token.
 ## Failure, observability, and acceptance
 
 Production requires an action group and alerts for all three poison queues,
-15-minute backlog, Function failure/timeout, sustained Foundry/OpenAI/Cosmos
+15-minute backlog, Function failure/timeout, sustained Azure OpenAI/Cosmos
 errors, Front Door 5xx, authenticated synthetic failure, and missed disposition
 sync. Exact thresholds and owners are customer deployment decisions.
 
@@ -114,7 +113,7 @@ Default CI uses fakes/emulators and no live cloud/model calls. The dedicated
 staging gate proves private intake, 3x burst, five-attempt poison paths,
 duplicate delivery, unchanged OpenAPI, authentication and cross-user ownership,
 timeout chain, disposition dry run, direct-origin denial, and managed-identity
-Foundry/OpenAI/Search/Cosmos behavior using synthetic data. Production case
+Azure OpenAI/Search/Cosmos behavior using synthetic data. Production case
 data, production SIEM, and external writeback are forbidden in staging.
 
 Acceptance additionally requires reproducible Bicep/digest deployment, no

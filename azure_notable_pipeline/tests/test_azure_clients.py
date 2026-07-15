@@ -36,11 +36,11 @@ def test_blob_client_uses_explicit_user_assigned_identity_and_timeouts(
     monkeypatch.setattr(azure_clients, "ManagedIdentityCredential", credential_factory)
     monkeypatch.setattr(azure_clients, "BlobServiceClient", blob_factory)
 
-    result = azure_clients.blob_service_client("https://input.blob.core.windows.net/")
+    result = azure_clients.blob_service_client("https://input.blob.core.usgovcloudapi.net/")
 
     assert result is not None
     assert credential_factory.kwargs == {"client_id": "uami-client-id"}
-    assert blob_factory.kwargs["account_url"] == "https://input.blob.core.windows.net"
+    assert blob_factory.kwargs["account_url"] == "https://input.blob.core.usgovcloudapi.net"
     assert blob_factory.kwargs["credential"] is not None
     assert blob_factory.kwargs["connection_timeout"] == 10
     assert blob_factory.kwargs["read_timeout"] == 60
@@ -56,7 +56,7 @@ def test_clients_fail_closed_without_user_assigned_identity(
         azure_clients.AzureClientConfigurationError,
         match="AZURE_CLIENT_ID is required",
     ):
-        azure_clients.blob_service_client("https://input.blob.core.windows.net")
+        azure_clients.blob_service_client("https://input.blob.core.usgovcloudapi.net")
 
 
 def test_blob_client_uses_azurite_connection_string_only_when_explicitly_enabled(
@@ -166,7 +166,7 @@ def test_invalid_local_emulation_flag_fails_closed(
         azure_clients.AzureClientConfigurationError,
         match="must be true or false",
     ):
-        azure_clients.blob_service_client("https://input.blob.core.windows.net")
+        azure_clients.blob_service_client("https://input.blob.core.usgovcloudapi.net")
 
 
 def test_azure_openai_uses_cognitive_services_entra_scope_without_api_key(
@@ -185,53 +185,27 @@ def test_azure_openai_uses_cognitive_services_entra_scope_without_api_key(
     monkeypatch.setattr(azure_clients, "AzureOpenAI", openai_factory)
 
     azure_clients.azure_openai_client(
-        "https://qualified.openai.azure.com",
+        "https://qualified.openai.azure.us",
         "2024-10-21",
     )
 
     assert token_calls == [
-        (credential, "https://cognitiveservices.azure.com/.default")
+        (credential, "https://cognitiveservices.azure.us/.default")
     ]
     assert openai_factory.kwargs["azure_ad_token_provider"] is provider
     assert openai_factory.kwargs["timeout"] == 220
     assert "api_key" not in openai_factory.kwargs
 
 
-def test_anthropic_foundry_uses_ai_entra_scope_and_native_base_url(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    credential = object()
-    provider = object()
-    foundry_factory = Capture()
-    token_calls: list[tuple[object, str]] = []
-    monkeypatch.setenv("ANTHROPIC_FOUNDRY_API_KEY", "ambient-key-must-not-be-used")
-    monkeypatch.setattr(azure_clients, "_credential", lambda: credential)
-    monkeypatch.setattr(
-        azure_clients,
-        "get_bearer_token_provider",
-        lambda value, scope: token_calls.append((value, scope)) or provider,
-    )
-    monkeypatch.setattr(azure_clients, "AnthropicFoundry", foundry_factory)
-
-    azure_clients.anthropic_foundry_client(
-        "https://qualified.services.ai.azure.com/anthropic/"
-    )
-
-    assert token_calls == [(credential, "https://ai.azure.com/.default")]
-    assert foundry_factory.kwargs["base_url"].endswith("/anthropic")
-    assert foundry_factory.kwargs["azure_ad_token_provider"] is provider
-    assert foundry_factory.kwargs["api_key"] == ""
-
-
-def test_anthropic_foundry_rejects_operation_url() -> None:
+def test_commercial_openai_endpoint_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AZURE_CLIENT_ID", "uami-client-id")
     with pytest.raises(
         azure_clients.AzureClientConfigurationError,
-        match="must end at /anthropic",
+        match="Azure Government endpoint",
     ):
-        azure_clients._service_url(
-            "https://qualified.services.ai.azure.com/anthropic/v1/messages",
-            setting_name="AZURE_AI_FOUNDRY_ANTHROPIC_BASE_URL",
-            required_path="/anthropic",
+        azure_clients.azure_openai_client(
+            "https://qualified.openai.azure.com",
+            "2024-10-21",
         )
 
 
@@ -243,7 +217,7 @@ def test_cosmos_client_requests_strong_consistency(
     monkeypatch.setattr(azure_clients, "_credential", lambda: credential)
     monkeypatch.setattr(azure_clients, "CosmosClient", cosmos_factory)
 
-    azure_clients.cosmos_client("https://qualified.documents.azure.com")
+    azure_clients.cosmos_client("https://qualified.documents.azure.us")
 
     assert cosmos_factory.kwargs["credential"] is credential
     assert cosmos_factory.kwargs["consistency_level"] == "Strong"
@@ -277,7 +251,7 @@ def test_cosmos_emulator_rejects_remote_endpoint(
         azure_clients.AzureClientConfigurationError,
         match="local Docker hostname",
     ):
-        azure_clients.cosmos_client("https://qualified.documents.azure.com")
+        azure_clients.cosmos_client("https://qualified.documents.azure.us")
 
 
 def test_cosmos_emulator_requires_explicit_key(
@@ -299,6 +273,6 @@ def test_queue_and_search_names_must_be_nonblank(
     monkeypatch.setattr(azure_clients, "_credential", lambda: object())
 
     with pytest.raises(azure_clients.AzureClientConfigurationError):
-        azure_clients.queue_client("https://output.queue.core.windows.net", "")
+        azure_clients.queue_client("https://output.queue.core.usgovcloudapi.net", "")
     with pytest.raises(azure_clients.AzureClientConfigurationError):
-        azure_clients.azure_search_client("https://qualified.search.windows.net", "")
+        azure_clients.azure_search_client("https://qualified.search.azure.us", "")

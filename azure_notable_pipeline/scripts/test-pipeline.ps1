@@ -44,7 +44,6 @@ try {
     $embedApp = Output-Value "EmbedFunctionAppName"
     $portalHost = Output-Value "PortalFrontDoorHostName"
     $portalApp = Output-Value "PortalFunctionAppName"
-    $apimName = Output-Value "PortalApiManagementName"
     $analyzerQueue = Output-Value "AnalyzerQueueName"
     $embedQueue = Output-Value "CaseEmbedQueueName"
 
@@ -55,10 +54,6 @@ try {
     if ($portalApp) {
         $publicAccess = (& az functionapp show -g $ResourceGroup -n $portalApp --query publicNetworkAccess -o tsv).Trim()
         if ($publicAccess -ne "Disabled") { throw "Portal Function public network access is not disabled" }
-    }
-    if ($apimName) {
-        $publicAccess = (& az apim show -g $ResourceGroup -n $apimName --query publicNetworkAccess -o tsv).Trim()
-        if ($publicAccess -ne "Disabled") { throw "APIM public network access is not disabled" }
     }
 
     function Get-Setting([string]$App, [string]$Name) {

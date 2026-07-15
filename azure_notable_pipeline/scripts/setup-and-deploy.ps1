@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 $required = @(
     'AZURE_SUBSCRIPTION_ID', 'AZURE_RESOURCE_GROUP', 'AZURE_DEPLOYMENT_PREFIX',
     'CONTAINER_REGISTRY_RESOURCE_ID', 'CONTAINER_IMAGE_URI',
-    'AZURE_AI_FOUNDRY_ANTHROPIC_BASE_URL', 'AZURE_AI_FOUNDRY_RESOURCE_ID',
+    'AZURE_OPENAI_ENDPOINT', 'AZURE_OPENAI_RESOURCE_ID', 'AZURE_OPENAI_ANALYSIS_DEPLOYMENT',
     'FUNCTIONS_HOST_STORAGE_ACCOUNT_NAME', 'INPUT_STORAGE_ACCOUNT_NAME',
     'OUTPUT_STORAGE_ACCOUNT_NAME', 'COSMOS_ACCOUNT_NAME', 'COSMOS_DATABASE_NAME'
 )
@@ -16,11 +16,22 @@ foreach ($name in $required) {
 if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
     throw 'Azure CLI (az) is required.'
 }
+az cloud set --name AzureUSGovernment
+if ($LASTEXITCODE -ne 0) { throw 'Could not select AzureUSGovernment.' }
 if ($env:CONTAINER_IMAGE_URI -notmatch '@sha256:[0-9a-fA-F]{64}$') {
     throw 'CONTAINER_IMAGE_URI must be pinned to an immutable @sha256 digest.'
 }
 
-$location = if ($env:AZURE_LOCATION) { $env:AZURE_LOCATION } else { 'eastus' }
+$location = if ($env:AZURE_LOCATION) { $env:AZURE_LOCATION.ToLowerInvariant() } else { 'usgovvirginia' }
+if ($location -notin @('usgovvirginia', 'usgovarizona')) {
+    throw 'AZURE_LOCATION must be usgovvirginia or usgovarizona.'
+}
+if ($env:AZURE_OPENAI_ENDPOINT -notmatch '^https://[^/]+\.openai\.azure\.us/?$') {
+    throw 'AZURE_OPENAI_ENDPOINT must use .openai.azure.us.'
+}
+if ($env:CONTAINER_IMAGE_URI -notmatch '^[^/]+\.azurecr\.us/') {
+    throw 'CONTAINER_IMAGE_URI must use an Azure Government ACR (.azurecr.us).'
+}
 $capabilityProfiles = if ($env:CAPABILITY_PROFILES) { $env:CAPABILITY_PROFILES } else { 'core' }
 $capabilityProfiles = $capabilityProfiles -replace '\s', ''
 $deployPortal = ",${capabilityProfiles},".ToLowerInvariant().Contains(',analyst_portal,')
@@ -44,19 +55,14 @@ $storageSkuName = if ($env:STORAGE_SKU_NAME) { $env:STORAGE_SKU_NAME } else { 'S
 if ($functionPlanZoneRedundant -ieq 'true' -and $storageSkuName -cne 'Standard_ZRS') {
     throw 'FUNCTION_PLAN_ZONE_REDUNDANT=true requires STORAGE_SKU_NAME=Standard_ZRS.'
 }
-if ($deploymentEnvironment -eq 'production' -and $blobDataProtectionEnabled -ine 'true') {
-    throw 'BLOB_DATA_PROTECTION_ENABLED=true is required for production.'
-}
-if ($deploymentEnvironment -eq 'production' -and $cosmosContinuousBackupEnabled -ine 'true') {
-    throw 'COSMOS_CONTINUOUS_BACKUP_ENABLED=true is required for production.'
-}
 $dispositionSyncEnabled = if ($env:SERVICENOW_DISPOSITION_SYNC_ENABLED) { $env:SERVICENOW_DISPOSITION_SYNC_ENABLED } else { 'false' }
 if ($deployPortal) {
     $portalRequired = @(
         'PORTAL_UI_STORAGE_ACCOUNT_NAME', 'PORTAL_UI_DEPLOYER_PRINCIPAL_ID',
-        'PORTAL_JWT_ISSUER', 'PORTAL_JWT_AUDIENCE', 'APIM_PUBLISHER_EMAIL',
-        'AZURE_OPENAI_ENDPOINT', 'AZURE_OPENAI_RESOURCE_ID',
+        'PORTAL_JWT_ISSUER', 'PORTAL_JWT_AUDIENCE',
         'AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT', 'AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT',
+        'AZURE_SEARCH_ENDPOINT', 'AZURE_SEARCH_RESOURCE_ID', 'CASE_QA_AZURE_SEARCH_INDEX',
+        'RAG_TENANT_ID',
         'PORTAL_OIDC_CLIENT_ID', 'PORTAL_OIDC_AUTHORITY', 'PORTAL_OIDC_API_SCOPE',
         'PORTAL_VALIDATION_BEARER_TOKEN'
     )
@@ -73,6 +79,21 @@ if ($deployPortal) {
     if ($portalAuthMode -eq 'jwt' -and $delegatedScopeName -ne $env:PORTAL_ENTRA_REQUIRED_APP_ROLE) {
         throw 'In JWT mode, PORTAL_ENTRA_REQUIRED_APP_ROLE must match the final segment of PORTAL_OIDC_API_SCOPE.'
     }
+}
+if (",${capabilityProfiles},".ToLowerInvariant().Contains(',rag,')) {
+    foreach ($name in @(
+        'AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT', 'AZURE_SEARCH_ENDPOINT',
+        'AZURE_SEARCH_RESOURCE_ID', 'RAG_AZURE_SEARCH_INDEX', 'RAG_TENANT_ID',
+        'RAG_SOURCE_STORAGE_ACCOUNT_NAME', 'RAG_SOURCE_STORAGE_ACCOUNT_URL',
+        'RAG_SOURCE_CONTAINER'
+    )) {
+        if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+            throw "Required RAG environment variable is unset: $name"
+        }
+    }
+}
+if ($env:AZURE_SEARCH_ENDPOINT -and $env:AZURE_SEARCH_ENDPOINT -notmatch '^https://[^/]+\.search\.azure\.us/?$') {
+    throw 'AZURE_SEARCH_ENDPOINT must use .search.azure.us.'
 }
 if ($deploymentEnvironment -eq 'production' -and [string]::IsNullOrWhiteSpace($env:ALERT_ACTION_GROUP_RESOURCE_ID)) {
     throw 'ALERT_ACTION_GROUP_RESOURCE_ID is required when DEPLOYMENT_ENVIRONMENT=production.'
@@ -119,13 +140,10 @@ function Invoke-Preflight {
 # Complete source, contract, IaC, and image checks before Azure mutation.
 Invoke-Preflight
 
-$apimId = if ($deployPortal) {
-    "/subscriptions/$($env:AZURE_SUBSCRIPTION_ID)/resourceGroups/$($env:AZURE_RESOURCE_GROUP)/providers/Microsoft.ApiManagement/service/$($env:AZURE_DEPLOYMENT_PREFIX)-portal-apim"
-}
-else { '' }
 $deploymentSucceeded = $false
 try {
 az account set --subscription $env:AZURE_SUBSCRIPTION_ID
+$resourceManagerEndpoint = "$(az cloud show --name AzureUSGovernment --query endpoints.resourceManager -o tsv)".TrimEnd('/')
 if ($cosmosContinuousBackupEnabled -ieq 'true') {
     $existingCosmosBackupType = "$(az cosmosdb show --resource-group $env:AZURE_RESOURCE_GROUP --name $env:COSMOS_ACCOUNT_NAME --query 'backupPolicy.type' -o tsv 2>$null)".Trim()
     if ($LASTEXITCODE -eq 0 -and $existingCosmosBackupType -ieq 'Periodic' -and $env:COSMOS_CONTINUOUS_BACKUP_MIGRATION_ACKNOWLEDGED -ine 'true') {
@@ -156,16 +174,22 @@ $parameters = @(
     "Location=$location",
     "ContainerRegistryResourceId=$($env:CONTAINER_REGISTRY_RESOURCE_ID)",
     "ContainerImageUri=$($env:CONTAINER_IMAGE_URI)",
-    "AzureAiFoundryAnthropicBaseUrl=$($env:AZURE_AI_FOUNDRY_ANTHROPIC_BASE_URL)",
-    "AzureAiFoundryResourceId=$($env:AZURE_AI_FOUNDRY_RESOURCE_ID)",
-    "AzureAiFoundryAnalysisDeployment=$(if ($env:AZURE_AI_FOUNDRY_ANALYSIS_DEPLOYMENT) { $env:AZURE_AI_FOUNDRY_ANALYSIS_DEPLOYMENT } else { 'claude-sonnet-4-6' })",
+    'cloudEnvironment=AzureUSGovernment',
     "AzureOpenAiEndpoint=$($env:AZURE_OPENAI_ENDPOINT)",
     "AzureOpenAiResourceId=$($env:AZURE_OPENAI_RESOURCE_ID)",
+    "AzureOpenAiAnalysisDeployment=$($env:AZURE_OPENAI_ANALYSIS_DEPLOYMENT)",
     "AzureOpenAiEmbeddingsDeployment=$($env:AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT)",
     "AzureOpenAiPortalChatDeployment=$($env:AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT)",
     "AzureSearchEndpoint=$($env:AZURE_SEARCH_ENDPOINT)",
     "AzureSearchResourceId=$($env:AZURE_SEARCH_RESOURCE_ID)",
     "RagAzureSearchIndex=$($env:RAG_AZURE_SEARCH_INDEX)",
+    "RagTenantId=$($env:RAG_TENANT_ID)",
+    "RagSourceStorageAccountName=$($env:RAG_SOURCE_STORAGE_ACCOUNT_NAME)",
+    "RagSourceStorageAccountUrl=$($env:RAG_SOURCE_STORAGE_ACCOUNT_URL)",
+    "RagSourceContainer=$($env:RAG_SOURCE_CONTAINER)",
+    "RagSourcePrefix=$(if ($env:RAG_SOURCE_PREFIX) { $env:RAG_SOURCE_PREFIX } else { 'rag-sources' })",
+    "RagIngestQueueName=$(if ($env:RAG_INGEST_QUEUE_NAME) { $env:RAG_INGEST_QUEUE_NAME } else { 'rag-ingest-invocations' })",
+    "CaseQaAzureSearchIndex=$($env:CASE_QA_AZURE_SEARCH_INDEX)",
     "KeyVaultName=$($env:KEY_VAULT_NAME)",
     "CosmosAccountName=$($env:COSMOS_ACCOUNT_NAME)",
     "CosmosDatabaseName=$($env:COSMOS_DATABASE_NAME)",
@@ -199,8 +223,6 @@ $parameters = @(
     "PortalJwtIssuer=$($env:PORTAL_JWT_ISSUER)",
     "PortalJwtAudience=$($env:PORTAL_JWT_AUDIENCE)",
     "PortalEntraRequiredAppRole=$($env:PORTAL_ENTRA_REQUIRED_APP_ROLE)",
-    "ApiManagementPublisherEmail=$($env:APIM_PUBLISHER_EMAIL)",
-    "ApiManagementPublisherName=$(if ($env:APIM_PUBLISHER_NAME) { $env:APIM_PUBLISHER_NAME } else { 'Notable Analysis' })",
     "PortalChatTimeoutSec=$(if ($env:PORTAL_CHAT_TIMEOUT_SEC) { $env:PORTAL_CHAT_TIMEOUT_SEC } else { '225' })",
     "PortalChatDistributedQuotaEnabled=$(if ($env:PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED) { $env:PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED } else { 'true' })",
     "ChatQuotaContainerName=$(if ($env:PORTAL_CHAT_QUOTA_CONTAINER) { $env:PORTAL_CHAT_QUOTA_CONTAINER } else { "$($env:AZURE_DEPLOYMENT_PREFIX)-chat-quota" })",
@@ -236,16 +258,9 @@ $analyzer = az deployment group show --name $deploymentName --resource-group $en
 $embed = az deployment group show --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --query properties.outputs.EmbedFunctionAppName.value -o tsv
 $disposition = "$(az deployment group show --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --query properties.outputs.DispositionFunctionAppName.value -o tsv)".Trim()
 $portal = "$(az deployment group show --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --query properties.outputs.PortalFunctionAppName.value -o tsv)".Trim()
-$apim = "$(az deployment group show --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --query properties.outputs.PortalApiManagementName.value -o tsv)".Trim()
 $frontDoorProfile = "$(az deployment group show --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --query properties.outputs.PortalFrontDoorProfileName.value -o tsv)".Trim()
 $frontDoorHost = "$(az deployment group show --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --query properties.outputs.PortalFrontDoorHostName.value -o tsv)".Trim()
 $workspaceCustomerId = "$(az deployment group show --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --query properties.outputs.LogAnalyticsWorkspaceCustomerId.value -o tsv)".Trim()
-if ($apim) {
-    # Resolve this immediately so finally can fail closed during every
-    # post-deployment validation, not only after portal asset upload succeeds.
-    $apimId = "$(az apim show --resource-group $env:AZURE_RESOURCE_GROUP --name $apim --query id -o tsv)".Trim()
-    if (-not $apimId) { throw 'Could not resolve the deployed APIM resource ID.' }
-}
 
 $forbiddenSettingPattern = '^(AZUREWEBJOBSSTORAGE|AZUREWEBJOBSDASHBOARD|WEBSITE_CONTENTAZUREFILECONNECTIONSTRING|WEBSITE_CONTENTSHARE)$|(^|_)(DOCKER_REGISTRY_SERVER|ACR|AZURE_CONTAINER_REGISTRY|CONTAINER_REGISTRY)(_|$).*(USERNAME|PASSWORD|API_?KEY|ACCESS_?KEY|KEY|TOKEN|SECRET|CREDENTIAL|CONNECTION_?STRING)|(^|_)(AZURE_)?(STORAGE|BLOB|QUEUE|TABLE|FILE|FILES)(_|$).*(ACCOUNT_?KEY|ACCESS_?KEY|API_?KEY|KEY|CONNECTION_?STRING|SAS(_TOKEN)?|PASSWORD|SECRET)|(^|_)(AZURE_AI_FOUNDRY|AI_FOUNDRY|FOUNDRY|ANTHROPIC|AZURE_OPENAI|OPENAI|AZURE_SEARCH|COGNITIVE_SEARCH|SEARCH_SERVICE|SEARCH|COSMOSDB|COSMOS|AZURE_COSMOS)(_|$).*(API_?KEY|ACCOUNT_?KEY|ACCESS_?KEY|PRIMARY_?KEY|SECONDARY_?KEY|MASTER_?KEY|KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|CONNECTION_?STRING)'
 
@@ -343,7 +358,7 @@ function Wait-FunctionHost {
     $expected = @($ExpectedFunctions | Sort-Object)
     foreach ($attempt in 1..18) {
         $appState = "$(az functionapp show --resource-group $env:AZURE_RESOURCE_GROUP --name $App --query state -o tsv 2>$null)".Trim()
-        $hostState = "$(az rest --method get --url "https://management.azure.com${appId}/hostruntime/admin/host/status?api-version=2022-03-01" --query state -o tsv 2>$null)".Trim()
+        $hostState = "$(az rest --method get --url "${resourceManagerEndpoint}${appId}/hostruntime/admin/host/status?api-version=2022-03-01" --query state -o tsv 2>$null)".Trim()
         $functionOutput = @(az functionapp function list --resource-group $env:AZURE_RESOURCE_GROUP --name $App --query '[].name' -o tsv 2>$null)
         $functionCommandSucceeded = $LASTEXITCODE -eq 0
         $actual = @(
@@ -516,11 +531,12 @@ if ($deployPortal) {
     $subscriptionId = "$(az account show --query id -o tsv)".Trim()
     $portalStorageId = "/subscriptions/$subscriptionId/resourceGroups/$($env:AZURE_RESOURCE_GROUP)/providers/Microsoft.Storage/storageAccounts/$($env:PORTAL_UI_STORAGE_ACCOUNT_NAME)"
     $portalFunctionId = "$(az functionapp show --resource-group $env:AZURE_RESOURCE_GROUP --name $portal --query id -o tsv)".Trim()
+    $portalFunctionHost = "$(az functionapp show --resource-group $env:AZURE_RESOURCE_GROUP --name $portal --query defaultHostName -o tsv)".Trim()
     Approve-ExpectedFrontDoorConnection -TargetResourceId $portalStorageId -ExpectedDescription 'Front Door private static website origin' -OriginGroup 'portal-ui' -OriginName 'portal-web'
-    Approve-ExpectedFrontDoorConnection -TargetResourceId $apimId -ExpectedDescription 'Front Door private APIM origin' -OriginGroup 'portal-api' -OriginName 'portal-apim'
+    Approve-ExpectedFrontDoorConnection -TargetResourceId $portalFunctionId -ExpectedDescription 'Front Door private portal Function origin' -OriginGroup 'portal-api' -OriginName 'portal-function'
 
     $origins = @(
-        @{ Group = 'portal-api'; Name = 'portal-apim' },
+        @{ Group = 'portal-api'; Name = 'portal-function' },
         @{ Group = 'portal-ui'; Name = 'portal-web' }
     )
     foreach ($origin in $origins) {
@@ -533,14 +549,10 @@ if ($deployPortal) {
         if ($state -ne 'Approved') { throw "Front Door origin $($origin.Name) was not approved." }
     }
 
-    # Never disable APIM public access until every Front Door managed endpoint is approved.
-    az resource update --ids $apimId --set properties.publicNetworkAccess=Disabled --output none
-    Assert-AzSucceeded -Operation 'disabling APIM public network access after origin approval'
-    if ("$(az resource show --ids $apimId --query properties.publicNetworkAccess -o tsv)".Trim() -ne 'Disabled') { throw 'APIM public access is not disabled.' }
     if ("$(az storage account show --ids $portalStorageId --query publicNetworkAccess -o tsv)".Trim() -ne 'Disabled') { throw 'Portal UI storage public access is not disabled.' }
     if ("$(az functionapp show --ids $portalFunctionId --query publicNetworkAccess -o tsv)".Trim() -ne 'Disabled') { throw 'Portal Function public access is not disabled.' }
 
-    Assert-DirectOriginDenied -Url "https://${apim}.azure-api.net/ready"
+    Assert-DirectOriginDenied -Url "https://${portalFunctionHost}/ready"
     Invoke-RestMethod `
         -Uri "https://${frontDoorHost}/ready" `
         -Headers @{ Authorization = "Bearer $($env:PORTAL_VALIDATION_BEARER_TOKEN)" } `
@@ -578,10 +590,5 @@ if ($deployPortal) {
     Write-Host "Deployment $deploymentName completed: $analyzer, $embed, $disposition$(if ($portal) { ", $portal" })."
 }
 finally {
-    if (-not $deploymentSucceeded -and $deployPortal) {
-        az resource update --ids $apimId --set properties.publicNetworkAccess=Disabled --output none 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning 'Failed to disable APIM public access during deployment cleanup.'
-        }
-    }
+    # Bicep keeps Function and storage origins private even when validation fails.
 }

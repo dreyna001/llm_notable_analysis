@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from azure_notable_pipeline import azure_search_retrieval
 from azure_notable_pipeline.config import Config
 from azure_notable_pipeline.portal_chat_kb import build_chat_knowledge_sources
 
@@ -16,16 +17,31 @@ class FakeSearchClient:
     def search(self, **_kwargs: Any) -> list[dict[str, Any]]:
         return [{"content": self.content, "source_file": self.source}]
 
+    def hybrid_search(self, **_kwargs: Any) -> list[dict[str, Any]]:
+        return [
+            {
+                "text": self.content,
+                "search_text": self.content,
+                "source_file": self.source,
+                "section": "root",
+            }
+        ]
+
 
 class FailingSearchClient:
     def search(self, **_kwargs: Any) -> list[dict[str, Any]]:
         raise RuntimeError("search unavailable")
 
 
-def test_builds_enabled_index_specific_advisory_sources() -> None:
+def test_builds_enabled_index_specific_advisory_sources(monkeypatch) -> None:
+    monkeypatch.setattr(
+        azure_search_retrieval, "embed_texts", lambda _texts: [[0.0] * 1024]
+    )
     config = Config(
         RAG_ENABLED=True,
+        RAG_TENANT_ID="tenant-1",
         RAG_AZURE_SEARCH_INDEX="rag-index",
+        AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT="embeddings",
         SPL_QUERY_RAG_ENABLED=True,
         SPL_QUERY_AZURE_SEARCH_INDEX="spl-index",
         ELASTICSEARCH_GROUNDING_ENABLED=True,
@@ -50,10 +66,15 @@ def test_builds_enabled_index_specific_advisory_sources() -> None:
     assert all(source["source_lane"] == "knowledge_base" for source in sources)
 
 
-def test_one_failed_lane_does_not_remove_other_advisory_sources() -> None:
+def test_one_failed_lane_does_not_remove_other_advisory_sources(monkeypatch) -> None:
+    monkeypatch.setattr(
+        azure_search_retrieval, "embed_texts", lambda _texts: [[0.0] * 1024]
+    )
     config = Config(
         RAG_ENABLED=True,
+        RAG_TENANT_ID="tenant-1",
         RAG_AZURE_SEARCH_INDEX="rag-index",
+        AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT="embeddings",
         SPL_QUERY_RAG_ENABLED=True,
         SPL_QUERY_AZURE_SEARCH_INDEX="spl-index",
     )

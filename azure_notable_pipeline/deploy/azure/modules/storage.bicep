@@ -36,6 +36,10 @@ param outputRetentionDays int = 30
 
 @minValue(1)
 param caseRetentionDays int = 30
+param ragIngestQueueName string = 'rag-ingest-invocations'
+param customerManagedKeyEnabled bool = false
+param customerManagedKeyUri string = ''
+param customerManagedKeyIdentityResourceId string = ''
 
 var commonProperties = {
   accessTier: 'Hot'
@@ -51,7 +55,12 @@ var commonProperties = {
     defaultAction: 'Deny'
   }
   encryption: {
-    keySource: 'Microsoft.Storage'
+    keySource: customerManagedKeyEnabled ? 'Microsoft.Keyvault' : 'Microsoft.Storage'
+    keyvaultproperties: customerManagedKeyEnabled ? {
+      keyvaulturi: split(customerManagedKeyUri, '/keys/')[0]
+      keyname: split(split(customerManagedKeyUri, '/keys/')[1], '/')[0]
+      keyversion: split(split(customerManagedKeyUri, '/keys/')[1], '/')[1]
+    } : null
     requireInfrastructureEncryption: false
     services: {
       blob: { enabled: true }
@@ -74,6 +83,7 @@ resource hostStorages 'Microsoft.Storage/storageAccounts@2023-05-01' = [for acco
   location: location
   kind: 'StorageV2'
   sku: { name: storageSkuName }
+  identity: customerManagedKeyEnabled ? { type: 'UserAssigned', userAssignedIdentities: { '${customerManagedKeyIdentityResourceId}': {} } } : null
   properties: commonProperties
 }]
 
@@ -82,6 +92,7 @@ resource inputStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   location: location
   kind: 'StorageV2'
   sku: { name: storageSkuName }
+  identity: customerManagedKeyEnabled ? { type: 'UserAssigned', userAssignedIdentities: { '${customerManagedKeyIdentityResourceId}': {} } } : null
   properties: commonProperties
 }
 
@@ -90,6 +101,7 @@ resource outputStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   location: location
   kind: 'StorageV2'
   sku: { name: storageSkuName }
+  identity: customerManagedKeyEnabled ? { type: 'UserAssigned', userAssignedIdentities: { '${customerManagedKeyIdentityResourceId}': {} } } : null
   properties: commonProperties
 }
 
@@ -98,6 +110,7 @@ resource portalStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = if (!emp
   location: location
   kind: 'StorageV2'
   sku: { name: storageSkuName }
+  identity: customerManagedKeyEnabled ? { type: 'UserAssigned', userAssignedIdentities: { '${customerManagedKeyIdentityResourceId}': {} } } : null
   properties: commonProperties
 }
 
@@ -185,6 +198,15 @@ resource analyzerQueue 'Microsoft.Storage/storageAccounts/queueServices/queues@2
 resource embedQueue 'Microsoft.Storage/storageAccounts/queueServices/queues@2023-05-01' = {
   parent: outputQueueService
   name: 'case-embed-invocations'
+}
+
+resource ragIngestQueue 'Microsoft.Storage/storageAccounts/queueServices/queues@2023-05-01' = {
+  parent: outputQueueService
+  name: ragIngestQueueName
+}
+resource ragIngestPoisonQueue 'Microsoft.Storage/storageAccounts/queueServices/queues@2023-05-01' = {
+  parent: outputQueueService
+  name: '${ragIngestQueueName}-poison'
 }
 
 resource hostBlobServices 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = [for (accountName, i) in hostStorageAccountNames: {
@@ -279,6 +301,7 @@ output analyzerQueueAccountName string = outputStorageAccountName
 output analyzerQueueName string = analyzerQueue.name
 output embedQueueAccountName string = outputStorageAccountName
 output embedQueueName string = embedQueue.name
+output ragIngestQueueId string = ragIngestQueue.id
 output portalStorageId string = empty(portalUiStorageAccountName) ? '' : portalStorage.id
 output portalWebHostName string = empty(portalUiStorageAccountName) ? '' : replace(replace(portalStorage!.properties.primaryEndpoints.web, 'https://', ''), '/', '')
 output inputBlobServiceUri string = 'https://${inputStorage.name}.blob.${environment().suffixes.storage}'

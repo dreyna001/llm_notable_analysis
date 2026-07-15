@@ -81,7 +81,6 @@ analyzer_app="$(output AnalyzerFunctionAppName)"
 embed_app="$(output EmbedFunctionAppName)"
 portal_host="$(output PortalFrontDoorHostName)"
 portal_app="$(output PortalFunctionAppName)"
-apim_name="$(output PortalApiManagementName)"
 analyzer_queue="$(output AnalyzerQueueName)"
 embed_queue="$(output CaseEmbedQueueName)"
 [[ -n "$input_account" && -n "$output_account" && -n "$analyzer_app" ]] || { echo "Required deployment outputs are missing" >&2; exit 1; }
@@ -94,11 +93,6 @@ done
 if [[ -n "$portal_app" ]]; then
   [[ "$(az functionapp show -g "$resource_group" -n "$portal_app" --query publicNetworkAccess -o tsv)" == "Disabled" ]] || {
     echo "Portal Function public network access is not disabled" >&2; exit 1;
-  }
-fi
-if [[ -n "$apim_name" ]]; then
-  [[ "$(az apim show -g "$resource_group" -n "$apim_name" --query publicNetworkAccess -o tsv)" == "Disabled" ]] || {
-    echo "APIM public network access is not disabled" >&2; exit 1;
   }
 fi
 

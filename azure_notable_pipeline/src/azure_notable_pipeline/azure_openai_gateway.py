@@ -1,10 +1,12 @@
-"""Native Azure OpenAI operations for portal chat and embeddings only."""
+"""Native Azure Government OpenAI operations for analysis, chat, and embeddings."""
 
 from __future__ import annotations
 
 import math
 import os
+import json
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from openai import (
@@ -63,6 +65,25 @@ class AzureOpenAIUnavailableError(AzureOpenAIGatewayError):
 
 class AzureOpenAIResponseError(AzureOpenAIGatewayError):
     """Azure OpenAI returned a malformed or contract-incompatible response."""
+
+    def __init__(self, message: str, *, raw_output: str = "") -> None:
+        super().__init__(message)
+        self.raw_output = raw_output
+
+
+class AzureOpenAIRefusalError(AzureOpenAIGatewayError):
+    """Azure OpenAI refused the request and must not be repaired automatically."""
+
+
+@dataclass(frozen=True)
+class AzureOpenAIAnalysis:
+    """Parsed forced-tool response for the analyzer contract."""
+
+    payload: dict[str, Any]
+    raw_output: str
+    stop_reason: str
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 def _value(value: Any, name: str, default: Any = None) -> Any:
@@ -238,6 +259,124 @@ def _usage(response: Any) -> dict[str, int]:
     return output
 
 
+def _tool_schema(tool: Mapping[str, Any]) -> dict[str, Any]:
+    """Translate the shared tool contract to the OpenAI function shape."""
+
+    name = str(tool.get("name") or "").strip()
+    parameters = tool.get("input_schema")
+    if not name or not isinstance(parameters, Mapping):
+        raise AzureOpenAIRequestError("tool must define a name and input_schema")
+    description = str(tool.get("description") or "").strip()
+    function: dict[str, Any] = {
+        "name": name,
+        "parameters": dict(parameters),
+    }
+    if description:
+        function["description"] = description
+    return {"type": "function", "function": function}
+
+
+def _usage_value(usage: Mapping[str, Any], name: str) -> int | None:
+    value = usage.get(name)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def analyze_notable(
+    *,
+    messages: Sequence[Mapping[str, Any]],
+    deployment: str,
+    tool: Mapping[str, Any],
+    max_tokens: int = 8192,
+    temperature: float = 0.1,
+    gateway: Any | None = None,
+) -> AzureOpenAIAnalysis:
+    """Run exactly one forced function call using a customer OpenAI deployment."""
+
+    if not deployment.strip():
+        raise AzureOpenAIConfigurationError("analysis deployment cannot be blank")
+    if not 256 <= max_tokens <= 8192:
+        raise AzureOpenAIRequestError("max_tokens must be between 256 and 8192")
+    if not messages:
+        raise AzureOpenAIRequestError("messages cannot be empty")
+
+    result = create_chat_completion(
+        messages=messages,
+        gateway=gateway,
+        deployment=deployment,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        tools=[_tool_schema(tool)],
+        tool_choice={
+            "type": "function",
+            "function": {"name": str(tool.get("name") or "")},
+        },
+        timeout_seconds=_MAX_CHAT_TIMEOUT_SECONDS,
+    )
+    if result.get("refusal"):
+        raise AzureOpenAIRefusalError("Azure OpenAI refused the analysis request")
+    calls = result["tool_calls"]
+    if len(calls) != 1 or calls[0]["function"]["name"] != tool.get("name"):
+        raise AzureOpenAIResponseError(
+            "Azure OpenAI analysis response must contain exactly one analyze_notable function call"
+        )
+    raw_arguments = calls[0]["function"]["arguments"]
+    try:
+        payload = json.loads(raw_arguments)
+    except json.JSONDecodeError as exc:
+        raise AzureOpenAIResponseError(
+            "Azure OpenAI analysis function arguments were not valid JSON"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise AzureOpenAIResponseError(
+            "Azure OpenAI analysis function arguments must be an object"
+        )
+    usage = result.get("usage", {})
+    return AzureOpenAIAnalysis(
+        payload=payload,
+        raw_output=raw_arguments,
+        stop_reason=str(result.get("finish_reason") or ""),
+        input_tokens=_usage_value(usage, "prompt_tokens"),
+        output_tokens=_usage_value(usage, "completion_tokens"),
+    )
+
+
+def generate_text(
+    *,
+    messages: Sequence[Mapping[str, Any]],
+    deployment: str,
+    max_tokens: int = 8192,
+    temperature: float = 0.1,
+    gateway: Any | None = None,
+    json_object: bool = False,
+) -> str:
+    """Run one bounded text call for optional synthesis and repair workflows."""
+
+    if not deployment.strip():
+        raise AzureOpenAIConfigurationError("analysis deployment cannot be blank")
+    if not 256 <= max_tokens <= 8192:
+        raise AzureOpenAIRequestError("max_tokens must be between 256 and 8192")
+    response_format = {"type": "json_object"} if json_object else None
+    result = create_chat_completion(
+        messages=messages,
+        gateway=gateway,
+        deployment=deployment,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        timeout_seconds=_MAX_CHAT_TIMEOUT_SECONDS,
+        response_format=response_format,
+    )
+    if result.get("refusal"):
+        raise AzureOpenAIResponseError("Azure OpenAI refused the text request")
+    text = result.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise AzureOpenAIResponseError("Azure OpenAI text response was empty")
+    if result.get("finish_reason") == "length":
+        raise AzureOpenAIResponseError(
+            "Azure OpenAI response stopped at the output-token limit"
+        )
+    return text
+
+
 def create_chat_completion(
     *,
     messages: Sequence[Mapping[str, Any]],
@@ -247,6 +386,7 @@ def create_chat_completion(
     temperature: float = 0.0,
     tools: Sequence[Mapping[str, Any]] | None = None,
     tool_choice: str | Mapping[str, Any] | None = None,
+    response_format: Mapping[str, Any] | None = None,
     timeout_seconds: int = _CHAT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     """Create one portal chat completion and return a stable normalized result."""
@@ -296,6 +436,10 @@ def create_chat_completion(
         request["tools"] = [dict(tool) for tool in normalized_tools]
     if tool_choice is not None:
         request["tool_choice"] = tool_choice
+    if response_format is not None:
+        if not isinstance(response_format, Mapping):
+            raise AzureOpenAIRequestError("response_format must be an object")
+        request["response_format"] = dict(response_format)
     try:
         response = _native_client(gateway).chat.completions.create(**request)
     except AzureOpenAIGatewayError:
@@ -331,8 +475,12 @@ __all__ = [
     "AzureOpenAIGatewayError",
     "AzureOpenAIRateLimitError",
     "AzureOpenAIRequestError",
+    "AzureOpenAIRefusalError",
     "AzureOpenAIResponseError",
     "AzureOpenAIUnavailableError",
+    "AzureOpenAIAnalysis",
+    "analyze_notable",
     "create_chat_completion",
     "embed_texts",
+    "generate_text",
 ]

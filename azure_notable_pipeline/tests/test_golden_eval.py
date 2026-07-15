@@ -13,7 +13,7 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from azure_notable_pipeline.ttp_analyzer import AnthropicAnalyzer  # pylint: disable=import-error
+from azure_notable_pipeline.ttp_analyzer import AzureOpenAIAnalyzer  # pylint: disable=import-error
 from azure_notable_pipeline.verdicts import normalize_verdict  # pylint: disable=import-error
 
 from golden_eval_rubric import (
@@ -59,8 +59,8 @@ class TestGoldenEvalLive(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         required = (
-            "AZURE_AI_FOUNDRY_ANALYSIS_DEPLOYMENT",
-            "AZURE_AI_FOUNDRY_ANTHROPIC_BASE_URL",
+            "AZURE_OPENAI_ANALYSIS_DEPLOYMENT",
+            "AZURE_OPENAI_ENDPOINT",
             "AZURE_CLIENT_ID",
         )
         missing = [name for name in required if not os.environ.get(name)]
@@ -70,7 +70,9 @@ class TestGoldenEvalLive(unittest.TestCase):
             )
 
     def test_live_analyzer_meets_golden_rubric(self) -> None:
-        analyzer = AnthropicAnalyzer(deployment=os.environ["AZURE_AI_FOUNDRY_ANALYSIS_DEPLOYMENT"])
+        analyzer = AzureOpenAIAnalyzer(
+            deployment=os.environ["AZURE_OPENAI_ANALYSIS_DEPLOYMENT"]
+        )
 
         for case in load_manifest():
             with self.subTest(case_id=case.id):

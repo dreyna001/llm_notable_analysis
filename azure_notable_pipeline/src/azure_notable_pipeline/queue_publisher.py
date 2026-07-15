@@ -17,6 +17,7 @@ from azure.core.exceptions import (
 
 from .analyzer_job import AnalyzerQueueJob
 from .azure_clients import AzureClientConfigurationError, queue_client
+from .rag_ingest_handler import RagIngestQueueJob
 
 
 EMBED_JOB_SCHEMA_VERSION = 1
@@ -233,6 +234,43 @@ def enqueue_case_embed(
     )
 
 
+def enqueue_rag_ingest(
+    *,
+    manifest_container: str,
+    manifest_blob_name: str,
+    manifest_version_id: str = "",
+    manifest_etag: str = "",
+    publisher: Any | None = None,
+) -> None:
+    """Publish one strict manifest ingestion job to the dedicated queue."""
+
+    job = RagIngestQueueJob(
+        schema_version=1,
+        manifest_container=manifest_container,
+        manifest_blob_name=manifest_blob_name,
+        manifest_version_id=manifest_version_id,
+        manifest_etag=manifest_etag,
+    )
+    queue_name = _required_string(
+        os.getenv("RAG_INGEST_QUEUE_NAME", "rag-ingest-invocations"),
+        field_name="RAG_INGEST_QUEUE_NAME",
+    )
+    _send_message(
+        queue_name=queue_name,
+        payload=json.dumps(
+            {
+                "schema_version": job.schema_version,
+                "manifest_container": job.manifest_container,
+                "manifest_blob_name": job.manifest_blob_name,
+                "manifest_version_id": job.manifest_version_id,
+                "manifest_etag": job.manifest_etag,
+            },
+            separators=(",", ":"),
+        ),
+        publisher=publisher,
+    )
+
+
 __all__ = [
     "EMBED_JOB_SCHEMA_VERSION",
     "EMBED_JOB_KEYS",
@@ -242,4 +280,5 @@ __all__ = [
     "QueuePublisherUnavailableError",
     "enqueue_analyzer_job",
     "enqueue_case_embed",
+    "enqueue_rag_ingest",
 ]

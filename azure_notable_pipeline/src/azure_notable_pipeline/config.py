@@ -14,11 +14,15 @@ _TRUE_VALUES = {"true", "1", "yes"}
 _FALSE_VALUES = {"false", "0", "no"}
 _COSMOS_CONTAINER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{3,255}$")
 _MAX_CHAT_QUOTA_RECENT_REQUEST_IDS = 4_096
-_FOUNDRY_RESOURCE_ID_PATTERN = re.compile(
-    r"^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/"
-    r"Microsoft\.CognitiveServices/accounts/[^/]+$",
-    re.IGNORECASE,
-)
+_AZURE_GOVERNMENT_CLOUD = "AzureUSGovernment"
+_AZURE_GOVERNMENT_REGIONS = {"usgovvirginia", "usgovarizona"}
+_AZURE_GOVERNMENT_ENDPOINT_SUFFIXES = {
+    "AZURE_OPENAI_ENDPOINT": (".openai.azure.us",),
+    "AZURE_SEARCH_ENDPOINT": (".search.azure.us",),
+    "COSMOS_ENDPOINT": (".documents.azure.us",),
+    "KEY_VAULT_URI": (".vault.usgovcloudapi.net",),
+    "STORAGE_ACCOUNT_URL": (".core.usgovcloudapi.net",),
+}
 
 _CAPABILITY_PROFILE_FLAGS: dict[str, dict[str, Any]] = {
     "core": {},
@@ -136,26 +140,45 @@ def _optional_str_env(name: str) -> str:
     return raw.strip()
 
 
-def _validate_foundry_anthropic_base_url(value: str) -> str:
-    setting_name = "AZURE_AI_FOUNDRY_ANTHROPIC_BASE_URL"
-    url = validate_https_url(value, setting_name=setting_name)
-    parsed = urlparse(url)
-    if parsed.path.rstrip("/") != "/anthropic" or parsed.query or parsed.fragment:
-        raise ValueError(
-            f"{setting_name} must end at /anthropic without /v1/messages, "
-            "a query, or a fragment"
-        )
+def _validate_azure_government_endpoint(value: str, *, setting_name: str) -> str:
+    """Validate a configured endpoint against the Azure Government suffix contract."""
+
+    normalized = value.strip()
+    if not normalized:
+        return ""
+    if os.getenv("LOCAL_EMULATION", "false").strip().lower() == "true":
+        return normalized.rstrip("/")
+    url = validate_https_url(
+        normalized,
+        setting_name=setting_name,
+        allow_private=True,
+    )
+    hostname = (urlparse(url).hostname or "").lower().rstrip(".")
+    suffixes = _AZURE_GOVERNMENT_ENDPOINT_SUFFIXES[setting_name]
+    if not any(hostname.endswith(suffix) for suffix in suffixes):
+        raise ValueError(f"{setting_name} must use an Azure Government endpoint")
     return url.rstrip("/")
 
 
-def _validate_foundry_resource_id(value: str) -> str:
-    resource_id = value.strip()
-    if resource_id and not _FOUNDRY_RESOURCE_ID_PATTERN.fullmatch(resource_id):
-        raise ValueError(
-            "AZURE_AI_FOUNDRY_RESOURCE_ID must identify a "
-            "Microsoft.CognitiveServices/accounts resource"
-        )
-    return resource_id
+def _validate_azure_government_issuer(value: str) -> str:
+    issuer = validate_https_url(value, setting_name="PORTAL_JWT_ISSUER")
+    hostname = (urlparse(issuer).hostname or "").lower().rstrip(".")
+    if hostname != "login.microsoftonline.us":
+        raise ValueError("PORTAL_JWT_ISSUER must use login.microsoftonline.us")
+    return issuer.rstrip("/")
+
+
+def _normalize_optional_endpoint(value: str, *, setting_name: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        return ""
+    if os.getenv("LOCAL_EMULATION", "false").strip().lower() == "true":
+        return normalized.rstrip("/")
+    return validate_https_url(
+        normalized,
+        setting_name=setting_name,
+        allow_private=True,
+    ).rstrip("/")
 
 
 def _validate_cosmos_container_name(value: str, *, setting_name: str) -> str:
@@ -183,9 +206,9 @@ class Config:
     """Configuration container for Azure Functions runtime settings."""
 
     CAPABILITY_PROFILES: str = "core"
-    AZURE_AI_FOUNDRY_ANTHROPIC_BASE_URL: str = ""
-    AZURE_AI_FOUNDRY_RESOURCE_ID: str = ""
-    AZURE_AI_FOUNDRY_ANALYSIS_DEPLOYMENT: str = "claude-sonnet-4-6"
+    AZURE_CLOUD_ENVIRONMENT: str = _AZURE_GOVERNMENT_CLOUD
+    AZURE_REGION: str = "usgovvirginia"
+    AZURE_OPENAI_ANALYSIS_DEPLOYMENT: str = ""
     AZURE_OPENAI_ENDPOINT: str = ""
     AZURE_OPENAI_API_VERSION: str = "2024-10-21"
     REPORT_SINK_MODE: str = "blob"
@@ -194,6 +217,10 @@ class Config:
     OUTPUT_STORAGE_ACCOUNT_URL: str = ""
     OUTPUT_CONTAINER_NAME: str = "output"
     ANALYZER_QUEUE_NAME: str = "notable-analysis-jobs"
+    ANALYZER_QUEUE_TTL_SECONDS: int = 86_400
+    CASE_EMBED_QUEUE_TTL_SECONDS: int = 86_400
+    QUEUE_RECOVERY_WINDOW_SECONDS: int = 86_400
+    INPUT_RETENTION_DAYS: int = 2
     COSMOS_ENDPOINT: str = ""
     COSMOS_DATABASE_NAME: str = ""
     AZURE_SEARCH_ENDPOINT: str = ""
@@ -202,9 +229,18 @@ class Config:
     MAX_COMPRESSED_INPUT_BYTES: int = 1_048_576
     MAX_DECOMPRESSED_INPUT_BYTES: int = 1_048_576
     ALLOW_PRIVATE_OUTBOUND_ENDPOINTS: bool = False
+    CUSTOMER_MANAGED_KEY_ENABLED: bool = False
+    CUSTOMER_MANAGED_KEY_URI: str = ""
+    CUSTOMER_MANAGED_KEY_IDENTITY_RESOURCE_ID: str = ""
 
     HTML_REPORT_ENABLED: bool = False
     RAG_ENABLED: bool = False
+    RAG_RETRIEVAL_BACKEND: str = "azure_search"
+    RAG_TENANT_ID: str = ""
+    RAG_SOURCE_CONTAINER: str = ""
+    RAG_SOURCE_PREFIX: str = "rag-sources"
+    RAG_SOURCE_STORAGE_ACCOUNT_URL: str = ""
+    RAG_INGEST_QUEUE_NAME: str = "rag-ingest-invocations"
     RAG_AZURE_SEARCH_INDEX: str = ""
     RAG_MAX_SNIPPETS: int = 4
     RAG_CONTEXT_BUDGET_CHARS: int = 1600
@@ -326,6 +362,8 @@ class Config:
     PORTAL_ENTRA_REQUIRED_APP_ROLE: str = ""
 
     CASE_QA_ENABLED: bool = False
+    CASE_QA_RETRIEVAL_BACKEND: str = "azure_search"
+    CASE_QA_AZURE_SEARCH_INDEX: str = ""
     CASE_QA_GENERAL_KNOWLEDGE_ENABLED: bool = True
     CASE_QA_MAX_INDEX_CHUNKS_PER_CASE: int = 200
     CASE_QA_MAX_CHUNKS_PER_LANE: int = 6
@@ -358,14 +396,81 @@ class Config:
         profile_flags = _profile_flag_defaults(profiles)
         for name, value in profile_flags.items():
             setattr(self, name, value)
-        if self.AZURE_AI_FOUNDRY_ANTHROPIC_BASE_URL:
-            self.AZURE_AI_FOUNDRY_ANTHROPIC_BASE_URL = (
-                _validate_foundry_anthropic_base_url(
-                    self.AZURE_AI_FOUNDRY_ANTHROPIC_BASE_URL
+        self.AZURE_CLOUD_ENVIRONMENT = (
+            self.AZURE_CLOUD_ENVIRONMENT or _AZURE_GOVERNMENT_CLOUD
+        ).strip()
+        self.AZURE_REGION = (self.AZURE_REGION or "usgovvirginia").strip().lower()
+        self.AZURE_OPENAI_ANALYSIS_DEPLOYMENT = (
+            self.AZURE_OPENAI_ANALYSIS_DEPLOYMENT.strip()
+        )
+        self.AZURE_OPENAI_ENDPOINT = _normalize_optional_endpoint(
+            self.AZURE_OPENAI_ENDPOINT,
+            setting_name="AZURE_OPENAI_ENDPOINT",
+        )
+        self.INPUT_STORAGE_ACCOUNT_URL = _normalize_optional_endpoint(
+            self.INPUT_STORAGE_ACCOUNT_URL,
+            setting_name="STORAGE_ACCOUNT_URL",
+        )
+        self.OUTPUT_STORAGE_ACCOUNT_URL = _normalize_optional_endpoint(
+            self.OUTPUT_STORAGE_ACCOUNT_URL,
+            setting_name="STORAGE_ACCOUNT_URL",
+        )
+        self.COSMOS_ENDPOINT = _normalize_optional_endpoint(
+            self.COSMOS_ENDPOINT,
+            setting_name="COSMOS_ENDPOINT",
+        )
+        self.AZURE_SEARCH_ENDPOINT = _normalize_optional_endpoint(
+            self.AZURE_SEARCH_ENDPOINT,
+            setting_name="AZURE_SEARCH_ENDPOINT",
+        )
+        self.KEY_VAULT_URI = _normalize_optional_endpoint(
+            self.KEY_VAULT_URI,
+            setting_name="KEY_VAULT_URI",
+        )
+        if self.PORTAL_JWT_ISSUER:
+            self.PORTAL_JWT_ISSUER = validate_https_url(
+                self.PORTAL_JWT_ISSUER,
+                setting_name="PORTAL_JWT_ISSUER",
+            ).rstrip("/")
+        if self.CUSTOMER_MANAGED_KEY_ENABLED:
+            if not self.CUSTOMER_MANAGED_KEY_URI.strip():
+                raise ValueError(
+                    "CUSTOMER_MANAGED_KEY_URI is required when customer-managed keys are enabled"
                 )
+            if not self.CUSTOMER_MANAGED_KEY_IDENTITY_RESOURCE_ID.strip():
+                raise ValueError(
+                    "CUSTOMER_MANAGED_KEY_IDENTITY_RESOURCE_ID is required when customer-managed keys are enabled"
+                )
+        elif self.CUSTOMER_MANAGED_KEY_URI or self.CUSTOMER_MANAGED_KEY_IDENTITY_RESOURCE_ID:
+            raise ValueError(
+                "Customer-managed key settings require CUSTOMER_MANAGED_KEY_ENABLED=true"
             )
-        self.AZURE_AI_FOUNDRY_RESOURCE_ID = _validate_foundry_resource_id(
-            self.AZURE_AI_FOUNDRY_RESOURCE_ID
+        if self.ANALYZER_QUEUE_TTL_SECONDS > 604_800:
+            raise ValueError("ANALYZER_QUEUE_TTL_SECONDS must be <= 604800")
+        if self.CASE_EMBED_QUEUE_TTL_SECONDS > 604_800:
+            raise ValueError("CASE_EMBED_QUEUE_TTL_SECONDS must be <= 604800")
+        if self.INPUT_RETENTION_DAYS * 86_400 < (
+            max(self.ANALYZER_QUEUE_TTL_SECONDS, self.CASE_EMBED_QUEUE_TTL_SECONDS)
+            + self.QUEUE_RECOVERY_WINDOW_SECONDS
+        ):
+            raise ValueError(
+                "INPUT_RETENTION_DAYS must cover queue TTL plus QUEUE_RECOVERY_WINDOW_SECONDS"
+            )
+        self.RAG_RETRIEVAL_BACKEND = (self.RAG_RETRIEVAL_BACKEND or "azure_search").strip().lower()
+        self.CASE_QA_RETRIEVAL_BACKEND = (
+            self.CASE_QA_RETRIEVAL_BACKEND or "azure_search"
+        ).strip().lower()
+        if self.RAG_RETRIEVAL_BACKEND != "azure_search":
+            raise ValueError("RAG_RETRIEVAL_BACKEND must be azure_search")
+        if self.CASE_QA_RETRIEVAL_BACKEND != "azure_search":
+            raise ValueError("CASE_QA_RETRIEVAL_BACKEND must be azure_search")
+        self.RAG_SOURCE_PREFIX = _normalize_blob_prefix(
+            self.RAG_SOURCE_PREFIX,
+            setting_name="RAG_SOURCE_PREFIX",
+        )
+        self.RAG_SOURCE_STORAGE_ACCOUNT_URL = _normalize_optional_endpoint(
+            self.RAG_SOURCE_STORAGE_ACCOUNT_URL,
+            setting_name="STORAGE_ACCOUNT_URL",
         )
         self.REPORT_SINK_MODE = (self.REPORT_SINK_MODE or "blob").strip().lower()
         if self.REPORT_SINK_MODE not in {"blob", "notable_rest"}:
@@ -566,6 +671,52 @@ class Config:
                     self.CHAT_MESSAGES_CONTAINER,
                     setting_name="CHAT_MESSAGES_CONTAINER",
                 )
+
+    def validate_deployment_contract(self) -> None:
+        """Fail closed on sovereign endpoints and enabled capability inputs."""
+
+        if self.AZURE_CLOUD_ENVIRONMENT != _AZURE_GOVERNMENT_CLOUD:
+            raise ValueError("AZURE_CLOUD_ENVIRONMENT must be AzureUSGovernment")
+        if self.AZURE_REGION not in _AZURE_GOVERNMENT_REGIONS:
+            raise ValueError("AZURE_REGION must be usgovvirginia or usgovarizona")
+        for attribute, setting_name in (
+            ("AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_ENDPOINT"),
+            ("INPUT_STORAGE_ACCOUNT_URL", "STORAGE_ACCOUNT_URL"),
+            ("OUTPUT_STORAGE_ACCOUNT_URL", "STORAGE_ACCOUNT_URL"),
+            ("COSMOS_ENDPOINT", "COSMOS_ENDPOINT"),
+            ("AZURE_SEARCH_ENDPOINT", "AZURE_SEARCH_ENDPOINT"),
+            ("KEY_VAULT_URI", "KEY_VAULT_URI"),
+            ("RAG_SOURCE_STORAGE_ACCOUNT_URL", "STORAGE_ACCOUNT_URL"),
+        ):
+            setattr(
+                self,
+                attribute,
+                _validate_azure_government_endpoint(
+                    getattr(self, attribute), setting_name=setting_name
+                ),
+            )
+        if self.PORTAL_JWT_ISSUER:
+            self.PORTAL_JWT_ISSUER = _validate_azure_government_issuer(
+                self.PORTAL_JWT_ISSUER
+            )
+        if self.RAG_ENABLED:
+            for value, name in (
+                (self.RAG_TENANT_ID, "RAG_TENANT_ID"),
+                (self.RAG_SOURCE_CONTAINER, "RAG_SOURCE_CONTAINER"),
+                (self.RAG_AZURE_SEARCH_INDEX, "RAG_AZURE_SEARCH_INDEX"),
+                (self.RAG_SOURCE_STORAGE_ACCOUNT_URL, "RAG_SOURCE_STORAGE_ACCOUNT_URL"),
+            ):
+                if not str(value).strip():
+                    raise ValueError(f"{name} is required when RAG is enabled")
+        if self.CASE_QA_ENABLED:
+            if not self.RAG_TENANT_ID.strip():
+                raise ValueError("RAG_TENANT_ID is required when Case Q&A is enabled")
+            if not self.CASE_QA_AZURE_SEARCH_INDEX.strip():
+                raise ValueError(
+                    "CASE_QA_AZURE_SEARCH_INDEX is required when Case Q&A is enabled"
+                )
+
+
 def load_config() -> Config:
     """Load runtime configuration from Azure Functions environment variables."""
 
@@ -575,19 +726,14 @@ def load_config() -> Config:
     profile_flags = _profile_flag_defaults(capability_profiles)
     splunk_timeout = _positive_int_env("SPLUNK_SEARCH_TIMEOUT_SECONDS", 30, max_value=300)
 
-    return Config(
+    config = Config(
         CAPABILITY_PROFILES=",".join(capability_profiles),
-        AZURE_AI_FOUNDRY_ANTHROPIC_BASE_URL=os.getenv(
-            "AZURE_AI_FOUNDRY_ANTHROPIC_BASE_URL", ""
+        AZURE_CLOUD_ENVIRONMENT=os.getenv(
+            "AZURE_CLOUD_ENVIRONMENT", _AZURE_GOVERNMENT_CLOUD
         ),
-        AZURE_AI_FOUNDRY_RESOURCE_ID=os.getenv(
-            "AZURE_AI_FOUNDRY_RESOURCE_ID", ""
-        ),
-        AZURE_AI_FOUNDRY_ANALYSIS_DEPLOYMENT=(
-            os.getenv(
-                "AZURE_AI_FOUNDRY_ANALYSIS_DEPLOYMENT", "claude-sonnet-4-6"
-            ).strip()
-            or "claude-sonnet-4-6"
+        AZURE_REGION=os.getenv("AZURE_REGION", "usgovvirginia"),
+        AZURE_OPENAI_ANALYSIS_DEPLOYMENT=os.getenv(
+            "AZURE_OPENAI_ANALYSIS_DEPLOYMENT", ""
         ),
         AZURE_OPENAI_ENDPOINT=os.getenv("AZURE_OPENAI_ENDPOINT", ""),
         AZURE_OPENAI_API_VERSION=(
@@ -603,6 +749,18 @@ def load_config() -> Config:
             os.getenv("ANALYZER_QUEUE_NAME", "notable-analysis-jobs").strip()
             or "notable-analysis-jobs"
         ),
+        ANALYZER_QUEUE_TTL_SECONDS=_positive_int_env(
+            "ANALYZER_QUEUE_TTL_SECONDS", 86_400, max_value=604_800
+        ),
+        CASE_EMBED_QUEUE_TTL_SECONDS=_positive_int_env(
+            "CASE_EMBED_QUEUE_TTL_SECONDS", 86_400, max_value=604_800
+        ),
+        QUEUE_RECOVERY_WINDOW_SECONDS=_positive_int_env(
+            "QUEUE_RECOVERY_WINDOW_SECONDS", 86_400, max_value=2_592_000
+        ),
+        INPUT_RETENTION_DAYS=_positive_int_env(
+            "INPUT_RETENTION_DAYS", 2, max_value=3650
+        ),
         COSMOS_ENDPOINT=os.getenv("COSMOS_ENDPOINT", ""),
         COSMOS_DATABASE_NAME=os.getenv("COSMOS_DATABASE_NAME", ""),
         AZURE_SEARCH_ENDPOINT=os.getenv("AZURE_SEARCH_ENDPOINT", ""),
@@ -615,8 +773,26 @@ def load_config() -> Config:
             "MAX_DECOMPRESSED_INPUT_BYTES", 1_048_576
         ),
         ALLOW_PRIVATE_OUTBOUND_ENDPOINTS=_bool_env("ALLOW_PRIVATE_OUTBOUND_ENDPOINTS", False),
+        CUSTOMER_MANAGED_KEY_ENABLED=_bool_env(
+            "CUSTOMER_MANAGED_KEY_ENABLED", False
+        ),
+        CUSTOMER_MANAGED_KEY_URI=_optional_str_env("CUSTOMER_MANAGED_KEY_URI"),
+        CUSTOMER_MANAGED_KEY_IDENTITY_RESOURCE_ID=_optional_str_env(
+            "CUSTOMER_MANAGED_KEY_IDENTITY_RESOURCE_ID"
+        ),
         HTML_REPORT_ENABLED=_profile_bool("HTML_REPORT_ENABLED", False, profile_flags),
         RAG_ENABLED=_profile_bool("RAG_ENABLED", False, profile_flags),
+        RAG_RETRIEVAL_BACKEND=os.getenv("RAG_RETRIEVAL_BACKEND", "azure_search"),
+        RAG_TENANT_ID=os.getenv("RAG_TENANT_ID", "").strip(),
+        RAG_SOURCE_CONTAINER=os.getenv("RAG_SOURCE_CONTAINER", "").strip(),
+        RAG_SOURCE_PREFIX=os.getenv("RAG_SOURCE_PREFIX", "rag-sources"),
+        RAG_SOURCE_STORAGE_ACCOUNT_URL=os.getenv(
+            "RAG_SOURCE_STORAGE_ACCOUNT_URL", ""
+        ),
+        RAG_INGEST_QUEUE_NAME=(
+            os.getenv("RAG_INGEST_QUEUE_NAME", "rag-ingest-invocations").strip()
+            or "rag-ingest-invocations"
+        ),
         RAG_AZURE_SEARCH_INDEX=os.getenv("RAG_AZURE_SEARCH_INDEX", ""),
         RAG_MAX_SNIPPETS=_positive_int_env("RAG_MAX_SNIPPETS", 4, max_value=20),
         RAG_CONTEXT_BUDGET_CHARS=_positive_int_env(
@@ -887,6 +1063,10 @@ def load_config() -> Config:
             "PORTAL_ENTRA_REQUIRED_APP_ROLE"
         ),
         CASE_QA_ENABLED=_profile_bool("CASE_QA_ENABLED", False, profile_flags),
+        CASE_QA_RETRIEVAL_BACKEND=os.getenv(
+            "CASE_QA_RETRIEVAL_BACKEND", "azure_search"
+        ),
+        CASE_QA_AZURE_SEARCH_INDEX=os.getenv("CASE_QA_AZURE_SEARCH_INDEX", "").strip(),
         CASE_QA_GENERAL_KNOWLEDGE_ENABLED=_bool_env(
             "CASE_QA_GENERAL_KNOWLEDGE_ENABLED", True
         ),
@@ -950,3 +1130,5 @@ def load_config() -> Config:
         CHAT_MESSAGES_CONTAINER=os.getenv("CHAT_MESSAGES_CONTAINER", ""),
         RAG_RERANK_ENABLED=_bool_env("RAG_RERANK_ENABLED", False),
     )
+    config.validate_deployment_contract()
+    return config

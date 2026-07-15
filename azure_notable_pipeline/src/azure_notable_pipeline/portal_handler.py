@@ -20,6 +20,7 @@ from .case_chat_history import (
     delete_chat_session,
     delete_last_chat_turn,
     get_chat_session_messages,
+    get_idempotent_chat_response,
     list_chat_sessions,
     load_session_transcript,
     persist_chat_history,
@@ -331,6 +332,19 @@ def _handle_chat_gate(
         ):
             raise ValueError("client_request_id must be 8-128 URL-safe characters")
         store = _cosmos_store(config)
+        if config.CASE_QA_CHAT_HISTORY_ENABLED and client_request_id:
+            replay = get_idempotent_chat_response(
+                config=config,
+                cosmos_store=store,
+                mode=mode,
+                selected_case_id=selected_case_id,
+                question=question,
+                requested_session_id=session_id,
+                user_id=user_id,
+                client_request_id=client_request_id,
+            )
+            if replay is not None:
+                return _model_response(ChatResponseModel, replay)
         if config.CASE_QA_CHAT_HISTORY_ENABLED:
             # Validate ownership, retention, scope, and message capacity before
             # reserving the request ID in the distributed dedupe document. A

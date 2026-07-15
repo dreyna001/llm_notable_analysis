@@ -4,6 +4,8 @@ param location string
 param namePrefix string
 param inputStorageAccountName string
 param outputStorageAccountName string
+param cosmosAccountName string
+param ragSourceStorageAccountName string = ''
 param functionsHostStorageAccountNames array
 param portalUiStorageAccountName string = ''
 
@@ -11,71 +13,6 @@ param portalUiStorageAccountName string = ''
 param vnetAddressPrefix string = '10.42.0.0/16'
 param functionSubnetPrefix string = '10.42.0.0/24'
 param privateEndpointSubnetPrefix string = '10.42.1.0/24'
-param apimSubnetPrefix string = '10.42.2.0/24'
-
-resource apimNetworkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2024-01-01' = {
-  name: '${namePrefix}-apim-nsg'
-  location: location
-  properties: {
-    securityRules: [
-      {
-        name: 'AllowAzureStorageHttpsOutbound'
-        properties: {
-          priority: 100
-          direction: 'Outbound'
-          access: 'Allow'
-          protocol: 'Tcp'
-          sourcePortRange: '*'
-          destinationPortRange: '443'
-          sourceAddressPrefix: 'VirtualNetwork'
-          destinationAddressPrefix: 'Storage'
-        }
-      }
-      {
-        name: 'AllowAzureKeyVaultHttpsOutbound'
-        properties: {
-          priority: 110
-          direction: 'Outbound'
-          access: 'Allow'
-          protocol: 'Tcp'
-          sourcePortRange: '*'
-          destinationPortRange: '443'
-          sourceAddressPrefix: 'VirtualNetwork'
-          destinationAddressPrefix: 'AzureKeyVault'
-        }
-      }
-      {
-        // APIM resolves the Entra OpenID metadata URL used by validate-jwt.
-        name: 'AllowEntraHttpsOutbound'
-        properties: {
-          priority: 120
-          direction: 'Outbound'
-          access: 'Allow'
-          protocol: 'Tcp'
-          sourcePortRange: '*'
-          destinationPortRange: '443'
-          sourceAddressPrefix: 'VirtualNetwork'
-          destinationAddressPrefix: 'AzureActiveDirectory'
-        }
-      }
-      {
-        // The portal Function hostname resolves to its private endpoint in this VNet.
-        name: 'AllowBackendHttpsOutbound'
-        properties: {
-          priority: 130
-          direction: 'Outbound'
-          access: 'Allow'
-          protocol: 'Tcp'
-          sourcePortRange: '*'
-          destinationPortRange: '443'
-          sourceAddressPrefix: 'VirtualNetwork'
-          destinationAddressPrefix: 'VirtualNetwork'
-        }
-      }
-    ]
-  }
-}
-
 resource vnet 'Microsoft.Network/virtualNetworks@2024-01-01' = {
   name: '${namePrefix}-vnet'
   location: location
@@ -102,21 +39,6 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-01-01' = {
           privateEndpointNetworkPolicies: 'Disabled'
         }
       }
-      {
-        name: 'apim-integration'
-        properties: {
-          addressPrefix: apimSubnetPrefix
-          networkSecurityGroup: {
-            id: apimNetworkSecurityGroup.id
-          }
-          delegations: [
-            {
-              name: 'apim-serverfarms'
-              properties: { serviceName: 'Microsoft.Web/serverFarms' }
-            }
-          ]
-        }
-      }
     ]
   }
 }
@@ -129,10 +51,6 @@ resource functionSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-01-01' e
 resource privateEndpointSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-01-01' existing = {
   parent: vnet
   name: 'private-endpoints'
-}
-resource apimSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-01-01' existing = {
-  parent: vnet
-  name: 'apim-integration'
 }
 
 var storageSuffix = environment().suffixes.storage
@@ -155,6 +73,48 @@ resource webDns 'Microsoft.Network/privateDnsZones@2020-06-01' = if (!empty(port
 resource sitesDns 'Microsoft.Network/privateDnsZones@2020-06-01' = if (!empty(portalUiStorageAccountName)) {
   name: 'privatelink.azurewebsites.net'
   location: 'global'
+}
+
+resource cosmosDns 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+  name: 'privatelink.documents.azure.us'
+  location: 'global'
+}
+resource cosmosDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  parent: cosmosDns
+  name: '${namePrefix}-cosmos-vnet-link'
+  location: 'global'
+  properties: {
+    registrationEnabled: false
+    virtualNetwork: { id: vnet.id }
+  }
+}
+
+resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' existing = {
+  name: cosmosAccountName
+}
+resource cosmosPrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-01-01' = {
+  name: '${namePrefix}-cosmos-pe'
+  location: location
+  properties: {
+    subnet: { id: privateEndpointSubnet.id }
+    privateLinkServiceConnections: [
+      {
+        name: 'cosmos-sql-connection'
+        properties: {
+          privateLinkServiceId: cosmosAccount.id
+          groupIds: ['Sql']
+        }
+      }
+    ]
+  }
+  resource dnsZoneGroup 'privateDnsZoneGroups' = {
+    name: 'default'
+    properties: {
+      privateDnsZoneConfigs: [
+        { name: 'documents', properties: { privateDnsZoneId: cosmosDns.id } }
+      ]
+    }
+  }
 }
 
 resource blobDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
@@ -219,13 +179,16 @@ var dataEndpointSpecs = [
   { name: 'output-blob', accountName: outputStorageAccountName, subresource: 'blob', zoneId: blobDns.id }
   { name: 'output-queue', accountName: outputStorageAccountName, subresource: 'queue', zoneId: queueDns.id }
 ]
+var ragSourceEndpointSpecs = empty(ragSourceStorageAccountName) ? [] : [
+  { name: 'rag-source-blob', accountName: ragSourceStorageAccountName, subresource: 'blob', zoneId: blobDns.id }
+]
 
 var hostEndpointSpecs = flatten(map(functionsHostStorageAccountNames, (accountName, i) => [
     { name: 'host-blob-${i}', accountName: accountName, subresource: 'blob', zoneId: blobDns.id }
     { name: 'host-queue-${i}', accountName: accountName, subresource: 'queue', zoneId: queueDns.id }
     { name: 'host-table-${i}', accountName: accountName, subresource: 'table', zoneId: tableDns.id }
 ]))
-var endpointSpecs = concat(dataEndpointSpecs, hostEndpointSpecs)
+var endpointSpecs = concat(dataEndpointSpecs, ragSourceEndpointSpecs, hostEndpointSpecs)
 
 resource storagePrivateEndpoints 'Microsoft.Network/privateEndpoints@2024-01-01' = [
   for spec in endpointSpecs: {
@@ -285,5 +248,4 @@ resource portalWebPrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-01-01
 output vnetId string = vnet.id
 output functionSubnetId string = functionSubnet.id
 output privateEndpointSubnetId string = privateEndpointSubnet.id
-output apimSubnetId string = apimSubnet.id
 output sitesPrivateDnsZoneId string = empty(portalUiStorageAccountName) ? '' : sitesDns.id

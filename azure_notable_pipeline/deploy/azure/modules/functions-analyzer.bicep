@@ -19,9 +19,22 @@ param hostQueueServiceUri string
 param hostTableServiceUri string
 param applicationInsightsConnectionString string
 param keyVaultUri string = ''
-param azureAiFoundryAnthropicBaseUrl string
-param azureAiFoundryResourceId string
-param azureAiFoundryAnalysisDeployment string = 'claude-sonnet-4-6'
+param azureOpenAiEndpoint string
+param azureOpenAiApiVersion string = '2024-10-21'
+param azureOpenAiAnalysisDeployment string
+param azureSearchEndpoint string = ''
+@minValue(1)
+param analyzerQueueTtlSeconds int = 86400
+param inputRetentionDays int = 2
+param queueRecoveryWindowSeconds int = 86400
+param ragTenantId string = ''
+param ragSourceContainer string = ''
+param ragSourcePrefix string = 'rag-sources'
+param ragSourceStorageAccountName string = ''
+param ragSourceStorageAccountUrl string = ''
+param ragAzureSearchIndex string = ''
+param caseQaAzureSearchIndex string = ''
+param ragIngestQueueName string = 'rag-ingest-invocations'
 param cosmosEndpoint string
 param cosmosDatabaseName string
 param sideEffectIdempotencyContainerName string
@@ -74,9 +87,22 @@ var applicationSettings = concat(azureWebJobsStorage, [
   { name: 'OutputStorage__queueServiceUri', value: outputQueueServiceUri }
   { name: 'OutputStorage__credential', value: 'managedidentity' }
   { name: 'OutputStorage__clientId', value: analyzerIdentityClientId }
-  { name: 'AZURE_AI_FOUNDRY_ANTHROPIC_BASE_URL', value: azureAiFoundryAnthropicBaseUrl }
-  { name: 'AZURE_AI_FOUNDRY_RESOURCE_ID', value: azureAiFoundryResourceId }
-  { name: 'AZURE_AI_FOUNDRY_ANALYSIS_DEPLOYMENT', value: azureAiFoundryAnalysisDeployment }
+  { name: 'AZURE_OPENAI_ENDPOINT', value: azureOpenAiEndpoint }
+  { name: 'AZURE_OPENAI_API_VERSION', value: azureOpenAiApiVersion }
+  { name: 'AZURE_OPENAI_ANALYSIS_DEPLOYMENT', value: azureOpenAiAnalysisDeployment }
+  { name: 'ANALYZER_QUEUE_TTL_SECONDS', value: string(analyzerQueueTtlSeconds) }
+  { name: 'INPUT_RETENTION_DAYS', value: string(inputRetentionDays) }
+  { name: 'QUEUE_RECOVERY_WINDOW_SECONDS', value: string(queueRecoveryWindowSeconds) }
+  { name: 'RAG_RETRIEVAL_BACKEND', value: 'azure_search' }
+  { name: 'CASE_QA_RETRIEVAL_BACKEND', value: 'azure_search' }
+  { name: 'RAG_TENANT_ID', value: ragTenantId }
+  { name: 'RAG_SOURCE_CONTAINER', value: ragSourceContainer }
+  { name: 'RAG_SOURCE_PREFIX', value: ragSourcePrefix }
+  { name: 'RAG_SOURCE_STORAGE_ACCOUNT_URL', value: ragSourceStorageAccountUrl }
+  { name: 'RAG_AZURE_SEARCH_INDEX', value: ragAzureSearchIndex }
+  { name: 'CASE_QA_AZURE_SEARCH_INDEX', value: caseQaAzureSearchIndex }
+  { name: 'AZURE_SEARCH_ENDPOINT', value: azureSearchEndpoint }
+  { name: 'RAG_INGEST_QUEUE_NAME', value: ragIngestQueueName }
   { name: 'COSMOS_ENDPOINT', value: cosmosEndpoint }
   { name: 'COSMOS_DATABASE_NAME', value: cosmosDatabaseName }
   { name: 'SIDE_EFFECT_IDEMPOTENCY_CONTAINER', value: sideEffectIdempotencyContainerName }
@@ -122,10 +148,18 @@ resource embedQueue 'Microsoft.Storage/storageAccounts/queueServices/queues@2023
   parent: outputQueueService
   name: 'case-embed-invocations'
 }
+resource ragIngestQueue 'Microsoft.Storage/storageAccounts/queueServices/queues@2023-05-01' existing = {
+  parent: outputQueueService
+  name: ragIngestQueueName
+}
+resource ragSourceStorage 'Microsoft.Storage/storageAccounts@2023-05-01' existing = if (!empty(ragSourceStorageAccountName)) {
+  name: ragSourceStorageAccountName
+}
 
 var blobOwnerRoleId = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
 var blobContributorRoleId = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
 var queueContributorRoleId = '974c5e8b-45b9-4653-ba55-5f855dd0fb88'
+var blobReaderRoleId = '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1'
 
 // Storage Queue Data Contributor, scope: 'output-notable-analysis-jobs'.
 // The same role at input account scope supports Blob-trigger receipts/poison.
@@ -175,6 +209,24 @@ resource embedQueueContributor 'Microsoft.Authorization/roleAssignments@2022-04-
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', queueContributorRoleId)
   }
 }
+resource ragIngestQueueContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(ragIngestQueue.id, analyzerIdentityResourceId, queueContributorRoleId)
+  scope: ragIngestQueue
+  properties: {
+    principalId: analyzerIdentityPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', queueContributorRoleId)
+  }
+}
+resource ragSourceBlobReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(ragSourceStorageAccountName)) {
+  name: guid(ragSourceStorage.id, analyzerIdentityResourceId, blobReaderRoleId)
+  scope: ragSourceStorage
+  properties: {
+    principalId: analyzerIdentityPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', blobReaderRoleId)
+  }
+}
 
 resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
   name: functionAppName
@@ -211,6 +263,8 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
     outputBlobContributor
     analyzerQueueContributor
     embedQueueContributor
+    ragIngestQueueContributor
+    ragSourceBlobReader
   ]
 }
 

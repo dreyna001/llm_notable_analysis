@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -14,6 +16,7 @@ _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._-]{8,128}$")
 _VALID_ANSWER_STATUSES = frozenset(
     {"answered", "unknown", "refused", "insufficient_context"}
 )
+_CLIENT_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._-]{8,128}$")
 
 
 class ChatSessionNotFoundError(LookupError):
@@ -211,6 +214,69 @@ def validate_chat_history_request(
         )
 
 
+def get_idempotent_chat_response(
+    *,
+    config: Config,
+    cosmos_store: CosmosStore,
+    mode: str,
+    selected_case_id: str | None,
+    question: str,
+    requested_session_id: str | None,
+    user_id: str | None,
+    client_request_id: str,
+) -> dict[str, Any] | None:
+    """Return a completed response for a retry key without charging quota."""
+
+    if not config.CASE_QA_CHAT_HISTORY_ENABLED:
+        return None
+    normalized_user = _require_user(user_id)
+    request_id = _validate_client_request_id(client_request_id)
+    session_id = (
+        _validate_session_id(requested_session_id)
+        if requested_session_id
+        else str(uuid.uuid5(uuid.NAMESPACE_URL, f"portal-chat-session:{normalized_user}:{request_id}"))
+    )
+    if requested_session_id:
+        _load_chat_session(
+            config=config,
+            cosmos_store=cosmos_store,
+            session_id=session_id,
+            user_id=normalized_user,
+            validate_scope=(mode, selected_case_id),
+        )
+    else:
+        session = cosmos_store.get_chat_session(
+            config.CHAT_SESSIONS_CONTAINER,
+            session_id=session_id,
+            user_id=normalized_user,
+        )
+        if not session:
+            return None
+        if session.get("mode") != mode or (session.get("selected_case_id") or None) != selected_case_id:
+            raise ValueError("client_request_id scope does not match the chat request.")
+    turn_id = _turn_id(request_id)
+    message = cosmos_store.get_chat_message(
+        config.CHAT_MESSAGES_CONTAINER,
+        session_id=session_id,
+        message_id=f"{turn_id}-assistant",
+    )
+    if not message:
+        return None
+    if message.get("request_fingerprint") != _request_fingerprint(mode, selected_case_id, question):
+        raise ValueError("client_request_id was reused for a different chat request.")
+    payload: dict[str, Any] = {
+        "answer": str(message.get("content") or ""),
+        "answer_status": str(message.get("answer_status") or "answered"),
+        "session_id": session_id,
+    }
+    if message.get("context_usage") is not None:
+        try:
+            payload["context_usage"] = json.loads(str(message["context_usage"]))
+        except (TypeError, ValueError):
+            pass
+    return payload
+
+
 def persist_chat_history(
     *,
     config: Config,
@@ -235,15 +301,20 @@ def persist_chat_history(
         client_request_id=client_request_id,
     )
     session_id = session["session_id"]
-    turn_id = _turn_id(client_request_id)
+    normalized_request_id = _validate_client_request_id(client_request_id) if client_request_id else None
+    turn_id = _turn_id(normalized_request_id)
     user_message_id = f"{turn_id}-user"
     assistant_message_id = f"{turn_id}-assistant"
-    if client_request_id and cosmos_store.get_chat_message(
-        config.CHAT_MESSAGES_CONTAINER,
-        session_id=session_id,
-        message_id=assistant_message_id,
-    ):
-        return session_id
+    if client_request_id:
+        existing = cosmos_store.get_chat_message(
+            config.CHAT_MESSAGES_CONTAINER,
+            session_id=session_id,
+            message_id=assistant_message_id,
+        )
+        if existing and existing.get("request_fingerprint") != _request_fingerprint(mode, selected_case_id, question):
+            raise ValueError("client_request_id was reused for a different chat request.")
+        if existing:
+            return session_id
     _reserve_turn(
         config=config,
         cosmos_store=cosmos_store,
@@ -279,6 +350,16 @@ def persist_chat_history(
     answer_status = normalize_stored_answer_status(response.get("answer_status"))
     if answer_status is not None:
         messages[1]["answer_status"] = answer_status
+    if normalized_request_id:
+        fingerprint = _request_fingerprint(mode, selected_case_id, question)
+        messages[0]["client_request_id"] = normalized_request_id
+        messages[1]["client_request_id"] = normalized_request_id
+        messages[0]["request_fingerprint"] = fingerprint
+        messages[1]["request_fingerprint"] = fingerprint
+        if response.get("context_usage") is not None:
+            messages[1]["context_usage"] = truncate_stored_message(
+                json.dumps(response["context_usage"], separators=(",", ":")), max_bytes
+            )
     created_ids: list[str] = []
     try:
         for message in messages:
@@ -513,6 +594,22 @@ def _turn_id(client_request_id: str | None) -> str:
         return str(uuid.uuid4())
     normalized = _validate_session_id(client_request_id)
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"portal-chat:{normalized}"))
+
+
+def _validate_client_request_id(value: str) -> str:
+    normalized = str(value or "").strip()
+    if not _CLIENT_REQUEST_ID_RE.fullmatch(normalized):
+        raise ValueError("client_request_id must be 8-128 URL-safe characters")
+    return normalized
+
+
+def _request_fingerprint(mode: str, selected_case_id: str | None, question: str) -> str:
+    value = json.dumps(
+        [mode, selected_case_id or None, question],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _decrement_message_count(

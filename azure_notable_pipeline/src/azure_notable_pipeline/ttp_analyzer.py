@@ -1,4 +1,4 @@
-"""Claude Sonnet TTP analysis with deterministic validation and policy gates."""
+"""Azure OpenAI TTP analysis with deterministic validation and policy gates."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from . import azure_anthropic_gateway
+from . import azure_openai_gateway
 from .verdicts import ALLOWED_VERDICTS, normalize_verdict
 
 # Configure logging
@@ -63,7 +63,7 @@ def _normalize_llm_result_shape(result: Any) -> Any:
     return result
 
 
-# Native Anthropic Messages tool schema; this is the durable analysis contract.
+# Shared structured analysis tool schema; this is the durable analysis contract.
 ANALYZE_NOTABLE_INPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -1045,26 +1045,26 @@ class TTPValidator:
         return len(self._valid_subtechniques) + len(self._valid_parent_techniques)
 
 
-class AnthropicAnalyzer:
-    """Coordinate bounded Sonnet analysis and deterministic post-processing."""
+class AzureOpenAIAnalyzer:
+    """Coordinate bounded Azure OpenAI analysis and deterministic post-processing."""
 
     def __init__(
         self,
-        deployment: str = "claude-sonnet-4-6",
+        deployment: str | None = None,
         *,
         base_url: str | None = None,
         gateway: Any | None = None,
         max_output_tokens: int | None = None,
         propagate_retryable: bool = False,
     ) -> None:
-        deployment = deployment.strip()
+        deployment = (deployment or os.getenv("AZURE_OPENAI_ANALYSIS_DEPLOYMENT", "")).strip()
         if not deployment:
-            raise ValueError("deployment cannot be blank")
+            raise ValueError("AZURE_OPENAI_ANALYSIS_DEPLOYMENT is required")
         self.deployment = deployment
         self.base_url = (
             base_url
             if base_url is not None
-            else os.getenv("AZURE_AI_FOUNDRY_ANTHROPIC_BASE_URL", "")
+            else os.getenv("AZURE_OPENAI_ENDPOINT", "")
         )
         self.gateway = gateway
         self.max_output_tokens = self._resolve_max_output_tokens(max_output_tokens)
@@ -1142,12 +1142,11 @@ SECURITY ALERT INPUT:
 {RULES}
 """
 
-    def _request_analysis(self, prompt: str) -> azure_anthropic_gateway.AnthropicAnalysis:
-        return azure_anthropic_gateway.analyze_notable(
+    def _request_analysis(self, prompt: str) -> azure_openai_gateway.AzureOpenAIAnalysis:
+        return azure_openai_gateway.analyze_notable(
             messages=[{"role": "user", "content": prompt}],
             deployment=self.deployment,
             tool=ANALYZE_NOTABLE_TOOL,
-            base_url=self.base_url,
             max_tokens=self.max_output_tokens,
             temperature=0.1,
             gateway=self.gateway,
@@ -1161,15 +1160,14 @@ SECURITY ALERT INPUT:
     ) -> Tuple[Optional[Dict[str, Any]], Optional[str], str]:
         """Run one native text call and decode its bounded JSON object."""
 
-        response = azure_anthropic_gateway.generate_text(
+        raw_text = azure_openai_gateway.generate_text(
             messages=[{"role": "user", "content": prompt}],
             deployment=self.deployment,
-            base_url=self.base_url,
             max_tokens=max_tokens or self.max_output_tokens,
             temperature=0.1,
             gateway=self.gateway,
+            json_object=True,
         )
-        raw_text = response.text
         candidate_text, _extraction_note = extract_json_object(raw_text)
         try:
             parsed = json.loads(candidate_text)
@@ -1266,7 +1264,7 @@ SECURITY ALERT INPUT:
                     primary_usage["input_tokens"] = response.input_tokens
                 if response.output_tokens is not None:
                     primary_usage["output_tokens"] = response.output_tokens
-            except azure_anthropic_gateway.AnthropicGatewayResponseError as exc:
+            except azure_openai_gateway.AzureOpenAIResponseError as exc:
                 primary_elapsed = time.time() - call_started
                 primary_raw = exc.raw_output
                 error_msg = str(exc)
@@ -1298,7 +1296,7 @@ SECURITY ALERT INPUT:
                     ok, error_msg, final_obj = self._validate_and_postprocess(
                         repair_response.payload
                     )
-                except azure_anthropic_gateway.AnthropicGatewayResponseError as exc:
+                except azure_openai_gateway.AzureOpenAIResponseError as exc:
                     repair_elapsed = time.time() - call_started
                     repair_raw = exc.raw_output
                     error_msg = str(exc)
@@ -1333,24 +1331,23 @@ SECURITY ALERT INPUT:
             )
             self.last_llm_response = final_obj
             return final_obj.get("ttp_analysis", [])
-        except azure_anthropic_gateway.AnthropicGatewayError as exc:
+        except azure_openai_gateway.AzureOpenAIGatewayError as exc:
             if self.propagate_retryable and isinstance(
                 exc,
                 (
-                    azure_anthropic_gateway.AnthropicGatewayTimeoutError,
-                    azure_anthropic_gateway.AnthropicGatewayRateLimitError,
-                    azure_anthropic_gateway.AnthropicGatewayServiceError,
+                    azure_openai_gateway.AzureOpenAIUnavailableError,
+                    azure_openai_gateway.AzureOpenAIRateLimitError,
                 ),
             ):
                 raise
-            logger.warning("Anthropic Foundry analysis failed: %s", type(exc).__name__)
+            logger.warning("Azure OpenAI analysis failed: %s", type(exc).__name__)
             self.last_llm_response = {
                 "error": f"LLM API error: {exc}",
                 "ttp_analysis": [],
             }
             return []
         except Exception as exc:  # pylint: disable=broad-exception-caught
-            logger.exception("Unexpected error calling Anthropic Foundry")
+            logger.exception("Unexpected error calling Azure OpenAI")
             self.last_llm_response = {
                 "error": f"LLM API error: {exc}",
                 "ttp_analysis": [],

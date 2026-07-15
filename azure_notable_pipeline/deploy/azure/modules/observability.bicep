@@ -8,7 +8,6 @@ param deployAlertRules bool = false
 param alertActionGroupResourceId string = ''
 param inputQueueServiceResourceId string = ''
 param outputQueueServiceResourceId string = ''
-param foundryResourceId string = ''
 param azureOpenAiResourceId string = ''
 param cosmosResourceId string = ''
 param frontDoorProfileResourceId string = ''
@@ -190,62 +189,6 @@ resource functionTimeoutAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-01
   }
 }
 
-resource foundryErrorAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = if (createAlerts && !empty(foundryResourceId)) {
-  name: '${namePrefix}-foundry-errors'
-  location: 'global'
-  properties: {
-    description: 'Sustained Foundry model service errors.'
-    severity: 1
-    enabled: true
-    scopes: [foundryResourceId]
-    evaluationFrequency: 'PT5M'
-    windowSize: 'PT15M'
-    criteria: {
-      'odata.type': 'Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria'
-      allOf: [{
-        name: 'FoundryModelErrors'
-        metricNamespace: 'Microsoft.CognitiveServices/accounts'
-        metricName: 'ModelRequests'
-        dimensions: [{ name: 'StatusCode', operator: 'Include', values: ['servererrors'] }]
-        operator: 'GreaterThan'
-        timeAggregation: 'Total'
-        threshold: modelErrorThreshold
-        criterionType: 'StaticThresholdCriterion'
-      }]
-    }
-    actions: metricAlertActions
-    autoMitigate: true
-  }
-}
-
-resource foundryThrottleAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = if (createAlerts && !empty(foundryResourceId)) {
-  name: '${namePrefix}-foundry-throttling'
-  location: 'global'
-  properties: {
-    description: 'Sustained Foundry model throttling (HTTP 429).'
-    severity: 2
-    enabled: true
-    scopes: [foundryResourceId]
-    evaluationFrequency: 'PT5M'
-    windowSize: 'PT15M'
-    criteria: {
-      'odata.type': 'Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria'
-      allOf: [{
-        name: 'FoundryModelThrottling'
-        metricNamespace: 'Microsoft.CognitiveServices/accounts'
-        metricName: 'ModelRequests'
-        dimensions: [{ name: 'StatusCode', operator: 'Include', values: ['429'] }]
-        operator: 'GreaterThan'
-        timeAggregation: 'Total'
-        threshold: modelThrottleThreshold
-        criterionType: 'StaticThresholdCriterion'
-      }]
-    }
-    actions: metricAlertActions
-    autoMitigate: true
-  }
-}
-
 resource openAiErrorAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = if (createAlerts && !empty(azureOpenAiResourceId)) {
   name: '${namePrefix}-openai-errors'
   location: 'global'
@@ -420,8 +363,6 @@ output alertRuleNames array = createAlerts ? concat(
   [
     '${namePrefix}-function-failures'
     '${namePrefix}-function-timeouts'
-    '${namePrefix}-foundry-errors'
-    '${namePrefix}-foundry-throttling'
     '${namePrefix}-cosmos-throttling'
   ],
   empty(azureOpenAiResourceId) ? [] : ['${namePrefix}-openai-errors', '${namePrefix}-openai-throttling'],

@@ -4,7 +4,7 @@ set -euo pipefail
 required=(
   AZURE_SUBSCRIPTION_ID AZURE_RESOURCE_GROUP AZURE_DEPLOYMENT_PREFIX
   CONTAINER_REGISTRY_RESOURCE_ID CONTAINER_IMAGE_URI
-  AZURE_AI_FOUNDRY_ANTHROPIC_BASE_URL AZURE_AI_FOUNDRY_RESOURCE_ID
+  AZURE_OPENAI_ENDPOINT AZURE_OPENAI_RESOURCE_ID AZURE_OPENAI_ANALYSIS_DEPLOYMENT
   FUNCTIONS_HOST_STORAGE_ACCOUNT_NAME INPUT_STORAGE_ACCOUNT_NAME
   OUTPUT_STORAGE_ACCOUNT_NAME COSMOS_ACCOUNT_NAME COSMOS_DATABASE_NAME
 )
@@ -16,7 +16,14 @@ for name in "${required[@]}"; do
 done
 
 command -v az >/dev/null || { echo 'Azure CLI (az) is required.' >&2; exit 2; }
-LOCATION="${AZURE_LOCATION:-eastus}"
+az cloud set --name AzureUSGovernment
+LOCATION="${AZURE_LOCATION:-usgovvirginia}"
+case "${LOCATION,,}" in
+  usgovvirginia|usgovarizona) ;;
+  *) echo 'AZURE_LOCATION must be usgovvirginia or usgovarizona.' >&2; exit 2 ;;
+esac
+[[ "${AZURE_OPENAI_ENDPOINT,,}" == https://*.openai.azure.us ]] || { echo 'AZURE_OPENAI_ENDPOINT must use .openai.azure.us.' >&2; exit 2; }
+[[ "${CONTAINER_IMAGE_URI,,}" == *.azurecr.us/* ]] || { echo 'CONTAINER_IMAGE_URI must use an Azure Government ACR (.azurecr.us).' >&2; exit 2; }
 capability_profiles="${CAPABILITY_PROFILES:-core}"
 capability_profiles="${capability_profiles//[[:space:]]/}"
 deploy_portal=false
@@ -45,18 +52,15 @@ if [[ "${function_plan_zone_redundant,,}" == 'true' && "${storage_sku_name}" != 
   echo 'FUNCTION_PLAN_ZONE_REDUNDANT=true requires STORAGE_SKU_NAME=Standard_ZRS.' >&2
   exit 2
 fi
-if [[ "${deployment_environment}" == 'production' ]]; then
-  [[ "${blob_data_protection_enabled,,}" == 'true' ]] || { echo 'BLOB_DATA_PROTECTION_ENABLED=true is required for production.' >&2; exit 2; }
-  [[ "${cosmos_continuous_backup_enabled,,}" == 'true' ]] || { echo 'COSMOS_CONTINUOUS_BACKUP_ENABLED=true is required for production.' >&2; exit 2; }
-fi
 disposition_sync_enabled="${SERVICENOW_DISPOSITION_SYNC_ENABLED:-false}"
 if [[ ",${capability_profiles,,}," == *,analyst_portal,* ]]; then
   deploy_portal=true
   portal_required=(
     PORTAL_UI_STORAGE_ACCOUNT_NAME PORTAL_UI_DEPLOYER_PRINCIPAL_ID
-    PORTAL_JWT_ISSUER PORTAL_JWT_AUDIENCE APIM_PUBLISHER_EMAIL
-    AZURE_OPENAI_ENDPOINT AZURE_OPENAI_RESOURCE_ID
+    PORTAL_JWT_ISSUER PORTAL_JWT_AUDIENCE
     AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT
+    AZURE_SEARCH_ENDPOINT AZURE_SEARCH_RESOURCE_ID CASE_QA_AZURE_SEARCH_INDEX
+    RAG_TENANT_ID
     PORTAL_OIDC_CLIENT_ID PORTAL_OIDC_AUTHORITY PORTAL_OIDC_API_SCOPE
     PORTAL_VALIDATION_BEARER_TOKEN
   )
@@ -74,6 +78,23 @@ if [[ ",${capability_profiles,,}," == *,analyst_portal,* ]]; then
     echo 'In JWT mode, PORTAL_ENTRA_REQUIRED_APP_ROLE must match the final segment of PORTAL_OIDC_API_SCOPE.' >&2
     exit 2
   fi
+fi
+if [[ ",${capability_profiles,,}," == *,rag,* ]]; then
+  rag_required=(
+    AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT AZURE_SEARCH_ENDPOINT AZURE_SEARCH_RESOURCE_ID
+    RAG_AZURE_SEARCH_INDEX RAG_TENANT_ID RAG_SOURCE_STORAGE_ACCOUNT_URL
+    RAG_SOURCE_STORAGE_ACCOUNT_NAME RAG_SOURCE_CONTAINER
+  )
+  for name in "${rag_required[@]}"; do
+    if [[ -z "${!name:-}" ]]; then
+      echo "Required RAG environment variable is unset: ${name}" >&2
+      exit 2
+    fi
+  done
+fi
+if [[ -n "${AZURE_SEARCH_ENDPOINT:-}" && "${AZURE_SEARCH_ENDPOINT,,}" != https://*.search.azure.us ]]; then
+  echo 'AZURE_SEARCH_ENDPOINT must use .search.azure.us.' >&2
+  exit 2
 fi
 if [[ "${deployment_environment}" == 'production' && -z "${ALERT_ACTION_GROUP_RESOURCE_ID:-}" ]]; then
   echo 'ALERT_ACTION_GROUP_RESOURCE_ID is required when DEPLOYMENT_ENVIRONMENT=production.' >&2
@@ -125,22 +146,8 @@ run_preflight() {
 # Complete source, contract, IaC, and image checks before Azure mutation.
 run_preflight
 
-apim_id=''
-if [[ "${deploy_portal}" == true ]]; then
-  apim_id="/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.ApiManagement/service/${AZURE_DEPLOYMENT_PREFIX}-portal-apim"
-fi
-deployment_succeeded=false
-disable_apim_on_failure() {
-  local exit_code=$?
-  if [[ ${exit_code} -ne 0 && "${deployment_succeeded}" != true && "${deploy_portal}" == true ]]; then
-    az resource update --ids "${apim_id}" \
-      --set properties.publicNetworkAccess=Disabled --output none >/dev/null 2>&1 || true
-  fi
-  exit "${exit_code}"
-}
-trap disable_apim_on_failure EXIT
-
 az account set --subscription "${AZURE_SUBSCRIPTION_ID}"
+resource_manager_endpoint="$(az cloud show --name AzureUSGovernment --query endpoints.resourceManager -o tsv)"
 if [[ "${cosmos_continuous_backup_enabled,,}" == 'true' ]]; then
   existing_cosmos_backup_type="$(az cosmosdb show \
     --resource-group "${AZURE_RESOURCE_GROUP}" \
@@ -186,16 +193,22 @@ az deployment group create \
     Location="${LOCATION}" \
     ContainerRegistryResourceId="${CONTAINER_REGISTRY_RESOURCE_ID}" \
     ContainerImageUri="${CONTAINER_IMAGE_URI}" \
-    AzureAiFoundryAnthropicBaseUrl="${AZURE_AI_FOUNDRY_ANTHROPIC_BASE_URL}" \
-    AzureAiFoundryResourceId="${AZURE_AI_FOUNDRY_RESOURCE_ID}" \
-    AzureAiFoundryAnalysisDeployment="${AZURE_AI_FOUNDRY_ANALYSIS_DEPLOYMENT:-claude-sonnet-4-6}" \
-    AzureOpenAiEndpoint="${AZURE_OPENAI_ENDPOINT:-}" \
-    AzureOpenAiResourceId="${AZURE_OPENAI_RESOURCE_ID:-}" \
+    cloudEnvironment=AzureUSGovernment \
+    AzureOpenAiEndpoint="${AZURE_OPENAI_ENDPOINT}" \
+    AzureOpenAiResourceId="${AZURE_OPENAI_RESOURCE_ID}" \
+    AzureOpenAiAnalysisDeployment="${AZURE_OPENAI_ANALYSIS_DEPLOYMENT}" \
     AzureOpenAiEmbeddingsDeployment="${AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT:-}" \
     AzureOpenAiPortalChatDeployment="${AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT:-}" \
     AzureSearchEndpoint="${AZURE_SEARCH_ENDPOINT:-}" \
     AzureSearchResourceId="${AZURE_SEARCH_RESOURCE_ID:-}" \
     RagAzureSearchIndex="${RAG_AZURE_SEARCH_INDEX:-}" \
+    RagTenantId="${RAG_TENANT_ID:-}" \
+    RagSourceStorageAccountUrl="${RAG_SOURCE_STORAGE_ACCOUNT_URL:-}" \
+    RagSourceStorageAccountName="${RAG_SOURCE_STORAGE_ACCOUNT_NAME:-}" \
+    RagSourceContainer="${RAG_SOURCE_CONTAINER:-}" \
+    RagSourcePrefix="${RAG_SOURCE_PREFIX:-rag-sources}" \
+    RagIngestQueueName="${RAG_INGEST_QUEUE_NAME:-rag-ingest-invocations}" \
+    CaseQaAzureSearchIndex="${CASE_QA_AZURE_SEARCH_INDEX:-}" \
     KeyVaultName="${KEY_VAULT_NAME:-}" \
     CosmosAccountName="${COSMOS_ACCOUNT_NAME}" \
     CosmosDatabaseName="${COSMOS_DATABASE_NAME}" \
@@ -229,8 +242,6 @@ az deployment group create \
     PortalJwtIssuer="${PORTAL_JWT_ISSUER:-}" \
     PortalJwtAudience="${PORTAL_JWT_AUDIENCE:-}" \
     PortalEntraRequiredAppRole="${PORTAL_ENTRA_REQUIRED_APP_ROLE:-}" \
-    ApiManagementPublisherEmail="${APIM_PUBLISHER_EMAIL:-}" \
-    ApiManagementPublisherName="${APIM_PUBLISHER_NAME:-Notable Analysis}" \
     PortalChatTimeoutSec="${PORTAL_CHAT_TIMEOUT_SEC:-225}" \
     PortalChatDistributedQuotaEnabled="${PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED:-true}" \
     ChatQuotaContainerName="${PORTAL_CHAT_QUOTA_CONTAINER:-${AZURE_DEPLOYMENT_PREFIX}-chat-quota}" \
@@ -265,15 +276,9 @@ analyzer_name="$(az deployment group show --name "${deployment_name}" --resource
 embed_name="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.EmbedFunctionAppName.value -o tsv)"
 disposition_name="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.DispositionFunctionAppName.value -o tsv)"
 portal_name="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.PortalFunctionAppName.value -o tsv)"
-apim_name="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.PortalApiManagementName.value -o tsv)"
 frontdoor_profile="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.PortalFrontDoorProfileName.value -o tsv)"
 frontdoor_host="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.PortalFrontDoorHostName.value -o tsv)"
 workspace_customer_id="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.LogAnalyticsWorkspaceCustomerId.value -o tsv)"
-if [[ -n "${apim_name}" ]]; then
-  # Resolve this immediately so the EXIT trap can fail closed during any
-  # post-deployment validation, not only after portal asset upload succeeds.
-  apim_id="$(az apim show --resource-group "${AZURE_RESOURCE_GROUP}" --name "${apim_name}" --query id -o tsv)"
-fi
 
 forbidden_setting_pattern='^(AZUREWEBJOBSSTORAGE|AZUREWEBJOBSDASHBOARD|WEBSITE_CONTENTAZUREFILECONNECTIONSTRING|WEBSITE_CONTENTSHARE)$|(^|_)(DOCKER_REGISTRY_SERVER|ACR|AZURE_CONTAINER_REGISTRY|CONTAINER_REGISTRY)(_|$).*(USERNAME|PASSWORD|API_?KEY|ACCESS_?KEY|KEY|TOKEN|SECRET|CREDENTIAL|CONNECTION_?STRING)|(^|_)(AZURE_)?(STORAGE|BLOB|QUEUE|TABLE|FILE|FILES)(_|$).*(ACCOUNT_?KEY|ACCESS_?KEY|API_?KEY|KEY|CONNECTION_?STRING|SAS(_TOKEN)?|PASSWORD|SECRET)|(^|_)(AZURE_AI_FOUNDRY|AI_FOUNDRY|FOUNDRY|ANTHROPIC|AZURE_OPENAI|OPENAI|AZURE_SEARCH|COGNITIVE_SEARCH|SEARCH_SERVICE|SEARCH|COSMOSDB|COSMOS|AZURE_COSMOS)(_|$).*(API_?KEY|ACCOUNT_?KEY|ACCESS_?KEY|PRIMARY_?KEY|SECONDARY_?KEY|MASTER_?KEY|KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|CONNECTION_?STRING)'
 
@@ -366,7 +371,7 @@ wait_for_function_host() {
     host_state="$(
       az rest \
         --method get \
-        --url "https://management.azure.com${app_id}/hostruntime/admin/host/status?api-version=2022-03-01" \
+        --url "${resource_manager_endpoint%/}${app_id}/hostruntime/admin/host/status?api-version=2022-03-01" \
         --query state \
         -o tsv 2>/dev/null || true
     )"
@@ -509,12 +514,13 @@ if [[ "${deploy_portal}" == true ]]; then
   subscription_id="$(az account show --query id -o tsv)"
   portal_storage_id="/subscriptions/${subscription_id}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Storage/storageAccounts/${PORTAL_UI_STORAGE_ACCOUNT_NAME}"
   portal_function_id="$(az functionapp show --resource-group "${AZURE_RESOURCE_GROUP}" --name "${portal_name}" --query id -o tsv)"
+  portal_function_host="$(az functionapp show --resource-group "${AZURE_RESOURCE_GROUP}" --name "${portal_name}" --query defaultHostName -o tsv)"
   approve_expected_frontdoor_connection "${portal_storage_id}" 'Front Door private static website origin' portal-ui portal-web
-  approve_expected_frontdoor_connection "${apim_id}" 'Front Door private APIM origin' portal-api portal-apim
+  approve_expected_frontdoor_connection "${portal_function_id}" 'Front Door private portal Function origin' portal-api portal-function
 
-  for origin in portal-apim portal-web; do
+  for origin in portal-function portal-web; do
     case "${origin}" in
-      portal-apim) group=portal-api ;;
+      portal-function) group=portal-api ;;
       portal-web) group=portal-ui ;;
     esac
     for attempt in {1..30}; do
@@ -525,13 +531,10 @@ if [[ "${deploy_portal}" == true ]]; then
     [[ "${state}" == 'Approved' ]] || { echo "Front Door origin ${origin} was not approved." >&2; exit 1; }
   done
 
-  # Never disable APIM public access until every Front Door managed endpoint is approved.
-  az resource update --ids "${apim_id}" --set properties.publicNetworkAccess=Disabled --output none
-  [[ "$(az resource show --ids "${apim_id}" --query properties.publicNetworkAccess -o tsv)" == 'Disabled' ]] || exit 1
   [[ "$(az storage account show --ids "${portal_storage_id}" --query publicNetworkAccess -o tsv)" == 'Disabled' ]] || exit 1
   [[ "$(az functionapp show --ids "${portal_function_id}" --query publicNetworkAccess -o tsv)" == 'Disabled' ]] || exit 1
 
-  expect_direct_origin_denied "https://${apim_name}.azure-api.net/ready"
+  expect_direct_origin_denied "https://${portal_function_host}/ready"
   curl --fail --silent --show-error --max-time 240 \
     --header "Authorization: Bearer ${PORTAL_VALIDATION_BEARER_TOKEN}" \
     "https://${frontdoor_host}/ready" >/dev/null
@@ -556,5 +559,4 @@ if [[ "${deploy_portal}" == true ]]; then
   fi
 fi
 
-deployment_succeeded=true
 echo "Deployment ${deployment_name} completed: ${analyzer_name}, ${embed_name}, ${disposition_name}${portal_name:+, ${portal_name}}."

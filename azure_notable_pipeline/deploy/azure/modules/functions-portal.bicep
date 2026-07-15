@@ -28,6 +28,10 @@ param azureOpenAiEmbeddingsDeployment string
 param azureOpenAiPortalChatDeployment string
 param azureSearchEndpoint string = ''
 param ragAzureSearchIndex string = ''
+param ragTenantId string = ''
+param ragRetrievalBackend string = 'azure_search'
+param caseQaRetrievalBackend string = 'azure_search'
+param caseQaAzureSearchIndex string = ''
 param capabilityProfiles string = 'core,analyst_portal'
 param zoneRedundant bool = false
 
@@ -91,6 +95,10 @@ var applicationSettings = [
   { name: 'AZURE_OPENAI_PORTAL_CHAT_DEPLOYMENT', value: azureOpenAiPortalChatDeployment }
   { name: 'AZURE_SEARCH_ENDPOINT', value: azureSearchEndpoint }
   { name: 'RAG_AZURE_SEARCH_INDEX', value: ragAzureSearchIndex }
+  { name: 'RAG_RETRIEVAL_BACKEND', value: ragRetrievalBackend }
+  { name: 'RAG_TENANT_ID', value: ragTenantId }
+  { name: 'CASE_QA_RETRIEVAL_BACKEND', value: caseQaRetrievalBackend }
+  { name: 'CASE_QA_AZURE_SEARCH_INDEX', value: caseQaAzureSearchIndex }
   { name: 'CAPABILITY_PROFILES', value: capabilityProfiles }
   { name: 'PORTAL_AUTH_MODE', value: portalAuthMode }
   { name: 'PORTAL_JWT_ISSUER', value: portalJwtIssuer }

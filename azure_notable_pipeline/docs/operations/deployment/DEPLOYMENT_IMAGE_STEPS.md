@@ -7,7 +7,7 @@ deployment contract.
 
 ## Prerequisites and decisions
 
-Record the subscription, `eastus`-compatible qualified region, resource group,
+Record the Azure Government subscription, `usgovvirginia`-qualified region, resource group,
 naming prefix, ACR resource ID, customer capability profile, image retention,
 rollback digest, and deployment owner outside the reusable repository. The
 runner must have private network/DNS access to the deployment endpoints and
@@ -15,8 +15,8 @@ permission to deploy Bicep, assign roles, approve Front Door private endpoint
 connections, and push to ACR. Do not enable public storage or origins as a
 deployment shortcut.
 
-Before build, obtain customer approval for the Anthropic-hosted Claude Sonnet
-4.6 preview boundary described in
+Before build, obtain customer approval for the customer-owned Azure OpenAI
+model boundary described in
 [`../llm/LLM_INFERENCE_OPERATIONS.md`](../llm/LLM_INFERENCE_OPERATIONS.md).
 
 ## Build, scan, and resolve the digest

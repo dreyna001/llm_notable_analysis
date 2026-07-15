@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from uuid import uuid4
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -25,6 +26,7 @@ class SideEffectReservation:
     container_name: str = ""
     item_id: str = ""
     etag: str = ""
+    fencing_token: str = ""
     existing_marker: dict[str, Any] | None = None
     store: CosmosStore | None = None
 
@@ -64,6 +66,7 @@ def _marker_from_item(
         "key": str(item.get("side_effect_key") or key),
         "status": str(item.get("status") or "unknown"),
         "started_at": str(item.get("started_at") or ""),
+        "fencing_token": str(item.get("fencing_token") or ""),
         "metadata": dict(metadata) if isinstance(metadata, dict) else {},
     }
 
@@ -104,12 +107,14 @@ def begin_side_effect(
     normalized_key = _normalize_key(key)
     item_id = _item_id(operation, normalized_key)
     now = datetime.now(timezone.utc).isoformat()
+    fencing_token = uuid4().hex
     item = {
         "id": item_id,
         "operation": operation,
         "side_effect_key": normalized_key,
         "status": "in_progress",
         "started_at": now,
+        "fencing_token": fencing_token,
         "expires_at": _expiry_epoch(config.SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS),
     }
 
@@ -126,6 +131,7 @@ def begin_side_effect(
                 item_id=item_id,
                 etag=str(created_item.get("_etag") or ""),
                 store=store,
+                fencing_token=fencing_token,
             )
 
         existing = store.read_item(
@@ -139,14 +145,25 @@ def begin_side_effect(
         lock_seconds = int(config.SIDE_EFFECT_IDEMPOTENCY_LOCK_SECONDS)
         etag = str(existing.get("_etag") or "")
         if attempt == 0 and etag and _is_stale_in_progress(marker, lock_seconds=lock_seconds):
-            deleted = store.delete_if_match(
+            takeover_token = uuid4().hex
+            replacement = dict(existing)
+            replacement.update(
+                {"status": "in_progress", "started_at": now, "fencing_token": takeover_token}
+            )
+            reclaimed = store.replace_if_match(
                 container_name,
-                item_id=item_id,
-                partition_key=item_id,
+                replacement,
                 expected_etag=etag,
             )
-            if deleted.applied:
-                continue
+            if reclaimed.applied:
+                return SideEffectReservation(
+                    True, True, operation, normalized_key,
+                    container_name=container_name,
+                    item_id=item_id,
+                    etag=str((reclaimed.item or replacement).get("_etag") or ""),
+                    store=store,
+                    fencing_token=takeover_token,
+                )
         return SideEffectReservation(
             True,
             False,
@@ -181,12 +198,17 @@ def complete_side_effect_success(
         return True
     if not reservation.should_execute or not reservation.store or not reservation.etag:
         return False
-    current = reservation.store.read_item(
-        reservation.container_name,
-        item_id=reservation.item_id,
-        partition_key=reservation.item_id,
-    )
+    try:
+        current = reservation.store.read_item(
+            reservation.container_name,
+            item_id=reservation.item_id,
+            partition_key=reservation.item_id,
+        )
+    except Exception:
+        return False
     if not current or current.get("status") != "in_progress":
+        return False
+    if str(current.get("fencing_token") or "") != reservation.fencing_token:
         return False
     current_etag = str(current.get("_etag") or "")
     if not current_etag or current_etag != reservation.etag:
@@ -206,7 +228,18 @@ def complete_side_effect_success(
             expected_etag=current_etag,
         )
     except Exception:
+        mark_side_effect_state(
+            reservation,
+            status="external_success_unrecorded",
+            metadata={**(metadata or {}), "external_success": True},
+        )
         return False
+    if not outcome.applied:
+        mark_side_effect_state(
+            reservation,
+            status="external_success_unrecorded",
+            metadata={**(metadata or {}), "external_success": True},
+        )
     return outcome.applied
 
 
@@ -224,7 +257,7 @@ def release_side_effect_lock(reservation: SideEffectReservation) -> None:
         if not current or current.get("status") != "in_progress":
             return
         etag = str(current.get("_etag") or "")
-        if not etag or etag != reservation.etag:
+        if not etag or etag != reservation.etag or str(current.get("fencing_token") or "") != reservation.fencing_token:
             return
         reservation.store.delete_if_match(
             reservation.container_name,
@@ -234,3 +267,52 @@ def release_side_effect_lock(reservation: SideEffectReservation) -> None:
         )
     except Exception:
         return
+
+
+def mark_side_effect_state(
+    reservation: SideEffectReservation,
+    *,
+    status: str,
+    metadata: dict[str, Any] | None = None,
+) -> bool:
+    """Record a terminal state only for the current fenced lease owner."""
+
+    if not reservation.enabled or not reservation.should_execute or not reservation.store:
+        return False
+    try:
+        current = reservation.store.read_item(
+            reservation.container_name,
+            item_id=reservation.item_id,
+            partition_key=reservation.item_id,
+        )
+    except Exception:
+        return False
+    if not current or current.get("status") != "in_progress":
+        return False
+    if str(current.get("fencing_token") or "") != reservation.fencing_token:
+        return False
+    updated = dict(current)
+    updated.update(
+        {
+            "status": status,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "metadata": dict(metadata or {}),
+        }
+    )
+    try:
+        outcome = reservation.store.replace_if_match(
+            reservation.container_name,
+            updated,
+            expected_etag=str(current.get("_etag") or ""),
+        )
+        return outcome.applied
+    except Exception:
+        return False
+
+
+def mark_side_effect_uncertain(
+    reservation: SideEffectReservation,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> bool:
+    return mark_side_effect_state(reservation, status="uncertain", metadata=metadata)

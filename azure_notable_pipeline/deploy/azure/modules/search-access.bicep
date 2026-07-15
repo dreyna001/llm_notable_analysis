@@ -1,19 +1,31 @@
 targetScope = 'resourceGroup'
 
 param searchServiceName string
-param principalIds array
+param analyzerPrincipalId string
+param portalPrincipalId string = ''
 
 resource search 'Microsoft.Search/searchServices@2023-11-01' existing = {
   name: searchServiceName
 }
 
 var searchIndexDataReaderRoleId = '1407120a-92aa-4202-b7e9-c0e197c71c8f'
-resource indexReaders 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for principalId in principalIds: {
-  name: guid(search.id, principalId, searchIndexDataReaderRoleId)
+var searchIndexDataContributorRoleId = '8ebe5a00-799e-43f5-93ac-243d3dce84a7'
+resource analyzerIndexContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(search.id, analyzerPrincipalId, searchIndexDataContributorRoleId)
   scope: search
   properties: {
-    principalId: principalId
+    principalId: analyzerPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', searchIndexDataContributorRoleId)
+  }
+}
+
+resource portalIndexReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(portalPrincipalId)) {
+  name: guid(search.id, portalPrincipalId, searchIndexDataReaderRoleId)
+  scope: search
+  properties: {
+    principalId: portalPrincipalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', searchIndexDataReaderRoleId)
   }
-}]
+}

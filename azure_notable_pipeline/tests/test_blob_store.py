@@ -94,6 +94,7 @@ def test_read_blob_returns_bytes_and_observed_etag() -> None:
         "etag": '"etag-1"',
         "match_condition": MatchConditions.IfNotModified,
         "length": 101,
+        "offset": 0,
     }
 
 

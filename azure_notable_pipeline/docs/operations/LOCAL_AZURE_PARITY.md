@@ -68,7 +68,7 @@ successful-worker boundary.
 - The core path uses deterministic in-memory Cosmos persistence. When the optional Cosmos
   emulator variables are supplied, a focused test additionally verifies duplicate create,
   stale ETag rejection, and chat-session partition ownership through `CosmosStore`.
-- Foundry/Anthropic, Azure OpenAI, AI Search, Key Vault, ServiceNow, and Splunk are never
+- Azure OpenAI, Azure AI Search, Key Vault, ServiceNow, and Splunk are never
   contacted. Their live identity, quota, TLS, and service-specific behavior belongs in an
   explicitly authorized Azure development environment.
 - The chat response is deterministic and validates routing/authentication composition, not

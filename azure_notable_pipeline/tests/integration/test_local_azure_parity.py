@@ -191,6 +191,7 @@ def _config(input_container: str, output_container: str, analyzer_queue: str, em
         PORTAL_ENTRA_REQUIRED_APP_ROLE="Case.Reader",
         PORTAL_JWT_ISSUER="https://local.invalid",
         PORTAL_JWT_AUDIENCE="local-parity",
+        PORTAL_CHAT_DISTRIBUTED_QUOTA_ENABLED=False,
     )
 
 
@@ -333,7 +334,12 @@ def test_gzip_intake_queue_analysis_archive_embed_chat_and_disposition_dry_run(
         monkeypatch.setattr(
             portal_handler,
             "validate_portal_jwt",
-            lambda token, **_kwargs: {"sub": "local-analyst"} if token == "good-token" else None,
+            lambda token, **_kwargs: {
+                "sub": "local-analyst",
+                "roles": ["Case.Reader"],
+            }
+            if token == "good-token"
+            else None,
         )
         chat_body = json.dumps(
             {"mode": "selected_case", "selected_case_id": case_id, "question": "What happened?"}

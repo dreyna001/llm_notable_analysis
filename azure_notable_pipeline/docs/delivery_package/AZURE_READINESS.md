@@ -5,11 +5,11 @@ customer-specific values in the approved customer system, not this repository.
 
 ## Customer decisions
 
-- [ ] Dedicated subscription, resource group, naming prefix, Azure Commercial
-  region, and same-region Foundry/OpenAI qualification approved.
-- [ ] Anthropic-hosted Sonnet 4.6 preview, data-processing/residency terms,
-  content filtering, quota, deployment name, and rollback model approved.
-- [ ] Azure OpenAI chat/embedding deployments and filters approved.
+- [ ] Dedicated Azure Government subscription, resource group, naming prefix,
+  `usgovvirginia` region, and Government endpoint qualification approved.
+- [ ] Customer-owned Azure OpenAI analyzer/chat/embedding deployments,
+  data-processing terms, content filtering, quota, deployment names, and
+  rollback model approved.
 - [ ] AI Search source owners, index names/schema, ingestion, refresh/deletion,
   semantic rerank, and rollback approved.
 - [ ] Primary intake profile and optional manual fallback recorded with
@@ -36,9 +36,9 @@ customer-specific values in the approved customer system, not this repository.
   host storage, and least-privilege data access.
 - [ ] Blob/container soft delete and Blob versioning are enabled with bounded
   previous-version retention; Cosmos continuous backup is enabled.
-- [ ] No storage/ACR/Foundry/OpenAI/Search/Cosmos key or connection string exists
+- [ ] No storage/ACR/Azure OpenAI/Search/Cosmos key or connection string exists
   in app settings, image, logs, or committed files.
-- [ ] Storage, Function, APIM, and `$web` origins are private; Front Door private
+- [ ] Storage, Function, and `$web` origins are private; Front Door private
   links are approved; direct origins fail.
 - [ ] Key Vault contains only customer integration secrets; rotation owners are
   recorded.
@@ -49,7 +49,7 @@ customer-specific values in the approved customer system, not this repository.
 - [ ] `scripts/test-pipeline.sh --staging-gate` or PowerShell equivalent passes
   in the dedicated subscription with synthetic fixtures/test identities.
 - [ ] Private intake produces the expected report and managed-identity live
-  smoke covers Foundry forced output, Azure OpenAI 1024-d embeddings/chat where
+  smoke covers Azure OpenAI structured output, 1024-d embeddings/chat where
   enabled, Search grounding where enabled, Blob/Queue, and Cosmos.
 - [ ] At least `3 * AnalyzerMaxInstanceCount` jobs show bounded concurrency,
   queued surplus, drain, and normal idempotent outcomes.
@@ -59,8 +59,7 @@ customer-specific values in the approved customer system, not this repository.
   duplicate writeback.
 - [ ] OpenAPI is unchanged; negative auth, required role, same-origin CORS, two-
   identity ownership, direct-origin denial, and authenticated Front Door pass.
-- [ ] Chat timeout chain is browser 220 / Function 225 / APIM 230 / Front Door
-  240 seconds; non-chat APIM operations retain the 30-second default.
+- [ ] Chat timeout chain is browser 220 / Function 225 / Front Door 240 seconds.
 - [ ] Disposition disabled-path dry run and fake mapping/checkpoint tests pass;
   any live test uses only the isolated ServiceNow test instance/read credential.
 

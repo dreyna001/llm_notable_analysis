@@ -18,9 +18,9 @@ that evidence without reading or storing its bearer token.
 | `case-embed-invocations-poison` nonempty (output) | any message | inspect envelope, chunks, and embed status |
 | analyzer/embed backlog | customer count threshold sustained 15 min | compare burst, scale cap, quota, throttling |
 | Function failure/timeout | customer consecutive/rate threshold | correlate invocation, dependency, and queue message |
-| Foundry/OpenAI throttle/service error | sustained customer threshold | preserve queue, reduce intake/cap or obtain quota |
+| Azure OpenAI throttle/service error | sustained customer threshold | preserve queue, reduce intake/cap or obtain quota |
 | Cosmos 429 | sustained customer threshold | inspect RU/query/partition telemetry; do not add retry amplification |
-| Front Door 5xx | customer rate threshold | inspect private origins and Function/APIM health |
+| Front Door 5xx | customer rate threshold | inspect private origins and Function health |
 | authenticated `/ready` | customer consecutive failures | identity/token, edge, and dependency triage |
 | disposition sync | no successful completion in 26 hours | ServiceNow auth/network/map/Cosmos and cursor triage |
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from uuid import uuid4
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
@@ -29,6 +30,9 @@ class SourceContext:
     source_filename: str
     content_type: str
     was_compressed: bool
+    source_version_id: str = ""
+    source_etag: str = ""
+    processing_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -53,7 +57,7 @@ def archive_case(
     cosmos: CosmosStore | Any | None = None,
     processed_at: datetime | str | None = None,
 ) -> ArchiveWriteResult:
-    """Write a bounded case envelope and conditionally create its Cosmos index."""
+    """Claim, write, and publish one immutable case run."""
 
     if not config.CASE_ARCHIVE_ENABLED:
         return ArchiveWriteResult(status="skipped", message="case archive disabled")
@@ -68,6 +72,9 @@ def archive_case(
         source_bucket=source.input_bucket,
     )
     case_id = _build_case_id(finding_id)
+    processing_id = source.processing_id or _build_processing_id(source)
+    immutable_run = bool(source.source_etag or source.processing_id or source.source_version_id)
+    run_id = _build_run_id(finding_id, processing_id)
     correlation_id = _extract_first_string(alert_payload, CORRELATION_FIELDS)
     completeness, archived_alert, archived_analysis = _bounded_archive_values(
         alert_payload=alert_payload,
@@ -76,7 +83,7 @@ def archive_case(
     )
     artifacts = _extract_artifact_keys(sink_result)
     retrieval_status = "pending" if config.CASE_QA_ENABLED else "not_indexed"
-    envelope_key = _build_envelope_key(config, processed, case_id)
+    envelope_key = _build_envelope_key(config, processed, case_id, run_id, immutable_run)
 
     existing = store.get_case(config.CASE_INDEX_CONTAINER, case_id)
     if existing:
@@ -95,6 +102,7 @@ def archive_case(
         "case_schema_version": config.CASE_SCHEMA_VERSION,
         "analysis_schema_version": config.CASE_ANALYSIS_SCHEMA_VERSION,
         "case_id": case_id,
+        "run_id": run_id,
         "finding_id": finding_id,
         "source": {
             "input_bucket": source.input_bucket,
@@ -102,6 +110,9 @@ def archive_case(
             "source_filename": source.source_filename,
             "content_type": source.content_type,
             "was_compressed": source.was_compressed,
+            "version_id": source.source_version_id,
+            "etag": source.source_etag,
+            "processing_id": processing_id,
         },
         "processed_at": _format_utc(processed),
         "expires_at": _format_utc(expires),
@@ -116,14 +127,6 @@ def archive_case(
         "alert_payload": archived_alert,
         "analysis": archived_analysis,
     }
-    write_blob(
-        config.CASE_ARCHIVE_CONTAINER,
-        envelope_key,
-        json.dumps(envelope, ensure_ascii=False, default=str).encode("utf-8"),
-        content_type="application/json",
-        overwrite=True,
-        store=blob_store,
-    )
     item = _build_case_index_item(
         config=config,
         case_id=case_id,
@@ -139,21 +142,113 @@ def archive_case(
         analysis=analysis,
         alert_payload=alert_payload,
     )
-    outcome = store.create_case_if_absent(config.CASE_INDEX_CONTAINER, item)
-    if not outcome.created:
-        existing = store.get_case(config.CASE_INDEX_CONTAINER, case_id)
-        if existing:
-            return _replay_result(
-                existing,
-                case_id=case_id,
-                envelope_key=envelope_key,
-                retrieval_status=retrieval_status,
-                source_completeness=completeness,
-                source=source,
-                correlation_id=correlation_id,
-                finding_id=finding_id,
-            )
-        raise RuntimeError("case index create conflicted but the item could not be read")
+    item["processing_id"] = processing_id
+    if not immutable_run:
+        write_blob(
+            config.CASE_ARCHIVE_CONTAINER,
+            envelope_key,
+            json.dumps(envelope, ensure_ascii=False, default=str).encode("utf-8"),
+            content_type="application/json",
+            overwrite=True,
+            store=blob_store,
+        )
+        outcome = store.create_case_if_absent(config.CASE_INDEX_CONTAINER, item)
+        if not outcome.created:
+            winner = store.get_case(config.CASE_INDEX_CONTAINER, case_id)
+            if winner:
+                return _replay_result(
+                    winner,
+                    case_id=case_id,
+                    envelope_key=envelope_key,
+                    retrieval_status=retrieval_status,
+                    source_completeness=completeness,
+                    source=source,
+                    correlation_id=correlation_id,
+                    finding_id=finding_id,
+                )
+            raise RuntimeError("case index create conflicted but the item could not be read")
+        return ArchiveWriteResult(
+            status="success",
+            case_id=case_id,
+            case_envelope_key=envelope_key,
+            retrieval_status=retrieval_status,
+            source_completeness=completeness,
+        )
+    existing_run = _run_from_item(existing, run_id) if existing else None
+    if existing_run is not None:
+        if str(existing_run.get("state")) == "completed":
+            return _run_result(existing, existing_run, retrieval_status, completeness)
+        return ArchiveWriteResult(
+            status="skipped",
+            case_id=case_id,
+            case_envelope_key=str(existing_run.get("envelope_key") or envelope_key),
+            message="case run is already claimed",
+        )
+    if existing and not immutable_run:
+        return _replay_result(
+            existing,
+            case_id=case_id,
+            envelope_key=envelope_key,
+            retrieval_status=retrieval_status,
+            source_completeness=completeness,
+            source=source,
+            correlation_id=correlation_id,
+            finding_id=finding_id,
+        )
+    run_record = {
+        "run_id": run_id,
+        "processing_id": processing_id,
+        "state": "claimed",
+        "fencing_token": uuid4().hex,
+        "envelope_key": envelope_key,
+        "claimed_at": _format_utc(processed),
+        "source_key": source.input_key,
+    }
+    item["runs"] = {run_id: run_record}
+    item.pop("case_envelope_key", None)
+    if not existing:
+        outcome = store.create_case_if_absent(config.CASE_INDEX_CONTAINER, item)
+        if not outcome.created:
+            winner = store.get_case(config.CASE_INDEX_CONTAINER, case_id)
+            winner_run = _run_from_item(winner, run_id) if winner else None
+            if winner_run and str(winner_run.get("state")) == "completed":
+                return _run_result(winner, winner_run, retrieval_status, completeness)
+            if winner and immutable_run:
+                claimed = _claim_run(store, config, winner, run_id, run_record)
+                if claimed is None:
+                    return ArchiveWriteResult(status="skipped", case_id=case_id, case_envelope_key=envelope_key, message="case run claim is already held")
+                existing = claimed
+            else:
+                raise RuntimeError("case index create conflicted but the item could not be read")
+    elif immutable_run:
+        existing = _claim_run(store, config, existing, run_id, run_record)
+        if existing is None:
+            return ArchiveWriteResult(status="skipped", case_id=case_id, case_envelope_key=envelope_key, message="case run claim is already held")
+    write_blob(
+        config.CASE_ARCHIVE_CONTAINER,
+        envelope_key,
+        json.dumps(envelope, ensure_ascii=False, default=str).encode("utf-8"),
+        content_type="application/json",
+        overwrite=not immutable_run,
+        store=blob_store,
+    )
+    current = store.get_case(config.CASE_INDEX_CONTAINER, case_id)
+    if current is None:
+        raise RuntimeError("case index disappeared before run publication")
+    current_run = _run_from_item(current, run_id)
+    if current_run is None or current_run.get("fencing_token") != run_record["fencing_token"]:
+        return ArchiveWriteResult(status="skipped", case_id=case_id, case_envelope_key=envelope_key, message="case run fence was lost")
+    completed = {**run_record, "state": "completed", "completed_at": _format_utc(processed)}
+    publication = store.publish_case_run_if_latest(
+        config.CASE_INDEX_CONTAINER,
+        case_id=case_id,
+        run_id=run_id,
+        run_record=completed,
+        expected_etag=str(current.get("_etag") or ""),
+        processed_at=_format_utc(processed),
+    )
+    if not publication.applied:
+        return ArchiveWriteResult(status="skipped", case_id=case_id, case_envelope_key=envelope_key, message=f"case latest-run publication failed: {publication.outcome}")
     return ArchiveWriteResult(
         status="success",
         case_id=case_id,
@@ -281,11 +376,85 @@ def _extract_artifact_keys(sink_result: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def _build_envelope_key(config: Config, processed_at: datetime, case_id: str) -> str:
+def _build_envelope_key(
+    config: Config,
+    processed_at: datetime,
+    case_id: str,
+    run_id: str = "",
+    immutable_run: bool = False,
+) -> str:
+    filename = f"{case_id}/{run_id}.json" if immutable_run else f"{case_id}.json"
     return (
         f"{config.CASE_ARCHIVE_PREFIX}/"
         f"{processed_at.year:04d}/{processed_at.month:02d}/{processed_at.day:02d}/"
-        f"{case_id}.json"
+        f"{filename}"
+    )
+
+
+def _build_processing_id(source: SourceContext) -> str:
+    material = "\x1f".join(
+        (
+            source.input_bucket,
+            source.input_key,
+            source.source_version_id or "",
+            source.source_etag or "",
+        )
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
+
+
+def _build_run_id(finding_id: str, processing_id: str) -> str:
+    digest = hashlib.sha256(f"{finding_id}:{processing_id}".encode("utf-8")).hexdigest()[:24]
+    return f"run-{digest}"
+
+
+def _run_from_item(item: dict[str, Any] | None, run_id: str) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    runs = item.get("runs")
+    if isinstance(runs, dict) and isinstance(runs.get(run_id), dict):
+        return dict(runs[run_id])
+    return None
+
+
+def _claim_run(
+    store: Any,
+    config: Config,
+    current: dict[str, Any],
+    run_id: str,
+    run_record: dict[str, Any],
+) -> dict[str, Any] | None:
+    etag = str(current.get("_etag") or "")
+    if not etag:
+        raise RuntimeError("case index is missing its concurrency token")
+    runs = current.get("runs")
+    run_map = dict(runs) if isinstance(runs, dict) else {}
+    if run_id in run_map:
+        return current if str(run_map[run_id].get("state")) == "claimed" else None
+    replacement = dict(current)
+    run_map[run_id] = run_record
+    replacement["runs"] = run_map
+    outcome = store.replace_if_match(
+        config.CASE_INDEX_CONTAINER,
+        replacement,
+        expected_etag=etag,
+    )
+    return outcome.item if outcome.applied else None
+
+
+def _run_result(
+    item: dict[str, Any] | None,
+    run: dict[str, Any],
+    retrieval_status: str,
+    source_completeness: str,
+) -> ArchiveWriteResult:
+    return ArchiveWriteResult(
+        status="success",
+        case_id=str((item or {}).get("case_id") or ""),
+        case_envelope_key=str(run.get("envelope_key") or (item or {}).get("case_envelope_key") or ""),
+        retrieval_status=str((item or {}).get("retrieval_status") or retrieval_status),
+        source_completeness=str((item or {}).get("source_completeness") or source_completeness),
+        message="case archive run replay matched existing identity",
     )
 
 
@@ -318,6 +487,9 @@ def _build_case_index_item(
         "risk_score": _extract_risk_score(alert_payload),
         "source_filename": source.source_filename,
         "source_key": source.input_key,
+        "source_etag": source.source_etag,
+        "source_version_id": source.source_version_id,
+        "processing_id": source.processing_id,
         "case_envelope_key": envelope_key,
         "report_markdown_key": artifacts.get("report_markdown_key", ""),
         "report_json_key": artifacts.get("report_json_key", ""),
