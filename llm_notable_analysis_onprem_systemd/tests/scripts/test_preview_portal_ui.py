@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -42,20 +43,26 @@ class PreviewPortalUiOpenAiConfigTests(unittest.TestCase):
         )
 
     def test_load_optional_preview_env_does_not_override_existing(self) -> None:
-        env_path = PROJECT_ROOT / "config.portal-preview.env"
-        env_path.write_text(
-            "PORTAL_PREVIEW_OPENAI_API_KEY=from-file\n",
-            encoding="utf-8",
-        )
-        self.addCleanup(lambda: env_path.unlink(missing_ok=True))
-        with patch.dict(
-            os.environ,
-            {"PORTAL_PREVIEW_OPENAI_API_KEY": "from-shell"},
-            clear=True,
-        ):
-            loaded = load_optional_preview_env()
-            self.assertEqual(loaded, env_path)
-            self.assertEqual(os.environ["PORTAL_PREVIEW_OPENAI_API_KEY"], "from-shell")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_path = Path(temp_dir) / "config.portal-preview.env"
+            env_path.write_text(
+                "PORTAL_PREVIEW_OPENAI_API_KEY=from-file\n",
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {
+                    "PORTAL_PREVIEW_ENV": str(env_path),
+                    "PORTAL_PREVIEW_OPENAI_API_KEY": "from-shell",
+                },
+                clear=True,
+            ):
+                loaded = load_optional_preview_env()
+                self.assertEqual(loaded, env_path)
+                self.assertEqual(
+                    os.environ["PORTAL_PREVIEW_OPENAI_API_KEY"],
+                    "from-shell",
+                )
 
     def test_preview_chat_mode_label_reflects_openai_config(self) -> None:
         with patch.dict(
