@@ -154,7 +154,7 @@ function Invoke-Wave1SmokeChecks {
                 } elseif ($ragStatus -eq "skipped") {
                     Write-Host "  rag: profile enabled but RAG appears disabled (rag_status=skipped)" -ForegroundColor Yellow
                 } else {
-                    Write-Host "  rag: unexpected rag_status='$ragStatus' (check RagEnabled/RagBedrockKbId)" -ForegroundColor Red
+                    Write-Host "  rag: unexpected rag_status='$ragStatus' (check RagEnabled/OpenSearch configuration)" -ForegroundColor Red
                     $wave1Failed = $true
                 }
             }

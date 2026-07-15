@@ -21,7 +21,7 @@ those parameters (`CapabilityProfiles` -> `CAPABILITY_PROFILES`,
 |---------|-----------------|------------|
 | `core` | S3-triggered ingest, Bedrock analysis, markdown + JSON reports under `reports/`. Sets no feature flags. | Read/write within customer S3 buckets; Bedrock inference. |
 | `html_reports` | Static HTML reports as a third S3 artifact next to markdown and JSON. | Additional S3 report artifact only. |
-| `rag` | General SOC RAG context from a Bedrock Knowledge Base in the main analysis prompt. | Read-only KB retrieval; advisory context only. |
+| `rag` | General SOC RAG context from the tenant-scoped OpenSearch SOC index in the main analysis prompt. | Read-only retrieval; advisory context only. |
 | `spl_readonly` | SPL query generation and bounded read-only Splunk investigation execution. | Read-only external Splunk or MCP queries. |
 | `elastic_readonly` | Elasticsearch Query DSL generation and bounded read-only `_search` execution. | Read-only external Elasticsearch queries. |
 | `ticket_draft` | ServiceNow incident draft payloads in JSON reports. | Report content only; no ServiceNow POST. |
@@ -65,8 +65,8 @@ is the draft-only bundle when create/writeback are not approved.
 
 Flags not controlled by any profile (legacy/lab only unless noted):
 
-- `SPL_QUERY_RAG_ENABLED` (SAM also enables this when `SplQueryRagBedrockKbId` is set)
-- `ELASTICSEARCH_GROUNDING_ENABLED` (SAM also enables this when `ElasticsearchGroundingBedrockKbId` is set)
+- `SPL_QUERY_RAG_ENABLED` (set explicitly with `SplQueryRagEnabled`)
+- `ELASTICSEARCH_GROUNDING_ENABLED` (set explicitly with `ElasticsearchGroundingEnabled`)
 - `QUERY_RESULT_INTERPRETATION_ENABLED` (no SAM parameter; env override only)
 - `CASE_QA_CHAT_HISTORY_ENABLED` (default `false`; not enabled by `analyst_portal`)
 
@@ -74,7 +74,7 @@ Flags not controlled by any profile (legacy/lab only unless noted):
 
 1. Start with `CapabilityProfiles=core` and `SplunkSinkMode=s3`.
 2. Add one profile at a time in a non-production stack.
-3. Configure required secret ARNs, URLs, Knowledge Base IDs, and tuning values
+3. Configure required secret ARNs, URLs, OpenSearch indexes, and tuning values
    for the selected profile.
 4. Run the smoke steps in the relevant operations guide and
    [`../../testing/TESTING.md`](../../testing/TESTING.md).
@@ -101,15 +101,15 @@ Primary follow-up values:
 
 ### `rag`
 
-Use after the general Bedrock Knowledge Base source documents are curated and
+Use after the general SOC OpenSearch corpus is curated and
 owned. Retrieved content is advisory context, not direct alert evidence.
 
 Primary follow-up values:
 
-- `RagBedrockKbId` / `RAG_BEDROCK_KB_ID`
+- `RagTenantId`, `OpenSearchEndpoint`, `OpenSearchDomainArn`, index names, and private VPC settings
 - `RagMaxSnippets` / `RAG_MAX_SNIPPETS`, `RagContextBudgetChars` /
   `RAG_CONTEXT_BUDGET_CHARS`, `RagFailureMode` / `RAG_FAILURE_MODE`
-- Lambda IAM permission for `bedrock:Retrieve` on that Knowledge Base
+- Lambda IAM permission for signed, read-only access to the SOC index
 
 ### `spl_readonly`
 
@@ -132,8 +132,7 @@ Primary follow-up values:
   `SPLUNK_API_TOKEN_SECRET_ARN` when executor is `rest`
 - `SplunkMcpEndpoint` / `SPLUNK_MCP_ENDPOINT` and `SplunkMcpAuthSecretArn` /
   `SPLUNK_MCP_AUTH_SECRET_ARN` when executor is `mcp`
-- optional `SplQueryRagBedrockKbId` / `SPL_QUERY_RAG_BEDROCK_KB_ID` for
-  dedicated SPL grounding
+- optional `SplQueryRagEnabled` / `SPL_QUERY_RAG_ENABLED` after the Splunk dictionary is ingested
 
 ### `elastic_readonly`
 
@@ -153,8 +152,8 @@ Primary follow-up values:
 - `ElasticsearchMaxTimeRange` / `ELASTICSEARCH_MAX_TIME_RANGE`,
   `ElasticsearchMaxRows` / `ELASTICSEARCH_MAX_ROWS`,
   `ElasticsearchTimeoutSeconds` / `ELASTICSEARCH_TIMEOUT_SECONDS`
-- optional `ElasticsearchGroundingBedrockKbId` /
-  `ELASTICSEARCH_GROUNDING_BEDROCK_KB_ID`
+- optional `ElasticsearchGroundingEnabled` / `ELASTICSEARCH_GROUNDING_ENABLED`
+  after the Elasticsearch dictionary is ingested
 
 ### `ticket_draft`
 
@@ -254,8 +253,8 @@ controlled by a selected profile. Profile-controlled flags (see mapping table):
 Examples of safe legacy-only overrides:
 
 - enabling `HTML_REPORT_ENABLED` without selecting `html_reports`
-- enabling `SPL_QUERY_RAG_ENABLED` after the dedicated SPL Knowledge Base is curated
-- enabling `ELASTICSEARCH_GROUNDING_ENABLED` after the dedicated Elastic Knowledge Base is curated
+- enabling `SPL_QUERY_RAG_ENABLED` after the dedicated Splunk dictionary index is curated
+- enabling `ELASTICSEARCH_GROUNDING_ENABLED` after the dedicated Elastic dictionary index is curated
 - enabling `QUERY_RESULT_INTERPRETATION_ENABLED` for optional query-result LLM synthesis
 - enabling `CASE_QA_CHAT_HISTORY_ENABLED` after chat-history DynamoDB tables are provisioned
 

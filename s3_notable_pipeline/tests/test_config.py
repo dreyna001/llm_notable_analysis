@@ -61,9 +61,12 @@ class ConfigTests(unittest.TestCase):
                 "CAPABILITY_PROFILES": "core,analyst_portal",
                 "OUTPUT_BUCKET_NAME": "notable-output",
                 "CASE_INDEX_TABLE": "notable-case-index",
-                "CASE_EMBED_LAMBDA_NAME": "notable-case-embed",
+                "CASE_EMBED_QUEUE_URL": "https://sqs.us-gov-east-1.amazonaws.com/123456789012/embed",
                 "PORTAL_JWT_ISSUER": "https://issuer.example.test",
                 "PORTAL_JWT_AUDIENCE": "notable-portal",
+                "PORTAL_REQUIRED_ANALYST_ROLE": "Case.Reader",
+                "OPENSEARCH_ENDPOINT": "https://search-notable.example.test",
+                "RAG_TENANT_ID": "customer-a",
             },
             clear=True,
         ):
@@ -119,6 +122,7 @@ class ConfigTests(unittest.TestCase):
                     "OUTPUT_BUCKET_NAME": "notable-output",
                     "PORTAL_JWT_ISSUER": "https://issuer.example.test",
                     "PORTAL_JWT_AUDIENCE": "notable-portal",
+                    "PORTAL_REQUIRED_ANALYST_ROLE": "Case.Reader",
                 },
                 clear=True,
             ),
@@ -126,8 +130,8 @@ class ConfigTests(unittest.TestCase):
         ):
             load_config()
 
-    def test_case_qa_requires_embed_lambda_name(self) -> None:
-        """Case Q&A should not start without the async embed Lambda target."""
+    def test_case_qa_requires_embed_queue(self) -> None:
+        """Case Q&A should not start without the durable embed queue."""
         with (
             patch.dict(
                 "os.environ",
@@ -137,10 +141,11 @@ class ConfigTests(unittest.TestCase):
                     "CASE_INDEX_TABLE": "notable-case-index",
                     "PORTAL_JWT_ISSUER": "https://issuer.example.test",
                     "PORTAL_JWT_AUDIENCE": "notable-portal",
+                    "PORTAL_REQUIRED_ANALYST_ROLE": "Case.Reader",
                 },
                 clear=True,
             ),
-            self.assertRaisesRegex(ValueError, "CASE_EMBED_LAMBDA_NAME"),
+            self.assertRaisesRegex(ValueError, "CASE_EMBED_QUEUE_URL"),
         ):
             load_config()
 
@@ -156,6 +161,35 @@ class ConfigTests(unittest.TestCase):
                 clear=True,
             ),
             self.assertRaisesRegex(ValueError, "PORTAL_JWT_ISSUER"),
+        ):
+            load_config()
+
+    def test_portal_jwt_auth_requires_analyst_grant(self) -> None:
+        """A valid JWT audience alone must not grant analyst access."""
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "PORTAL_ENABLED": "true",
+                    "CASE_INDEX_TABLE": "notable-case-index",
+                    "PORTAL_JWT_ISSUER": "https://issuer.example.test",
+                    "PORTAL_JWT_AUDIENCE": "notable-portal",
+                },
+                clear=True,
+            ),
+            self.assertRaisesRegex(ValueError, "PORTAL_REQUIRED_ANALYST"),
+        ):
+            load_config()
+
+    def test_enabled_govcloud_rag_requires_opensearch_scope(self) -> None:
+        """Application-managed RAG must have a private endpoint and tenant scope."""
+        with (
+            patch.dict(
+                "os.environ",
+                {"CAPABILITY_PROFILES": "core,rag"},
+                clear=True,
+            ),
+            self.assertRaisesRegex(ValueError, "OPENSEARCH_ENDPOINT"),
         ):
             load_config()
 

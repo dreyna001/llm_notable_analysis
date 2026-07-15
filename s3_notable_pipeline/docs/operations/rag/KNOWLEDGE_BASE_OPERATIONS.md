@@ -1,216 +1,137 @@
-# AWS Knowledge Base Operations
+# GovCloud RAG Corpus Operations
 
-This runbook covers **content lifecycle** for Amazon Bedrock Knowledge Bases
-used by the S3 notable pipeline. Retrieval size, failure modes, and snippet
-budgets are in [`RAG_OPERATIONS.md`](RAG_OPERATIONS.md).
+This runbook covers source-document, ingestion, vector-index, and retrieval
+operations for the `us-gov-east-1` deployment. The GovCloud production path
+does not depend on Amazon Bedrock Knowledge Bases or S3 Vectors.
 
-## What This Controls
+## Architecture
 
-Bedrock Knowledge Bases provide advisory retrieval context. The pipeline does
-**not** create, ingest, or sync Knowledge Bases. Operators provision KBs and
-data sources outside the SAM/CloudFormation stack, then pass Knowledge Base IDs
-into deploy parameters.
+```text
+approved source documents + manifest in versioned S3
+    -> SQS ingestion queue
+    -> ingestion Lambda
+    -> Bedrock Titan embeddings
+    -> tenant-scoped OpenSearch index
+    -> bounded retrieval with S3 provenance
+```
 
-There are three supported KB content lanes:
+One VPC-only Amazon OpenSearch Service domain hosts separate indexes for:
 
-| Lane | Prompt block | Capability profile | When retrieval runs |
-|------|--------------|--------------------|---------------------|
-| General SOC RAG | `SOC_OPERATIONAL_CONTEXT` | `rag` | Main notable analysis |
-| SPL query grounding | `SPL_QUERY_GROUNDING_CONTEXT` | `spl_readonly` (with KB id set) | SPL generation call |
-| Elasticsearch query grounding | `ELASTICSEARCH_GROUNDING_CONTEXT` | `elastic_readonly` (with KB id set) | Query DSL generation call |
+| Lane | Used by | Content |
+| --- | --- | --- |
+| General SOC | Initial alert analysis and optional chat context | SOPs, runbooks, detection notes, escalation and pivot guidance |
+| Splunk/SIEM dictionary | SPL generation | Indexes, sourcetypes, fields, CIM models, macros, lookups, approved SPL examples |
+| Elasticsearch dictionary | Query DSL generation | Index patterns, fields, timestamp rules, approved examples |
+| Case chunks | Selected-case chat | Generated alert/analysis chunks with canonical case provenance |
 
-Splunk and Elastic grounding KBs are separate from each other and from the
-general SOC KB. Do not load current-alert facts into any advisory KB.
+S3 is authoritative. OpenSearch is a rebuildable retrieval projection. DynamoDB
+stores transactional case/import status but is not a vector store.
 
-## Recommended Starting Posture
+## Security Boundary
 
-- Keep Knowledge Base content small, curated, and owned.
-- Include SOPs, escalation guidance, field dictionaries, detection notes, and
-  runbooks that analysts already trust.
-- Use **separate** Bedrock Knowledge Bases for general SOC guidance, SPL
-  grounding, and Elasticsearch grounding.
-- Do not enable `rag`, `spl_readonly`, or `elastic_readonly` until source
-  documents are approved and an initial ingestion job has completed.
-- Do not store secrets, tokens, raw auth headers, or private keys in KB source
-  documents.
+- OpenSearch is VPC-only and encrypted with the customer-configured KMS key.
+- Runtime access uses IAM/SigV4; do not store OpenSearch credentials.
+- Every document and query is scoped by the deployment/tenant identifier.
+- Case retrieval additionally requires an exact `case_id` filter.
+- Source documents must not contain credentials, private keys, tokens, or raw authentication headers.
+- Retrieved operational guidance is advisory and cannot become alert evidence by itself.
 
-## Customer Decisions
+## Source Layout
 
-- Which team owns source document approval and refresh cadence?
-- Which documents are allowed to influence model synthesis?
-- Which Bedrock embedding model and vector store back each Knowledge Base?
-- Which S3 bucket and prefix hold approved source documents for each lane?
-- What retention and deletion process applies to removed guidance?
-- Are separate Knowledge Bases required for general SOC guidance, SPL grounding,
-  and Elasticsearch grounding? (Recommended: yes.)
+Use the customer-configured RAG source bucket and prefix. Keep one approved
+corpus lane per sub-prefix and enable S3 versioning.
 
-## Recommended Vector Store And Embedding (AWS)
+```text
+rag-sources/
+  soc/
+  splunk/
+  elastic/
+  manifests/
+```
 
-For typical SOC Knowledge Base sizes (a few hundred to about 1,000 curated
-documents):
+Each ingestion job identifies:
 
-| Choice | When to use |
-|--------|-------------|
-| **S3 Vectors (recommended)** | Default for new Bedrock Knowledge Bases in this project. Low ops, pay-as-you-go, right-sized for SOC SOP/HVA/runbook corpora. |
-| **OpenSearch Serverless (alternative)** | Larger corpora, advanced search tuning, or an existing OpenSearch investment. Expect a much higher monthly minimum than S3 Vectors at small scale. |
-| **Aurora PostgreSQL Serverless** | Only when Aurora is already part of the customer stack and operators want SQL-centric vector ops. |
-| **Neptune Analytics** | Not for document KB retrieval; graph analytics only. |
+- schema version
+- deployment/tenant identifier
+- corpus lane and corpus version
+- source bucket, full key, version ID, ETag, and checksum
+- embedding model and dimensions
+- operation: create/update, delete, or rebuild
 
-**Embedding model:** use `amazon.titan-embed-text-v2:0` (1024 dimensions) so KB
-retrieval stays aligned with AWS case-chat Titan embeddings in this repo.
+Unsupported file types, oversized documents, malformed manifests, tenant
+mismatches, and checksum mismatches are terminal validation failures and go to
+the ingestion DLQ after bounded handling.
 
-**Data source type:** unstructured. Upload approved `.md` or `.txt` SOC docs to
-an operator-controlled S3 prefix; do not use structured KB unless the corpus is
-already maintained as queryable tables.
+## Ingestion Behavior
 
-The pipeline templates do **not** provision the vector store. Operators create
-the Bedrock Knowledge Base, vector store, and S3 data source outside the stack,
-then pass Knowledge Base IDs into deploy parameters.
+1. Validate the queue job and source-object identity.
+2. Read the exact S3 version named by the job.
+3. Parse and create bounded deterministic chunks.
+4. Generate embeddings with the configured GovCloud Bedrock embedding model.
+5. Ensure the corpus index has the required k-NN mapping.
+6. Tombstone prior active chunks for each source key.
+7. Bulk-index deterministic replacement documents with source provenance.
+8. Reconcile expected and actual chunk IDs before promotion.
+9. Record ingestion status and metrics.
 
-## Runtime Contract
+The idempotency key is the deployment/tenant, corpus lane, source version, and
+checksum. Replaying a completed job must not create duplicate active chunks.
 
-The deployment templates (`deploy/aws/template-sam.yaml`,
-`deploy/aws/template-cfn.yaml`) wire Knowledge Base IDs into Lambda environment
-variables and grant `bedrock:Retrieve` **only** for configured Knowledge Base
-ARNs when the corresponding parameter is non-empty.
+## Splunk Dictionary Content
 
-Lambda calls `bedrock-agent-runtime:Retrieve` at analysis time. It does **not**:
+Keep dictionary sections small and retrieval-oriented. Include only values
+approved for generated investigation queries:
 
-- create or delete Knowledge Bases or data sources
-- start or monitor ingestion jobs
-- write back to KB source buckets
+- `index=` names and purpose
+- sourcetypes and event categories
+- fields, types, aliases, and normalized join keys
+- CIM data models and datasets
+- approved macros and their required arguments
+- lookup names, key fields, output fields, and freshness expectations
+- bounded example SPL
+- detection/search identifiers and applicable data sources
+- content owner, effective version, and review date
 
-General SOC retrieval uses alert text as the query. SPL and Elasticsearch
-grounding retrieval uses alert text plus competing hypotheses (see
-`spl_query_grounding.py` and `elasticsearch_query_grounding.py`).
+The runtime policy allowlists remain authoritative. Retrieved content can narrow
+or supply approved tokens but cannot override denied commands, time ranges, row
+caps, field allowlists, or index restrictions.
 
-Rendered snippets include source labels from result metadata. The runtime reads,
-in order: `source_file`, `source`, `uri`, `title`, and for grounding lanes
-`section_path` or `section`. When metadata is missing, labels fall back to
-Bedrock location fields or `bedrock_kb`.
+## Reconciliation
 
-## Provision A Knowledge Base (Customer-Managed)
+Run reconciliation after ingestion failures, source deletion, index recovery,
+or deployment upgrades. It compares the active S3 manifest with OpenSearch and:
 
-Perform these steps in the target AWS account and region **before** enabling a
-profile that depends on the KB.
+- republishes missing source versions
+- removes or tombstones orphaned chunks
+- detects chunks produced by the wrong embedding model or dimensions
+- verifies tenant, corpus, source, and case filters
+- leaves the prior complete corpus active until replacement succeeds
 
-1. **Create a Bedrock Knowledge Base** in the Amazon Bedrock console or via API.
-   Choose an embedding model approved for that account and region. For this
-   project, prefer `amazon.titan-embed-text-v2:0`.
-2. **Attach a vector store.** For SOC corpora up to about 1,000 documents,
-   prefer **S3 Vectors**. Use OpenSearch Serverless only when you need its
-   search/tuning features or expect the KB to grow well beyond that scale. Vector
-   store choice and sizing are customer-managed; the pipeline templates do not
-   provision it.
-3. **Add an S3 data source** pointing at an operator-controlled bucket prefix
-   for curated source documents. Block public access and encrypt at rest.
-4. **Run an initial ingestion (sync) job** and wait until the job status is
-   complete.
-5. **Record the Knowledge Base ID** (for example `ABCDEFGHIJ`) for deploy
-   parameters.
-6. **Repeat for each lane** that needs grounding. Use one KB per lane; do not
-   mix SOC SOPs with Splunk index catalogs or Elastic field maps in the same KB.
+Do not repair individual vectors manually in OpenSearch.
 
-## Add Or Update Source Documents
+## Failure And Redrive
 
-1. Stage approved changes in operator source control (outside the pipeline
-   stack).
-2. Upload or update objects in the S3 prefix configured for the Knowledge Base
-   data source. Prefer short, clearly headed `.txt` or `.md` files; Bedrock also
-   supports other formats allowed by the chosen data source configuration.
-3. Start a new **Sync** or **Full** ingestion job for that data source in the
-   Bedrock console or with `StartIngestionJob`.
-4. Wait for the job to complete before validating in production traffic.
-5. For general SOC RAG, redeploy is **not** required when only source documents
-   change. Redeploy **is** required when changing Knowledge Base IDs or when
-   adding a new KB parameter to the stack.
+- Retry transient S3, Bedrock, OpenSearch, and network failures through SQS.
+- Send exhausted jobs to the ingestion DLQ and alarm on any visible message.
+- Correct the cause and run reconciliation before redrive.
+- Redrive only the matching queue job; never copy arbitrary DLQ bodies directly into Lambda.
+- A failed optional corpus leaves analysis available with an explicit degraded RAG status.
+- A failed case embedding leaves case retrieval unavailable and visible as `pending` or `failed`.
 
-### General SOC KB
+## Customer Operationalization
 
-Use for broad triage SOPs, escalation runbooks, and detection notes. Do not put
-Splunk index catalogs or Elastic field maps here.
+Collect source ownership, approval workflow, source prefix, retention, embedding
+model, OpenSearch capacity, KMS keys, VPC resources, and alarm destinations per
+customer. See
+[`../deployment/GOVCLOUD_CUSTOMER_CONFIGURATION.md`](../deployment/GOVCLOUD_CUSTOMER_CONFIGURATION.md).
 
-### SPL query KB
+## Validation
 
-Use for customer-specific Splunk environment facts: `index=`, `sourcetype=`,
-field dictionaries, macro names, and approved example SPL. Keep one log source
-or hunt pattern per section so retrieval can return atomic token blocks.
-
-Detailed onboarding: [`../investigation/SPL_OPERATIONS.md`](../investigation/SPL_OPERATIONS.md).
-
-### Elasticsearch query KB
-
-Use for index patterns, ECS or custom field dictionaries, timestamp conventions,
-and approved bool/filter Query DSL examples. Documented hunt fields must also
-appear in `ELASTICSEARCH_ALLOWED_FIELDS` at deploy time; the KB supplements
-but does not replace config allowlists.
-
-Detailed onboarding:
-[`../investigation/ELASTICSEARCH_OPERATIONS.md`](../investigation/ELASTICSEARCH_OPERATIONS.md).
-
-## Rollback And Retirement
-
-To roll back a bad content update:
-
-1. Restore the prior approved object set in the S3 data source prefix from
-   operator backup or source control.
-2. Run a new ingestion job for that data source.
-3. Process a representative notable and confirm retrieved snippets cite expected
-   sources in JSON metadata or CloudWatch logs.
-4. Redeploy only if the Knowledge Base ID itself changed.
-
-To retire guidance, remove or replace objects in S3 and resync. Do not leave
-stale documents in the active prefix.
-
-## Config Quick Reference
-
-Set Knowledge Base IDs through SAM/CloudFormation parameters. The templates
-populate Lambda environment variables and scoped IAM permissions.
-
-| Purpose | SAM / CloudFormation parameter | Lambda env var | Auto-enables |
-|---------|-------------------------------|----------------|--------------|
-| General SOC RAG | `RagBedrockKbId` | `RAG_BEDROCK_KB_ID` | Retrieve IAM when id non-empty; retrieval when `rag` profile (or `RagEnabled=true`) and id set |
-| SPL grounding | `SplQueryRagBedrockKbId` | `SPL_QUERY_RAG_BEDROCK_KB_ID` | `SPL_QUERY_RAG_ENABLED=true` when id non-empty |
-| Elastic grounding | `ElasticsearchGroundingBedrockKbId` | `ELASTICSEARCH_GROUNDING_BEDROCK_KB_ID` | `ELASTICSEARCH_GROUNDING_ENABLED=true` when id non-empty |
-
-General SOC enablement also requires `CapabilityProfiles=core,rag` (sets
-`RAG_ENABLED=true` via profile) or `RagEnabled=true` when the `rag` profile is
-not listed. SPL and Elastic grounding require their respective investigation
-profiles (`spl_readonly` or `elastic_readonly`) for the generation path to run.
-
-Do not manually edit Lambda environment variables in the console as the normal
-workflow.
-
-## Validation And Rollout
-
-1. Verify each Knowledge Base is queryable in the target account and region
-   (Bedrock console test retrieve or `aws bedrock-agent-runtime retrieve`).
-2. Confirm the Lambda execution role has `bedrock:Retrieve` only for configured
-   Knowledge Base ARNs (granted when the matching parameter is non-empty).
-3. Deploy with `CapabilityProfiles=core` first; confirm base markdown/JSON
-   output.
-4. Enable one profile at a time in a non-production stack:
-   - `rag` with `RagBedrockKbId`
-   - `spl_readonly` with optional `SplQueryRagBedrockKbId`
-   - `elastic_readonly` with optional `ElasticsearchGroundingBedrockKbId`
-     (never together with `spl_readonly`)
-5. Run a known notable and verify:
-   - General RAG: JSON `metadata.rag_status` is `success` or `no_match`; model
-     behavior treats retrieved text as advisory, not alert evidence.
-   - SPL grounding: generated SPL uses grounded tokens when alert type matches
-     KB content; metadata records grounding status.
-   - Elastic grounding: generated Query DSL respects allowlists and grounded
-     index/field tokens.
-6. Remove or correct stale source documents and resync before production
-   rollout.
-
-Smoke guidance: [`../../testing/TESTING.md`](../../testing/TESTING.md).
-
-## Related Docs
-
-- [`RAG_OPERATIONS.md`](RAG_OPERATIONS.md) — retrieval enablement, failure modes, snippet budgets
-- [`../platform/CAPABILITY_PROFILES.md`](../platform/CAPABILITY_PROFILES.md) — profile bundles and rollout order
-- [`../investigation/SPL_OPERATIONS.md`](../investigation/SPL_OPERATIONS.md) — SPL generation, execution, Splunk onboarding
-- [`../investigation/ELASTICSEARCH_OPERATIONS.md`](../investigation/ELASTICSEARCH_OPERATIONS.md) — Query DSL generation and Elastic onboarding
-- [`../llm/LLM_INFERENCE_OPERATIONS.md`](../llm/LLM_INFERENCE_OPERATIONS.md) — Bedrock model and Lambda sizing
-- [`../security/SECURITY_OPERATIONS.md`](../security/SECURITY_OPERATIONS.md) — IAM, secrets, and data handling
+1. Upload a versioned representative source document and manifest.
+2. Confirm the ingestion queue drains and no DLQ message appears.
+3. Verify indexed documents contain the correct tenant, corpus, source version, and embedding model.
+4. Retrieve a known query and confirm bounded, attributed results.
+5. Update and delete the source; verify stale chunks are no longer active.
+6. Replay the original job; verify no duplicate active chunks are created.
+7. Attempt a cross-tenant and cross-case query; verify no documents are returned.
+8. Exercise Bedrock throttling and OpenSearch outage; verify retries, alarms, and redrive.

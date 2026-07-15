@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import io
 import json
 import sys
 import threading
@@ -118,6 +120,7 @@ def portal_config(**overrides):
         "PORTAL_AUTH_MODE": "jwt",
         "PORTAL_JWT_ISSUER": "https://issuer.example.test",
         "PORTAL_JWT_AUDIENCE": "portal",
+        "PORTAL_REQUIRED_ANALYST_ROLE": "Case.Reader",
         "CASE_ARCHIVE_BUCKET": "case-bucket",
         "CASE_ARCHIVE_CHUNKS_PREFIX": "case_chunks",
         "CASE_INDEX_TABLE": "case-index",
@@ -140,6 +143,7 @@ def event(path: str, method: str = "GET"):
                         "iss": "https://issuer.example.test",
                         "aud": "portal",
                         "sub": "user-1",
+                        "roles": ["Case.Reader"],
                     }
                 }
             },
@@ -161,7 +165,39 @@ class PortalHandlerTests(unittest.TestCase):
 
         self.assertEqual(response["statusCode"], 401)
 
-    def test_bearer_jwt_is_accepted_when_authorizer_claims_are_absent(self) -> None:
+    def test_disabled_portal_rejects_protected_routes(self) -> None:
+        with patch.object(
+            portal_handler,
+            "load_config",
+            return_value=portal_config(PORTAL_ENABLED=False),
+        ):
+            response = portal_handler.handler(event("/api/cases"), None)
+
+        self.assertEqual(response["statusCode"], 404)
+
+    def test_static_spa_asset_is_served_from_private_bucket_without_auth(self) -> None:
+        class StaticS3:
+            def get_object(self, **kwargs):
+                self.request = kwargs
+                return {
+                    "Body": io.BytesIO(b"<html>portal</html>"),
+                    "ContentType": "text/html",
+                }
+
+        s3 = StaticS3()
+        with (
+            patch.dict("os.environ", {"PORTAL_UI_BUCKET": "portal-ui"}),
+            patch.object(portal_handler, "load_config", return_value=portal_config()),
+            patch.object(portal_handler, "s3_client", return_value=s3),
+        ):
+            response = portal_handler.handler({"rawPath": "/", "requestContext": {"http": {"method": "GET"}}}, None)
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertTrue(response["isBase64Encoded"])
+        self.assertEqual(base64.b64decode(response["body"]), b"<html>portal</html>")
+        self.assertEqual(s3.request, {"Bucket": "portal-ui", "Key": "index.html"})
+
+    def test_bearer_jwt_without_analyst_grant_is_rejected(self) -> None:
         request = {
             "rawPath": "/api/cases",
             "requestContext": {"http": {"method": "GET"}},
@@ -182,7 +218,7 @@ class PortalHandlerTests(unittest.TestCase):
         ):
             response = portal_handler.handler(request, None)
 
-        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(response["statusCode"], 403)
 
     def test_mutating_method_is_rejected(self) -> None:
         with patch.object(portal_handler, "load_config", return_value=portal_config()):

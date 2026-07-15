@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .aws_clients import bedrock_agent_runtime_client
+from .aws_clients import bedrock_agent_runtime_client, bedrock_runtime_client
 from .config import Config
 
 
@@ -18,6 +18,7 @@ class RetrievalResult:
     context: str = ""
     snippet_count: int = 0
     message: str = ""
+    provenance: tuple[dict[str, Any], ...] = ()
 
 
 def _source_label(result: dict[str, Any]) -> str:
@@ -67,11 +68,56 @@ def retrieve_soc_context(
     config: Config,
     *,
     client: Any | None = None,
+    opensearch_client: Any | None = None,
+    bedrock_client: Any | None = None,
 ) -> RetrievalResult:
     """Retrieve advisory SOC context from a Bedrock Knowledge Base."""
 
     if not config.RAG_ENABLED:
         return RetrievalResult(status="skipped", message="RAG disabled")
+    from .opensearch_retrieval import (
+        adapter_for,
+        config_value,
+        opensearch_enabled,
+        render_documents,
+        retrieve_documents,
+        tenant_id_for,
+    )
+
+    if opensearch_enabled(config):
+        try:
+            tenant_id = tenant_id_for(config, required=True)
+            embedding_client = bedrock_client or bedrock_runtime_client()
+            query_embedding = embed_text(alert_text, config, embedding_client)
+            adapter = opensearch_client or (client if hasattr(client, "search") else None)
+            documents = retrieve_documents(
+                query_text=alert_text,
+                query_embedding=query_embedding,
+                index=str(config_value(config, "OPENSEARCH_SOC_INDEX", "soc-knowledge")),
+                tenant_id=tenant_id,
+                corpus_id="soc",
+                top_k=config.RAG_MAX_SNIPPETS,
+                adapter=adapter_for(config, adapter),
+            )
+            context = render_documents(
+                documents,
+                budget_chars=config.RAG_CONTEXT_BUDGET_CHARS,
+            )
+            if not context:
+                return RetrievalResult(status="no_match", message="No RAG snippets returned")
+            return RetrievalResult(
+                status="success",
+                context=context,
+                snippet_count=len(documents),
+                provenance=tuple(
+                    dict(document.metadata or {}).get("provenance", {}) for document in documents
+                ),
+            )
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            message = f"OpenSearch RAG retrieval failed: {exc}"
+            if config.RAG_FAILURE_MODE == "fail_closed":
+                raise RuntimeError(message) from exc
+            return RetrievalResult(status="failed", message=message)
     if not config.RAG_BEDROCK_KB_ID.strip():
         message = "RAG_BEDROCK_KB_ID is required when RAG is enabled"
         if config.RAG_FAILURE_MODE == "fail_closed":
@@ -108,3 +154,11 @@ def retrieve_soc_context(
         context=context,
         snippet_count=len(results[: config.RAG_MAX_SNIPPETS]),
     )
+
+
+def embed_text(text: str, config: Config, client: Any) -> list[float]:
+    """Keep Titan embedding at the existing case embedding contract."""
+
+    from .case_embed import embed_text as _embed_text
+
+    return _embed_text(text, config, client)

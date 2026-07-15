@@ -269,6 +269,36 @@ class CaseChatHistoryTests(unittest.TestCase):
                 user_id="user-1",
             )
 
+    def test_client_request_id_is_idempotent(self) -> None:
+        config = history_config()
+        client = FakeChatDynamoDbClient()
+        kwargs = {
+            "config": config,
+            "dynamodb_client": client,
+            "mode": "selected_case",
+            "question": "What happened?",
+            "selected_case_id": "case-1",
+            "requested_session_id": None,
+            "user_id": "user-1",
+            "response": {"answer": "Suspicious login.", "answer_status": "answered"},
+            "client_request_id": "request-0001",
+        }
+        first = persist_chat_history(**kwargs)
+        second = persist_chat_history(**kwargs)
+
+        self.assertEqual(first, second)
+        self.assertEqual(
+            len(
+                get_chat_session_messages(
+                    config=config,
+                    dynamodb_client=client,
+                    session_id=first,
+                    user_id="user-1",
+                )["messages"]
+            ),
+            2,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

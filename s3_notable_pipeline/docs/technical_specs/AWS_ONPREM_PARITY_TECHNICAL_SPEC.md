@@ -43,20 +43,24 @@ Testing: [`../testing/TESTING.md`](../testing/TESTING.md).
 
 ## Deployment Target (v1)
 
-**Locked deployment target:** Production parity deploys target **AWS GovCloud
-`us-gov-west-1`**. Use `arn:aws-us-gov:...` partition ARNs in examples and
-templates unless a customer explicitly chooses a commercial region.
+**Locked deployment target:** Production deployments target **AWS GovCloud
+`us-gov-east-1`**. Templates derive `arn:aws-us-gov:...` with
+`AWS::Partition`; customer-specific account, identity, network, key, model, and
+retention values are deployment inputs rather than product forks.
 
 ## Locked Runtime Shape
 
-The AWS pipeline keeps its current architecture:
+The AWS pipeline uses durable AWS-native processing boundaries:
 
 ```text
-S3 incoming object -> Lambda -> Bedrock analysis -> S3 report output -> optional Splunk writeback
+S3 incoming object -> SQS -> analyzer Lambda -> Bedrock analysis -> versioned S3 reports/case runs
+                                      |-> bounded external-action jobs
+                                      |-> embed/RAG ingestion queues -> OpenSearch
 ```
 
-New capabilities must be inserted as optional, default-off steps around that
-flow. Do not move orchestration to Step Functions as part of this parity block.
+New capabilities remain optional and profile-gated. SQS owns retry and poison
+handling; do not add Step Functions or synchronous Lambda-to-Lambda glue where
+a durable queue is the natural AWS boundary.
 
 ## Diff 1 Contract
 
@@ -109,16 +113,20 @@ Unit tests must mock clients and must not require AWS credentials. Local
 integration tests, if added later, must use `AWS_ENDPOINT_URL` and local test
 credentials.
 
-## Bedrock Knowledge Base Retrieval Contract
+## GovCloud RAG Retrieval Contract
 
-General SOC RAG is implemented in `bedrock_kb_retrieval.py`.
+The `us-gov-east-1` deployment performs application-managed RAG over one
+VPC-only Amazon OpenSearch Service domain. S3 holds approved, versioned source
+documents and manifests; OpenSearch holds generated chunks, Titan embeddings,
+retrieval metadata, and source provenance.
 
 Rules:
 
 - RAG is default-off.
 - Retrieved content is advisory context only and must not be treated as direct
   current-alert evidence.
-- Missing Knowledge Base ids fail soft by default with `RAG_FAILURE_MODE=suppress`.
+- Missing or unavailable OpenSearch corpora fail soft by default with
+  `RAG_FAILURE_MODE=suppress`.
 - `RAG_FAILURE_MODE=fail_closed` raises and causes the Lambda record processing
   path to fail.
 - Retrieval is bounded by `RAG_MAX_SNIPPETS` and
@@ -128,6 +136,13 @@ Rules:
 
 The prompt uses a `SOC_OPERATIONAL_CONTEXT` block and explicitly instructs the
 model that this context is not observed alert evidence.
+
+Separate indexes isolate current-case chunks, general SOC operational
+knowledge, Splunk/SIEM dictionaries, and optional Elasticsearch dictionaries.
+The SIEM dictionary grounds SPL generation with approved indexes, sourcetypes,
+fields, CIM models, macros, lookups, and examples; it is not direct case
+evidence. Bedrock Knowledge Bases and S3 Vectors are not runtime dependencies
+for the GovCloud East profile.
 
 ## HTML Report Output Contract
 
@@ -305,34 +320,28 @@ customer overrides `BEDROCK_MODEL_ID`.
 
 ### Case Archive And Index Contract (Decisions 1, 5, 10, 20, 24-26)
 
-- S3 canonical envelope at
-  `{CASE_ARCHIVE_PREFIX}/yyyy/mm/dd/{case_id}.json`.
+- S3 immutable run envelope under the logical case and processing/run identity;
+  the CaseIndex atomically publishes the current `latest_run` pointer while
+  preserving prior runs.
 - DynamoDB CaseIndex for browse/query metadata and pointers only; no full alert
   payloads or full analysis bodies in DynamoDB.
-- **No Aurora Postgres, RDS Proxy, or OpenSearch** for v1 archive storage or
-  case retrieval (Decision 1).
-- Analyzer writes envelope and CaseIndex, sets `retrieval_status=pending`, then
-  asynchronously invokes the **embed Lambda (Diff 2b)**. Embedding must not run
-  inside the analyzer Lambda process (Decisions 10, 24).
-- Embed Lambda writes S3 chunk objects at
-  `{CASE_ARCHIVE_CHUNKS_PREFIX}/{case_id}/{chunk_id}.json` with `search_text` and
-  Titan embeddings; transitions `retrieval_status` to `ready` or `failed`
-  (Decisions 6, 20, 26).
-- Identity collision on an existing `case_id` suppresses the archive write
-  (Decision 25).
+- S3 remains the canonical evidence/archive store; DynamoDB remains the
+  transactional case/status index; OpenSearch is a rebuildable retrieval index.
+- Analyzer publishes a durable embed job after the run is committed. The embed
+  consumer writes case chunks and embeddings to OpenSearch and transitions
+  retrieval status to `ready` or `failed`.
+- `finding_id` is the logical case identity. Bucket, full decoded key, object
+  version or ETag, and sequencer form the immutable processing identity.
 - `CASE_ARCHIVE_FAILURE_MODE=suppress` (default) preserves report output on
   archive/index/embed failure (Decision 5).
 
 ### Portal Hosting Contract (Decisions 2, 9, 19, 31, 34)
 
-- Portal API: read-only Lambda plus stack-managed API Gateway HTTP API and
-  optional Lambda Function URL for long chat (`PortalChatFunctionUrlEnabled`,
-  default `true`).
-- Static React SPA on S3 plus CloudFront (Decision 18). When
-  `PortalUiBucketName` is set, CloudFront routes `/api/*` to API Gateway and
-  `/api/chat` to the Function URL when enabled.
-- Stack outputs: `PortalApiUrl`, `PortalChatFunctionUrl`,
-  `PortalBrowserApiBaseUrl`, `PortalUiDistributionDomainName`.
+- Regional API Gateway is the only browser/API front door and uses WAF plus JWT
+  or Lambda authorization. GovCloud deployments do not create Lambda Function
+  URLs or CloudFront distributions.
+- The private portal S3 bucket is exposed only through a scoped API Gateway AWS
+  service integration for deployed SPA objects.
 - Recommended v1 bundle: `CAPABILITY_PROFILES=core,analyst_portal` (Decision 34).
 - Portal Lambda has no write permissions to case index, input bucket, writeback
   secrets, or external integrations.
@@ -341,11 +350,9 @@ customer overrides `BEDROCK_MODEL_ID`.
 
 - Read-only portal handler; no case mutations from the portal.
 - Pinned-case chat only (`selected_case_id` required on every chat request).
-- Per-query hybrid retrieval in portal Lambda over **S3 case chunk objects**
-  (`case_chunk_retrieval.py`): in-memory BM25 on `search_text`, cosine
-  similarity on Bedrock Titan query embeddings, merged with RRF
-  (`CASE_QA_RRF_K=60`). No OpenSearch, Kendra, or Bedrock KB for case-archive
-  retrieval (Decision 7).
+- Per-query hybrid lexical/vector retrieval executes in OpenSearch with required
+  deployment/tenant and `case_id` filters. Returned chunks retain canonical S3
+  provenance.
 - Optional advisory KB context when `rag`, `spl_readonly`, or `elastic_readonly`
   profiles are also enabled (`portal_chat_kb.py`; Decision 12).
 - Chat synthesis in `portal_chat.py`; do not import `ttp_analyzer.py`
@@ -355,10 +362,9 @@ customer overrides `BEDROCK_MODEL_ID`.
   (Decision 35).
 - `archive_notices` on case list and detail; full `chat_dependency_status` when
   `CASE_QA_ENABLED=true` (Decisions 21-22).
-- Chat concurrency: each portal Lambda instance handles at most
-  `PORTAL_CHAT_MAX_CONCURRENCY` in-flight chat requests (default `18`, max `64`);
-  returns HTTP 429 when exceeded. Under load, total capacity scales with warm
-  instances. v1 does not use a cross-instance counter (Decisions 23, 36).
+- Chat admission is bounded at API Gateway and Lambda reserved concurrency, with
+  customer-configured per-user/deployment quotas. The in-process semaphore is
+  not treated as a global quota.
 
 ### Embedding Contract (Decision 6)
 

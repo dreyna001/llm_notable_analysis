@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from uuid import uuid4
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
@@ -27,6 +28,10 @@ class SourceContext:
     source_filename: str
     content_type: str
     was_compressed: bool
+    source_version_id: str = ""
+    source_etag: str = ""
+    source_sequencer: str = ""
+    processing_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -49,10 +54,11 @@ def archive_case(
     sink_result: dict[str, Any],
     s3_client: Any,
     dynamodb_client: Any,
+    sqs_client: Any | None = None,
     lambda_client: Any | None = None,
     processed_at: datetime | str | None = None,
 ) -> ArchiveWriteResult:
-    """Write a canonical S3 case envelope and DynamoDB CaseIndex row."""
+    """Claim one immutable run, write its envelope, then publish latest atomically."""
 
     if not config.CASE_ARCHIVE_ENABLED:
         return ArchiveWriteResult(status="skipped", message="case archive disabled")
@@ -63,6 +69,8 @@ def archive_case(
     analysis = analysis_result.get("llm_response")
     finding_id = _resolve_finding_id(alert_payload, source.input_key)
     case_id = _build_case_id(finding_id)
+    processing_id = source.processing_id or _build_processing_id(source)
+    run_id = _build_run_id(finding_id, processing_id)
     correlation_id = _extract_first_string(alert_payload, CORRELATION_FIELDS)
     source_completeness, archived_alert, archived_analysis = _bounded_archive_values(
         alert_payload=alert_payload,
@@ -71,13 +79,13 @@ def archive_case(
     )
     artifacts = _extract_artifact_keys(sink_result)
     retrieval_status = "pending" if config.CASE_QA_ENABLED else "not_indexed"
-    envelope_key = _build_envelope_key(config, processed_at_dt, case_id)
+    envelope_key = _build_envelope_key(config, processed_at_dt, case_id, run_id, bool(source.processing_id))
 
     existing_item = _get_case_index_item(dynamodb_client, config.CASE_INDEX_TABLE, case_id)
     if existing_item:
         if not _identity_matches(
             existing_item,
-            source_filename=source.source_filename,
+            source_key=source.input_key,
             correlation_id=correlation_id,
             finding_id=finding_id,
         ):
@@ -86,21 +94,49 @@ def archive_case(
                 case_id=case_id,
                 message="case identity collision suppressed",
             )
-        return ArchiveWriteResult(
-            status="success",
-            case_id=case_id,
-            case_envelope_key=str(existing_item.get("case_envelope_key", envelope_key)),
-            retrieval_status=str(existing_item.get("retrieval_status", retrieval_status)),
-            source_completeness=str(
-                existing_item.get("source_completeness", source_completeness)
-            ),
-            message="case archive replay matched existing identity",
-        )
+        existing_run = existing_item.get(_run_attribute_name(run_id))
+        if isinstance(existing_run, dict):
+            run_state = str(existing_run.get("state", "")).strip()
+            if run_state == "completed":
+                _republish_pending_embed(
+                    config=config,
+                    item=existing_item,
+                    run=existing_run,
+                    sqs_client=sqs_client,
+                    lambda_client=lambda_client,
+                )
+                return _run_result_from_item(existing_item, existing_run, retrieval_status, source_completeness)
+            return ArchiveWriteResult(
+                status="skipped",
+                case_id=case_id,
+                case_envelope_key=str(existing_run.get("envelope_key", envelope_key)),
+                retrieval_status=retrieval_status,
+                source_completeness=source_completeness,
+                message="case run is already claimed",
+            )
+        # Keep legacy rows replay-safe when they predate immutable run metadata.
+        if not source.processing_id:
+            _republish_pending_embed(
+                config=config,
+                item=existing_item,
+                run={},
+                sqs_client=sqs_client,
+                lambda_client=lambda_client,
+            )
+            return ArchiveWriteResult(
+                status="success",
+                case_id=case_id,
+                case_envelope_key=str(existing_item.get("case_envelope_key", envelope_key)),
+                retrieval_status=str(existing_item.get("retrieval_status", retrieval_status)),
+                source_completeness=str(existing_item.get("source_completeness", source_completeness)),
+                message="case archive replay matched existing identity",
+            )
 
     envelope = {
         "case_schema_version": config.CASE_SCHEMA_VERSION,
         "analysis_schema_version": config.CASE_ANALYSIS_SCHEMA_VERSION,
         "case_id": case_id,
+        "run_id": run_id,
         "finding_id": finding_id,
         "source": {
             "input_bucket": source.input_bucket,
@@ -108,6 +144,10 @@ def archive_case(
             "source_filename": source.source_filename,
             "content_type": source.content_type,
             "was_compressed": source.was_compressed,
+            "version_id": source.source_version_id,
+            "etag": source.source_etag,
+            "sequencer": source.source_sequencer,
+            "processing_id": processing_id,
         },
         "processed_at": _format_utc(processed_at_dt),
         "expires_at": _format_utc(expires_at_dt),
@@ -118,17 +158,13 @@ def archive_case(
             "source_completeness": source_completeness,
             "retrieval_status": retrieval_status,
             "archive_failure_mode": config.CASE_ARCHIVE_FAILURE_MODE,
+            "analysis_status": _analysis_status(analysis),
         },
         "alert_payload": archived_alert,
         "analysis": archived_analysis,
     }
 
-    s3_client.put_object(
-        Bucket=config.CASE_ARCHIVE_BUCKET,
-        Key=envelope_key,
-        Body=json.dumps(envelope, ensure_ascii=False, default=str).encode("utf-8"),
-        ContentType="application/json",
-    )
+    run_fencing_token = uuid4().hex
     item = _build_case_index_item(
         config=config,
         case_id=case_id,
@@ -144,32 +180,60 @@ def archive_case(
         analysis=analysis,
         alert_payload=alert_payload,
     )
+    run_attribute = _run_attribute_name(run_id)
+    run_record = {
+        "run_id": run_id,
+        "processing_id": processing_id,
+        "state": "claimed",
+        "fencing_token": run_fencing_token,
+        "envelope_key": envelope_key,
+        "claimed_at": _format_utc(processed_at_dt),
+        "source_key": source.input_key,
+    }
+    item[run_attribute] = run_record
+    item.pop("case_envelope_key", None)
+    if not source.processing_id:
+        # Preserve the pre-run contract for direct archive callers without S3 identity.
+        item["case_envelope_key"] = envelope_key
     try:
-        dynamodb_client.put_item(
-            TableName=config.CASE_INDEX_TABLE,
-            Item=_to_ddb_item(_prepare_case_index_attributes(item)),
-            ConditionExpression="attribute_not_exists(case_id)",
-        )
+        if existing_item:
+            dynamodb_client.update_item(
+                TableName=config.CASE_INDEX_TABLE,
+                Key={"case_id": {"S": case_id}},
+                UpdateExpression="SET #run = :run",
+                ConditionExpression="attribute_not_exists(#run)",
+                ExpressionAttributeNames={"#run": run_attribute},
+                ExpressionAttributeValues={":run": _to_ddb_value(run_record)},
+            )
+        else:
+            dynamodb_client.put_item(
+                TableName=config.CASE_INDEX_TABLE,
+                Item=_to_ddb_item(_prepare_case_index_attributes(item)),
+                ConditionExpression="attribute_not_exists(case_id)",
+            )
     except Exception as exc:
         if not _is_conditional_check_failed(exc):
             raise
         existing_item = _get_case_index_item(dynamodb_client, config.CASE_INDEX_TABLE, case_id)
-        if existing_item and _identity_matches(
-            existing_item,
-            source_filename=source.source_filename,
-            correlation_id=correlation_id,
-            finding_id=finding_id,
-        ):
+        existing_run = (existing_item or {}).get(run_attribute)
+        if isinstance(existing_run, dict) and str(existing_run.get("state", "")) == "completed":
+            _republish_pending_embed(
+                config=config,
+                item=existing_item or {},
+                run=existing_run,
+                sqs_client=sqs_client,
+                lambda_client=lambda_client,
+            )
             return ArchiveWriteResult(
                 status="success",
                 case_id=case_id,
-                case_envelope_key=str(existing_item.get("case_envelope_key", envelope_key)),
+                case_envelope_key=str(existing_run.get("envelope_key", envelope_key)),
                 retrieval_status=str(existing_item.get("retrieval_status", retrieval_status)),
-                source_completeness=str(
-                    existing_item.get("source_completeness", source_completeness)
-                ),
-                message="case archive replay matched existing identity",
+                source_completeness=str(existing_item.get("source_completeness", source_completeness)),
+                message="case archive run replay matched existing identity",
             )
+        if existing_item and _identity_matches(existing_item, source_key=source.input_key, correlation_id=correlation_id, finding_id=finding_id):
+            return ArchiveWriteResult(status="skipped", case_id=case_id, case_envelope_key=envelope_key, message="case run claim is already held")
         return ArchiveWriteResult(
             status="skipped",
             case_id=case_id,
@@ -177,8 +241,37 @@ def archive_case(
             message="case identity collision suppressed",
         )
 
-    _invoke_embed_lambda(
+    s3_client.put_object(
+        Bucket=config.CASE_ARCHIVE_BUCKET,
+        Key=envelope_key,
+        Body=json.dumps(envelope, ensure_ascii=False, default=str).encode("utf-8"),
+        ContentType="application/json",
+        IfNoneMatch="*",
+    )
+
+    completed_run = {**run_record, "state": "completed", "completed_at": _format_utc(processed_at_dt)}
+    dynamodb_client.update_item(
+        TableName=config.CASE_INDEX_TABLE,
+        Key={"case_id": {"S": case_id}},
+        UpdateExpression=(
+            "SET #run = :run, latest_run_id = :run_id, latest_run_key = :run_key, "
+            "latest_run_at = :run_at, case_envelope_key = :run_key"
+        ),
+        ConditionExpression="#run.#state = :claimed AND #run.#fence = :fence",
+        ExpressionAttributeNames={"#run": run_attribute, "#state": "state", "#fence": "fencing_token"},
+        ExpressionAttributeValues={
+            ":run": _to_ddb_value(completed_run),
+            ":run_id": {"S": run_id},
+            ":run_key": {"S": envelope_key},
+            ":run_at": {"S": _format_utc(processed_at_dt)},
+            ":claimed": {"S": "claimed"},
+            ":fence": {"S": run_fencing_token},
+        },
+    )
+
+    _publish_embed_request(
         config=config,
+        sqs_client=sqs_client,
         lambda_client=lambda_client,
         case_id=case_id,
         envelope_bucket=config.CASE_ARCHIVE_BUCKET,
@@ -193,9 +286,10 @@ def archive_case(
     )
 
 
-def _invoke_embed_lambda(
+def _publish_embed_request(
     *,
     config: Config,
+    sqs_client: Any | None,
     lambda_client: Any | None,
     case_id: str,
     envelope_bucket: str,
@@ -203,17 +297,51 @@ def _invoke_embed_lambda(
 ) -> None:
     if not config.CASE_QA_ENABLED:
         return
-    if lambda_client is None:
-        raise ValueError("lambda_client is required when Case Q&A embedding is enabled")
     payload = {
         "case_id": case_id,
         "case_envelope_bucket": envelope_bucket,
         "case_envelope_key": envelope_key,
     }
+    if config.CASE_EMBED_QUEUE_URL:
+        if sqs_client is None:
+            raise ValueError("sqs_client is required when CASE_EMBED_QUEUE_URL is configured")
+        sqs_client.send_message(
+            QueueUrl=config.CASE_EMBED_QUEUE_URL,
+            MessageBody=json.dumps(payload, separators=(",", ":"), sort_keys=True),
+        )
+        return
+    if lambda_client is None:
+        raise ValueError("lambda_client is required for legacy direct case embedding")
     lambda_client.invoke(
         FunctionName=config.CASE_EMBED_LAMBDA_NAME,
         InvocationType="Event",
         Payload=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+    )
+
+
+def _republish_pending_embed(
+    *,
+    config: Config,
+    item: dict[str, Any],
+    run: dict[str, Any],
+    sqs_client: Any | None,
+    lambda_client: Any | None,
+) -> None:
+    """Repair an archive-to-embed handoff that failed after the run committed."""
+
+    if not config.CASE_QA_ENABLED or str(item.get("retrieval_status", "")) != "pending":
+        return
+    envelope_key = str(run.get("envelope_key", item.get("case_envelope_key", ""))).strip()
+    case_id = str(item.get("case_id", "")).strip()
+    if not case_id or not envelope_key:
+        raise ValueError("pending case replay is missing its case or envelope identity")
+    _publish_embed_request(
+        config=config,
+        sqs_client=sqs_client,
+        lambda_client=lambda_client,
+        case_id=case_id,
+        envelope_bucket=config.CASE_ARCHIVE_BUCKET,
+        envelope_key=envelope_key,
     )
 
 
@@ -315,11 +443,56 @@ def _extract_artifact_keys(sink_result: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def _build_envelope_key(config: Config, processed_at: datetime, case_id: str) -> str:
+def _build_processing_id(source: SourceContext) -> str:
+    material = "\x1f".join(
+        (
+            source.input_bucket,
+            source.input_key,
+            source.source_version_id or source.source_etag or "unversioned",
+            source.source_etag,
+            source.source_sequencer,
+        )
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
+
+
+def _build_run_id(finding_id: str, processing_id: str) -> str:
+    digest = hashlib.sha256(f"{finding_id}:{processing_id}".encode("utf-8")).hexdigest()[:24]
+    return f"run-{digest}"
+
+
+def _run_attribute_name(run_id: str) -> str:
+    return f"run_{run_id.replace('-', '_')}"
+
+
+def _run_result_from_item(
+    item: dict[str, Any],
+    run: dict[str, Any],
+    retrieval_status: str,
+    source_completeness: str,
+) -> ArchiveWriteResult:
+    return ArchiveWriteResult(
+        status="success",
+        case_id=str(item.get("case_id", "")),
+        case_envelope_key=str(run.get("envelope_key", item.get("case_envelope_key", ""))),
+        retrieval_status=str(item.get("retrieval_status", retrieval_status)),
+        source_completeness=str(item.get("source_completeness", source_completeness)),
+        message="case archive run replay matched existing identity",
+    )
+
+
+def _build_envelope_key(
+    config: Config,
+    processed_at: datetime,
+    case_id: str,
+    run_id: str,
+    immutable_run: bool = False,
+) -> str:
+    filename = f"{case_id}.json" if not immutable_run else f"{case_id}/{run_id}.json"
     return (
         f"{config.CASE_ARCHIVE_PREFIX}/"
         f"{processed_at.year:04d}/{processed_at.month:02d}/{processed_at.day:02d}/"
-        f"{case_id}.json"
+        f"{filename}"
     )
 
 
@@ -362,6 +535,7 @@ def _build_case_index_item(
         "source_completeness": source_completeness,
         "retrieval_status": retrieval_status,
         "correlation_id": correlation_id,
+        "analysis_status": _analysis_status(analysis),
     }
 
 
@@ -385,6 +559,15 @@ def _extract_risk_score(alert_payload: Any) -> str:
     return ""
 
 
+def _analysis_status(analysis: Any) -> str:
+    if not isinstance(analysis, dict):
+        return "unknown"
+    metadata = analysis.get("metadata")
+    if not isinstance(metadata, dict):
+        return "success"
+    return str(metadata.get("analysis_status", "success") or "success")
+
+
 def _capability_snapshot(config: Config) -> dict[str, Any]:
     return {
         "capability_profiles": config.CAPABILITY_PROFILES,
@@ -399,16 +582,20 @@ def _capability_snapshot(config: Config) -> dict[str, Any]:
 def _identity_matches(
     item: dict[str, Any],
     *,
-    source_filename: str,
+    source_key: str,
     correlation_id: str,
     finding_id: str,
 ) -> bool:
-    if str(item.get("source_filename", "")) == source_filename:
-        return True
-    if correlation_id and str(item.get("correlation_id", "")) == correlation_id:
-        return True
-    if finding_id and str(item.get("finding_id", "")) == finding_id:
-        return True
+    stored_source_key = str(item.get("source_key", "")).strip()
+    stored_finding_id = str(item.get("finding_id", "")).strip()
+    stored_correlation_id = str(item.get("correlation_id", "")).strip()
+    # finding_id is the logical-case key; source-key changes are new immutable runs.
+    if stored_finding_id and finding_id:
+        return stored_finding_id == finding_id
+    if stored_correlation_id and correlation_id:
+        return stored_correlation_id == correlation_id
+    if stored_source_key and source_key:
+        return stored_source_key == source_key
     return False
 
 

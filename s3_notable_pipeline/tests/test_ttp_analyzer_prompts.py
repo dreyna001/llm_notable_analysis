@@ -15,6 +15,7 @@ if str(SRC_DIR) not in sys.path:
 
 from s3_notable_pipeline.ttp_analyzer import (
     BedrockAnalyzer,
+    BedrockAnalysisError,
     REPAIR_PROMPT_TEMPLATE,
     REPAIR_PROMPT_TEMPLATE_RAW_JSON,
 )
@@ -59,6 +60,14 @@ class TTPAnalyzerPromptTests(unittest.TestCase):
         self.assertIn("{contract}", REPAIR_PROMPT_TEMPLATE_RAW_JSON)
         self.assertIn("Do not add facts", REPAIR_PROMPT_TEMPLATE_RAW_JSON)
         self.assertIn("analyze_notable tool", REPAIR_PROMPT_TEMPLATE)
+
+    def test_core_bedrock_failure_is_not_returned_as_empty_analysis(self) -> None:
+        self.analyzer._converse = lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("bedrock down"))
+
+        with self.assertRaises(BedrockAnalysisError) as raised:
+            self.analyzer.analyze_ttp("user=alice")
+
+        self.assertTrue(raised.exception.retryable)
 
 
 if __name__ == "__main__":

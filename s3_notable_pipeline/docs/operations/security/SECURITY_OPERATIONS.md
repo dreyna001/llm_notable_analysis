@@ -29,9 +29,9 @@ update, ServiceNow create) are gated and deduplicated.
   `ALLOW_PRIVATE_OUTBOUND_ENDPOINTS`).
 - Treat generated SPL, Elasticsearch Query DSL, and ticket payloads as untrusted
   until policy validation passes.
-- For the analyst portal, use `PortalAuthMode=jwt` with exact JWT issuer and
-  audience, exact `PortalCorsAllowedOrigins`, and CloudFront
-  `redirect-to-https`. Do not put JWTs in static assets or logs.
+- For the analyst portal, use `PortalAuthMode=jwt` with exact JWT issuer,
+  audience, tenant, analyst role or scope, and `PortalCorsAllowedOrigins`.
+  Do not put JWTs in static assets or logs.
 
 ## IAM Least Privilege
 
@@ -44,11 +44,11 @@ The SAM template attaches scoped inline policies per function. There is no blank
 | --- | --- |
 | S3 read | Input bucket only |
 | S3 write | Output bucket (`reports/` and case archive prefixes when portal resources exist) |
-| `bedrock:InvokeModel` | Deploy-time inference profile ARN only |
-| `bedrock:Retrieve` | Only when the matching Knowledge Base ID parameter is non-empty |
+| `bedrock:InvokeModel` | Customer-selected analysis and embedding model resources |
+| OpenSearch HTTP | Customer OpenSearch domain indexes required by enabled retrieval lanes |
 | `secretsmanager:GetSecretValue` | Only when the corresponding secret ARN parameter is not `*` |
 | DynamoDB | `SideEffectIdempotencyTable` (Put/Get/Update/Delete); `CaseIndexTable` when portal enabled |
-| `lambda:InvokeFunction` | `CaseEmbedFunction` only when case archive is enabled |
+| `sqs:SendMessage` | Durable case-embed queue when case archive is enabled |
 | CloudWatch Logs | Function log group only |
 
 Secret IAM conditions in the template: `HasSplunkMcpSecret`, `HasServiceNowSecret`,
@@ -110,11 +110,10 @@ All Splunk, Elasticsearch, ServiceNow, and MCP base URLs pass through
 Outbound HTTP clients use `verify=True` (system trust store). There is no
 `SPLUNK_CA_BUNDLE` or custom CA path in the AWS runtime today.
 
-Portal and CloudFront:
-
-- API Gateway and Function URL custom origins use `OriginProtocolPolicy: https-only`
-  with `TLSv1.2`.
-- Viewer requests use `redirect-to-https` on cache behaviors.
+The portal uses a regional API Gateway HTTPS endpoint. CloudFront and Lambda
+Function URLs are not part of the GovCloud path. The private SPA bucket blocks
+public access and is read through the portal Lambda with a scoped object-read
+permission.
 
 ## External Action Gates
 

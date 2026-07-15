@@ -124,6 +124,22 @@ class CaseIndexTests(unittest.TestCase):
         self.assertEqual(result["limit"], 1)
         self.assertEqual(list(result["items"]), ["user"])
 
+    def test_partial_cursor_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "provided together"):
+            list_cases(
+                config=config(),
+                dynamodb_client=FakeDynamoDbClient(),
+                cursor_processed_at="2026-06-15T10:30:00Z",
+            )
+
+    def test_invalid_date_filter_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "YYYY-MM-DD"):
+            list_cases(
+                config=config(),
+                dynamodb_client=FakeDynamoDbClient(),
+                start_date="June 15",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

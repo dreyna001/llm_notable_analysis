@@ -9,11 +9,11 @@ This service processes security notables uploaded to S3, runs LLM-based ATT&CK a
 
 ## 1) What You Need
 
-- AWS account with Bedrock model access (template targets Claude Sonnet 4.6 inference profile)
+- AWS GovCloud account in `us-gov-east-1` with customer-approved Bedrock model access
 - AWS CLI configured (`aws configure`)
 - AWS SAM CLI
 - Docker running (required for Lambda image build)
-- An **ECR image URI** for this Lambda: SAM parameter `ImageUri` must reference an image **already pushed to ECR** in your account/region. You are not ready to deploy until you can build that image (see `deploy/docker/Dockerfile`) and publish it, or you use an image your org already ships.
+- A Lambda image published to customer GovCloud ECR and its immutable digest. Deployments pass `EcrRepositoryUri` and `ImageDigest` separately.
 
 Quick checks:
 
@@ -25,7 +25,7 @@ docker --version
 
 ## 2) Deploy (Fast Path)
 
-**Packaging readiness:** Deploy passes `ImageUri` into the stack. That URI must be a real Lambda container image in ECR **before** `sam deploy` succeeds. The `deploy/docker/Dockerfile` `FROM` is a placeholder/org-specific base—if you cannot pull and build it as written, you still need an agreed way to produce the same handler code inside **some** approved base image and push it to ECR. Until that exists, "ready to deploy" really means "ready to build and publish the Lambda image." See [`docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`](docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md).
+**Packaging readiness:** Build with the default Lambda Python 3.12 base for development or override `LAMBDA_BASE_IMAGE` with the customer's approved digest-pinned mirror. Push the result to GovCloud ECR before deployment. See [`docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`](docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md).
 
 From this directory:
 
@@ -60,7 +60,9 @@ If using guided deploy, start with:
 - `SplunkSinkMode=s3`
 - globally unique values for `InputBucketName` and `OutputBucketName`
 - `AwsAccountId`: your 12-digit AWS account ID (Bedrock inference profile ARN)
-- `ImageUri`: the **existing** ECR URI for this Lambda image (build + `docker push` first if you do not have one yet)
+- `EcrRepositoryUri`: customer GovCloud ECR repository URI without a tag or digest
+- `ImageDigest`: immutable `sha256:...` digest returned by ECR
+- `BedrockAnalysisModelId`: customer-approved model or inference-profile ID/ARN
 - `CapabilityProfiles=core` unless you are enabling optional bundles (see section 5)
 - `MaxDecompressedInputBytes`: keep the default `1048576` unless expected gzip notable payloads need a larger decompressed size
 - if using `notable_rest`, provide:
@@ -101,7 +103,7 @@ Profiles are the preferred way to enable optional behavior. Set SAM parameter `C
 |---------|---------|
 | `core` | S3-triggered ingest, Bedrock analysis, markdown + JSON under `reports/` |
 | `html_reports` | Optional HTML companion report in S3 |
-| `rag` | Bedrock Knowledge Base advisory context in the main analysis prompt |
+| `rag` | Tenant-scoped OpenSearch advisory context in the main analysis prompt |
 | `spl_readonly` | SPL generation and bounded read-only Splunk investigation (REST or MCP) |
 | `elastic_readonly` | Query DSL generation and bounded read-only Elasticsearch `_search` |
 | `ticket_draft` | ServiceNow incident draft payloads in JSON reports (no POST) |
@@ -162,7 +164,7 @@ Operations: [`docs/operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md`](docs
 - `src/s3_notable_pipeline/config.py` - runtime config and capability profile mapping
 - `src/s3_notable_pipeline/case_archive.py`, `portal_handler.py`, `embed_handler.py` - analyst portal archive, API, and chunk embedding (when `analyst_portal` is enabled)
 - `deploy/docker/Dockerfile` - Lambda image build; `FROM` is not portable until you substitute your approved base registry/image
-- `deploy/aws/template-sam.yaml` - deployable SAM infrastructure (main, embed, and portal Lambdas; API Gateway; optional CloudFront)
+- `deploy/aws/template-sam.yaml` - deployable GovCloud SAM infrastructure (durable queues, Lambdas, regional API Gateway, and private S3 portal assets)
 - `tests/test_lambda_handler.py` - focused Lambda sink routing tests
 - `scripts/setup-and-deploy.*` - prerequisite checks, `sam build`, `sam deploy`
 - `scripts/test-pipeline.ps1` - core and optional Wave 1 stack smoke checks
@@ -202,7 +204,7 @@ Operations: [`docs/operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md`](docs
 - **No Lambda trigger:** verify object key is under `incoming/`.
 - **No output report:** check `OUTPUT_BUCKET_NAME` and CloudWatch logs for `notable-analyzer-s3`.
 - **Bedrock permission errors:** verify `bedrock:InvokeModel` and model/inference-profile access; confirm `AwsAccountId` matches the deployed account.
-- **Deploy fails on ImageUri:** build from `deploy/docker/Dockerfile` (or approved equivalent), push to ECR, then pass the full URI to SAM.
+- **Deploy fails on image resolution:** verify `EcrRepositoryUri` is in `us-gov-east-1`, `ImageDigest` exists in that repository, and Lambda can pull it.
 - **Compressed input errors:** only gzip is supported. Verify the object is valid gzip, contains UTF-8 text/JSON after decompression, and does not exceed `MAX_DECOMPRESSED_INPUT_BYTES`.
 - **Secrets access errors in notable_rest:** verify Lambda can call `secretsmanager:GetSecretValue` on `SplunkApiTokenSecretArn`.
 - **Splunk REST update fails:** verify the target endpoint accepts your identifier mapping (`finding_id` vs customer-specific IDs).

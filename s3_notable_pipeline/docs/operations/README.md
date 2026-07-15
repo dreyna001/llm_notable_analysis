@@ -19,6 +19,8 @@ omitted. Then open the category that matches your task.
 
 ## Deployment
 
+- [`deployment/GOVCLOUD_CUSTOMER_CONFIGURATION.md`](deployment/GOVCLOUD_CUSTOMER_CONFIGURATION.md) — reusable product boundary and per-customer operationalization inputs for `us-gov-east-1`.
+
 Lambda container image, ECR, and SAM deploy flow.
 
 | Guide | Purpose |
@@ -55,13 +57,13 @@ Part of `core` on every stack: Bedrock model id, Lambda timeout, inference budge
 |-------|---------|
 | [`llm/LLM_INFERENCE_OPERATIONS.md`](llm/LLM_INFERENCE_OPERATIONS.md) | Bedrock routing, timeouts, structured output, rollout. |
 
-## RAG and Knowledge Base
+## RAG and OpenSearch
 
-Requires `rag` profile. Bedrock Knowledge Base lifecycle and retrieval tuning.
+Requires `rag` profile. S3 manifest ingestion, Bedrock embeddings, and OpenSearch retrieval tuning.
 
 | Guide | Purpose |
 |-------|---------|
-| [`rag/KNOWLEDGE_BASE_OPERATIONS.md`](rag/KNOWLEDGE_BASE_OPERATIONS.md) | KB source content and sync lifecycle. |
+| [`rag/KNOWLEDGE_BASE_OPERATIONS.md`](rag/KNOWLEDGE_BASE_OPERATIONS.md) | Source content, manifest, and OpenSearch indexing lifecycle. |
 | [`rag/RAG_OPERATIONS.md`](rag/RAG_OPERATIONS.md) | RAG enablement, failure mode, snippets, budgets. |
 
 ## Investigation
@@ -70,7 +72,7 @@ Requires `spl_readonly` or `elastic_readonly` (mutually exclusive).
 
 | Guide | Purpose |
 |-------|---------|
-| [`investigation/SPL_OPERATIONS.md`](investigation/SPL_OPERATIONS.md) | SPL generation, KB grounding, Splunk REST/MCP execution. |
+| [`investigation/SPL_OPERATIONS.md`](investigation/SPL_OPERATIONS.md) | SPL generation, SIEM-dictionary grounding, Splunk REST/MCP execution. |
 | [`investigation/ELASTICSEARCH_OPERATIONS.md`](investigation/ELASTICSEARCH_OPERATIONS.md) | Query DSL generation and read-only `_search`. |
 
 ## Integrations

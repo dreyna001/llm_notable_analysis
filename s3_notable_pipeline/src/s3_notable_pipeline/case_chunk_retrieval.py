@@ -222,8 +222,83 @@ def retrieve_case_chunks_for_question(
     dynamodb_client: Any,
     s3_client: Any,
     bedrock_client: Any,
+    opensearch_client: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Retrieve ranked case chunks for one analyst question."""
+
+    from .opensearch_retrieval import (
+        adapter_for,
+        config_value,
+        opensearch_enabled,
+        retrieve_documents,
+    )
+
+    if opensearch_enabled(config, case=True):
+        metadata = get_case_metadata(
+            config=config,
+            dynamodb_client=dynamodb_client,
+            case_id=case_id,
+        )
+        if not metadata or str(metadata.get("retrieval_status", "")).lower() != "ready":
+            return []
+        tenant_id = str(
+            config_value(config, "RAG_TENANT_ID", "") or metadata.get("tenant_id", "")
+        ).strip()
+        if not tenant_id:
+            return []
+        query_embedding = embed_text(question, config, bedrock_client)
+        documents = retrieve_documents(
+            query_text=question,
+            query_embedding=query_embedding,
+            index=str(config_value(config, "OPENSEARCH_CASE_INDEX", "case-chunks")),
+            tenant_id=tenant_id,
+            corpus_id="case_chunks",
+            case_id=case_id,
+            top_k=max(config.CASE_QA_LEXICAL_TOP_K, config.CASE_QA_VECTOR_TOP_K),
+            adapter=adapter_for(config, opensearch_client),
+        )
+        chunks = []
+        for document in documents:
+            chunk = dict(document.metadata or {})
+            chunk.update(
+                {
+                    "chunk_id": document.chunk_id or document.document_id,
+                    "case_id": document.case_id or case_id,
+                    "text": document.text,
+                    "search_text": document.text,
+                    "score": document.score,
+                    "retrieval_provenance": {
+                        "tenant_id": document.tenant_id,
+                        "corpus_id": document.corpus_id,
+                        "case_id": document.case_id or case_id,
+                        "chunk_id": document.chunk_id or document.document_id,
+                        "source_bucket": document.source_bucket,
+                        "source_key": document.source_key,
+                        "source_version_id": document.source_version_id,
+                        "source_etag": document.source_etag,
+                        "source_file": document.source_file,
+                        "embedding_model": str(
+                            (document.metadata or {}).get("provenance", {}).get(
+                                "embedding_model", ""
+                            )
+                        ),
+                    },
+                }
+            )
+            chunks.append(chunk)
+        return _trim_chunks(
+            [
+                RankedChunk(
+                    chunk_id=str(chunk.get("chunk_id", "")),
+                    case_id=str(chunk.get("case_id", case_id)),
+                    chunk=chunk,
+                    rank=index,
+                    score=float(chunk.get("score", 0.0)),
+                )
+                for index, chunk in enumerate(chunks, start=1)
+            ],
+            config,
+        )
 
     chunks = load_all_case_chunks(
         case_id=case_id,

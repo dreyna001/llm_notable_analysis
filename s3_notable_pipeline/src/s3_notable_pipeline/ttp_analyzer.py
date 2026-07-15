@@ -22,6 +22,27 @@ from .verdicts import ALLOWED_VERDICTS, normalize_verdict
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+
+class BedrockAnalysisError(RuntimeError):
+    """A core Bedrock analysis failure that must be visible to the caller."""
+
+    def __init__(self, message: str, *, retryable: bool) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
+
+_RETRYABLE_BEDROCK_CODES = frozenset(
+    {
+        "ThrottlingException",
+        "ServiceUnavailableException",
+        "InternalServerException",
+        "ModelTimeoutException",
+        "ServiceQuotaExceededException",
+        "ProvisionedThroughputExceededException",
+        "RequestTimeout",
+    }
+)
+
 # Some models / intermediaries occasionally wrap the JSON payload in an extra
 # top-level container key (e.g., {"ttp_analyzer": {...}}). This helper unwraps
 # common container shapes so downstream schema validation is robust.
@@ -1185,6 +1206,16 @@ SECURITY ALERT INPUT:
             return False
         return code == "ModelErrorException" and "ToolUse" in msg and "invalid sequence" in msg.lower()
 
+    @staticmethod
+    def _is_retryable_bedrock_error(err: ClientError) -> bool:
+        """Classify provider failures without treating validation as transient."""
+
+        try:
+            code = str((err.response or {}).get("Error", {}).get("Code", ""))
+        except Exception:
+            return True
+        return code in _RETRYABLE_BEDROCK_CODES or code.startswith("5")
+
     def _converse(self, prompt: str, *, use_tool: bool) -> Dict[str, Any]:
         """Call Bedrock Converse with optional tool configuration.
 
@@ -1357,8 +1388,7 @@ SECURITY ALERT INPUT:
 
         if not alert_text or not alert_text.strip():
             logger.error("Alert text is empty or whitespace only")
-            self.last_llm_response = {"error": "Empty alert text", "ttp_analysis": []}
-            return []
+            raise BedrockAnalysisError("Empty alert text", retryable=False)
 
         def _validate_and_postprocess(parsed: Dict[str, Any]) -> Tuple[bool, Optional[str], Dict[str, Any]]:
             parsed = _normalize_llm_result_shape(parsed)
@@ -1411,7 +1441,10 @@ SECURITY ALERT INPUT:
                         time.sleep(retry_delay)
                         retry_delay *= 2
                     else:
-                        raise
+                        raise BedrockAnalysisError(
+                            f"Bedrock tool-mode inference failed: {api_error}",
+                            retryable=self._is_retryable_bedrock_error(api_error),
+                        ) from api_error
 
             # Phase 2: raw JSON mode
             if response is None and not used_tool:
@@ -1430,7 +1463,10 @@ SECURITY ALERT INPUT:
                             time.sleep(retry_delay)
                             retry_delay *= 2
                         else:
-                            raise
+                            raise BedrockAnalysisError(
+                                f"Bedrock raw-JSON inference failed: {api_error}",
+                                retryable=self._is_retryable_bedrock_error(api_error),
+                            ) from api_error
 
             if response is None:
                 raise RuntimeError("Bedrock converse did not return a response")
@@ -1496,7 +1532,10 @@ SECURITY ALERT INPUT:
                     elapsed_repair=repair_elapsed,
                 )
                 self.last_llm_response = fallback
-                return []
+                raise BedrockAnalysisError(
+                    f"Bedrock analysis response failed validation: {error_msg or 'unknown error'}",
+                    retryable=False,
+                )
 
             final_obj["metadata"] = {
                 "model": self.model_id,
@@ -1518,11 +1557,20 @@ SECURITY ALERT INPUT:
             logger.info(f"Total TTP analysis completed in {total_time:.2f} seconds")
             return valid_ttps
 
+        except BedrockAnalysisError:
+            raise
+        except ClientError as e:
+            logger.error(f"Bedrock API error: {e}")
+            self.last_llm_response = {"error": f"LLM API error: {e}", "ttp_analysis": []}
+            raise BedrockAnalysisError(
+                f"Bedrock API error: {e}",
+                retryable=self._is_retryable_bedrock_error(e),
+            ) from e
         except Exception as e:
             logger.error(f"Unexpected error calling LLM: {str(e)}")
             logger.error(f"Exception type: {type(e).__name__}")
             self.last_llm_response = {"error": f"LLM API error: {e}", "ttp_analysis": []}
-            return []
+            raise BedrockAnalysisError(f"Bedrock analysis failed: {e}", retryable=True) from e
 
     def generate_spl_queries(
         self,
@@ -1905,4 +1953,3 @@ def extract_score(ttp: Dict[str, Any]) -> float:
         if key in ttp:
             return ttp[key]
     return 0.0
-

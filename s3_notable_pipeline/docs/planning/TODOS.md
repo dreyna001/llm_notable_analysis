@@ -1,13 +1,18 @@
 # s3_notable_pipeline — planning backlog
 
-_Last updated: 2026-06-20. Normative parity contract:
+_Last updated: 2026-07-10. Normative parity contract:
 [`../technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md`](../technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md)._
+
+## Top Priority Reminder
+
+- [ ] Add an explicit AWS analyzer backlog queue: change direct S3 `ObjectCreated` -> Lambda analyzer intake to S3 -> SQS -> Lambda so concurrency caps create queue depth instead of relying on S3/Lambda redelivery as the backlog mechanism.
 
 ## Parity docs
 
 | Doc | Role |
 | --- | --- |
 | [AWS_ONPREM_PARITY_TECHNICAL_SPEC.md](../technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md) | Normative shipped AWS/on-prem parity contract |
+| [AZURE_AWS_PARITY_PLAN.md](AZURE_AWS_PARITY_PLAN.md) | Azure deployment plan mirroring AWS SAM stack (planning only) |
 | [PORTAL_CHATBOT_CAPABILITY_GAPS.md](../../../PORTAL_CHATBOT_CAPABILITY_GAPS.md) | SOTA chat gaps; P3-1 multi-turn shipped |
 
 ## Shipped (code on `main`)
@@ -17,6 +22,10 @@ _Last updated: 2026-06-20. Normative parity contract:
 - **Wave 3 + P3-1** — portal chat contract parity, hybrid retrieval (W3-4), analyzer verdict and SOC header, chat-readiness diagnostics, OpenAPI sync, multi-turn synthesis.
 
 ## Backlog
+
+**Azure parity (in progress):**
+
+- [x] Phase 0 scaffold complete on `azure_instance` — see [AZURE_AWS_PARITY_PLAN.md](AZURE_AWS_PARITY_PLAN.md)
 
 **Operator closeout (not code):**
 

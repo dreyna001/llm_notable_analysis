@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from .aws_clients import bedrock_agent_runtime_client
+from .aws_clients import bedrock_agent_runtime_client, bedrock_runtime_client
 from .config import Config
 
 ELASTICSEARCH_GROUNDING_CONTEXT_HEADER = "ELASTICSEARCH_GROUNDING_CONTEXT"
@@ -21,6 +21,7 @@ class ElasticsearchGroundingResult:
     context: str = ""
     snippet_count: int = 0
     message: str = ""
+    provenance: tuple[dict[str, Any], ...] = ()
 
 
 def elasticsearch_grounding_failure_mode(config: Config) -> str:
@@ -115,11 +116,71 @@ def retrieve_elasticsearch_grounding(
     hypotheses: list[dict[str, Any]],
     config: Config,
     client: Any | None = None,
+    opensearch_client: Any | None = None,
+    bedrock_client: Any | None = None,
 ) -> ElasticsearchGroundingResult:
     """Retrieve Elasticsearch query grounding from a Bedrock Knowledge Base."""
 
     if not config.ELASTICSEARCH_GROUNDING_ENABLED:
         return ElasticsearchGroundingResult(status="skipped", message="Elasticsearch grounding disabled")
+    from .case_embed import embed_text
+    from .opensearch_retrieval import (
+        adapter_for,
+        config_value,
+        opensearch_enabled,
+        render_documents,
+        retrieve_documents,
+        tenant_id_for,
+    )
+
+    query_text = build_elasticsearch_grounding_query(alert_text=alert_text, hypotheses=hypotheses)
+    if opensearch_enabled(config):
+        try:
+            documents = retrieve_documents(
+                query_text=query_text,
+                query_embedding=embed_text(
+                    query_text,
+                    config,
+                    bedrock_client or bedrock_runtime_client(),
+                ),
+                index=str(
+                    config_value(
+                        config,
+                        "OPENSEARCH_ELASTICSEARCH_INDEX",
+                        config_value(config, "OPENSEARCH_ELASTIC_INDEX", "notable-elastic-dictionary"),
+                    )
+                ),
+                tenant_id=tenant_id_for(config, required=True),
+                corpus_id="elasticsearch",
+                top_k=config.ELASTICSEARCH_GROUNDING_MAX_SNIPPETS,
+                adapter=adapter_for(
+                    config,
+                    opensearch_client or (client if hasattr(client, "search") else None),
+                ),
+            )
+            context = render_documents(
+                documents,
+                budget_chars=config.ELASTICSEARCH_GROUNDING_CONTEXT_BUDGET_CHARS,
+                header=ELASTICSEARCH_GROUNDING_CONTEXT_HEADER,
+            )
+            if not context:
+                return ElasticsearchGroundingResult(
+                    status="no_match",
+                    message="No Elasticsearch grounding snippets returned",
+                )
+            return ElasticsearchGroundingResult(
+                status="success",
+                context=context,
+                snippet_count=len(documents),
+                provenance=tuple(
+                    dict(document.metadata or {}).get("provenance", {}) for document in documents
+                ),
+            )
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            return ElasticsearchGroundingResult(
+                status="failed",
+                message=f"OpenSearch Elasticsearch grounding failed: {exc}",
+            )
     if not config.ELASTICSEARCH_GROUNDING_BEDROCK_KB_ID.strip():
         return ElasticsearchGroundingResult(
             status="failed",
@@ -127,7 +188,6 @@ def retrieve_elasticsearch_grounding(
         )
 
     kb_client = client or bedrock_agent_runtime_client()
-    query_text = build_elasticsearch_grounding_query(alert_text=alert_text, hypotheses=hypotheses)
     try:
         response = kb_client.retrieve(
             knowledgeBaseId=config.ELASTICSEARCH_GROUNDING_BEDROCK_KB_ID,

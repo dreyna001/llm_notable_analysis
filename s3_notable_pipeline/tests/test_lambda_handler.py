@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gzip
 import importlib
+import json
 import sys
 import types
 import unittest
@@ -427,6 +428,96 @@ class CompressedInputTests(unittest.TestCase):
         self.assertEqual(
             self.lambda_handler.extract_finding_id_from_s3_key("incoming/abc-123.json.gz"),
             "abc-123",
+        )
+
+    def test_sqs_s3_notification_is_unwrapped_with_message_id(self) -> None:
+        nested = {"Records": [{"s3": {"bucket": {"name": "input"}, "object": {"key": "team%2Fone.json"}}}]}
+        records, message_id = self.lambda_handler._s3_event_records(
+            {"eventSource": "aws:sqs", "messageId": "msg-1", "body": __import__("json").dumps(nested)}
+        )
+
+        self.assertEqual(message_id, "msg-1")
+        self.assertEqual(records[0]["s3"]["object"]["key"], "team%2Fone.json")
+
+    def test_processing_identity_distinguishes_replays_and_preserves_prefix(self) -> None:
+        identity = self.lambda_handler.S3ProcessingIdentity(
+            bucket="input",
+            key="team/one.json",
+            version_id="v1",
+            etag="etag-1",
+            sequencer="001",
+        )
+        other = self.lambda_handler.S3ProcessingIdentity(
+            bucket="input",
+            key="team/one.json",
+            version_id="v2",
+            etag="etag-2",
+            sequencer="002",
+        )
+
+        self.assertNotEqual(identity.processing_id, other.processing_id)
+        key = self.lambda_handler._report_key("reports", identity.key, "md", identity)
+        self.assertTrue(key.startswith("reports/team/one--"))
+
+    def test_sqs_partial_batch_returns_only_failed_message_ids(self) -> None:
+        class Body:
+            def __init__(self, value: bytes) -> None:
+                self.value = value
+
+            def read(self) -> bytes:
+                return self.value
+
+        def get_object(**kwargs):
+            calls.append(kwargs)
+            if kwargs["Key"] == "bad.json":
+                raise RuntimeError("temporary S3 failure")
+            return {"Body": Body(b'{"finding_id":"good"}'), "ETag": '"etag-good"'}
+
+        calls: list[dict[str, str]] = []
+        event = {
+            "Records": [
+                {
+                    "eventSource": "aws:sqs",
+                    "messageId": "good-message",
+                    "body": json.dumps({"Records": [{"s3": {"bucket": {"name": "input"}, "object": {"key": "good.json", "size": 25, "versionId": "v2"}}}]}),
+                },
+                {
+                    "eventSource": "aws:sqs",
+                    "messageId": "bad-message",
+                    "body": json.dumps({"Records": [{"s3": {"bucket": {"name": "input"}, "object": {"key": "bad.json", "size": 25, "versionId": "v1"}}}]}),
+                },
+            ]
+        }
+        with (
+            patch.object(self.lambda_handler, "load_config", return_value=self.lambda_handler.Config(BEDROCK_MODEL_ID="test")),
+            patch.object(self.lambda_handler.s3_client, "get_object", side_effect=get_object, create=True),
+            patch.object(self.lambda_handler, "write_to_s3_sink", return_value={"status": "success"}),
+        ):
+            result = self.lambda_handler.handler(event, None)
+
+        self.assertEqual(result["batchItemFailures"], [{"itemIdentifier": "bad-message"}])
+        self.assertEqual([call["VersionId"] for call in calls], ["v2", "v1"])
+
+    def test_terminal_sqs_envelope_is_sent_to_dlq_via_partial_failure(self) -> None:
+        event = {
+            "Records": [
+                {
+                    "eventSource": "aws:sqs",
+                    "messageId": "malformed-message",
+                    "body": "not-json",
+                }
+            ]
+        }
+        with patch.object(
+            self.lambda_handler,
+            "load_config",
+            return_value=self.lambda_handler.Config(BEDROCK_MODEL_ID="test"),
+        ):
+            result = self.lambda_handler.handler(event, None)
+
+        self.assertEqual(
+            result["batchItemFailures"],
+            [{"itemIdentifier": "malformed-message"}],
         )
 
 

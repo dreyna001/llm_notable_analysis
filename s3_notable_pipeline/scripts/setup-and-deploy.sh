@@ -2,8 +2,7 @@
 # Setup and Deploy Script for Notable Analyzer Pipeline
 # Prerequisites: AWS CLI, SAM CLI, Docker must be installed
 #
-# Readiness: template ImageUri must be an existing ECR image (build+push first if needed).
-# The deploy/docker/Dockerfile FROM line is not portable until you substitute your approved base image.
+# Readiness: publish the image to GovCloud ECR and capture its immutable digest first.
 
 set -u
 
@@ -63,7 +62,7 @@ fi
 
 echo
 echo "Checking Bedrock access..."
-region="us-east-1"
+region="us-gov-east-1"
 nova_models=""
 claude_profiles=""
 nova_available=0
@@ -95,8 +94,7 @@ else
 fi
 
 echo
-echo "Before build: ensure ImageUri (sam/template) points at your Lambda image in ECR, or your sam build/push flow matches your org."
-echo "If the deploy/docker/Dockerfile FROM is still a placeholder, fix it or use another approved image build path."
+echo "Before deploy: ensure EcrRepositoryUri and ImageDigest identify the approved image in us-gov-east-1."
 echo
 echo "=== Step 1: Building application ==="
 echo "Running: sam build -t $SAM_TEMPLATE"
@@ -120,11 +118,11 @@ else
   echo
   echo "You'll be prompted for:"
   echo "  - Stack name (e.g., notable-analyzer-stack)"
-  echo "  - AWS Region (e.g., us-east-1)"
+  echo "  - AWS Region (us-gov-east-1)"
   echo "  - Input bucket name (must be globally unique)"
   echo "  - Output bucket name (must be globally unique)"
   echo "  - Splunk sink mode ('s3' or 'notable_rest'; use 's3' for testing)"
-  echo "  - AwsAccountId (12-digit) and ImageUri (existing ECR URI for this Lambda image)"
+  echo "  - AwsAccountId, EcrRepositoryUri, ImageDigest, and BedrockAnalysisModelId"
   echo "  - If notable_rest: SplunkBaseUrl + SplunkApiTokenSecretArn (Secrets Manager ARN)"
   echo "  - Optional: SplunkApiTokenSecretField (default 'token') and SplunkNotableUpdatePath"
   if ! sam deploy --guided --template-file "$SAM_BUILT_TEMPLATE"; then

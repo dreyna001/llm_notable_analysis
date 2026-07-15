@@ -1,109 +1,45 @@
-# AWS RAG Operations
+# GovCloud RAG Retrieval Operations
 
-For Bedrock Knowledge Base source content and sync lifecycle, see
-[`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md).
+The `rag` capability adds bounded advisory context from the deployment's private
+OpenSearch SOC corpus before the main alert-analysis Bedrock call.
 
-## What This Controls
+## Analysis Use
 
-The `rag` capability profile adds advisory SOC context from an Amazon Bedrock
-Knowledge Base before the main notable-analysis Bedrock call. `lambda_handler.py`
-calls `retrieve_soc_context()` in `bedrock_kb_retrieval.py`, which uses the
-Bedrock Agent Runtime `Retrieve` API (`bedrock-agent-runtime`). Retrieved
-snippets are rendered with source labels, passed to `BedrockAnalyzer.analyze_ttp()`
-as `advisory_context`, and injected under the stable prompt header
-`SOC_OPERATIONAL_CONTEXT`. Retrieved content is not direct alert evidence.
+General SOC retrieval runs before initial analysis and may inform:
 
-**SPL query grounding is separate.** A dedicated Knowledge Base and
-`SPL_QUERY_RAG_*` settings govern Splunk token grounding in the SPL-generation
-call. See [`../investigation/SPL_OPERATIONS.md`](../investigation/SPL_OPERATIONS.md).
+- competing benign and adversary hypotheses
+- evidence gaps
+- analyst pivots
+- recommended validation and escalation actions
 
-## Recommended Starting Posture
+It may not create direct evidence, IOCs, verdict facts, or ATT&CK evidence. The
+alert remains the authoritative source for those fields.
 
-- Keep `CapabilityProfiles=core` for first deployment.
-- Add the `rag` profile only after the general Knowledge Base source documents
-  are curated and approved by the customer.
-- Set `RagBedrockKbId` to the approved Knowledge Base id. The SAM template
-  grants `bedrock:Retrieve` only when this id is non-empty.
-- Use `RagFailureMode=suppress` (default) so analysis continues when retrieval
-  is unavailable.
-- Provision the Bedrock Knowledge Base with **S3 Vectors** and
-  `amazon.titan-embed-text-v2:0` for typical SOC corpora (see
-  [`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md)). Local analyst
-  portal preview does **not** call Bedrock KB; it uses committed fixture docs
-  instead.
+Splunk/SIEM and Elasticsearch dictionaries are separate retrieval lanes used
+only during query generation. Selected-case chat uses case chunks and may add
+general SOC guidance as a separately labeled advisory lane.
 
-## Customer Decisions
+## Runtime Contract
 
-- Which Bedrock Knowledge Base contains approved SOC SOPs, escalation guidance,
-  field dictionaries, detection notes, and runbooks?
-- Who owns source document freshness and removal?
-- Should retrieval failures suppress context (`suppress`) or fail the analysis
-  (`fail_closed`)?
+- Backend: `RAG_RETRIEVAL_BACKEND=opensearch` for GovCloud production.
+- Scope: `RAG_TENANT_ID` is required and attached to every write and query.
+- Endpoint: `OPENSEARCH_ENDPOINT` is HTTPS, VPC-only, and IAM/SigV4 protected.
+- Indexes: case, SOC, Splunk dictionary, and optional Elastic dictionary are separate.
+- Query size and rendered context are bounded by lane-specific top-k and character budgets.
+- Retrieval metadata records corpus version, chunk IDs, source versions, scores, and embedding model.
+- Failure defaults to explicit degraded/suppressed behavior for advisory context; core case retrieval reports unavailable rather than inventing an answer.
 
-## Config Quick Reference
+Legacy `bedrock_kb` selection exists only for explicit non-GovCloud compatibility
+testing. It is not a fallback in `us-gov-east-1`.
 
-Set values through SAM/CloudFormation parameters in
-`deploy/aws/template-sam.yaml`. Do not manually edit Lambda environment
-variables in the console as the normal workflow.
+## Rollout
 
-| Area | SAM parameter | Lambda env |
-|------|---------------|------------|
-| Profile enablement | `CapabilityProfiles=core,rag` | `CAPABILITY_PROFILES` (sets `RAG_ENABLED=true`) |
-| Legacy enablement | `RagEnabled=true` | `RAG_ENABLED` (used only when the `rag` profile is not selected) |
-| Knowledge Base | `RagBedrockKbId` | `RAG_BEDROCK_KB_ID` |
-| Retrieval size | `RagMaxSnippets` | `RAG_MAX_SNIPPETS` |
-| Context budget | `RagContextBudgetChars` | `RAG_CONTEXT_BUDGET_CHARS` |
-| Failure behavior | `RagFailureMode` | `RAG_FAILURE_MODE` (`suppress` or `fail_closed`) |
+1. Deploy core processing with RAG profiles disabled.
+2. Provision and validate the private OpenSearch domain and indexes.
+3. Ingest and approve one corpus lane at a time.
+4. Enable `rag`, then the selected investigation profile, in staging.
+5. Confirm retrieval attribution and evidence separation in JSON reports.
+6. Promote the same corpus manifest, image digest, and settings through the customer release process.
 
-**Template defaults (`template-sam.yaml`):**
-
-| Parameter | Default |
-|-----------|---------|
-| `RagEnabled` | `false` |
-| `RagBedrockKbId` | (empty) |
-| `RagMaxSnippets` | `4` (range 1-20) |
-| `RagContextBudgetChars` | `1600` (range 1-10000) |
-| `RagFailureMode` | `suppress` |
-
-When the `rag` profile is selected, profile flags take precedence over
-`RagEnabled`. Prefer `CapabilityProfiles=core,rag` plus `RagBedrockKbId`; do
-not rely on a standalone `RagEnabled=true` in production.
-
-Retrieval passes `alert_text` as the query and requests
-`vectorSearchConfiguration.numberOfResults` equal to `RAG_MAX_SNIPPETS`.
-Rendered context is capped at `RAG_CONTEXT_BUDGET_CHARS`.
-
-**Failure behavior (`bedrock_kb_retrieval.py`):**
-
-| Mode | Missing KB id | Retrieve API error | No snippets |
-|------|---------------|--------------------|-------------|
-| `suppress` | Continue; `rag_status=failed` | Continue; `rag_status=failed` | Continue; `rag_status=no_match` |
-| `fail_closed` | Raise; analysis fails | Raise; analysis fails | Continue; `rag_status=no_match` |
-
-On success or soft failure, JSON report metadata includes `rag_status`,
-`rag_snippet_count`, and optionally `rag_message`.
-
-The template also exposes `RagRerankEnabled`, `RagRerankModel`, and
-`RagRerankModelFallback` as Lambda env vars. General SOC Bedrock KB retrieval
-does not call rerank today.
-
-## Validation And Rollout
-
-1. Deploy with `CapabilityProfiles=core` and verify markdown/JSON output.
-2. Populate and approve the Bedrock Knowledge Base; confirm it is queryable in
-   the deployment region.
-3. Redeploy with `CapabilityProfiles=core,rag` and `RagBedrockKbId=<kb-id>`.
-4. Confirm the Lambda role has `bedrock:Retrieve` on that Knowledge Base ARN.
-5. Process a representative notable. Confirm JSON metadata has `rag_status` and
-   `rag_snippet_count`, and that report text treats retrieved SOP content as
-   advisory rather than observed alert facts.
-6. Set `RagFailureMode=fail_closed` only when operators require retrieval
-   availability for every analysis.
-
-## Related Docs
-
-- [`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md)
-- [`../platform/CAPABILITY_PROFILES.md`](../platform/CAPABILITY_PROFILES.md)
-- [`../llm/LLM_INFERENCE_OPERATIONS.md`](../llm/LLM_INFERENCE_OPERATIONS.md)
-- [`../investigation/SPL_OPERATIONS.md`](../investigation/SPL_OPERATIONS.md)
-- [`../security/SECURITY_OPERATIONS.md`](../security/SECURITY_OPERATIONS.md)
+See [`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md) for ingestion,
+reconciliation, deletion, and redrive procedures.

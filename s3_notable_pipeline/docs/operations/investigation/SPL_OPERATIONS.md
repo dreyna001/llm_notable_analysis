@@ -1,7 +1,7 @@
 # SPL Operations
 
-Operator guide for Splunk SPL generation, optional Bedrock Knowledge Base
-grounding, bounded read-only REST or MCP execution, and optional query-result
+Operator guide for Splunk SPL generation, optional tenant-scoped OpenSearch
+dictionary grounding, bounded read-only REST or MCP execution, and optional query-result
 interpretation on AWS.
 
 ## What This Controls
@@ -45,7 +45,7 @@ supports one read-only investigation backend per deployment.
 - Lab generation-only: `CapabilityProfiles=core`,
   `SPL_QUERY_GENERATION_ENABLED=true`, leave execution off.
 - Before production execution: review generated SPL with Splunk admins; curate the
-  SPL grounding Knowledge Base when queries need approved `index=`, sourcetype,
+  Splunk dictionary index when queries need approved `index=`, sourcetype,
   macro, or datamodel tokens.
 - Keep `QUERY_RESULT_INTERPRETATION_ENABLED=false` until deterministic execution
   quality is accepted.
@@ -63,8 +63,8 @@ supports one read-only investigation backend per deployment.
 - Which SPL commands are allowed and which commands are denied?
 - Should Lambda call Splunk REST directly, or a customer-managed MCP bridge over
   HTTPS?
-- Which Bedrock Knowledge Base contains customer-approved SPL index, sourcetype,
-  macro, and data model guidance?
+- Which approved S3 dictionary sources and manifests define the customer's SPL
+  indexes, sourcetypes, macros, and data models?
 - What network path is required from Lambda to Splunk or the MCP bridge?
 - Should SPL grounding retrieval failures suppress generation or fall back to
   ungrounded output?
@@ -81,7 +81,7 @@ supports one read-only investigation backend per deployment.
 | Search policy | `SplunkSearchAllowedIndexes` / `SPLUNK_SEARCH_ALLOWED_INDEXES`; `SplunkSearchAllowedCommands` / `SPLUNK_SEARCH_ALLOWED_COMMANDS`; `SplunkSearchDeniedCommands` / `SPLUNK_SEARCH_DENIED_COMMANDS`; optional `SplunkSearchAllowedFields` / `SPLUNK_SEARCH_ALLOWED_FIELDS` (`_raw` is always dropped) |
 | Search bounds | `SplunkSearchMaxTimeRange` / `SPLUNK_SEARCH_MAX_TIME_RANGE` (default `24h`); `SplunkSearchMaxRows` / `SPLUNK_SEARCH_MAX_ROWS` (default `100`, max `1000`); `SplunkSearchTimeoutSeconds` / `SPLUNK_SEARCH_TIMEOUT_SECONDS` (default `30`, max `300`) |
 | Concurrency | `InvestigationMaxQueriesPerAlert` / `INVESTIGATION_MAX_QUERIES_PER_ALERT` (default `6`); `InvestigationMaxConcurrentQueries` / `INVESTIGATION_MAX_CONCURRENT_QUERIES` (default `6`, max `8`) |
-| SPL grounding KB | `SplQueryRagBedrockKbId` / `SPL_QUERY_RAG_BEDROCK_KB_ID` (non-empty id also sets `SPL_QUERY_RAG_ENABLED=true` in the template); `SPL_QUERY_RAG_MAX_SNIPPETS`; `SPL_QUERY_RAG_CONTEXT_BUDGET_CHARS`; `SPL_QUERY_RAG_FAILURE_MODE=suppress\|fallback_to_ungrounded` |
+| SPL dictionary grounding | `SplQueryRagEnabled` / `SPL_QUERY_RAG_ENABLED`; private OpenSearch settings; `SPL_QUERY_RAG_MAX_SNIPPETS`; `SPL_QUERY_RAG_CONTEXT_BUDGET_CHARS`; `SPL_QUERY_RAG_FAILURE_MODE=suppress\|fallback_to_ungrounded` |
 | Query interpretation | `QUERY_RESULT_INTERPRETATION_ENABLED` (env only); `QUERY_RESULT_INTERPRETATION_CONTEXT_BUDGET_CHARS`; `QUERY_RESULT_INTERPRETATION_MAX_SAMPLE_ROWS`; `QUERY_RESULT_INTERPRETATION_MAX_TOKENS` |
 
 SAM and CloudFormation parameters in `deploy/aws/template-sam.yaml` are the
@@ -95,9 +95,9 @@ differ only in prompt context attached to that call.
 
 | Mode | Typical flags | Prompt context | Operator tuning |
 |------|---------------|----------------|-----------------|
-| Alert-only | `core` + `SPL_QUERY_GENERATION_ENABLED=true`, no SPL grounding KB | Alert and hypotheses. No `SOC_OPERATIONAL_CONTEXT` unless `rag` is also enabled. | Contract validation rejects environment tokens such as `index=`, `sourcetype=`, macros, and `datamodel=` unless they appear in the alert or retrieved SPL grounding context. |
-| General SOC KB | `core,rag,spl_readonly`, no SPL grounding KB | Alert, hypotheses, and advisory `SOC_OPERATIONAL_CONTEXT` from the general KB. | Runbooks guide reasoning; they do not authorize environment SPL tokens by themselves. |
-| SPL grounding KB | `spl_readonly` plus non-empty `SplQueryRagBedrockKbId` | Alert, hypotheses, optional `SOC_OPERATIONAL_CONTEXT`, plus `SPL_QUERY_GROUNDING_CONTEXT` from the Splunk-focused KB. | Curate real indexes, sourcetypes, macros, datamodel notes, and examples. When grounding context is present, contract validation requires environment tokens to appear in the alert or that context. |
+| Alert-only | `core` + `SPL_QUERY_GENERATION_ENABLED=true`, no SPL dictionary grounding | Alert and hypotheses. No `SOC_OPERATIONAL_CONTEXT` unless `rag` is also enabled. | Contract validation rejects environment tokens such as `index=`, `sourcetype=`, macros, and `datamodel=` unless they appear in the alert or retrieved SPL grounding context. |
+| General SOC corpus | `core,rag,spl_readonly`, no SPL dictionary grounding | Alert, hypotheses, and advisory `SOC_OPERATIONAL_CONTEXT` from the general SOC index. | Runbooks guide reasoning; they do not authorize environment SPL tokens by themselves. |
+| SPL dictionary grounding | `spl_readonly` plus `SplQueryRagEnabled=true` | Alert, hypotheses, optional `SOC_OPERATIONAL_CONTEXT`, plus `SPL_QUERY_GROUNDING_CONTEXT` from the Splunk OpenSearch index. | Curate real indexes, sourcetypes, macros, datamodel notes, and examples. When grounding context is present, contract validation requires environment tokens to appear in the alert or that context. |
 
 When `SPL_QUERY_RAG_ENABLED=true` and grounding retrieval fails,
 `SPL_QUERY_RAG_FAILURE_MODE=suppress` (default) skips SPL generation;
@@ -150,8 +150,8 @@ such as `status`, `executor`, `query`, `result_count`, `sample_columns`, and
 The Lambda role needs `secretsmanager:GetSecretValue` for
 `SPLUNK_API_TOKEN_SECRET_ARN` when REST execution is configured, and for
 `SPLUNK_MCP_AUTH_SECRET_ARN` when MCP auth is configured. When SPL grounding is
-enabled, the role also needs `bedrock:Retrieve` scoped to the configured SPL
-Knowledge Base ARN.
+enabled, the role also needs signed HTTP access scoped to the configured
+OpenSearch domain and Splunk dictionary index.
 
 Store Splunk tokens in Secrets Manager as a plain string or JSON with the
 configured secret field (default `token`). Do not place tokens directly in SAM
@@ -161,8 +161,8 @@ reports.
 ## Validation And Rollout
 
 1. Deploy with `CapabilityProfiles=core` and confirm the base S3 report path.
-2. Create or select the SPL grounding Knowledge Base and confirm its snippets
-   contain only approved operational query guidance.
+2. Upload approved dictionary sources and a versioned ingestion manifest, then
+   confirm the Splunk OpenSearch index contains only approved query guidance.
 3. Enable `core,spl_readonly` in a non-production stack with narrow indexes and
    row limits.
 4. Verify generated SPL appears in JSON and markdown reports under

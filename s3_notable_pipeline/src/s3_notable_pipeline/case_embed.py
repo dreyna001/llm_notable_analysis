@@ -137,6 +137,8 @@ def embed_case_envelope(
             config=config,
             s3_client=s3_client,
             bedrock_client=bedrock_client,
+            envelope_key=key,
+            tenant_id=_case_tenant_id(envelope, config),
         )
         update_retrieval_status(
             dynamodb_client=dynamodb_client,
@@ -233,11 +235,14 @@ def rewrite_case_chunks(
     config: Config,
     s3_client: Any,
     bedrock_client: Any,
+    envelope_key: str = "",
+    tenant_id: str = "",
 ) -> None:
     """Delete existing chunk objects and write fresh embedded chunks."""
 
     prefix = f"{config.CASE_ARCHIVE_CHUNKS_PREFIX}/{case_id}/"
     _delete_prefix(bucket=bucket, prefix=prefix, s3_client=s3_client)
+    opensearch_documents: list[dict[str, Any]] = []
     for chunk in chunks:
         embedding = embed_text(chunk.search_text, config, bedrock_client)
         body = {
@@ -258,6 +263,30 @@ def rewrite_case_chunks(
             Key=f"{prefix}{chunk.chunk_id}.json",
             Body=json.dumps(body, ensure_ascii=False, default=str).encode("utf-8"),
             ContentType="application/json",
+        )
+        if _opensearch_case_enabled(config):
+            from .rag_ingestion import case_chunk_document
+
+            opensearch_documents.append(
+                case_chunk_document(
+                    chunk=body,
+                    embedding=embedding,
+                    bucket=bucket,
+                    envelope_key=envelope_key,
+                    tenant_id=tenant_id,
+                )
+            )
+    if opensearch_documents:
+        from .opensearch_retrieval import adapter_for, config_value
+        from .rag_ingestion import index_case_chunks
+
+        index_case_chunks(
+            index=str(config_value(config, "OPENSEARCH_CASE_INDEX", "case-chunks")),
+            case_id=case_id,
+            tenant_id=tenant_id,
+            documents=opensearch_documents,
+            adapter=adapter_for(config),
+            batch_size=int(config_value(config, "OPENSEARCH_BULK_BATCH_SIZE", 100)),
         )
 
 
@@ -320,6 +349,22 @@ def _load_case_envelope(bucket: str, key: str, s3_client: Any) -> dict[str, Any]
     if not isinstance(envelope, dict):
         raise ValueError("case envelope must be a JSON object")
     return envelope
+
+
+def _case_tenant_id(envelope: dict[str, Any], config: Config) -> str:
+    source = envelope.get("source") if isinstance(envelope.get("source"), dict) else {}
+    tenant = envelope.get("tenant_id") or source.get("tenant_id")
+    if tenant:
+        return str(tenant).strip()
+    from .opensearch_retrieval import config_value
+
+    return str(config_value(config, "RAG_TENANT_ID", "")).strip()
+
+
+def _opensearch_case_enabled(config: Config) -> bool:
+    from .opensearch_retrieval import opensearch_enabled
+
+    return opensearch_enabled(config, case=True)
 
 
 def _delete_prefix(bucket: str, prefix: str, s3_client: Any) -> None:

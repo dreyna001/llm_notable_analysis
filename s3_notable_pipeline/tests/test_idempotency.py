@@ -126,7 +126,9 @@ class IdempotencyTests(unittest.TestCase):
         )
 
         self.assertTrue(reservation.should_execute)
-        self.assertEqual(client.delete_calls, 1)
+        self.assertTrue(reservation.fencing_token)
+        self.assertEqual(client.delete_calls, 0)
+        self.assertEqual(client.update_calls, 1)
 
     def test_success_records_completion_and_failure_releases_lock(self) -> None:
         client = FakeDynamoDb()

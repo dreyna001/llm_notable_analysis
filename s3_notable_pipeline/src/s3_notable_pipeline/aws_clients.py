@@ -33,6 +33,22 @@ def aws_client(service_name: str, **overrides: Any) -> Any:
     return boto3.client(**kwargs)
 
 
+def aws_session() -> Any:
+    """Return a region-aware boto3 session for request signing."""
+
+    return boto3.Session(
+        region_name=os.getenv("AWS_REGION")
+        or os.getenv("AWS_DEFAULT_REGION")
+        or "us-east-1"
+    )
+
+
+def aws_credentials() -> Any:
+    """Return the current session credentials for SigV4 adapters."""
+
+    return aws_session().get_credentials()
+
+
 def s3_client() -> Any:
     """Return an S3 client."""
 
@@ -67,3 +83,9 @@ def lambda_client() -> Any:
     """Return an AWS Lambda client."""
 
     return aws_client("lambda")
+
+
+def sqs_client() -> Any:
+    """Return an SQS client."""
+
+    return aws_client("sqs")

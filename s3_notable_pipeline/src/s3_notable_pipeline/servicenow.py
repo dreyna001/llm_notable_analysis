@@ -14,7 +14,7 @@ from .config import Config
 from .idempotency import (
     begin_side_effect,
     complete_side_effect_success,
-    release_side_effect_lock,
+    mark_side_effect_uncertain,
 )
 from .runtime_security import validate_https_url
 
@@ -328,8 +328,24 @@ def create_servicenow_incident(
         if reservation.enabled:
             result_payload["idempotency_recorded"] = idempotency_recorded
             if not idempotency_recorded:
-                result_payload["idempotency_warning"] = "side-effect marker was not written"
+                result_payload["status"] = "uncertain"
+                result_payload["idempotency_status"] = "uncertain"
+                result_payload["idempotency_warning"] = (
+                    "external incident may have been created; marker reconciliation is required"
+                )
         return result_payload
     except requests.RequestException as exc:
-        release_side_effect_lock(reservation)
-        return {"status": "error", "operation": "create", "message": str(exc), "approval": approval or {}}
+        marker_recorded = mark_side_effect_uncertain(
+            reservation,
+            metadata={
+                "external_success": "unknown",
+                "uncertain_reason": "servicenow_request_outcome_unknown",
+            },
+        )
+        return {
+            "status": "uncertain",
+            "operation": "create",
+            "message": str(exc),
+            "idempotency_status": "uncertain" if marker_recorded else "marker_write_failed",
+            "approval": approval or {},
+        }

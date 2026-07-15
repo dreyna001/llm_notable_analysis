@@ -25,6 +25,8 @@ Optional deep dives:
 - **[Analyst portal operations](operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md)** — S3 case archive, DynamoDB CaseIndex, JWT API Gateway, static SPA, pinned-case Q&A.
 - **[SPL operations](operations/investigation/SPL_OPERATIONS.md)** — KB grounding, allowlists, Splunk REST/MCP read-only execution.
 - **[Planning todos](planning/TODOS.md)** — Generated TODO report (may be empty).
+- **[AWS GovCloud readiness plan](planning/AWS_GOVCLOUD_READINESS_PLAN.md)** — Implementation and validation plan for the `us-gov-east-1` target.
+- **[Azure/AWS parity plan](planning/AZURE_AWS_PARITY_PLAN.md)** — Implementation contract for Azure deployment mirroring the SAM stack (planning only).
 
 ## Topic shortcuts
 

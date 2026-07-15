@@ -33,9 +33,8 @@ Use template defaults unless CloudWatch evidence shows a need to change them.
 
 Additional posture:
 
-- Keep the default Bedrock inference profile supplied by the SAM template unless
-  the customer approves a model change and updates both `BEDROCK_MODEL_ID` and
-  matching IAM in the template.
+- Set the customer-approved GovCloud model or inference-profile ID explicitly;
+  the template has no product-wide model default.
 - Start with `CapabilityProfiles=core` and `SplunkSinkMode=s3` before enabling
   profiles that add extra Bedrock calls.
 - Increase Lambda timeout only after measuring end-to-end duration in
@@ -47,27 +46,15 @@ Additional posture:
 
 ### Which Bedrock model or inference profile should Lambda call?
 
-**SAM parameters:** `AwsAccountId` (required at deploy)
+**SAM parameters:** `BedrockAnalysisModelId` and `BedrockAnalysisModelArn`
 
 **Lambda env:** `BEDROCK_MODEL_ID`
 
-The SAM template sets `BEDROCK_MODEL_ID` to a **Claude Sonnet 4.6 inference
-profile ARN** in `us-east-1`:
-
-```text
-arn:aws:bedrock:us-east-1:<AwsAccountId>:inference-profile/us.anthropic.claude-sonnet-4-6
-```
-
-- `<AwsAccountId>` is the deploying account's 12-digit ID. There is no template
-  default; pass it at deploy time, for example
-  `sam deploy --parameter-overrides AwsAccountId=123456789012 ...`.
-- The inference profile slug is `us.anthropic.claude-sonnet-4-6`.
-- IAM on `notable-analyzer-s3` grants `bedrock:InvokeModel` on the same
-  inference profile ARN. Changing the model requires updating both the env var
-  and the IAM resource in `template-sam.yaml`.
-- The profile ARN region is **hardcoded to `us-east-1`** in the template even
-  when the stack deploys elsewhere. Confirm the account has access to this
-  inference profile in `us-east-1` before rollout.
+The GovCloud template copies `BedrockAnalysisModelId` into `BEDROCK_MODEL_ID` in
+`us-gov-east-1`. Select an ID actually enabled in the customer account; do not
+assume commercial-region model or cross-region inference-profile availability.
+Record the selected ID with release evidence and scope IAM to its foundation
+model or inference profile during customer operationalization.
 
 `lambda_handler.py` passes `config.BEDROCK_MODEL_ID` into `BedrockAnalyzer`;
 startup fails when it is empty.
@@ -107,10 +94,10 @@ chat falls back to `BEDROCK_MODEL_ID`.
 |----------|----------------|---------|
 | `notable-analyzer-s3` | `LambdaTimeoutSeconds` | `360` |
 | `notable-case-embed` (when CaseIndex enabled) | hardcoded | `900` |
-| `notable-portal-api` (when portal enabled) | `PortalChatTimeoutSec` | `300` |
+| `notable-portal-api` (when portal enabled) | `PortalChatTimeoutSec` | `29` |
 
-Portal HTTP API integration timeout is `30000` ms; long chat uses the optional
-Function URL path when `PortalChatFunctionUrlEnabled=true`.
+Portal chat is synchronous and bounded to 29 seconds so the Lambda and regional
+HTTP API integration share an honest timeout contract.
 
 ### How is structured output enforced?
 
@@ -156,15 +143,15 @@ Portal chat synthesis uses plain Converse text output (no tool schema),
 
 | Parameter | Lambda env | Default | Purpose |
 |-----------|------------|---------|---------|
-| `AwsAccountId` | _(ARN construction)_ | required | Account ID in inference profile ARN |
+| `BedrockAnalysisModelId` | `BEDROCK_MODEL_ID` | required | Customer-approved GovCloud model/profile ID |
+| `BedrockAnalysisModelArn` | _(IAM scope)_ | required | Exact model/profile ARN allowed for analysis |
 | `CapabilityProfiles` | `CAPABILITY_PROFILES` | `core` | Feature bundles affecting call count |
 | `LambdaTimeoutSeconds` | _(function Timeout)_ | `360` | `notable-analyzer-s3` max duration |
 | `LambdaMemorySize` | _(function MemorySize)_ | `512` | Analyzer memory |
 | `LambdaEphemeralStorageMb` | _(EphemeralStorage)_ | `512` | `/tmp` size |
 | `LambdaReservedConcurrentExecutions` | _(reserved concurrency)_ | `5` | Cap parallel invocations |
 
-`BEDROCK_MODEL_ID` is not a deploy-time parameter; the template sets it from
-`AwsAccountId` as shown above.
+The model ID and exact IAM resource ARN are explicit deployment inputs.
 
 ### Runtime-only env overrides (no SAM parameter)
 
@@ -187,11 +174,10 @@ for profile-driven Bedrock call counts and
 1. Run unit tests from `s3_notable_pipeline/`:
    `python -m pytest tests -q`.
 2. Deploy to a non-production account with
-   `CapabilityProfiles=core` and confirm `AwsAccountId` matches the target
-   account.
-3. Verify Bedrock access: account enabled for Claude Sonnet 4.6 inference
-   profile `us.anthropic.claude-sonnet-4-6` in `us-east-1`, and IAM allows
-   `bedrock:InvokeModel` on the deployed ARN.
+   `CapabilityProfiles=core` and confirm the model ID and ARN belong to the
+   target GovCloud partition and region.
+3. Verify the configured model is enabled in `us-gov-east-1` and IAM allows
+   `bedrock:InvokeModel` on the deployed model or inference profile.
 4. Upload one representative notable and confirm markdown and JSON under
    `reports/`. Check JSON metadata for `model`, `repair_attempted`, and
    absence of `poc_unstructured_output` on the happy path.
@@ -205,7 +191,7 @@ for profile-driven Bedrock call counts and
 
 Local tests mock Bedrock and validate orchestration. They do not validate
 account quotas, model access, cross-region inference profile routing, IAM
-conditions, or Bedrock Knowledge Base quality.
+conditions, or OpenSearch retrieval quality.
 
 ## Related Docs
 
@@ -216,10 +202,10 @@ conditions, or Bedrock Knowledge Base quality.
 - [`../../../deploy/aws/template-sam.yaml`](../../../deploy/aws/template-sam.yaml) —
   authoritative parameter defaults
 - [`../../../README.md`](../../../README.md) — fast-path deploy scripts
-- [`../rag/RAG_OPERATIONS.md`](../rag/RAG_OPERATIONS.md) — Bedrock KB retrieval
+- [`../rag/RAG_OPERATIONS.md`](../rag/RAG_OPERATIONS.md) — OpenSearch retrieval
   (advisory context, not observed evidence)
 - [`../analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../analyst_portal/ANALYST_PORTAL_OPERATIONS.md) —
-  portal chat timeout and Function URL
+  portal chat and regional API Gateway boundary
 - [`../../security/ATTACK_LLM_ANALYSIS.md`](../../security/ATTACK_LLM_ANALYSIS.md) —
   LLM boundary and validation posture
 - [`../../testing/TESTING.md`](../../testing/TESTING.md) — unit and integration

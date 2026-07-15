@@ -2,7 +2,7 @@
 
 Operator guide for the `elastic_readonly` capability profile on AWS: bounded
 Elasticsearch Query DSL generation (second Bedrock call), optional Elastic
-grounding from a dedicated Bedrock Knowledge Base, and read-only `_search`
+grounding from a dedicated tenant-scoped OpenSearch dictionary index, and read-only `_search`
 execution from Lambda. Complements
 [`../platform/CAPABILITY_PROFILES.md`](../platform/CAPABILITY_PROFILES.md) and
 [`../../README.md`](../../README.md) deploy parameters.
@@ -37,7 +37,7 @@ override legacy env values at Lambda startup.
 Keep Elasticsearch generation and execution disabled for the first `core`
 rollout. Enable only after the customer has approved the Elasticsearch base URL,
 index allowlist, field allowlist, row cap, time range, network path, API key
-secret, and Knowledge Base content used for Elastic grounding.
+secret, and approved dictionary content used for Elastic grounding.
 
 For parity deployments, start with:
 
@@ -74,8 +74,8 @@ quality is accepted.
 - Which index patterns are approved for read-only investigation?
 - Which fields are safe to use in generated queries and returned sample rows?
 - Which timestamp field defines the query time window?
-- Which Bedrock Knowledge Base contains approved Elastic index and field
-  guidance?
+- Which approved S3 dictionary sources and manifests define Elastic indexes,
+  fields, and timestamp guidance?
 - What Secrets Manager secret holds the Elasticsearch API key?
 - Whether wildcard index patterns are allowed
   (`ElasticsearchAllowWildcardIndexes`).
@@ -132,7 +132,7 @@ environment variables are the runtime representation of those parameters.
 | `ElasticsearchMaxTimeRange` | `ELASTICSEARCH_MAX_TIME_RANGE` | Max span in generated range filters (default `24h`) |
 | `ElasticsearchMaxRows` | `ELASTICSEARCH_MAX_ROWS` | Max `body.size` and execution row cap (default `100`, max `1000`) |
 | `ElasticsearchTimeoutSeconds` | `ELASTICSEARCH_TIMEOUT_SECONDS` | HTTP timeout and injected `body.timeout` (default `30`, max `300`) |
-| `ElasticsearchGroundingBedrockKbId` | `ELASTICSEARCH_GROUNDING_BEDROCK_KB_ID` | When non-empty, sets `ELASTICSEARCH_GROUNDING_ENABLED=true` |
+| `ElasticsearchGroundingEnabled` | `ELASTICSEARCH_GROUNDING_ENABLED` | Enables the tenant-scoped Elasticsearch dictionary index in OpenSearch |
 | — | `ELASTICSEARCH_GROUNDING_MAX_SNIPPETS` | Max grounding snippets (default `4`; env-only, not a SAM parameter) |
 | — | `ELASTICSEARCH_GROUNDING_CONTEXT_BUDGET_CHARS` | Grounding render budget (default `1600`; env-only) |
 | — | `ELASTICSEARCH_GROUNDING_FAILURE_MODE` | `suppress` or `fallback_to_ungrounded` (default `suppress`) |
@@ -142,8 +142,9 @@ environment variables are the runtime representation of those parameters.
 ## Validation And Rollout
 
 1. Deploy with `CapabilityProfiles=core` and confirm the base S3 report path.
-2. Create or select the Elastic grounding Knowledge Base and confirm its
-   snippets contain only approved index, field, and timestamp guidance.
+2. Upload approved dictionary sources and a versioned ingestion manifest, then
+   confirm the Elastic dictionary index contains only approved index, field,
+   and timestamp guidance.
 3. Store the API key in Secrets Manager as either a plain secret string or JSON
    with `api_key` or `token`.
 4. Enable `core,elastic_readonly` in a non-production stack with a narrow index
@@ -191,8 +192,8 @@ into reports or optional query-result interpretation.
 
 The Lambda role needs `secretsmanager:GetSecretValue` only for
 `ElasticsearchApiKeySecretArn` when configured (not the `*` placeholder). If
-Elastic grounding is enabled, the Lambda role also needs `bedrock:Retrieve`
-scoped to the configured Knowledge Base ARN.
+Elastic grounding is enabled, the Lambda role also needs signed HTTP access
+scoped to the configured OpenSearch domain and Elastic dictionary index.
 
 The Elasticsearch API key must not be placed directly in SAM parameters,
 CloudFormation templates, Lambda environment variables, logs, or reports.

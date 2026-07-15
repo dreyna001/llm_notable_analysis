@@ -13,6 +13,12 @@ $env:AWS_DEFAULT_REGION = if ($env:AWS_DEFAULT_REGION) { $env:AWS_DEFAULT_REGION
 $inputBucket = if ($env:INPUT_BUCKET_NAME) { $env:INPUT_BUCKET_NAME } else { "notable-local-input" }
 $outputBucket = if ($env:OUTPUT_BUCKET_NAME) { $env:OUTPUT_BUCKET_NAME } else { "notable-local-output" }
 $tableName = if ($env:SIDE_EFFECT_IDEMPOTENCY_TABLE) { $env:SIDE_EFFECT_IDEMPOTENCY_TABLE } else { "notable-local-side-effects" }
+$analyzerQueue = if ($env:ANALYZER_QUEUE_NAME) { $env:ANALYZER_QUEUE_NAME } else { "notable-local-analyzer" }
+$analyzerDlq = if ($env:ANALYZER_DLQ_NAME) { $env:ANALYZER_DLQ_NAME } else { "notable-local-analyzer-dlq" }
+$embedQueue = if ($env:CASE_EMBED_QUEUE_NAME) { $env:CASE_EMBED_QUEUE_NAME } else { "notable-local-case-embed" }
+$embedDlq = if ($env:CASE_EMBED_DLQ_NAME) { $env:CASE_EMBED_DLQ_NAME } else { "notable-local-case-embed-dlq" }
+$ragQueue = if ($env:RAG_INGEST_QUEUE_NAME) { $env:RAG_INGEST_QUEUE_NAME } else { "notable-local-rag-ingest" }
+$ragDlq = if ($env:RAG_INGEST_DLQ_NAME) { $env:RAG_INGEST_DLQ_NAME } else { "notable-local-rag-ingest-dlq" }
 
 function Invoke-AwsLocal {
     aws --endpoint-url $endpoint @args
@@ -39,6 +45,23 @@ function Ensure-Secret {
     }
 }
 
+function Ensure-QueuePair {
+    param(
+        [string]$QueueName,
+        [string]$DlqName
+    )
+    $dlqUrl = Invoke-AwsLocal sqs create-queue --queue-name $DlqName --query QueueUrl --output text
+    $dlqArn = Invoke-AwsLocal sqs get-queue-attributes `
+        --queue-url $dlqUrl `
+        --attribute-names QueueArn `
+        --query Attributes.QueueArn `
+        --output text
+    $redrive = "{`"deadLetterTargetArn`":`"$dlqArn`",`"maxReceiveCount`":`"5`"}"
+    Invoke-AwsLocal sqs create-queue `
+        --queue-name $QueueName `
+        --attributes "RedrivePolicy=$redrive,VisibilityTimeout=900" | Out-Null
+}
+
 Ensure-Bucket $inputBucket
 Ensure-Bucket $outputBucket
 
@@ -54,6 +77,10 @@ if ($LASTEXITCODE -ne 0) {
         --table-name $tableName `
         --time-to-live-specification "Enabled=true,AttributeName=expires_at" | Out-Null
 }
+
+Ensure-QueuePair $analyzerQueue $analyzerDlq
+Ensure-QueuePair $embedQueue $embedDlq
+Ensure-QueuePair $ragQueue $ragDlq
 
 Ensure-Secret "local/splunk/api-token" '{"token":"local-splunk-token"}'
 Ensure-Secret "local/servicenow/api-token" '{"token":"local-servicenow-token"}'

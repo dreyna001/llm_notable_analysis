@@ -1,0 +1,28 @@
+# vLLM systemd drop-in for RTX PRO 6000 Blackwell + 5 concurrent portal analysts
+#
+# This file does NOT replace deploy/systemd/vllm.service.
+# Install on the host as:
+#   sudo mkdir -p /etc/systemd/system/vllm.service.d
+#   sudo cp vllm.rtx-pro-6000-blackwell-5analysts.drop-in.example /etc/systemd/system/vllm.service.d/override.conf
+#   sudo systemctl daemon-reload
+#   sudo systemctl restart vllm
+#
+# Pair with:
+#   config.env.rtx-pro-6000-blackwell-5analysts.example
+#   config.portal.env.rtx-pro-6000-blackwell-5analysts.example
+#
+# Validate with docs/operations/llm/LLM_INFERENCE_BENCHMARKING.md before go-live.
+# Roll back to the packaged unit (remove the drop-in) if OOM or latency regressions appear.
+
+[Service]
+ExecStart=
+ExecStart=/opt/vllm/venv/bin/python -m vllm.entrypoints.openai.api_server \
+    --model /opt/models/gemma-4-31B-it \
+    --served-model-name gemma-4-31B-it \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --gpu-memory-utilization 0.92 \
+    --max-model-len 32768 \
+    --max-num-seqs 8 \
+    --dtype auto \
+    --distributed-executor-backend mp

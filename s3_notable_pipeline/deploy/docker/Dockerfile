@@ -1,7 +1,6 @@
-# FROM is org-specific: replace <image> and path with a Lambda Python 3.12 base you can pull.
-# SAM parameter ImageUri must point at the same handler image after you build and push to ECR.
-# Use AWS Lambda Python 3.12 base image
-FROM <image>.dkr.ecr.us-east-1.amazonaws.com/ironbank/lambda.python:312
+# Production builds should override this with a customer-approved, digest-pinned mirror.
+ARG LAMBDA_BASE_IMAGE=public.ecr.aws/lambda/python:3.12
+FROM ${LAMBDA_BASE_IMAGE}
 
 # Copy requirements file
 COPY requirements.txt ${LAMBDA_TASK_ROOT}

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -14,6 +17,7 @@ _VALID_ANSWER_STATUSES = frozenset(
     {"answered", "unknown", "refused", "insufficient_context"}
 )
 _USER_UPDATED_INDEX = "UserUpdatedIndex"
+_CLIENT_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._-]{8,128}$")
 
 
 class ChatSessionNotFoundError(LookupError):
@@ -269,6 +273,82 @@ def validate_chat_history_request(
         )
 
 
+def get_idempotent_chat_response(
+    *,
+    config: Config,
+    dynamodb_client: Any,
+    mode: str,
+    selected_case_id: str | None,
+    question: str,
+    requested_session_id: str | None,
+    user_id: str | None,
+    client_request_id: str,
+) -> dict[str, Any] | None:
+    """Return a previously stored response for a retry-stable client key."""
+
+    if not config.CASE_QA_CHAT_HISTORY_ENABLED:
+        return None
+    normalized_user = _normalize_user_id(user_id)
+    if normalized_user is None:
+        raise ValueError("authenticated user is required for chat history.")
+    request_id = _validate_client_request_id(client_request_id)
+    session_id = _request_session_id(
+        user_id=normalized_user,
+        client_request_id=request_id,
+        requested_session_id=requested_session_id,
+    )
+    if requested_session_id:
+        _load_chat_session(
+            config=config,
+            dynamodb_client=dynamodb_client,
+            session_id=_validate_session_id(session_id),
+            user_id=normalized_user,
+            require_owner=True,
+            validate_scope=(mode, selected_case_id),
+        )
+    else:
+        record = _load_chat_session_if_present(
+            config=config,
+            dynamodb_client=dynamodb_client,
+            session_id=session_id,
+        )
+        if record is None:
+            return None
+        if _normalize_user_id(record.get("user_id")) != normalized_user:
+            return None
+        if record.get("mode") != mode or (record.get("selected_case_id") or None) != selected_case_id:
+            raise ValueError("client_request_id scope does not match the chat request.")
+
+    turn_id = _turn_id(request_id, session_id=session_id)
+    item = _get_message_item(
+        config=config,
+        dynamodb_client=dynamodb_client,
+        session_id=session_id,
+        turn_id=turn_id,
+        role="assistant",
+    )
+    if not item:
+        return None
+    if item.get("request_fingerprint", {}).get("S") != _request_fingerprint(
+        mode=mode,
+        selected_case_id=selected_case_id,
+        question=question,
+    ):
+        raise ValueError("client_request_id was reused for a different chat request.")
+    payload: dict[str, Any] = {
+        "answer": item.get("content", {}).get("S", ""),
+        "answer_status": item.get("answer_status", {}).get("S", "answered"),
+        "session_id": session_id,
+    }
+    context_usage = item.get("context_usage", {}).get("S")
+    if context_usage:
+        try:
+            payload["context_usage"] = json.loads(context_usage)
+        except (TypeError, ValueError):
+            pass
+    return payload
+
+
 def persist_chat_history(
     *,
     config: Config,
@@ -279,6 +359,7 @@ def persist_chat_history(
     requested_session_id: str | None,
     user_id: str | None,
     response: dict[str, Any],
+    client_request_id: str | None = None,
 ) -> str:
     """Persist one bounded chat turn and return the active session id."""
     if not config.CASE_QA_CHAT_HISTORY_ENABLED:
@@ -288,6 +369,12 @@ def persist_chat_history(
     if normalized_user is None:
         raise ValueError("authenticated user is required for chat history.")
 
+    normalized_request_id = (
+        _validate_client_request_id(client_request_id)
+        if client_request_id
+        else None
+    )
+
     session_id = _resolve_session_id(
         config=config,
         dynamodb_client=dynamodb_client,
@@ -295,6 +382,35 @@ def persist_chat_history(
         selected_case_id=selected_case_id,
         requested_session_id=requested_session_id,
         user_id=normalized_user,
+        client_request_id=normalized_request_id,
+    )
+    turn_id = _turn_id(normalized_request_id, session_id=session_id)
+    if normalized_request_id:
+        existing = _get_message_item(
+            config=config,
+            dynamodb_client=dynamodb_client,
+            session_id=session_id,
+            turn_id=turn_id,
+            role="assistant",
+        )
+        if existing:
+            expected_fingerprint = _request_fingerprint(
+                mode=mode,
+                selected_case_id=selected_case_id,
+                question=question,
+            )
+            if existing.get("request_fingerprint", {}).get("S") != expected_fingerprint:
+                raise ValueError("client_request_id was reused for a different chat request.")
+            return session_id
+
+    reserved = _reserve_turn_capacity(
+        config=config,
+        dynamodb_client=dynamodb_client,
+        session_id=session_id,
+        user_id=normalized_user,
+        mode=mode,
+        selected_case_id=selected_case_id,
+        turn_id=turn_id,
     )
     max_bytes = max(1, int(config.CASE_QA_MAX_STORED_MESSAGE_BYTES))
     user_content = truncate_stored_message(question, max_bytes)
@@ -315,52 +431,127 @@ def persist_chat_history(
     now = _utc_now()
     expires_at = _session_expires_at(config, now=now)
     expires_epoch = int(expires_at.timestamp())
-    user_message_id = str(uuid.uuid4())
-    assistant_message_id = str(uuid.uuid4())
+    if normalized_request_id:
+        expires_epoch = min(
+            expires_epoch,
+            int(now.timestamp()) + _idempotency_retention_seconds(config),
+        )
+    user_message_id = f"turn#{turn_id}#user" if normalized_request_id else str(uuid.uuid4())
+    assistant_message_id = (
+        f"turn#{turn_id}#assistant" if normalized_request_id else str(uuid.uuid4())
+    )
     user_created = now.isoformat()
     assistant_created = (now + timedelta(microseconds=1)).isoformat()
 
-    dynamodb_client.put_item(
-        TableName=config.CHAT_MESSAGES_TABLE,
-        Item={
-            "session_id": {"S": session_id},
-            "created_at_message_id": {"S": _message_sort_key(user_created, user_message_id)},
-            "message_id": {"S": user_message_id},
-            "role": {"S": "user"},
-            "content": {"S": user_content},
-            "created_at": {"S": user_created},
-            "expires_at_epoch": {"N": str(expires_epoch)},
+    user_item: dict[str, Any] = {
+        "session_id": {"S": session_id},
+        "created_at_message_id": {
+            "S": (
+                f"turn#{turn_id}#user"
+                if normalized_request_id
+                else _message_sort_key(user_created, user_message_id)
+            )
         },
-    )
+        "message_id": {"S": user_message_id},
+        "role": {"S": "user"},
+        "content": {"S": user_content},
+        "created_at": {"S": user_created},
+        "expires_at_epoch": {"N": str(expires_epoch)},
+    }
     assistant_item: dict[str, Any] = {
         "session_id": {"S": session_id},
-        "created_at_message_id": {"S": _message_sort_key(assistant_created, assistant_message_id)},
+        "created_at_message_id": {
+            "S": (
+                f"turn#{turn_id}#assistant"
+                if normalized_request_id
+                else _message_sort_key(assistant_created, assistant_message_id)
+            )
+        },
         "message_id": {"S": assistant_message_id},
         "role": {"S": "assistant"},
         "content": {"S": assistant_content},
         "created_at": {"S": assistant_created},
         "expires_at_epoch": {"N": str(expires_epoch)},
     }
+    if normalized_request_id:
+        fingerprint = _request_fingerprint(
+            mode=mode,
+            selected_case_id=selected_case_id,
+            question=question,
+        )
+        user_item["client_request_id"] = {"S": normalized_request_id}
+        user_item["request_fingerprint"] = {"S": fingerprint}
     if assistant_answer_status is not None:
         assistant_item["answer_status"] = {"S": assistant_answer_status}
-    dynamodb_client.put_item(
-        TableName=config.CHAT_MESSAGES_TABLE,
-        Item=assistant_item,
-    )
-    dynamodb_client.update_item(
-        TableName=config.CHAT_SESSIONS_TABLE,
-        Key={"session_id": {"S": session_id}},
-        UpdateExpression=(
-            "SET updated_at = :updated_at, updated_at_session_id = :updated_sort, "
-            "expires_at = :expires_at, expires_at_epoch = :expires_at_epoch"
-        ),
-        ExpressionAttributeValues={
-            ":updated_at": {"S": now.isoformat()},
-            ":updated_sort": {"S": _session_sort_key(now.isoformat(), session_id)},
-            ":expires_at": {"S": expires_at.isoformat()},
-            ":expires_at_epoch": {"N": str(expires_epoch)},
-        },
-    )
+    if normalized_request_id:
+        assistant_item["client_request_id"] = {"S": normalized_request_id}
+        assistant_item["request_fingerprint"] = {"S": fingerprint}
+        if response.get("context_usage") is not None:
+            assistant_item["context_usage"] = {
+                "S": truncate_stored_message(
+                    json.dumps(response["context_usage"], separators=(",", ":")),
+                    max_bytes,
+                )
+            }
+    created_keys: list[dict[str, Any]] = []
+    try:
+        if reserved and hasattr(dynamodb_client, "transact_write_items"):
+            _transact_persist_turn(
+                config=config,
+                dynamodb_client=dynamodb_client,
+                session_id=session_id,
+                turn_id=turn_id,
+                user_item=user_item,
+                assistant_item=assistant_item,
+                now=now,
+                expires_at=expires_at,
+            )
+        else:
+            dynamodb_client.put_item(
+                TableName=config.CHAT_MESSAGES_TABLE,
+                Item=user_item,
+            )
+            created_keys.append(
+                {
+                    "session_id": user_item["session_id"],
+                    "created_at_message_id": user_item["created_at_message_id"],
+                }
+            )
+            dynamodb_client.put_item(
+                TableName=config.CHAT_MESSAGES_TABLE,
+                Item=assistant_item,
+            )
+            created_keys.append(
+                {
+                    "session_id": assistant_item["session_id"],
+                    "created_at_message_id": assistant_item["created_at_message_id"],
+                }
+            )
+            dynamodb_client.update_item(
+                TableName=config.CHAT_SESSIONS_TABLE,
+                Key={"session_id": {"S": session_id}},
+                UpdateExpression=(
+                    "SET updated_at = :updated_at, updated_at_session_id = :updated_sort, "
+                    "expires_at = :expires_at, expires_at_epoch = :expires_at_epoch"
+                ),
+                ExpressionAttributeValues={
+                    ":updated_at": {"S": now.isoformat()},
+                    ":updated_sort": {"S": _session_sort_key(now.isoformat(), session_id)},
+                    ":expires_at": {"S": expires_at.isoformat()},
+                    ":expires_at_epoch": {"N": str(expires_epoch)},
+                },
+            )
+    except Exception:
+        for key in created_keys:
+            dynamodb_client.delete_item(TableName=config.CHAT_MESSAGES_TABLE, Key=key)
+        if reserved:
+            _release_turn_capacity(
+                config=config,
+                dynamodb_client=dynamodb_client,
+                session_id=session_id,
+                turn_id=turn_id,
+            )
+        raise
     return session_id
 
 
@@ -372,6 +563,7 @@ def _resolve_session_id(
     selected_case_id: str | None,
     requested_session_id: str | None,
     user_id: str,
+    client_request_id: str | None = None,
 ) -> str:
     now = _utc_now()
     expires_at = _session_expires_at(config, now=now)
@@ -408,7 +600,11 @@ def _resolve_session_id(
         dynamodb_client=dynamodb_client,
         user_id=user_id,
     )
-    session_id = str(uuid.uuid4())
+    session_id = _request_session_id(
+        user_id=user_id,
+        client_request_id=client_request_id,
+        requested_session_id=None,
+    )
     created_at = now.isoformat()
     dynamodb_client.put_item(
         TableName=config.CHAT_SESSIONS_TABLE,
@@ -423,10 +619,261 @@ def _resolve_session_id(
             "updated_at_session_id": {"S": _session_sort_key(created_at, session_id)},
             "expires_at": {"S": expires_at.isoformat()},
             "expires_at_epoch": {"N": str(expires_epoch)},
+            "message_count": {"N": "0"},
+            "pending_turns": {"M": {}},
         },
         ConditionExpression="attribute_not_exists(session_id)",
     )
     return session_id
+
+
+def _reserve_turn_capacity(
+    *,
+    config: Config,
+    dynamodb_client: Any,
+    session_id: str,
+    user_id: str,
+    mode: str,
+    selected_case_id: str | None,
+    turn_id: str,
+) -> bool:
+    """Atomically reserve two message slots when the native client supports it."""
+
+    if not hasattr(dynamodb_client, "transact_write_items"):
+        return False
+    record = _load_chat_session(
+        config=config,
+        dynamodb_client=dynamodb_client,
+        session_id=session_id,
+        user_id=user_id,
+        require_owner=True,
+        validate_scope=(mode, selected_case_id),
+    )
+    pending = record.get("pending_turns") or {}
+    if isinstance(pending, dict) and turn_id in pending:
+        return True
+    if "pending_turns" not in record:
+        dynamodb_client.update_item(
+            TableName=config.CHAT_SESSIONS_TABLE,
+            Key={"session_id": {"S": session_id}},
+            UpdateExpression="SET pending_turns = :empty",
+            ConditionExpression="attribute_not_exists(pending_turns)",
+            ExpressionAttributeValues={":empty": {"M": {}}},
+        )
+        record = _load_chat_session(
+            config=config,
+            dynamodb_client=dynamodb_client,
+            session_id=session_id,
+            user_id=user_id,
+            require_owner=True,
+            validate_scope=(mode, selected_case_id),
+        )
+    current = int(record.get("message_count") or 0)
+    max_messages = max(1, int(config.CASE_QA_MAX_MESSAGES_PER_SESSION))
+    if current + 2 > max_messages:
+        raise ValueError(
+            f"Chat session exceeded the configured message limit of {max_messages}."
+        )
+    try:
+        dynamodb_client.update_item(
+            TableName=config.CHAT_SESSIONS_TABLE,
+            Key={"session_id": {"S": session_id}},
+            UpdateExpression=(
+                "SET message_count = if_not_exists(message_count, :current) + :two, "
+                "pending_turns.#turn = :reserved"
+            ),
+            ConditionExpression=(
+                "attribute_exists(session_id) AND "
+                "(attribute_not_exists(message_count) OR message_count + :two <= :maximum) AND "
+                "attribute_not_exists(pending_turns.#turn)"
+            ),
+            ExpressionAttributeNames={"#turn": turn_id},
+            ExpressionAttributeValues={
+                ":current": {"N": str(current)},
+                ":two": {"N": "2"},
+                ":maximum": {"N": str(max_messages)},
+                ":reserved": {"N": str(_now_epoch())},
+            },
+        )
+    except Exception as exc:
+        latest = _load_chat_session(
+            config=config,
+            dynamodb_client=dynamodb_client,
+            session_id=session_id,
+            user_id=user_id,
+            require_owner=True,
+            validate_scope=(mode, selected_case_id),
+        )
+        if turn_id in (latest.get("pending_turns") or {}):
+            return True
+        if "ConditionalCheckFailed" in str(exc):
+            raise ValueError(
+                f"Chat session exceeded the configured message limit of {max_messages}."
+            ) from exc
+        raise
+    return True
+
+
+def _release_turn_capacity(
+    *,
+    config: Config,
+    dynamodb_client: Any,
+    session_id: str,
+    turn_id: str,
+) -> None:
+    try:
+        dynamodb_client.update_item(
+            TableName=config.CHAT_SESSIONS_TABLE,
+            Key={"session_id": {"S": session_id}},
+            UpdateExpression="SET message_count = message_count - :two REMOVE pending_turns.#turn",
+            ConditionExpression="attribute_exists(pending_turns.#turn)",
+            ExpressionAttributeNames={"#turn": turn_id},
+            ExpressionAttributeValues={":two": {"N": "2"}},
+        )
+    except Exception:
+        return
+
+
+def _transact_persist_turn(
+    *,
+    config: Config,
+    dynamodb_client: Any,
+    session_id: str,
+    turn_id: str,
+    user_item: dict[str, Any],
+    assistant_item: dict[str, Any],
+    now: datetime,
+    expires_at: datetime,
+) -> None:
+    expires_epoch = int(expires_at.timestamp())
+    dynamodb_client.transact_write_items(
+        TransactItems=[
+            {
+                "Put": {
+                    "TableName": config.CHAT_MESSAGES_TABLE,
+                    "Item": user_item,
+                    "ConditionExpression": "attribute_not_exists(session_id)",
+                }
+            },
+            {
+                "Put": {
+                    "TableName": config.CHAT_MESSAGES_TABLE,
+                    "Item": assistant_item,
+                    "ConditionExpression": "attribute_not_exists(session_id)",
+                }
+            },
+            {
+                "Update": {
+                    "TableName": config.CHAT_SESSIONS_TABLE,
+                    "Key": {"session_id": {"S": session_id}},
+                    "UpdateExpression": (
+                        "SET updated_at = :updated_at, updated_at_session_id = :updated_sort, "
+                        "expires_at = :expires_at, expires_at_epoch = :expires_at_epoch "
+                        "REMOVE pending_turns.#turn"
+                    ),
+                    "ConditionExpression": "attribute_exists(pending_turns.#turn)",
+                    "ExpressionAttributeNames": {"#turn": turn_id},
+                    "ExpressionAttributeValues": {
+                        ":updated_at": {"S": now.isoformat()},
+                        ":updated_sort": {"S": _session_sort_key(now.isoformat(), session_id)},
+                        ":expires_at": {"S": expires_at.isoformat()},
+                        ":expires_at_epoch": {"N": str(expires_epoch)},
+                    },
+                }
+            },
+        ]
+    )
+
+
+def _request_session_id(
+    *,
+    user_id: str,
+    client_request_id: str | None,
+    requested_session_id: str | None,
+) -> str:
+    if requested_session_id:
+        return _validate_session_id(requested_session_id)
+    if client_request_id:
+        return str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"portal-chat-session:{user_id}:{client_request_id}",
+            )
+        )
+    return str(uuid.uuid4())
+
+
+def _turn_id(client_request_id: str | None, *, session_id: str) -> str:
+    if client_request_id is None:
+        return str(uuid.uuid4())
+    normalized = _validate_client_request_id(client_request_id)
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"portal-chat:{session_id}:{normalized}"))
+
+
+def _validate_client_request_id(value: str) -> str:
+    normalized = str(value or "").strip()
+    if not _CLIENT_REQUEST_ID_RE.fullmatch(normalized):
+        raise ValueError("client_request_id must be 8-128 URL-safe characters")
+    return normalized
+
+
+def _idempotency_retention_seconds(config: Config) -> int:
+    if hasattr(config, "PORTAL_CHAT_IDEMPOTENCY_RETENTION_SECONDS"):
+        raw = getattr(config, "PORTAL_CHAT_IDEMPOTENCY_RETENTION_SECONDS")
+    else:
+        raw = os.getenv("PORTAL_CHAT_IDEMPOTENCY_RETENTION_SECONDS", "86400")
+    try:
+        return max(60, min(int(raw), 7 * 24 * 60 * 60))
+    except (TypeError, ValueError):
+        return 86400
+
+
+def _request_fingerprint(
+    *,
+    mode: str,
+    selected_case_id: str | None,
+    question: str,
+) -> str:
+    body = json.dumps(
+        [mode, selected_case_id or None, question],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(body).hexdigest()
+
+
+def _get_message_item(
+    *,
+    config: Config,
+    dynamodb_client: Any,
+    session_id: str,
+    turn_id: str,
+    role: str,
+) -> dict[str, Any] | None:
+    response = dynamodb_client.get_item(
+        TableName=config.CHAT_MESSAGES_TABLE,
+        Key={
+            "session_id": {"S": session_id},
+            "created_at_message_id": {"S": f"turn#{turn_id}#{role}"},
+        },
+        ConsistentRead=True,
+    )
+    return response.get("Item")
+
+
+def _load_chat_session_if_present(
+    *,
+    config: Config,
+    dynamodb_client: Any,
+    session_id: str,
+) -> dict[str, Any] | None:
+    response = dynamodb_client.get_item(
+        TableName=config.CHAT_SESSIONS_TABLE,
+        Key={"session_id": {"S": session_id}},
+        ConsistentRead=True,
+    )
+    item = response.get("Item")
+    return _from_item(item) if item else None
 
 
 def _enforce_user_session_cap(
@@ -638,6 +1085,15 @@ def _from_item(item: dict[str, Any]) -> dict[str, Any]:
             row[key] = value["N"]
         elif "NULL" in value:
             row[key] = None
+        elif "M" in value:
+            row[key] = _from_item(value["M"])
+        elif "L" in value:
+            row[key] = [
+                _from_item(child["M"])
+                if "M" in child
+                else next(iter(child.values()), None)
+                for child in value["L"]
+            ]
     if "selected_case_id" in row and row["selected_case_id"] == "":
         row["selected_case_id"] = None
     return row

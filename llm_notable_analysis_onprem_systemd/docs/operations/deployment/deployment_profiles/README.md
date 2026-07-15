@@ -31,6 +31,21 @@ how a particular host should run the same features.
 Treat values as **recommended starting points**, not guarantees. Load-test on the
 actual host before increasing `MAX_WORKERS`, `--max-num-seqs`, or Splunk concurrency.
 
+## Customer Workload Templates
+
+Full env copies tuned for **RTX PRO 6000 Blackwell + ~400 large notables/day + 5 concurrent portal analysts**.
+These do not replace the generic defaults in [`config.env.example`](../../../../config.env.example).
+
+| File | Install path |
+|------|--------------|
+| [`config.env.rtx-pro-6000-blackwell-5analysts.example`](../../../../config.env.rtx-pro-6000-blackwell-5analysts.example) | `/etc/notable-analyzer/config.env` |
+| [`config.portal.env.rtx-pro-6000-blackwell-5analysts.example`](../../../../config.portal.env.rtx-pro-6000-blackwell-5analysts.example) | `/etc/notable-analyzer/portal.env` |
+| [`vllm.rtx-pro-6000-blackwell-5analysts.drop-in.example`](../../../../deploy/systemd/vllm.rtx-pro-6000-blackwell-5analysts.drop-in.example) | `/etc/systemd/system/vllm.service.d/override.conf` |
+
+Key overrides versus the generic template: `CAPABILITY_PROFILES=core,analyst_portal`,
+`CONCURRENCY_ENABLED=true`, `MAX_WORKERS=2`, `MAX_QUEUE_DEPTH=16`,
+`PORTAL_CHAT_MAX_CONCURRENCY=8`, and vLLM `--max-num-seqs 8`.
+
 ## Profiles
 
 | Profile ID | Hardware | vLLM unit | Status |

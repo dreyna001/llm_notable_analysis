@@ -5,7 +5,7 @@ services:
       - "4566:4566"
       - "4510-4559:4510-4559"
     environment:
-      - SERVICES=s3,secretsmanager,dynamodb
+      - SERVICES=s3,secretsmanager,dynamodb,sqs
       - AWS_DEFAULT_REGION=us-east-1
       - DEBUG=0
     volumes:

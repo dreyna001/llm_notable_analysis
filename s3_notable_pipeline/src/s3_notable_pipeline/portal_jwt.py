@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import jwt
@@ -80,6 +81,82 @@ def resolve_portal_user_id(event: dict[str, Any], config: Config) -> str | None:
             user_id = str(iam.get("userId") or iam.get("userArn") or "").strip()
             return user_id or None
     return None
+
+
+def portal_claims_authorized(claims: dict[str, Any] | None, config: Config) -> bool:
+    """Require the configured analyst grant when a grant is configured.
+
+    The base Config intentionally does not own portal deployment policy knobs.
+    Read them with getattr so older Config instances remain compatible, while
+    still allowing the environment contract to be used by lightweight tests
+    and deployment adapters that do not extend Config.
+    """
+
+    required_role = _setting(config, "PORTAL_REQUIRED_ANALYST_ROLE")
+    required_scope = _setting(config, "PORTAL_REQUIRED_ANALYST_SCOPE")
+    if not required_role and not required_scope:
+        # A JWT-enabled portal must have an explicit analyst grant.  Config
+        # validation normally enforces this; retain the boundary here for
+        # older Config objects and direct handler tests.
+        return not (
+            bool(getattr(config, "PORTAL_ENABLED", False))
+            and str(getattr(config, "PORTAL_AUTH_MODE", "jwt")).lower() == "jwt"
+        )
+    if not isinstance(claims, dict):
+        return False
+
+    if required_role:
+        roles = _claim_values(
+            claims,
+            "roles",
+            "role",
+            "app_role",
+            "application_role",
+        )
+        if not roles.intersection(_configured_values(required_role)):
+            return False
+    if required_scope:
+        scopes = _claim_values(claims, "scope", "scp", "scopes")
+        required_scopes = _configured_values(required_scope)
+        if not required_scopes.issubset(scopes):
+            return False
+    return True
+
+
+def _setting(config: Config, name: str) -> str:
+    """Read an optional portal policy setting without requiring Config edits."""
+
+    if hasattr(config, name):
+        return str(getattr(config, name) or "").strip()
+    return os.getenv(name, "").strip()
+
+
+def _configured_values(value: str) -> set[str]:
+    return {
+        part.strip()
+        for part in value.replace(";", ",").split(",")
+        if part.strip()
+    }
+
+
+def _claim_values(claims: dict[str, Any], *names: str) -> set[str]:
+    values: set[str] = set()
+    for name in names:
+        raw = claims.get(name)
+        if isinstance(raw, str):
+            values.update(_configured_values(raw.replace(" ", ",")))
+        elif isinstance(raw, (list, tuple, set)):
+            values.update(str(item).strip() for item in raw if str(item).strip())
+
+    realm_access = claims.get("realm_access")
+    if isinstance(realm_access, dict):
+        values.update(_claim_values(realm_access, "roles"))
+    resource_access = claims.get("resource_access")
+    if isinstance(resource_access, dict):
+        for grant in resource_access.values():
+            if isinstance(grant, dict):
+                values.update(_claim_values(grant, "roles", "scopes"))
+    return values
 
 
 def validate_portal_jwt(token: str, *, issuer: str, audience: str) -> dict[str, Any] | None:

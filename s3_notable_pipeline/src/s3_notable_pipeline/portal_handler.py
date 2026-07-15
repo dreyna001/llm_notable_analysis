@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import os
+import re
 import threading
 from typing import Any
 
-from .aws_clients import bedrock_runtime_client, dynamodb_client, s3_client
+from botocore.config import Config as BotoConfig
+
+from .aws_clients import aws_client, bedrock_runtime_client, dynamodb_client, s3_client
 from .case_chat import answer_selected_case_question
 from .case_chat_history import (
     ChatSessionExpiredError,
@@ -16,13 +21,19 @@ from .case_chat_history import (
     get_chat_session_messages,
     list_chat_sessions,
     load_session_transcript,
+    get_idempotent_chat_response,
     persist_chat_history,
     validate_chat_history_request,
 )
 from .case_index import get_case_detail, get_case_raw_section, list_cases
 from .config import Config, load_config
+from .opensearch_retrieval import adapter_for
 from .portal_chat import conversation_history_from_config
-from .portal_jwt import resolve_portal_jwt_claims, resolve_portal_user_id
+from .portal_jwt import (
+    portal_claims_authorized,
+    resolve_portal_jwt_claims,
+    resolve_portal_user_id,
+)
 from .portal_api_models import (
     CaseDetailResponse,
     CaseListResponse,
@@ -43,6 +54,8 @@ CHAT_LIMIT_MESSAGE = (
 _chat_semaphore: threading.BoundedSemaphore | None = None
 _chat_semaphore_limit: int | None = None
 _SUPPORTED_CHAT_MODES = frozenset({"selected_case"})
+_CLIENT_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._-]{8,128}$")
+_STATIC_ASSET_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,1023}$")
 
 
 def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
@@ -68,28 +81,45 @@ def _route(
         return _json_response(405, {"error": "Method not allowed"})
     if method == "DELETE" and _chat_session_route(path) is None:
         return _json_response(405, {"error": "Method not allowed"})
+    if path.startswith("/api/") and not bool(getattr(config, "PORTAL_ENABLED", False)):
+        return _json_response(404, {"error": "Not found"})
+    if method == "GET" and path not in {"/health", "/ready"} and not path.startswith("/api"):
+        return _handle_static_asset(config, path)
     if path not in {"/health", "/ready"} and not _is_authenticated(event, config):
-        return _json_response(401, {"error": "Unauthorized"})
+        return _json_response(
+            403 if _has_authenticated_identity(event, config) else 401,
+            {"error": "Forbidden" if _has_authenticated_identity(event, config) else "Unauthorized"},
+        )
 
     if method == "POST" and path == "/api/chat":
         return _handle_chat_gate(config, event)
     if path == "/health":
         return _model_response(HealthResponse, {"status": "ok"})
     if path == "/ready":
-        ready = config.PORTAL_ENABLED and bool(config.CASE_INDEX_TABLE)
-        return _json_response(200 if ready else 503, {"status": "ready" if ready else "not_ready"})
+        return _handle_readiness(config)
     if path == "/api/capabilities":
         return _model_response(PortalCapabilitiesResponse, _capabilities(config))
     if path == "/api/diagnostics/chat-readiness":
         return _handle_chat_readiness(config)
     if path == "/api/cases":
         query = event.get("queryStringParameters") or {}
-        payload = list_cases(
-            config=config,
-            dynamodb_client=dynamodb_client(),
-            limit=_int_query(query.get("limit")),
-            cursor=query.get("cursor"),
-        )
+        try:
+            payload = list_cases(
+                config=config,
+                dynamodb_client=dynamodb_client(),
+                limit=_int_query(query.get("limit"), strict=True),
+                cursor=query.get("cursor"),
+                cursor_processed_at=query.get("cursor_processed_at"),
+                cursor_case_id=query.get("cursor_case_id"),
+                start=query.get("start"),
+                end=query.get("end"),
+                start_date=query.get("start_date"),
+                end_date=query.get("end_date"),
+                verdict=query.get("verdict"),
+                search_name=query.get("search_name"),
+            )
+        except ValueError as exc:
+            return _json_response(400, {"error": str(exc)})
         return _model_response(CaseListResponse, payload)
 
     chat_session_route = _chat_session_route(path)
@@ -127,6 +157,42 @@ def _route(
             return _json_response(404, {"error": "Case not found"})
         return _model_response(CaseDetailResponse, payload)
     return _json_response(404, {"error": "Not found"})
+
+
+def _handle_static_asset(config: Config, path: str) -> dict[str, Any]:
+    """Serve bounded SPA assets from the private portal bucket."""
+
+    bucket = _optional_setting(config, "PORTAL_UI_BUCKET")
+    if not bucket:
+        return _json_response(404, {"error": "Not found"})
+    requested = path.lstrip("/")
+    key = "index.html" if not requested or "." not in requested.rsplit("/", 1)[-1] else requested
+    if not _STATIC_ASSET_KEY_RE.fullmatch(key) or ".." in key.split("/"):
+        return _json_response(404, {"error": "Not found"})
+    try:
+        response = s3_client().get_object(Bucket=bucket, Key=key)
+        body = response.get("Body")
+        payload = body.read() if hasattr(body, "read") else body
+        if not isinstance(payload, bytes):
+            raise ValueError("portal asset body is not bytes")
+        max_bytes = int(_optional_setting(config, "PORTAL_UI_MAX_ASSET_BYTES") or 5_242_880)
+        if len(payload) > max_bytes:
+            return _json_response(413, {"error": "Portal asset is too large"})
+    except Exception:  # noqa: BLE001 - do not expose S3 details on the public asset route.
+        return _json_response(404, {"error": "Not found"})
+    content_type = str(response.get("ContentType") or "application/octet-stream")
+    cache_control = "no-cache" if key == "index.html" else "public,max-age=31536000,immutable"
+    return {
+        "statusCode": 200,
+        "headers": {
+            "content-type": content_type,
+            "cache-control": cache_control,
+            "content-security-policy": "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'",
+            "x-content-type-options": "nosniff",
+        },
+        "isBase64Encoded": True,
+        "body": base64.b64encode(payload).decode("ascii"),
+    }
 
 
 def _handle_chat_session_route(
@@ -249,10 +315,40 @@ def _handle_chat_gate(config: Config, event: dict[str, Any]) -> dict[str, Any]:
         selected_case_id = (
             str(selected_case_id).strip() if selected_case_id is not None else None
         )
+        if not selected_case_id:
+            raise ValueError("selected_case_id is required")
         session_id = request.get("session_id")
         session_id = str(session_id).strip() if session_id else None
+        question = str(request.get("question") or "")
+        if not question.strip():
+            raise ValueError("question is required")
+        if len(question) > config.CASE_QA_MAX_QUESTION_CHARS:
+            raise ValueError(
+                f"question exceeds {config.CASE_QA_MAX_QUESTION_CHARS} characters"
+            )
+        client_request_id = request.get("client_request_id")
+        client_request_id = (
+            str(client_request_id).strip() if client_request_id is not None else None
+        )
+        if client_request_id and not _CLIENT_REQUEST_ID_RE.fullmatch(client_request_id):
+            raise ValueError("client_request_id must be 8-128 URL-safe characters")
+        if client_request_id and not config.CASE_QA_CHAT_HISTORY_ENABLED:
+            raise ValueError("client_request_id requires chat history to be enabled")
         user_id = resolve_portal_user_id(event, config)
         if config.CASE_QA_CHAT_HISTORY_ENABLED:
+            if client_request_id:
+                replay = get_idempotent_chat_response(
+                    config=config,
+                    dynamodb_client=dynamodb_client(),
+                    mode=mode,
+                    selected_case_id=selected_case_id,
+                    question=question,
+                    requested_session_id=session_id,
+                    user_id=user_id,
+                    client_request_id=client_request_id,
+                )
+                if replay is not None:
+                    return _model_response(ChatResponseModel, replay)
             validate_chat_history_request(
                 config=config,
                 dynamodb_client=dynamodb_client(),
@@ -273,7 +369,7 @@ def _handle_chat_gate(config: Config, event: dict[str, Any]) -> dict[str, Any]:
             )
         answer = answer_selected_case_question(
             case_id=str(selected_case_id or ""),
-            question=str(request.get("question", "")),
+            question=question,
             config=config,
             dynamodb_client=dynamodb_client(),
             s3_client=s3_client(),
@@ -293,11 +389,12 @@ def _handle_chat_gate(config: Config, event: dict[str, Any]) -> dict[str, Any]:
                     config=config,
                     dynamodb_client=dynamodb_client(),
                     mode=mode,
-                    question=str(request.get("question", "")),
+                    question=question,
                     selected_case_id=selected_case_id,
                     requested_session_id=session_id,
                     user_id=user_id,
                     response=response_payload,
+                    client_request_id=client_request_id,
                 )
             except (ChatSessionNotFoundError, ChatSessionExpiredError, ValueError) as exc:
                 return _chat_session_error_response(exc)
@@ -359,6 +456,25 @@ def _handle_chat_readiness(config: Config) -> dict[str, Any]:
     )
 
 
+def _handle_readiness(config: Config) -> dict[str, Any]:
+    """Probe required portal dependencies without mutating them."""
+
+    if not bool(getattr(config, "PORTAL_ENABLED", False)):
+        return _json_response(
+            503,
+            {"status": "not_ready", "reason": "Portal is disabled."},
+        )
+    dependencies = _probe_portal_dependencies(config)
+    ready = all(value == "ready" for value in dependencies.values())
+    payload: dict[str, Any] = {
+        "status": "ready" if ready else "not_ready",
+        "dependencies": dependencies,
+    }
+    if not ready:
+        payload["reason"] = "One or more portal dependencies are unavailable."
+    return _json_response(200 if ready else 503, payload)
+
+
 def _capabilities(config: Config) -> dict[str, Any]:
     dependency_status = None
     degraded_reason = None
@@ -385,7 +501,11 @@ def _capabilities(config: Config) -> dict[str, Any]:
 
 def _probe_chat_dependencies(config: Config) -> dict[str, str]:
     status = {
-        "embeddings": "ready" if config.CASE_EMBED_LAMBDA_NAME else "unavailable",
+        "embeddings": (
+            "ready"
+            if config.CASE_EMBED_QUEUE_URL or config.CASE_EMBED_LAMBDA_NAME
+            else "unavailable"
+        ),
         "archive_retrieval": "unavailable",
         "llm_gateway": "unavailable",
     }
@@ -403,7 +523,72 @@ def _probe_chat_dependencies(config: Config) -> dict[str, str]:
     return status
 
 
+def _probe_portal_dependencies(config: Config) -> dict[str, str]:
+    """Run bounded, read-only probes for the portal's durable dependencies."""
+
+    status = {
+        "case_index": "unavailable",
+        "archive": "unavailable",
+    }
+    if config.CASE_QA_ENABLED:
+        status["opensearch"] = "unavailable"
+    try:
+        if not str(getattr(config, "CASE_INDEX_TABLE", "")).strip():
+            raise ValueError("CASE_INDEX_TABLE is not configured")
+        dynamodb_client().describe_table(TableName=config.CASE_INDEX_TABLE)
+        status["case_index"] = "ready"
+    except Exception:  # noqa: BLE001 - readiness must fail closed on probe errors.
+        status["case_index"] = "unavailable"
+
+    try:
+        bucket = str(getattr(config, "CASE_ARCHIVE_BUCKET", "")).strip()
+        if not bucket:
+            raise ValueError("CASE_ARCHIVE_BUCKET is not configured")
+        s3_client().head_bucket(Bucket=bucket)
+        status["archive"] = "ready"
+    except Exception:  # noqa: BLE001 - readiness must fail closed on probe errors.
+        status["archive"] = "unavailable"
+
+    if config.CASE_QA_ENABLED and str(getattr(config, "OPENSEARCH_ENDPOINT", "")).strip():
+        try:
+            adapter_for(config).request("GET", "/_cluster/health")
+            status["opensearch"] = "ready"
+        except Exception:  # noqa: BLE001 - readiness must fail closed on probe errors.
+            status["opensearch"] = "unavailable"
+    return status
+
+
+def _bounded_aws_client(config: Config, service_name: str) -> Any:
+    timeout = _readiness_timeout(config)
+    return aws_client(
+        service_name,
+        config=BotoConfig(
+            connect_timeout=timeout,
+            read_timeout=timeout,
+            retries={"max_attempts": 1, "mode": "standard"},
+        ),
+    )
+
+
+def _readiness_timeout(config: Config) -> int:
+    raw = _optional_setting(config, "PORTAL_READINESS_TIMEOUT_SECONDS") or "2"
+    try:
+        return max(1, min(int(raw), 10))
+    except ValueError:
+        return 2
+
+
 def _is_authenticated(event: dict[str, Any], config: Config) -> bool:
+    if config.PORTAL_AUTH_MODE == "jwt":
+        claims = resolve_portal_jwt_claims(event, config)
+        return claims is not None and portal_claims_authorized(claims, config)
+    if config.PORTAL_AUTH_MODE == "iam":
+        authorizer = ((event.get("requestContext") or {}).get("authorizer") or {})
+        return bool(authorizer.get("iam"))
+    return False
+
+
+def _has_authenticated_identity(event: dict[str, Any], config: Config) -> bool:
     if config.PORTAL_AUTH_MODE == "jwt":
         return resolve_portal_jwt_claims(event, config) is not None
     if config.PORTAL_AUTH_MODE == "iam":
@@ -508,13 +693,29 @@ def _with_cors(
     return response
 
 
-def _int_query(value: Any, default: int | None = None) -> int | None:
+def _int_query(
+    value: Any,
+    default: int | None = None,
+    *,
+    strict: bool = False,
+) -> int | None:
     if value is None or value == "":
         return default
     try:
-        return int(value)
+        parsed = int(value)
+        if strict and parsed <= 0:
+            raise ValueError("query integer must be positive")
+        return parsed
     except (TypeError, ValueError):
+        if strict:
+            raise ValueError("query integer must be a positive integer") from None
         return default
+
+
+def _optional_setting(config: Config, name: str) -> str:
+    if hasattr(config, name):
+        return str(getattr(config, name) or "").strip()
+    return os.getenv(name, "").strip()
 
 
 def _json_body(event: dict[str, Any]) -> dict[str, Any]:

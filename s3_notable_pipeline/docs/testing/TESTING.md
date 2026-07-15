@@ -123,7 +123,10 @@ sam local invoke NotableAnalyzerFunction \
   --template-file deploy/aws/template-sam.yaml \
   --event events/s3-placeholder-event.json \
   --env-vars events/sam-local-env.json \
-  --parameter-overrides AwsAccountId=000000000000 ImageUri=notable-analyzer-s3:local
+  --parameter-overrides \
+    AwsAccountId=000000000000 \
+    EcrRepositoryUri=000000000000.dkr.ecr.us-gov-east-1.amazonaws.com/notable-analyzer-s3 \
+    ImageDigest=sha256:0000000000000000000000000000000000000000000000000000000000000000
 ```
 
 This smoke validates local handler startup and S3 event parsing. It does not
@@ -147,9 +150,9 @@ Run profile slices incrementally. Start with `CapabilityProfiles=core` and
 | --- | --- | --- |
 | **core** | Default SAM parameters; Bedrock model access | Upload `data/test-notable.txt` to `incoming/`; confirm markdown + JSON under `reports/`; review CloudWatch logs for bounded metadata without secrets |
 | **html_reports** | `CapabilityProfiles=core,html_reports`, `HtmlReportEnabled=true` | Confirm sibling `.html` object beside markdown/JSON |
-| **rag** | `CapabilityProfiles=core,rag`, `RagEnabled=true`, `RagBedrockKbId` | JSON `metadata.rag_status` is `success` or `no_match`; analysis completes when `RagFailureMode=suppress` |
-| **spl_readonly** | `CapabilityProfiles=core,rag,spl_readonly`; Splunk URL + token secret; optional `SplQueryRagBedrockKbId` | JSON includes SPL generation metadata and/or `investigation_query_results`; denied SPL commands do not outbound; Splunk allowlists enforced |
-| **elastic_readonly** | `CapabilityProfiles=core,rag,elastic_readonly` (not with `spl_readonly`); Elastic URL + API key secret + index allowlist; optional `ElasticsearchGroundingBedrockKbId` | JSON `metadata.investigation_query_backend=elasticsearch` with bounded `investigation_query_results` |
+| **rag** | `CapabilityProfiles=core,rag`, `RagEnabled=true`, private OpenSearch settings and an ingested SOC corpus | JSON `metadata.rag_status` is `success` or `no_match`; analysis completes when `RagFailureMode=suppress` |
+| **spl_readonly** | `CapabilityProfiles=core,rag,spl_readonly`; Splunk URL + token secret; `SplQueryRagEnabled=true` after dictionary ingestion | JSON includes SPL generation metadata and/or `investigation_query_results`; denied SPL commands do not outbound; Splunk allowlists enforced |
+| **elastic_readonly** | `CapabilityProfiles=core,rag,elastic_readonly` (not with `spl_readonly`); Elastic URL + API key secret + index allowlist; optional `ElasticsearchGroundingEnabled=true` | JSON `metadata.investigation_query_backend=elasticsearch` with bounded `investigation_query_results` |
 | **ticket_draft** | `CapabilityProfiles=core,ticket_draft`, `ServiceNowAssignmentGroup` | JSON `servicenow_section.draft` present; no ServiceNow POST unless create is separately enabled |
 | **action_gated** | `CapabilityProfiles=core,action_gated`; Splunk writeback and/or ServiceNow secrets as needed; `SideEffectIdempotencyTableName` | DynamoDB idempotency table exists; replay duplicate side-effect keys and confirm no duplicate Splunk/ServiceNow writes |
 

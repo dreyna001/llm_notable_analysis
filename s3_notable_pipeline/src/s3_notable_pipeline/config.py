@@ -168,6 +168,22 @@ class Config:
     RAG_MAX_SNIPPETS: int = 4
     RAG_CONTEXT_BUDGET_CHARS: int = 1600
     RAG_FAILURE_MODE: str = "suppress"
+    # Direct Config construction is used by isolated unit tests. load_config()
+    # selects the GovCloud production default (`opensearch`) explicitly.
+    RAG_RETRIEVAL_BACKEND: str = "legacy"
+    RAG_TENANT_ID: str = ""
+    OPENSEARCH_ENDPOINT: str = ""
+    OPENSEARCH_REGION: str = "us-gov-east-1"
+    OPENSEARCH_SERVICE: str = "es"
+    OPENSEARCH_TIMEOUT_SECONDS: int = 30
+    OPENSEARCH_CASE_INDEX: str = "notable-case-chunks"
+    OPENSEARCH_SOC_INDEX: str = "notable-soc-knowledge"
+    OPENSEARCH_SPLUNK_INDEX: str = "notable-splunk-dictionary"
+    OPENSEARCH_ELASTIC_INDEX: str = "notable-elastic-dictionary"
+    RAG_SOURCE_BUCKET: str = ""
+    RAG_SOURCE_PREFIX: str = "rag-sources"
+    RAG_INGEST_QUEUE_URL: str = ""
+    RAG_INGEST_MAX_DOCUMENT_BYTES: int = 5_242_880
 
     SPLUNK_BASE_URL: str = ""
     SPLUNK_API_TOKEN_SECRET_ARN: str = ""
@@ -256,6 +272,7 @@ class Config:
     CASE_ARCHIVE_PREFIX: str = "cases"
     CASE_ARCHIVE_CHUNKS_PREFIX: str = "case_chunks"
     CASE_EMBED_LAMBDA_NAME: str = ""
+    CASE_EMBED_QUEUE_URL: str = ""
     CASE_INDEX_TABLE: str = ""
     CASE_RETENTION_DAYS: int = 30
     CASE_SCHEMA_VERSION: int = 1
@@ -269,8 +286,10 @@ class Config:
     PORTAL_MAX_DETAIL_BYTES: int = 262_144
     PORTAL_JWT_ISSUER: str = ""
     PORTAL_JWT_AUDIENCE: str = ""
+    PORTAL_REQUIRED_ANALYST_ROLE: str = "Case.Reader"
+    PORTAL_REQUIRED_ANALYST_SCOPE: str = ""
     PORTAL_CORS_ALLOWED_ORIGINS: str = ""
-    PORTAL_CHAT_TIMEOUT_SEC: int = 300
+    PORTAL_CHAT_TIMEOUT_SEC: int = 29
     PORTAL_CHAT_FUNCTION_URL_ENABLED: bool = True
     PORTAL_CHAT_MAX_CONCURRENCY: int = 18
     PORTAL_CHAT_BEDROCK_MODEL_ID: str = ""
@@ -313,6 +332,17 @@ class Config:
         self.SPLUNK_SINK_MODE = (self.SPLUNK_SINK_MODE or "s3").strip().lower()
         if self.SPLUNK_SINK_MODE not in {"s3", "notable_rest"}:
             raise ValueError("SPLUNK_SINK_MODE must be s3 or notable_rest")
+        self.RAG_RETRIEVAL_BACKEND = (
+            self.RAG_RETRIEVAL_BACKEND or "legacy"
+        ).strip().lower()
+        if self.RAG_RETRIEVAL_BACKEND not in {"opensearch", "bedrock_kb", "legacy"}:
+            raise ValueError(
+                "RAG_RETRIEVAL_BACKEND must be opensearch, bedrock_kb, or legacy"
+            )
+        self.OPENSEARCH_ENDPOINT = self.OPENSEARCH_ENDPOINT.strip()
+        self.OPENSEARCH_REGION = self.OPENSEARCH_REGION.strip() or "us-gov-east-1"
+        self.OPENSEARCH_SERVICE = self.OPENSEARCH_SERVICE.strip() or "es"
+        self.RAG_TENANT_ID = self.RAG_TENANT_ID.strip()
         self.INVESTIGATION_QUERY_BACKEND = (
             self.INVESTIGATION_QUERY_BACKEND or "splunk"
         ).strip().lower()
@@ -426,12 +456,42 @@ class Config:
                 raise ValueError(
                     "PORTAL_JWT_AUDIENCE is required when portal JWT auth is enabled"
                 )
+            if not (
+                self.PORTAL_REQUIRED_ANALYST_ROLE.strip()
+                or self.PORTAL_REQUIRED_ANALYST_SCOPE.strip()
+            ):
+                raise ValueError(
+                    "PORTAL_REQUIRED_ANALYST_ROLE or PORTAL_REQUIRED_ANALYST_SCOPE "
+                    "is required when portal JWT auth is enabled"
+                )
         self.PORTAL_CHAT_BEDROCK_MODEL_ID = self.PORTAL_CHAT_BEDROCK_MODEL_ID.strip()
         if self.CASE_QA_ENABLED and not self.PORTAL_ENABLED:
             raise ValueError("CASE_QA_ENABLED=true requires PORTAL_ENABLED=true")
         self.CASE_EMBED_LAMBDA_NAME = self.CASE_EMBED_LAMBDA_NAME.strip()
-        if self.CASE_QA_ENABLED and not self.CASE_EMBED_LAMBDA_NAME:
-            raise ValueError("CASE_EMBED_LAMBDA_NAME is required when Case Q&A is enabled")
+        self.CASE_EMBED_QUEUE_URL = self.CASE_EMBED_QUEUE_URL.strip()
+        if self.CASE_QA_ENABLED and not (
+            self.CASE_EMBED_QUEUE_URL or self.CASE_EMBED_LAMBDA_NAME
+        ):
+            raise ValueError(
+                "CASE_EMBED_QUEUE_URL is required when Case Q&A is enabled"
+            )
+        uses_vector_rag = self.RAG_ENABLED or self.SPL_QUERY_RAG_ENABLED or (
+            self.ELASTICSEARCH_GROUNDING_ENABLED
+        ) or self.CASE_QA_ENABLED
+        if uses_vector_rag and self.RAG_RETRIEVAL_BACKEND == "opensearch":
+            if not self.OPENSEARCH_ENDPOINT:
+                raise ValueError(
+                    "OPENSEARCH_ENDPOINT is required for enabled GovCloud RAG capabilities"
+                )
+            self.OPENSEARCH_ENDPOINT = validate_https_url(
+                self.OPENSEARCH_ENDPOINT,
+                setting_name="OPENSEARCH_ENDPOINT",
+                allow_private=True,
+            )
+            if not self.RAG_TENANT_ID:
+                raise ValueError(
+                    "RAG_TENANT_ID is required for enabled GovCloud RAG capabilities"
+                )
         if self.CASE_QA_VECTOR_DIMENSIONS != 1024:
             raise ValueError("CASE_QA_VECTOR_DIMENSIONS must be 1024 for Titan V2")
         if self.CASE_QA_CHAT_HISTORY_ENABLED:
@@ -492,6 +552,40 @@ def load_config() -> Config:
         ),
         RAG_FAILURE_MODE=(
             os.getenv("RAG_FAILURE_MODE", "suppress").strip().lower() or "suppress"
+        ),
+        RAG_RETRIEVAL_BACKEND=(
+            os.getenv("RAG_RETRIEVAL_BACKEND", "opensearch").strip().lower()
+            or "opensearch"
+        ),
+        RAG_TENANT_ID=os.getenv("RAG_TENANT_ID", ""),
+        OPENSEARCH_ENDPOINT=os.getenv("OPENSEARCH_ENDPOINT", ""),
+        OPENSEARCH_REGION=(
+            os.getenv("OPENSEARCH_REGION")
+            or os.getenv("AWS_REGION")
+            or os.getenv("AWS_DEFAULT_REGION")
+            or "us-gov-east-1"
+        ),
+        OPENSEARCH_SERVICE=os.getenv("OPENSEARCH_SERVICE", "es"),
+        OPENSEARCH_TIMEOUT_SECONDS=_positive_int_env(
+            "OPENSEARCH_TIMEOUT_SECONDS", 30, max_value=300
+        ),
+        OPENSEARCH_CASE_INDEX=os.getenv(
+            "OPENSEARCH_CASE_INDEX", "notable-case-chunks"
+        ),
+        OPENSEARCH_SOC_INDEX=os.getenv(
+            "OPENSEARCH_SOC_INDEX", "notable-soc-knowledge"
+        ),
+        OPENSEARCH_SPLUNK_INDEX=os.getenv(
+            "OPENSEARCH_SPLUNK_INDEX", "notable-splunk-dictionary"
+        ),
+        OPENSEARCH_ELASTIC_INDEX=os.getenv(
+            "OPENSEARCH_ELASTIC_INDEX", "notable-elastic-dictionary"
+        ),
+        RAG_SOURCE_BUCKET=os.getenv("RAG_SOURCE_BUCKET", ""),
+        RAG_SOURCE_PREFIX=os.getenv("RAG_SOURCE_PREFIX", "rag-sources"),
+        RAG_INGEST_QUEUE_URL=os.getenv("RAG_INGEST_QUEUE_URL", ""),
+        RAG_INGEST_MAX_DOCUMENT_BYTES=_positive_int_env(
+            "RAG_INGEST_MAX_DOCUMENT_BYTES", 5_242_880, max_value=20_971_520
         ),
         SPLUNK_BASE_URL=os.getenv("SPLUNK_BASE_URL", ""),
         SPLUNK_API_TOKEN_SECRET_ARN=os.getenv("SPLUNK_API_TOKEN_SECRET_ARN", ""),
@@ -685,6 +779,7 @@ def load_config() -> Config:
             "CASE_ARCHIVE_CHUNKS_PREFIX", "case_chunks"
         ),
         CASE_EMBED_LAMBDA_NAME=os.getenv("CASE_EMBED_LAMBDA_NAME", ""),
+        CASE_EMBED_QUEUE_URL=os.getenv("CASE_EMBED_QUEUE_URL", ""),
         CASE_INDEX_TABLE=os.getenv("CASE_INDEX_TABLE", ""),
         CASE_RETENTION_DAYS=_positive_int_env(
             "CASE_RETENTION_DAYS", 30, max_value=3650
@@ -709,9 +804,15 @@ def load_config() -> Config:
         ),
         PORTAL_JWT_ISSUER=os.getenv("PORTAL_JWT_ISSUER", ""),
         PORTAL_JWT_AUDIENCE=os.getenv("PORTAL_JWT_AUDIENCE", ""),
+        PORTAL_REQUIRED_ANALYST_ROLE=os.getenv(
+            "PORTAL_REQUIRED_ANALYST_ROLE", ""
+        ),
+        PORTAL_REQUIRED_ANALYST_SCOPE=os.getenv(
+            "PORTAL_REQUIRED_ANALYST_SCOPE", ""
+        ),
         PORTAL_CORS_ALLOWED_ORIGINS=os.getenv("PORTAL_CORS_ALLOWED_ORIGINS", ""),
         PORTAL_CHAT_TIMEOUT_SEC=_positive_int_env(
-            "PORTAL_CHAT_TIMEOUT_SEC", 300, max_value=900
+            "PORTAL_CHAT_TIMEOUT_SEC", 29, max_value=29
         ),
         PORTAL_CHAT_FUNCTION_URL_ENABLED=_bool_env(
             "PORTAL_CHAT_FUNCTION_URL_ENABLED", True

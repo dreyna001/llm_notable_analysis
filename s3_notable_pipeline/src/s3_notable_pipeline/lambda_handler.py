@@ -6,6 +6,7 @@ configurable sinks (S3 or Splunk notable REST API).
 """
 
 import gzip
+import hashlib
 import io
 import json
 import os
@@ -16,20 +17,22 @@ import zlib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 import re
-from urllib.parse import unquote_plus
+from urllib.parse import quote, unquote_plus
 from typing import Dict, Any
 
 from .aws_clients import s3_client as make_s3_client
 from .aws_clients import secretsmanager_client as make_secretsmanager_client
 from .aws_clients import dynamodb_client as make_dynamodb_client
 from .aws_clients import lambda_client as make_lambda_client
-from .bedrock_kb_retrieval import retrieve_soc_context
+from .aws_clients import sqs_client as make_sqs_client
+from .bedrock_kb_retrieval import RetrievalResult, retrieve_soc_context
 from .case_archive import SourceContext, archive_case
 from .config import Config, load_config
 from .html_generator import generate_html_report
 from .idempotency import (
     begin_side_effect,
     complete_side_effect_success,
+    mark_side_effect_uncertain,
     release_side_effect_lock,
 )
 from .elasticsearch_investigation import execute_hypothesis_elasticsearch_queries
@@ -45,6 +48,8 @@ from .spl_query_grounding import retrieve_spl_query_grounding
 from .splunk_investigation import HttpSplunkMcpClient, execute_hypothesis_queries
 from .ttp_analyzer import BedrockAnalyzer
 from .markdown_generator import generate_markdown_report
+from .spl_query_grounding import SplGroundingResult
+from .elasticsearch_query_grounding import ElasticsearchGroundingResult
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -55,6 +60,7 @@ s3_client = make_s3_client()
 secretsmanager_client = make_secretsmanager_client()
 _dynamodb_client: Any | None = None
 _lambda_client: Any | None = None
+_sqs_client: Any | None = None
 
 # Placeholder filenames to skip (case-insensitive basename match)
 PLACEHOLDER_FILENAMES = frozenset({'.keep', '.gitkeep', '_success', '.placeholder'})
@@ -81,6 +87,15 @@ def get_lambda_client() -> Any:
     return _lambda_client
 
 
+def get_sqs_client() -> Any:
+    """Return the SQS client lazily because archive is default-off."""
+
+    global _sqs_client  # pylint: disable=global-statement
+    if _sqs_client is None:
+        _sqs_client = make_sqs_client()
+    return _sqs_client
+
+
 @dataclass(frozen=True)
 class DecodedNotable:
     """Decoded notable content plus metadata needed by the analysis flow."""
@@ -88,6 +103,106 @@ class DecodedNotable:
     content: str
     content_type: str
     was_compressed: bool
+
+
+@dataclass(frozen=True)
+class S3ProcessingIdentity:
+    """Immutable identity for one S3 delivery/version of a notable."""
+
+    bucket: str
+    key: str
+    version_id: str = ""
+    etag: str = ""
+    sequencer: str = ""
+
+    @property
+    def processing_id(self) -> str:
+        """Return a stable, non-sensitive processing identifier."""
+
+        material = "\x1f".join(
+            (
+                self.bucket,
+                self.key,
+                self.version_id or self.etag or "unversioned",
+                self.etag,
+                self.sequencer,
+            )
+        )
+        return hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
+
+
+class BedrockAnalysisFailure(RuntimeError):
+    """Core Bedrock analysis failed and must not become an empty report."""
+
+    def __init__(self, message: str, *, retryable: bool) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
+
+def _s3_event_records(record: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
+    """Unwrap direct S3 records and S3 notifications delivered through SQS."""
+
+    if record.get("eventSource") != "aws:sqs":
+        return [record], None
+    message_id = str(record.get("messageId", "")).strip() or None
+    try:
+        body = json.loads(record.get("body", ""))
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ValueError("SQS message body is not valid JSON") from exc
+    nested = body.get("Records") if isinstance(body, dict) else None
+    if not isinstance(nested, list) or not nested or not all(isinstance(item, dict) for item in nested):
+        raise ValueError("SQS message body is not an S3 notification")
+    return nested, message_id
+
+
+def _processing_identity(record: dict[str, Any], response: dict[str, Any], bucket: str, key: str) -> S3ProcessingIdentity:
+    """Build identity from all available S3 version/replay ordering fields."""
+
+    obj = record.get("s3", {}).get("object", {})
+    return S3ProcessingIdentity(
+        bucket=bucket,
+        key=key,
+        version_id=str(obj.get("versionId", "") or ""),
+        etag=str(obj.get("eTag", "") or response.get("ETag", "")).strip('"'),
+        sequencer=str(obj.get("sequencer", "") or ""),
+    )
+
+
+def _report_stem(source_key: str) -> str:
+    """Preserve source prefixes while constraining report path components."""
+
+    decoded_key = unquote_plus(source_key or "").lstrip("/")
+    path = PurePosixPath(decoded_key)
+    parts = [quote(part, safe="-_.~") for part in path.parts if part not in ("", ".", "..")]
+    if not parts:
+        return "unknown"
+    filename = parts[-1]
+    original_filename = path.name
+    stripped_filename = strip_gzip_suffix(original_filename)
+    stem = Path(stripped_filename).stem
+    parts[-1] = quote(stem, safe="-_.~")
+    return "/".join(parts)
+
+
+def _report_key(output_prefix: str, source_key: str, extension: str, identity: S3ProcessingIdentity | None) -> str:
+    # Keep direct helper calls backward-compatible; event-driven calls always pass identity.
+    stem = _report_stem(source_key) if identity is not None else source_key_stem(source_key)
+    suffix = ""
+    if identity is not None:
+        suffix = f"--{identity.processing_id}"
+    prefix = str(output_prefix or "reports").strip("/")
+    return f"{prefix}/{stem}{suffix}.{extension}" if prefix else f"{stem}{suffix}.{extension}"
+
+
+def _optional_call(label: str, operation: Any, fallback: Any, degraded: list[str]) -> Any:
+    """Run noncritical enrichment without converting it into a false core success."""
+
+    try:
+        return operation()
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.warning("Optional enrichment %s degraded: %s", label, exc)
+        degraded.append(label)
+        return fallback
 
 
 def should_skip_object(key: str, size: int) -> tuple[bool, str]:
@@ -323,6 +438,7 @@ def write_to_s3_sink(
     markdown: str,
     analysis_result: Dict[str, Any],
     config: Config | None = None,
+    processing_identity: S3ProcessingIdentity | None = None,
 ) -> Dict[str, Any]:
     """Write markdown analysis report and Bedrock JSON to S3 output bucket.
 
@@ -344,10 +460,9 @@ def write_to_s3_sink(
             return {"status": "error", "message": "OUTPUT_BUCKET_NAME not configured"}
         
         # Generate output key based on source key
-        base_name = source_key_stem(source_key)
-        md_key = f"{output_prefix}/{base_name}.md"
-        json_key = f"{output_prefix}/{base_name}.json"
-        html_key = f"{output_prefix}/{base_name}.html"
+        md_key = _report_key(output_prefix, source_key, "md", processing_identity)
+        json_key = _report_key(output_prefix, source_key, "json", processing_identity)
+        html_key = _report_key(output_prefix, source_key, "html", processing_identity)
 
         llm_response = analysis_result.get("llm_response")
         if llm_response is None:
@@ -355,11 +470,13 @@ def write_to_s3_sink(
         json_body = json.dumps(llm_response, ensure_ascii=False, indent=2, default=str)
 
         # Write markdown report
+        put_kwargs = {"IfNoneMatch": "*"} if processing_identity is not None else {}
         s3_client.put_object(
             Bucket=output_bucket,
             Key=md_key,
             Body=markdown.encode('utf-8'),
-            ContentType='text/markdown'
+            ContentType='text/markdown',
+            **put_kwargs,
         )
         logger.info(f"Wrote markdown report to s3://{output_bucket}/{md_key}")
 
@@ -368,6 +485,7 @@ def write_to_s3_sink(
             Key=json_key,
             Body=json_body.encode('utf-8'),
             ContentType="application/json",
+            **put_kwargs,
         )
         logger.info(f"Wrote Bedrock JSON to s3://{output_bucket}/{json_key}")
 
@@ -378,6 +496,7 @@ def write_to_s3_sink(
                 Key=html_key,
                 Body=html_report.encode('utf-8'),
                 ContentType="text/html",
+                **put_kwargs,
             )
             logger.info(f"Wrote HTML report to s3://{output_bucket}/{html_key}")
 
@@ -400,6 +519,7 @@ def write_to_notable_rest_sink(
     source_key: str,
     analysis_result: Dict[str, Any],
     config: Config | None = None,
+    processing_identity: S3ProcessingIdentity | None = None,
 ) -> Dict[str, Any]:
     """Write the markdown report to S3, then update the Splunk notable via REST.
 
@@ -416,6 +536,7 @@ def write_to_notable_rest_sink(
         analysis_result["markdown"],
         analysis_result,
         config,
+        processing_identity,
     )
     if s3_result.get("status") != "success":
         return {
@@ -426,7 +547,7 @@ def write_to_notable_rest_sink(
     rest_result = write_to_splunk_rest(analysis_result, source_key, config)
     combined_status = (
         "success"
-        if s3_result.get("status") == "success" and rest_result.get("status") in {"success", "skipped"}
+        if s3_result.get("status") == "success" and rest_result.get("status") in {"success", "skipped", "uncertain"}
         else "error"
     )
 
@@ -444,6 +565,7 @@ def write_case_archive_after_sink(
     source_bucket: str,
     source_key: str,
     decoded_notable: DecodedNotable,
+    processing_identity: S3ProcessingIdentity | None = None,
     sink_result: Dict[str, Any],
     processed_at: str | None = None,
 ) -> Dict[str, Any]:
@@ -463,6 +585,10 @@ def write_case_archive_after_sink(
             source_filename=PurePosixPath(source_key).name,
             content_type=decoded_notable.content_type,
             was_compressed=decoded_notable.was_compressed,
+            source_version_id=processing_identity.version_id if processing_identity else "",
+            source_etag=processing_identity.etag if processing_identity else "",
+            source_sequencer=processing_identity.sequencer if processing_identity else "",
+            processing_id=processing_identity.processing_id if processing_identity else "",
         )
         result = archive_case(
             analysis_result=analysis_result,
@@ -471,7 +597,16 @@ def write_case_archive_after_sink(
             sink_result=sink_result,
             s3_client=s3_client,
             dynamodb_client=get_dynamodb_client(),
-            lambda_client=get_lambda_client() if config.CASE_QA_ENABLED else None,
+            sqs_client=(
+                get_sqs_client()
+                if config.CASE_QA_ENABLED and config.CASE_EMBED_QUEUE_URL
+                else None
+            ),
+            lambda_client=(
+                get_lambda_client()
+                if config.CASE_QA_ENABLED and not config.CASE_EMBED_QUEUE_URL
+                else None
+            ),
             processed_at=processed_at,
         )
         return {
@@ -687,11 +822,29 @@ def write_to_splunk_rest(
         }
         if reservation.enabled:
             result["idempotency_recorded"] = idempotency_recorded
+            if not idempotency_recorded:
+                result["status"] = "uncertain"
+                result["idempotency_status"] = "uncertain"
+                result["idempotency_warning"] = (
+                    "external Splunk update may have completed; marker reconciliation is required"
+                )
         return result
-        
+
     except Exception as e:
         if "reservation" in locals():
-            release_side_effect_lock(reservation)
+            marker_recorded = mark_side_effect_uncertain(
+                reservation,
+                metadata={
+                    "external_success": "unknown",
+                    "uncertain_reason": "splunk_request_outcome_unknown",
+                },
+            )
+            if marker_recorded:
+                return {
+                    "status": "uncertain",
+                    "message": str(e),
+                    "idempotency_status": "uncertain",
+                }
         logger.error(f"Error writing to Splunk REST: {str(e)}")
         return {"status": "error", "message": str(e)}
 
@@ -710,12 +863,42 @@ def handler(event, context):
     config = load_config()
     
     results = []
-    
-    for record in event.get('Records', []):
+    failed_sqs_message_ids: set[str] = set()
+    deliveries: list[dict[str, Any]] = []
+    for delivery in event.get("Records", []):
         try:
+            nested_records, message_id = _s3_event_records(delivery)
+        except ValueError as exc:
+            message_id = str(delivery.get("messageId", "")).strip()
+            if message_id:
+                failed_sqs_message_ids.add(message_id)
+            deliveries.append(
+                {
+                    "_delivery_error": str(exc),
+                    "_sqs_message_id": str(delivery.get("messageId", "")).strip(),
+                }
+            )
+            continue
+        for nested_record in nested_records:
+            prepared_record = dict(nested_record)
+            if message_id:
+                prepared_record["_sqs_message_id"] = message_id
+            deliveries.append(prepared_record)
+
+    for record in deliveries:
+        try:
+            if record.get("_delivery_error"):
+                results.append(
+                    {
+                        "status": "terminal",
+                        "message_id": record.get("_sqs_message_id", ""),
+                        "error": record["_delivery_error"],
+                    }
+                )
+                continue
             # Extract S3 bucket, key, and size from event
             bucket = record['s3']['bucket']['name']
-            key = record['s3']['object']['key']
+            key = unquote_plus(record['s3']['object']['key'])
             size = record['s3']['object'].get('size', -1)
             
             logger.info(f"Processing s3://{bucket}/{key} (size={size})")
@@ -732,7 +915,12 @@ def handler(event, context):
                 continue
             
             # Read object from S3
-            response = s3_client.get_object(Bucket=bucket, Key=key)
+            get_object_kwargs = {"Bucket": bucket, "Key": key}
+            version_id = str(record["s3"]["object"].get("versionId", "") or "").strip()
+            if version_id:
+                get_object_kwargs["VersionId"] = version_id
+            response = s3_client.get_object(**get_object_kwargs)
+            processing_identity = _processing_identity(record, response, bucket, key)
             content_encoding = response.get('ContentEncoding')
             max_input_bytes = get_max_decompressed_input_bytes(config)
             if (
@@ -769,6 +957,7 @@ def handler(event, context):
                 raise ValueError("BEDROCK_MODEL_ID is not configured")
             logger.info(f"Initializing analyzer with model: {model_id}")
             analyzer = BedrockAnalyzer(model_id=model_id)
+            degraded_enrichments: list[str] = []
             
             # Format alert text
             alert_text = analyzer.format_alert_input(
@@ -777,7 +966,12 @@ def handler(event, context):
                 content_type=content_type,
             )
 
-            rag_result = retrieve_soc_context(alert_text, config)
+            rag_result = _optional_call(
+                "soc_rag",
+                lambda: retrieve_soc_context(alert_text, config),
+                RetrievalResult(status="failed", message="SOC RAG enrichment unavailable"),
+                degraded_enrichments,
+            )
             
             # Run analysis
             start_time = time.time()
@@ -802,17 +996,27 @@ def handler(event, context):
                 and config.INVESTIGATION_QUERY_BACKEND == "splunk"
                 and config.SPL_QUERY_GENERATION_ENABLED
             ):
-                spl_grounding = retrieve_spl_query_grounding(
-                    alert_text=alert_text,
-                    hypotheses=llm_response.get("competing_hypotheses", []),
-                    config=config,
+                spl_grounding = _optional_call(
+                    "spl_query_grounding",
+                    lambda: retrieve_spl_query_grounding(
+                        alert_text=alert_text,
+                        hypotheses=llm_response.get("competing_hypotheses", []),
+                        config=config,
+                    ),
+                    SplGroundingResult(status="failed", message="SPL grounding unavailable"),
+                    degraded_enrichments,
                 )
-                llm_response = analyzer.generate_spl_queries(
-                    alert_text=alert_text,
-                    analysis_result=llm_response,
-                    config=config,
-                    soc_operational_context=rag_result.context,
-                    spl_query_grounding_context=spl_grounding.context,
+                llm_response = _optional_call(
+                    "spl_query_generation",
+                    lambda: analyzer.generate_spl_queries(
+                        alert_text=alert_text,
+                        analysis_result=llm_response,
+                        config=config,
+                        soc_operational_context=rag_result.context,
+                        spl_query_grounding_context=spl_grounding.context,
+                    ),
+                    llm_response,
+                    degraded_enrichments,
                 )
                 metadata = llm_response.setdefault("metadata", {})
                 if isinstance(metadata, dict):
@@ -834,19 +1038,29 @@ def handler(event, context):
                         timeout_seconds=config.SPLUNK_MCP_HTTP_TIMEOUT_SECONDS,
                         allow_private=config.ALLOW_PRIVATE_OUTBOUND_ENDPOINTS,
                     )
-                query_results = execute_hypothesis_queries(
-                    llm_response,
-                    config=config,
-                    api_token=get_splunk_api_token(config),
-                    mcp_client=mcp_client,
+                query_results = _optional_call(
+                    "spl_query_execution",
+                    lambda: execute_hypothesis_queries(
+                        llm_response,
+                        config=config,
+                        api_token=get_splunk_api_token(config),
+                        mcp_client=mcp_client,
+                    ),
+                    [],
+                    degraded_enrichments,
                 )
                 llm_response["investigation_query_results"] = query_results
                 llm_response = enrich_analysis_with_query_results(llm_response, query_results)
                 if config.QUERY_RESULT_INTERPRETATION_ENABLED:
-                    llm_response = analyzer.interpret_query_results(
-                        alert_text=alert_text,
-                        analysis_result=llm_response,
-                        config=config,
+                    llm_response = _optional_call(
+                        "spl_query_interpretation",
+                        lambda: analyzer.interpret_query_results(
+                            alert_text=alert_text,
+                            analysis_result=llm_response,
+                            config=config,
+                        ),
+                        llm_response,
+                        degraded_enrichments,
                     )
                 metadata = llm_response.setdefault("metadata", {})
                 if isinstance(metadata, dict):
@@ -859,17 +1073,27 @@ def handler(event, context):
                 and config.INVESTIGATION_QUERY_BACKEND == "elasticsearch"
                 and config.ELASTIC_QUERY_GENERATION_ENABLED
             ):
-                elastic_grounding = retrieve_elasticsearch_grounding(
-                    alert_text=alert_text,
-                    hypotheses=llm_response.get("competing_hypotheses", []),
-                    config=config,
+                elastic_grounding = _optional_call(
+                    "elasticsearch_grounding",
+                    lambda: retrieve_elasticsearch_grounding(
+                        alert_text=alert_text,
+                        hypotheses=llm_response.get("competing_hypotheses", []),
+                        config=config,
+                    ),
+                    ElasticsearchGroundingResult(status="failed", message="Elasticsearch grounding unavailable"),
+                    degraded_enrichments,
                 )
-                llm_response = analyzer.generate_elastic_queries(
-                    alert_text=alert_text,
-                    analysis_result=llm_response,
-                    config=config,
-                    soc_operational_context=rag_result.context,
-                    elasticsearch_grounding_context=elastic_grounding.context,
+                llm_response = _optional_call(
+                    "elasticsearch_query_generation",
+                    lambda: analyzer.generate_elastic_queries(
+                        alert_text=alert_text,
+                        analysis_result=llm_response,
+                        config=config,
+                        soc_operational_context=rag_result.context,
+                        elasticsearch_grounding_context=elastic_grounding.context,
+                    ),
+                    llm_response,
+                    degraded_enrichments,
                 )
                 metadata = llm_response.setdefault("metadata", {})
                 if isinstance(metadata, dict):
@@ -883,24 +1107,42 @@ def handler(event, context):
                 and config.INVESTIGATION_QUERY_BACKEND == "elasticsearch"
                 and config.INVESTIGATION_QUERY_EXECUTION_ENABLED
             ):
-                query_results = execute_hypothesis_elasticsearch_queries(
-                    llm_response,
-                    config=config,
-                    api_key=get_elasticsearch_api_key(config),
+                query_results = _optional_call(
+                    "elasticsearch_query_execution",
+                    lambda: execute_hypothesis_elasticsearch_queries(
+                        llm_response,
+                        config=config,
+                        api_key=get_elasticsearch_api_key(config),
+                    ),
+                    [],
+                    degraded_enrichments,
                 )
                 llm_response["investigation_query_results"] = query_results
                 llm_response = enrich_analysis_with_query_results(llm_response, query_results)
                 if config.QUERY_RESULT_INTERPRETATION_ENABLED:
-                    llm_response = analyzer.interpret_query_results(
-                        alert_text=alert_text,
-                        analysis_result=llm_response,
-                        config=config,
+                    llm_response = _optional_call(
+                        "elasticsearch_query_interpretation",
+                        lambda: analyzer.interpret_query_results(
+                            alert_text=alert_text,
+                            analysis_result=llm_response,
+                            config=config,
+                        ),
+                        llm_response,
+                        degraded_enrichments,
                     )
                 metadata = llm_response.setdefault("metadata", {})
                 if isinstance(metadata, dict):
                     metadata["investigation_query_backend"] = config.INVESTIGATION_QUERY_BACKEND
                     metadata["investigation_query_executor"] = "elasticsearch"
                     metadata["investigation_query_result_count"] = len(query_results)
+
+            analysis_status = "degraded" if degraded_enrichments else "success"
+            if isinstance(llm_response, dict):
+                metadata = llm_response.setdefault("metadata", {})
+                if isinstance(metadata, dict):
+                    metadata["analysis_status"] = analysis_status
+                    if degraded_enrichments:
+                        metadata["degraded_enrichments"] = sorted(set(degraded_enrichments))
 
             if isinstance(llm_response, dict) and (
                 config.SERVICENOW_DRAFT_ENABLED or config.SERVICENOW_CREATE_ENABLED
@@ -948,7 +1190,10 @@ def handler(event, context):
                     "execution_time_seconds": round(end_time - start_time, 2),
                     "ttp_count": len(scored_ttps),
                     "source_bucket": bucket,
-                    "source_key": key
+                    "source_key": key,
+                    "processing_id": processing_identity.processing_id,
+                    "analysis_status": analysis_status,
+                    "degraded_enrichments": sorted(set(degraded_enrichments)),
                 }
             }
             
@@ -957,9 +1202,20 @@ def handler(event, context):
             logger.info(f"Routing to sink: {sink_mode}")
             
             if sink_mode == 's3':
-                sink_result = write_to_s3_sink(key, markdown, analysis_result, config)
+                sink_result = write_to_s3_sink(
+                    key,
+                    markdown,
+                    analysis_result,
+                    config,
+                    processing_identity,
+                )
             elif sink_mode == 'notable_rest':
-                sink_result = write_to_notable_rest_sink(key, analysis_result, config)
+                sink_result = write_to_notable_rest_sink(
+                    key,
+                    analysis_result,
+                    config,
+                    processing_identity,
+                )
             else:
                 logger.error(f"Unknown sink mode: {sink_mode}")
                 sink_result = {"sink": sink_mode, "status": "error", "message": "Unknown sink mode"}
@@ -972,6 +1228,7 @@ def handler(event, context):
                 decoded_notable=decoded_notable,
                 sink_result=sink_result,
                 processed_at=record.get("eventTime"),
+                processing_identity=processing_identity,
             )
             if config.CASE_ARCHIVE_ENABLED or archive_result.get("status") != "skipped":
                 sink_result["case_archive_result"] = archive_result
@@ -984,6 +1241,9 @@ def handler(event, context):
                 "sink_result": sink_result
             })
             if record_status != "success":
+                message_id = str(record.get("_sqs_message_id", "")).strip()
+                if message_id:
+                    failed_sqs_message_ids.add(message_id)
                 logger.error("Sink failed for %s: %s", key, sink_result)
             else:
                 logger.info(f"Successfully processed {key}")
@@ -991,13 +1251,31 @@ def handler(event, context):
         except Exception as e:
             logger.error(f"Error processing record: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
+            retryable = getattr(e, "retryable", not isinstance(e, (ValueError, KeyError, TypeError)))
+            message_id = str(record.get("_sqs_message_id", "")).strip()
+            if message_id:
+                failed_sqs_message_ids.add(message_id)
             results.append({
-                "key": record.get('s3', {}).get('object', {}).get('key', 'unknown'),
-                "status": "error",
-                "error": str(e)
+                "key": unquote_plus(record.get('s3', {}).get('object', {}).get('key', 'unknown')),
+                "status": "retryable_error" if retryable else "terminal_error",
+                "error": str(e),
+                "message_id": message_id,
             })
     
     failed_count = sum(1 for item in results if item.get("status") == "error")
+    if failed_sqs_message_ids:
+        return {
+            "statusCode": 200,
+            "batchItemFailures": [
+                {"itemIdentifier": message_id}
+                for message_id in sorted(failed_sqs_message_ids)
+            ],
+            "body": json.dumps({"processed": len(results), "results": results}),
+        }
+    failed_count += sum(
+        1 for item in results if item.get("status") in {"retryable_error", "terminal_error"}
+        and not item.get("message_id")
+    )
     if failed_count:
         raise RuntimeError(f"Failed to process {failed_count} S3 record(s)")
 
@@ -1008,4 +1286,3 @@ def handler(event, context):
             'results': results
         })
     }
-

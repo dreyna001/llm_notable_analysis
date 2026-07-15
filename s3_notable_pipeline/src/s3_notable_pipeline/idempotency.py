@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from uuid import uuid4
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -28,6 +29,7 @@ class SideEffectReservation:
     item_id: str = ""
     existing_marker: dict[str, Any] | None = None
     client: Any | None = None
+    fencing_token: str = ""
 
 
 def _normalize_key(key: str) -> str:
@@ -77,6 +79,7 @@ def _marker_from_item(
         "key": item.get("side_effect_key", {}).get("S", key),
         "status": item.get("status", {}).get("S", "unknown"),
         "started_at": item.get("started_at", {}).get("S", ""),
+        "fencing_token": item.get("fencing_token", {}).get("S", ""),
         "metadata": _metadata_from_item(item),
     }
 
@@ -123,6 +126,7 @@ def begin_side_effect(
     ddb = client or dynamodb_client()
     now = datetime.now(timezone.utc).isoformat()
     ttl = _expiry_epoch(int(getattr(config, "SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS", 30)))
+    fencing_token = uuid4().hex
 
     for attempt in range(2):
         try:
@@ -134,6 +138,7 @@ def begin_side_effect(
                     "side_effect_key": {"S": normalized_key},
                     "status": {"S": "in_progress"},
                     "started_at": {"S": now},
+                    "fencing_token": {"S": fencing_token},
                     "expires_at": {"N": str(ttl)},
                 },
                 ConditionExpression="attribute_not_exists(id)",
@@ -146,13 +151,35 @@ def begin_side_effect(
             marker = _marker_from_item(existing, operation=operation, key=normalized_key)
             lock_seconds = int(getattr(config, "SIDE_EFFECT_IDEMPOTENCY_LOCK_SECONDS", 900))
             if attempt == 0 and _is_stale_in_progress(marker, lock_seconds=lock_seconds):
+                takeover_token = uuid4().hex
                 try:
-                    ddb.delete_item(
+                    condition_values = {
+                        ":status": {"S": "in_progress"},
+                        ":started_at": {"S": str(marker.get("started_at", ""))},
+                    }
+                    condition = "#status = :status AND #started_at = :started_at"
+                    names = {"#status": "status", "#started_at": "started_at"}
+                    if marker.get("fencing_token"):
+                        condition += " AND #fencing_token = :fencing_token"
+                        names["#fencing_token"] = "fencing_token"
+                        condition_values[":fencing_token"] = {
+                            "S": str(marker["fencing_token"])
+                        }
+                    ddb.update_item(
                         TableName=table_name,
                         Key={"id": {"S": item_id}},
-                        ConditionExpression="#status = :status",
-                        ExpressionAttributeNames={"#status": "status"},
-                        ExpressionAttributeValues={":status": {"S": "in_progress"}},
+                        UpdateExpression=(
+                            "SET #status = :new_status, started_at = :new_started_at, "
+                            "fencing_token = :new_fencing_token"
+                        ),
+                        ConditionExpression=condition,
+                        ExpressionAttributeNames=names,
+                        ExpressionAttributeValues={
+                            **condition_values,
+                            ":new_status": {"S": "in_progress"},
+                            ":new_started_at": {"S": now},
+                            ":new_fencing_token": {"S": takeover_token},
+                        },
                     )
                 except Exception as delete_exc:
                     if _error_code(delete_exc) != "ConditionalCheckFailedException":
@@ -167,7 +194,16 @@ def begin_side_effect(
                         existing_marker=marker,
                         client=ddb,
                     )
-                continue
+                return SideEffectReservation(
+                    enabled=True,
+                    should_execute=True,
+                    operation=operation,
+                    key=normalized_key,
+                    table_name=table_name,
+                    item_id=item_id,
+                    client=ddb,
+                    fencing_token=takeover_token,
+                )
             return SideEffectReservation(
                 enabled=True,
                 should_execute=False,
@@ -187,6 +223,7 @@ def begin_side_effect(
         table_name=table_name,
         item_id=item_id,
         client=ddb,
+        fencing_token=fencing_token,
     )
 
 
@@ -207,16 +244,29 @@ def complete_side_effect_success(
         reservation.client.update_item(
             TableName=reservation.table_name,
             Key={"id": {"S": reservation.item_id}},
-            UpdateExpression="SET #status = :status, completed_at = :completed_at, metadata = :metadata",
+            UpdateExpression=(
+                "SET #status = :status, completed_at = :completed_at, metadata = :metadata"
+            ),
+            ConditionExpression="#status = :in_progress AND fencing_token = :fencing_token",
             ExpressionAttributeNames={"#status": "status"},
             ExpressionAttributeValues={
                 ":status": {"S": "completed"},
+                ":in_progress": {"S": "in_progress"},
+                ":fencing_token": {"S": reservation.fencing_token},
                 ":completed_at": {"S": datetime.now(timezone.utc).isoformat()},
                 ":metadata": _metadata_to_attr(metadata or {}),
             },
         )
         return True
     except Exception:
+        mark_side_effect_uncertain(
+            reservation,
+            metadata={
+                **(metadata or {}),
+                "external_success": True,
+                "uncertain_reason": "completion_marker_write_failed",
+            },
+        )
         return False
 
 
@@ -229,9 +279,43 @@ def release_side_effect_lock(reservation: SideEffectReservation) -> None:
         reservation.client.delete_item(
             TableName=reservation.table_name,
             Key={"id": {"S": reservation.item_id}},
-            ConditionExpression="#status = :status",
+            ConditionExpression="#status = :status AND fencing_token = :fencing_token",
             ExpressionAttributeNames={"#status": "status"},
-            ExpressionAttributeValues={":status": {"S": "in_progress"}},
+            ExpressionAttributeValues={
+                ":status": {"S": "in_progress"},
+                ":fencing_token": {"S": reservation.fencing_token},
+            },
         )
     except Exception:
         return
+
+
+def mark_side_effect_uncertain(
+    reservation: SideEffectReservation,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> bool:
+    """Fence a side effect in an uncertain state after an ambiguous outcome."""
+
+    if not reservation.enabled or not reservation.should_execute or not reservation.client:
+        return False
+    try:
+        reservation.client.update_item(
+            TableName=reservation.table_name,
+            Key={"id": {"S": reservation.item_id}},
+            UpdateExpression=(
+                "SET #status = :status, completed_at = :completed_at, metadata = :metadata"
+            ),
+            ConditionExpression="#status = :in_progress AND fencing_token = :fencing_token",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={
+                ":status": {"S": "uncertain"},
+                ":in_progress": {"S": "in_progress"},
+                ":fencing_token": {"S": reservation.fencing_token},
+                ":completed_at": {"S": datetime.now(timezone.utc).isoformat()},
+                ":metadata": _metadata_to_attr(metadata or {}),
+            },
+        )
+        return True
+    except Exception:
+        return False

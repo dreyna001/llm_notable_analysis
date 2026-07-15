@@ -1,8 +1,7 @@
 # Setup and Deploy Script for Notable Analyzer Pipeline
 # Prerequisites: AWS CLI, SAM CLI, Docker must be installed
 #
-# Readiness: template ImageUri must be an existing ECR image (build+push first if needed).
-# The deploy/docker/Dockerfile FROM line is not portable until you substitute your approved base image.
+# Readiness: publish the image to GovCloud ECR and capture its immutable digest first.
 
 Write-Host "=== Notable Analyzer Pipeline - Setup and Deploy ===" -ForegroundColor Cyan
 
@@ -68,7 +67,7 @@ try {
 # Check Bedrock access
 Write-Host "`nChecking Bedrock access..." -ForegroundColor Yellow
 try {
-    $region = "us-east-1"
+    $region = "us-gov-east-1"
 
     $novaModels = aws bedrock list-foundation-models --region $region --query "modelSummaries[?contains(modelId, 'nova-pro')].modelId" --output text 2>$null
     $novaAvailable = $LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($novaModels) -and $novaModels -ne "None"
@@ -93,8 +92,7 @@ try {
 }
 
 # Build
-Write-Host "`nBefore build: ensure ImageUri (sam/template) points at your Lambda image in ECR, or sam build/push flow matches your org." -ForegroundColor Yellow
-Write-Host "If the deploy/docker/Dockerfile FROM is still a placeholder, fix it or use another approved image build path." -ForegroundColor Yellow
+Write-Host "`nBefore deploy: ensure EcrRepositoryUri and ImageDigest identify the approved image in us-gov-east-1." -ForegroundColor Yellow
 Write-Host "`n=== Step 1: Building application ===" -ForegroundColor Cyan
 Write-Host "Running: sam build -t $samTemplate" -ForegroundColor Gray
 sam build -t $samTemplate
@@ -111,16 +109,15 @@ Write-Host ""
 Write-Host "  CapabilityProfiles (default: core)" -ForegroundColor Yellow
 Write-Host "    core                          - required base analysis path" -ForegroundColor Gray
 Write-Host "    core,html_reports             - add escaped HTML companion reports" -ForegroundColor Gray
-Write-Host "    core,rag                      - Bedrock KB advisory context (set RagEnabled=true, RagBedrockKbId)" -ForegroundColor Gray
+Write-Host "    core,rag                      - private OpenSearch advisory context (set RagEnabled=true)" -ForegroundColor Gray
 Write-Host "    core,rag,spl_readonly         - SPL generation + read-only Splunk investigation (SplunkBaseUrl, token secret)" -ForegroundColor Gray
 Write-Host "    core,rag,elastic_readonly     - Elasticsearch read-only investigation (mutually exclusive with spl_readonly)" -ForegroundColor Gray
 Write-Host "    core,ticket_draft             - ServiceNow draft payloads in JSON reports" -ForegroundColor Gray
 Write-Host "    core,action_gated             - Splunk writeback / ServiceNow create + DynamoDB idempotency" -ForegroundColor Gray
 Write-Host ""
-Write-Host "  Knowledge Base IDs (leave blank unless profile enabled)" -ForegroundColor Yellow
-Write-Host "    RagBedrockKbId                  - general SOC RAG" -ForegroundColor Gray
-Write-Host "    SplQueryRagBedrockKbId          - SPL query grounding (spl_readonly)" -ForegroundColor Gray
-Write-Host "    ElasticsearchGroundingBedrockKbId - Elastic query grounding (elastic_readonly)" -ForegroundColor Gray
+Write-Host "  OpenSearch grounding" -ForegroundColor Yellow
+Write-Host "    OpenSearchEndpoint, OpenSearchDomainArn, RagTenantId, private VPC IDs" -ForegroundColor Gray
+Write-Host "    SplQueryRagEnabled / ElasticsearchGroundingEnabled enable dictionary lanes" -ForegroundColor Gray
 Write-Host ""
 Write-Host "  Investigation backend (choose one read-only profile)" -ForegroundColor Yellow
 Write-Host "    spl_readonly: SplunkBaseUrl, SplunkApiTokenSecretArn, InvestigationQueryExecutor (rest|mcp)" -ForegroundColor Gray
@@ -145,18 +142,18 @@ if (Test-Path "samconfig.toml") {
     Write-Host "Running: sam deploy --guided --template-file $samBuiltTemplate" -ForegroundColor Gray
     Write-Host "`nYou'll be prompted for:" -ForegroundColor Yellow
     Write-Host "  - Stack name (e.g., notable-analyzer-stack)" -ForegroundColor Gray
-    Write-Host "  - AWS Region (e.g., us-east-1)" -ForegroundColor Gray
+    Write-Host "  - AWS Region (us-gov-east-1)" -ForegroundColor Gray
     Write-Host "  - Input bucket name (must be globally unique)" -ForegroundColor Gray
     Write-Host "  - Output bucket name (must be globally unique)" -ForegroundColor Gray
     Write-Host "  - SplunkSinkMode ('s3' or 'notable_rest'; use 's3' for testing)" -ForegroundColor Gray
     Write-Host "  - CapabilityProfiles (default 'core'; see Wave 1 reference above)" -ForegroundColor Gray
     Write-Host "  - HtmlReportEnabled (default 'false')" -ForegroundColor Gray
-    Write-Host "  - RagEnabled / RagBedrockKbId (default off; enable with core,rag profile)" -ForegroundColor Gray
-    Write-Host "  - SplQueryRagBedrockKbId, InvestigationQueryExecutor (spl_readonly staging only)" -ForegroundColor Gray
-    Write-Host "  - ElasticsearchBaseUrl / ElasticsearchApiKeySecretArn / ElasticsearchGroundingBedrockKbId (elastic_readonly)" -ForegroundColor Gray
+    Write-Host "  - RagEnabled, SplQueryRagEnabled, or ElasticsearchGroundingEnabled (default off)" -ForegroundColor Gray
+    Write-Host "  - OpenSearchEndpoint, OpenSearchDomainArn, RagTenantId, and private VPC IDs when enabled" -ForegroundColor Gray
+    Write-Host "  - ElasticsearchBaseUrl / ElasticsearchApiKeySecretArn (elastic_readonly)" -ForegroundColor Gray
     Write-Host "  - ServiceNowBaseUrl, ServiceNowApiTokenSecretArn, ServiceNowApprovalHmacSecretArn, ServiceNowAssignmentGroup" -ForegroundColor Gray
     Write-Host "  - SideEffectIdempotencyTableName (action_gated; default notable-side-effect-idempotency)" -ForegroundColor Gray
-    Write-Host "  - AwsAccountId (12-digit) and ImageUri (existing ECR URI for this Lambda image)" -ForegroundColor Gray
+    Write-Host "  - AwsAccountId, EcrRepositoryUri, ImageDigest, and BedrockAnalysisModelId" -ForegroundColor Gray
     Write-Host "  - If notable_rest: SplunkBaseUrl + SplunkApiTokenSecretArn (Secrets Manager ARN)" -ForegroundColor Gray
     Write-Host "  - Optional: SplunkApiTokenSecretField (default 'token') and SplunkNotableUpdatePath" -ForegroundColor Gray
     sam deploy --guided --template-file $samBuiltTemplate

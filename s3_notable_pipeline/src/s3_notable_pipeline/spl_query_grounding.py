@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from .aws_clients import bedrock_agent_runtime_client
+from .aws_clients import bedrock_agent_runtime_client, bedrock_runtime_client
 from .config import Config
 
 SPL_QUERY_GROUNDING_CONTEXT_HEADER = "SPL_QUERY_GROUNDING_CONTEXT"
@@ -21,6 +21,7 @@ class SplGroundingResult:
     context: str = ""
     snippet_count: int = 0
     message: str = ""
+    provenance: tuple[dict[str, Any], ...] = ()
 
 
 def spl_query_rag_failure_mode(config: Config) -> str:
@@ -115,11 +116,68 @@ def retrieve_spl_query_grounding(
     hypotheses: list[dict[str, Any]],
     config: Config,
     client: Any | None = None,
+    opensearch_client: Any | None = None,
+    bedrock_client: Any | None = None,
 ) -> SplGroundingResult:
     """Retrieve SPL query grounding from a Bedrock Knowledge Base."""
 
     if not config.SPL_QUERY_RAG_ENABLED:
         return SplGroundingResult(status="skipped", message="SPL query RAG disabled")
+    from .case_embed import embed_text
+    from .opensearch_retrieval import (
+        adapter_for,
+        config_value,
+        opensearch_enabled,
+        render_documents,
+        retrieve_documents,
+        tenant_id_for,
+    )
+
+    query_text = build_spl_query_grounding_query(alert_text=alert_text, hypotheses=hypotheses)
+    if opensearch_enabled(config):
+        try:
+            documents = retrieve_documents(
+                query_text=query_text,
+                query_embedding=embed_text(
+                    query_text,
+                    config,
+                    bedrock_client or bedrock_runtime_client(),
+                ),
+                index=str(
+                    config_value(
+                        config,
+                        "OPENSEARCH_SPL_INDEX",
+                        config_value(config, "OPENSEARCH_SPLUNK_INDEX", "notable-splunk-dictionary"),
+                    )
+                ),
+                tenant_id=tenant_id_for(config, required=True),
+                corpus_id="spl",
+                top_k=config.SPL_QUERY_RAG_MAX_SNIPPETS,
+                adapter=adapter_for(
+                    config,
+                    opensearch_client or (client if hasattr(client, "search") else None),
+                ),
+            )
+            context = render_documents(
+                documents,
+                budget_chars=config.SPL_QUERY_RAG_CONTEXT_BUDGET_CHARS,
+                header=SPL_QUERY_GROUNDING_CONTEXT_HEADER,
+            )
+            if not context:
+                return SplGroundingResult(
+                    status="no_match",
+                    message="No SPL query grounding snippets returned",
+                )
+            return SplGroundingResult(
+                status="success",
+                context=context,
+                snippet_count=len(documents),
+                provenance=tuple(
+                    dict(document.metadata or {}).get("provenance", {}) for document in documents
+                ),
+            )
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            return SplGroundingResult(status="failed", message=f"OpenSearch SPL grounding failed: {exc}")
     if not config.SPL_QUERY_RAG_BEDROCK_KB_ID.strip():
         message = "SPL_QUERY_RAG_BEDROCK_KB_ID is required when SPL query RAG is enabled"
         if spl_query_rag_failure_mode(config) == "fallback_to_ungrounded":
@@ -127,7 +185,6 @@ def retrieve_spl_query_grounding(
         return SplGroundingResult(status="failed", message=message)
 
     kb_client = client or bedrock_agent_runtime_client()
-    query_text = build_spl_query_grounding_query(alert_text=alert_text, hypotheses=hypotheses)
     try:
         response = kb_client.retrieve(
             knowledgeBaseId=config.SPL_QUERY_RAG_BEDROCK_KB_ID,
