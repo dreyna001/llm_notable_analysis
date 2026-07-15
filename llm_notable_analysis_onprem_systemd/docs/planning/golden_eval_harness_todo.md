@@ -19,7 +19,7 @@ layer in
 | Current test baseline | [`../testing/TESTING.md`](../testing/TESTING.md) |
 | Integrity / drift monitoring (planned) | [`ai_integrity_drift_monitoring_plan.md`](ai_integrity_drift_monitoring_plan.md) |
 | Portal Case Q&A contract | [`../technical_specs/analyst_portal_case_archive_technical_spec.md`](../technical_specs/analyst_portal_case_archive_technical_spec.md) |
-| Prompt / measurement backlog | [`PROMPT_ENHANCEMENTS_PLAN.md`](PROMPT_ENHANCEMENTS_PLAN.md) |
+| Prompt / measurement backlog | [`FUTURE_ENHANCEMENTS_ROADMAP.md`](FUTURE_ENHANCEMENTS_ROADMAP.md#spl-and-elasticsearch-grounding-quality-program) |
 | Manual preview chat questions | [`../../../PREVIEW_CASE_INVESTIGATION_GUIDE.md`](../../../PREVIEW_CASE_INVESTIGATION_GUIDE.md) |
 | Preview scenario fixtures (cases 1-5) | [`../../data/preview_scenarios/README.md`](../../data/preview_scenarios/README.md) |
 

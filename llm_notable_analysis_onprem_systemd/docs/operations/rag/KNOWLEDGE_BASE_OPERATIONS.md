@@ -21,8 +21,8 @@ There are three supported KB content lanes for investigation queries:
 
 Splunk and Elastic grounding KBs are separate from each other and from the
 general SOC KB. See
-[`SPL_OPERATIONS.md`](SPL_OPERATIONS.md) and
-[`ELASTICSEARCH_OPERATIONS.md`](ELASTICSEARCH_OPERATIONS.md) for backend-specific
+[`SPL_OPERATIONS.md`](../investigation/SPL_OPERATIONS.md) and
+[`ELASTICSEARCH_OPERATIONS.md`](../investigation/ELASTICSEARCH_OPERATIONS.md) for backend-specific
 onboarding checklists.
 
 ## Recommended Starting Posture
@@ -74,7 +74,7 @@ approved environment facts and a few representative alerts.
 
 - Full schema export of every index
 
-Detailed checklist: [`SPL_OPERATIONS.md`](SPL_OPERATIONS.md) section
+Detailed checklist: [`SPL_OPERATIONS.md`](../investigation/SPL_OPERATIONS.md) section
 **Customer Onboarding — Splunk Query Grounding**.
 
 ### Elasticsearch (`ELASTICSEARCH_GROUNDING_ENABLED`)
@@ -94,7 +94,7 @@ Unlike Splunk, **field names are enforced** in config and validators — operato
 must set `ELASTICSEARCH_ALLOWED_FIELDS` explicitly; grounding KB supplements but
 does not replace that list.
 
-Detailed checklist: [`ELASTICSEARCH_OPERATIONS.md`](ELASTICSEARCH_OPERATIONS.md)
+Detailed checklist: [`ELASTICSEARCH_OPERATIONS.md`](../investigation/ELASTICSEARCH_OPERATIONS.md)
 section **Customer Onboarding — Elasticsearch Query Grounding**.
 
 ### Ops vs engineering
@@ -102,7 +102,7 @@ section **Customer Onboarding — Elasticsearch Query Grounding**.
 | Work | Owner |
 |------|-------|
 | Curate source docs, ingest, enable flags, spot-check alerts | Operators / platform owners |
-| Prompt labeling, retrieval query shaping, eval harness | Engineering (see [`PROMPT_ENHANCEMENTS_PLAN.md`](../../planning/PROMPT_ENHANCEMENTS_PLAN.md)) |
+| Prompt labeling, retrieval query shaping, eval harness | Engineering (see the [`FUTURE_ENHANCEMENTS_ROADMAP.md`](../../planning/FUTURE_ENHANCEMENTS_ROADMAP.md#spl-and-elasticsearch-grounding-quality-program)) |
 
 ## Runtime Contract
 
@@ -358,11 +358,10 @@ deduplication apply; the top snippets are rendered up to configured limits.
 4. If the right doc exists but never appears in grounding, try rerank or modest
    pool increases one knob at a time; re-run spot-checks after each change.
 
-**Engineering follow-ups** (prompt labeling, retrieval query shaping, eval
-harness) are tracked in
-[`PROMPT_ENHANCEMENTS_PLAN.md`](../../planning/PROMPT_ENHANCEMENTS_PLAN.md) under
-**Deferred — SPL query RAG**; those are code/prompt changes, not operator KB
-curation.
+**Engineering follow-ups** (prompt labeling, retrieval query shaping, and the
+evaluation harness) are tracked in the
+[`FUTURE_ENHANCEMENTS_ROADMAP.md`](../../planning/FUTURE_ENHANCEMENTS_ROADMAP.md#spl-and-elasticsearch-grounding-quality-program);
+those are code or prompt changes, not operator KB curation.
 
 ## Add Or Update Elasticsearch Query KB Documents
 
@@ -574,6 +573,6 @@ host if rollback auditability is required.
 ## Related Docs
 
 - [`RAG_OPERATIONS.md`](RAG_OPERATIONS.md) — shared retrieval tuning
-- [`SPL_OPERATIONS.md`](SPL_OPERATIONS.md) — Splunk generation, execution, onboarding
-- [`ELASTICSEARCH_OPERATIONS.md`](ELASTICSEARCH_OPERATIONS.md) — Elastic generation, execution, onboarding
-- [`PROMPT_ENHANCEMENTS_PLAN.md`](../../planning/PROMPT_ENHANCEMENTS_PLAN.md) — engineering prompt/RAG follow-ups
+- [`SPL_OPERATIONS.md`](../investigation/SPL_OPERATIONS.md) — Splunk generation, execution, onboarding
+- [`ELASTICSEARCH_OPERATIONS.md`](../investigation/ELASTICSEARCH_OPERATIONS.md) — Elastic generation, execution, onboarding
+- [`FUTURE_ENHANCEMENTS_ROADMAP.md`](../../planning/FUTURE_ENHANCEMENTS_ROADMAP.md#spl-and-elasticsearch-grounding-quality-program) — engineering prompt/RAG follow-ups

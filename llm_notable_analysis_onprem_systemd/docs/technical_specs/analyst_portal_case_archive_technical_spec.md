@@ -5,10 +5,8 @@
 Normative implementation contract for the shipped on-prem analyst portal, 30-day
 Postgres case archive, and retrieval-bound portal chat.
 
-Planning sources (non-normative):
-
-- [`../planning/ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md`](../planning/ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md)
-- [`../planning/ANALYST_PORTAL_NETWORKING_PLAN.md`](../planning/ANALYST_PORTAL_NETWORKING_PLAN.md)
+Deferred work and open decisions (non-normative):
+[`../planning/ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md`](../planning/ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md).
 
 Operator runbooks:
 
@@ -58,6 +56,18 @@ analysts browse retained notables and ask retrieval-bound chat questions over:
 - nginx terminates TLS and basic auth; FastAPI trusts proxy-injected identity headers
   only when the shared proxy secret matches.
 - V1 chunks selected high-value alert fields and the full validated analysis.
+
+### Network Design Rationale
+
+| Decision | Rationale |
+|----------|-----------|
+| nginx is the documented front door | TLS, authentication, static SPA delivery, rate limits, and access logs stay outside FastAPI. |
+| FastAPI binds to loopback | Analyst subnets cannot reach Uvicorn directly; `PORTAL_ALLOW_NON_LOOPBACK_BIND=false` is the default. |
+| nginx basic auth is the v1 example | It provides a simple internal deployment path while allowing customer SSO to replace authentication at nginx later. |
+| nginx injects a shared proxy secret | `X-Notable-Portal-Proxy-Secret` prevents direct loopback callers from impersonating an authenticated proxy request. |
+| nginx supplies trusted user identity | `PORTAL_TRUSTED_USER_HEADER=X-Forwarded-User` is accepted only after proxy-secret validation. |
+| Case visibility is flat in v1 | Every authenticated analyst can see every retained case; per-case RBAC is deferred. |
+| nginx is co-located by default | `install.sh` assumes the analyzer host, but a separate internal web host is valid when the proxy, database, identity, and secret boundaries are preserved. |
 
 ## Implementation Status
 

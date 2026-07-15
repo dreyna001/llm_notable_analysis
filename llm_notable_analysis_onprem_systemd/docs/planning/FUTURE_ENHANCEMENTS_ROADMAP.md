@@ -267,6 +267,35 @@ Envelope Bedrock token spend, Athena bytes scanned, Splunk/Elastic concurrency, 
 
 Validated outputs cite only observable lanes: **direct_alert**, **adapter_enrichment**, **advisory_retrieval**, or explicit **unknown**. Third-party enrichment facts must reconcile to canonical API-derived fields.
 
+#### SPL and Elasticsearch grounding quality program
+
+**Status: backlog; baseline retrieval and prompt controls are shipped.**
+
+Operators own corpus curation, ingest, and spot checks. Engineering follow-up is
+limited to measured retrieval-query shaping, snippet selection, conditions for
+omitting weak grounding blocks, and broader grounded-versus-ungrounded golden
+evaluation cases. Tune one retrieval control at a time against representative
+notables and record baseline versus candidate results. See
+[`golden_eval_harness_todo.md`](golden_eval_harness_todo.md) and the
+[`KNOWLEDGE_BASE_OPERATIONS.md`](../operations/rag/KNOWLEDGE_BASE_OPERATIONS.md)
+quality checklist.
+
+#### Bounded post-query reconciliation
+
+**Status: unapproved backlog; no runtime contract or configuration exists.**
+
+Query-result interpretation currently adds per-hypothesis `supports` and
+`weakens` narrative without changing `alert_reconciliation`. A future optional
+reconciliation pass could align the case-level verdict with bounded hunt
+evidence only if it preserves the original assessment, cites search references
+and result counts, and prefers `unknown` for failed or inconclusive queries.
+
+Before approval, decide whether deterministic thresholds precede synthesis,
+whether output is a separate immutable block, which verdict or confidence fields
+may change, and how the portal exposes pre-hunt versus post-hunt assessments.
+Until then, do not add runtime flags, schema fields, rendering changes, or an
+extra model call.
+
 ### SPL / Elastic investigation and inference call layering
 
 Mirrors consolidated guidance shared with **`s3_notable_pipeline`** parity narratives:

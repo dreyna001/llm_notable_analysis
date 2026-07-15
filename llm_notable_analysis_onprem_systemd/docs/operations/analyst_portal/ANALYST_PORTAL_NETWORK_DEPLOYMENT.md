@@ -384,6 +384,6 @@ sudo tail -n 50 /var/log/nginx/notable-portal.error.log
 - [`ANALYST_PORTAL_OPERATIONS.md`](ANALYST_PORTAL_OPERATIONS.md) — enable/disable, maintenance, API surface, chat readiness
 - [`ANALYST_PORTAL_CHAT_SECURITY.md`](ANALYST_PORTAL_CHAT_SECURITY.md) — LLM boundaries
 - [`../deployment/INSTALL.md`](../deployment/INSTALL.md) — full host install
-- [`../../planning/ANALYST_PORTAL_NETWORKING_PLAN.md`](../../planning/ANALYST_PORTAL_NETWORKING_PLAN.md) — design rationale (superseded for rollout steps by this doc)
+- [`../../technical_specs/analyst_portal_case_archive_technical_spec.md`](../../technical_specs/analyst_portal_case_archive_technical_spec.md) — implementation contract and network design rationale
 - [`../../../deploy/nginx/notable-portal.conf`](../../../deploy/nginx/notable-portal.conf) — example nginx site
 - [`../../../deploy/systemd/notable-portal.service`](../../../deploy/systemd/notable-portal.service) — portal systemd unit

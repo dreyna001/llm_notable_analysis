@@ -23,10 +23,10 @@ Optional deep dives:
 - **[Developer maintainer guide](internal/DEVELOPER_MAINTAINER_GUIDE.md)** — Code boundaries, extension patterns, structured output, new capabilities.
 - **[Feature enhancements technical spec](technical_specs/feature_enhancements_technical_spec.md)** — Normative contract for SPL, Splunk investigation, ServiceNow, and related shipped behavior.
 - **[Analyst portal technical spec](technical_specs/analyst_portal_case_archive_technical_spec.md)** — Normative contract for the shipped Postgres-backed portal, case archive, and retrieval-bound chat.
-- **[Analyst portal case archive plan](planning/ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md)** and **[networking plan](planning/ANALYST_PORTAL_NETWORKING_PLAN.md)** — Living scope and design rationale; rollout steps in [ANALYST_PORTAL_NETWORK_DEPLOYMENT.md](operations/analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md).
+- **[Analyst portal deferred work](planning/ANALYST_PORTAL_CASE_ARCHIVE_PLAN.md)** — Open portal/archive decisions; shipped behavior and network rationale live in the technical spec and rollout runbook.
 - **[SPL operations](operations/investigation/SPL_OPERATIONS.md)** — Indexes, execution limits, REST vs MCP, rollout.
 - **[Future enhancements roadmap](planning/FUTURE_ENHANCEMENTS_ROADMAP.md)** — Backlog (threat intel, SOAR invocation, observability, and related work).
-- **[Prompt enhancements plan](planning/PROMPT_ENHANCEMENTS_PLAN.md)** and **[AI integrity / drift plan](planning/ai_integrity_drift_monitoring_plan.md)** — Planned prompt and quality-monitoring work.
+- **[AI integrity / drift plan](planning/ai_integrity_drift_monitoring_plan.md)** — Planned integrity and quality-monitoring work.
 - **[Golden eval (first slice)](testing/GOLDEN_EVAL.md)** — Analyzer disposition baseline corpus and rubric tests; broader harness backlog in [golden_eval_harness_todo.md](planning/golden_eval_harness_todo.md).
 
 ## Topic shortcuts
