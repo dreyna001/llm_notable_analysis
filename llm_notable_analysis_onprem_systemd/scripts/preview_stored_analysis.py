@@ -82,15 +82,15 @@ def analysis_case_1_beaconing(alert: dict[str, Any]) -> dict[str, Any]:
             "verdict": "likely_malicious",
             "confidence": "0.88",
             "one_sentence_summary": (
-                "Workstation laptop-22 sent 1,440 fixed-interval HTTPS POST beacons to a "
-                "three-day-old domain with constant 512-byte payloads, consistent with C2 "
+                "Workstation laptop-22 sent 1,427 near-regular HTTPS POST beacons to a "
+                "11-day-old domain with narrow 768-to-896-byte payloads, consistent with C2 "
                 "keepalive rather than a known updater."
             ),
             "decision_drivers": [
-                "beacon_interval_seconds=60 with beacon_count_24h=1440",
-                "domain_age_days=3 for dest_domain=update-service-cloud.net",
-                "bytes_out=512 on each POST with uri_path=/api/v1/session/a8f2c1",
-                "proxy_action=allowed with no vendor attribution in alert",
+                "beacon_interval_seconds=60 with beacon_count_24h=1427",
+                "domain_age_days=11 for dest_domain=update-service-cloud.net",
+                "median_payload_bytes=824 with a 768-to-896-byte range with uri_path=/api/v1/session/a8f2c1",
+                "proxy_action=allowed by Zscaler standard user policy",
             ],
             "recommended_actions": [
                 "Block dest_domain=update-service-cloud.net at DNS and proxy.",
@@ -102,12 +102,12 @@ def analysis_case_1_beaconing(alert: dict[str, Any]) -> dict[str, Any]:
                 (
                     "Sanctioned endpoint updater using a newly rotated CDN hostname.",
                     ["dest_port=443", "http_method=POST", "user_agent mentions UpdateAgent"],
-                    ["No inventory match for UpdateAgent on laptop-22", "domain_age_days=3"],
+                    ["No inventory match for UpdateAgent on laptop-22", "domain_age_days=11"],
                     [_pivot("Software inventory", ["host", "process"]), _pivot("Proxy logs", ["dest_domain", "uri_path"])],
                 ),
                 (
                     "Monitoring agent health checks misclassified as beaconing.",
-                    ["Fixed beacon_interval_seconds=60", "Small bytes_out=512"],
+                    ["Fixed beacon_interval_seconds=60", "Narrow payload range of 768-to-896 bytes"],
                     ["Agent name not in alert", "No CMDB monitoring tag on host"],
                     [_pivot("CMDB", ["host", "monitoring_role"]), _pivot("EDR", ["host", "process"])],
                 ),
@@ -123,11 +123,11 @@ def analysis_case_1_beaconing(alert: dict[str, Any]) -> dict[str, Any]:
                     "HTTP C2 channel using periodic POST keepalive to young domain.",
                     [
                         "beacon_interval_seconds=60",
-                        "beacon_count_24h=1440",
+                        "beacon_count_24h=1427",
                         "dest_domain=update-service-cloud.net",
-                        "domain_age_days=3",
+                        "domain_age_days=11",
                     ],
-                    ["Process owner not in alert", "TLS cert and JA3 not shown"],
+                    ["Process reputation not independently confirmed", "TLS certificate and JA3 require independent reputation validation"],
                     [_pivot("Proxy logs", ["src_host", "dest_domain", "uri_path"]), _pivot("EDR", ["host", "process"])],
                 ),
                 (
@@ -138,7 +138,7 @@ def analysis_case_1_beaconing(alert: dict[str, Any]) -> dict[str, Any]:
                 ),
                 (
                     "Low-and-slow exfil staging over repeated small HTTPS posts.",
-                    ["bytes_out=512 constant", "High event count in 24h"],
+                    ["payload_size_min=768 and payload_size_max=896", "High event count in 24h"],
                     ["No file access telemetry in alert", "Exfil volume threshold not exceeded"],
                     [_pivot("Proxy/DLP", ["host", "bytes_out"]), _pivot("EDR", ["host", "file_path"])],
                 ),
@@ -151,12 +151,12 @@ def analysis_case_1_beaconing(alert: dict[str, Any]) -> dict[str, Any]:
                 "dest_domain=update-service-cloud.net",
                 "dest_ip=203.0.113.77",
                 "beacon_interval_seconds=60",
-                "beacon_count_24h=1440",
-                "bytes_out=512",
-                "domain_age_days=3",
+                "beacon_count_24h=1427",
+                "median_payload_bytes=824",
+                "domain_age_days=11",
             ],
             "inferences": [
-                "Fixed cadence plus young domain is more consistent with C2 than bulk exfil",
+                "Near-regular cadence plus young domain is more consistent with C2 than bulk exfil",
                 "Process responsible for traffic is unknown from this notable alone",
             ],
         },
@@ -179,7 +179,7 @@ def analysis_case_1_beaconing(alert: dict[str, Any]) -> dict[str, Any]:
                 "ttp_id": "T1568.002",
                 "ttp_name": "Dynamic Resolution: Domain Generation Algorithms",
                 "confidence_score": "0.35",
-                "explanation": "Single young domain only; DGA not established. Uncertainty: domain_age_days=3 alone is weak.",
+                "explanation": "Single young domain only; DGA not established. Uncertainty: domain_age_days=11 alone is weak.",
                 "evidence_fields": ["domain_age_days", "dest_domain"],
             },
         ],
@@ -323,7 +323,7 @@ def analysis_case_3_powershell(alert: dict[str, Any]) -> dict[str, Any]:
             "verdict": "likely_malicious",
             "confidence": "0.84",
             "one_sentence_summary": (
-                "Admin user corp\\jsmith launched hidden encoded PowerShell from winword.exe "
+                "User corp\\jsmith launched hidden encoded PowerShell from winword.exe "
                 "on workstation-14 with no change ticket, indicating probable document-driven "
                 "execution rather than approved automation."
             ),
@@ -444,19 +444,19 @@ def analysis_case_4_privilege_escalation(alert: dict[str, Any]) -> dict[str, Any
             "verdict": "likely_malicious",
             "confidence": "0.80",
             "one_sentence_summary": (
-                "Non-admin user corp\\dgreen used net.exe to add themselves to the local "
-                "Administrators group on app-server-03, a direct self-elevation attempt on "
-                "an application server."
+                "An IIS worker spawned PrintSpoofer64.exe and obtained a SYSTEM token before "
+                "using net.exe to add a standard user to local Administrators on "
+                "app-server-03, consistent with post-exploitation privilege escalation."
             ),
             "decision_drivers": [
                 "event_id=4732 membership change",
                 "command_line adds corp\\dgreen to Administrators",
-                "subject_is_admin=false",
+                "grandparent_process=PrintSpoofer64.exe with integrity_level=System",
                 "server_role=application with cmdb_owner_team=finance-apps",
             ],
             "recommended_actions": [
                 "Remove corp\\dgreen from local Administrators on app-server-03.",
-                "Audit privileged group changes fleet-wide for 24 hours.",
+                "Isolate app-server-03 and preserve the IIS and token-impersonation process tree.",
             ],
         },
         "competing_hypotheses": _six(
@@ -489,7 +489,7 @@ def analysis_case_4_privilege_escalation(alert: dict[str, Any]) -> dict[str, Any
                 ),
                 (
                     "Insider attempt to gain persistent admin rights.",
-                    ["Direct command targeting Administrators group", "subject_is_admin=false"],
+                    ["Direct command targeting Administrators group", "grandparent_process=PrintSpoofer64.exe with integrity_level=System"],
                     ["UEBA baseline unknown", "HR context not included"],
                     [_pivot("UEBA", ["user"]), _pivot("PAM logs", ["user"])],
                 ),
@@ -508,7 +508,7 @@ def analysis_case_4_privilege_escalation(alert: dict[str, Any]) -> dict[str, Any
                 "event_id=4732",
                 "target_group=Administrators",
                 "command_line=net localgroup Administrators corp\\dgreen /add",
-                "subject_is_admin=false",
+                "grandparent_process=PrintSpoofer64.exe with integrity_level=System",
             ],
             "inferences": [
                 "Self-elevation without approved change is a strong malicious indicator",

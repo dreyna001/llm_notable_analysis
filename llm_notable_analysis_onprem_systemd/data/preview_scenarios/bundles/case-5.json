@@ -1,30 +1,122 @@
 {
   "scenario_index": 5,
   "case_id": "case-5",
-  "finding_id": "syn-005",
-  "search_name": "Suspicious RDP Lateral Movement",
+  "finding_id": "notable-0fbc8e29-ae28-4454-953d-48aa3515e005",
+  "search_name": "Service Account Interactive RDP to Tier-0 Asset",
   "source_filename": "case-5-lateral-movement-rdp.json",
   "alert": {
-    "notable_id": "syn-005",
-    "search_name": "Suspicious RDP Lateral Movement",
-    "urgency": "high",
-    "risk_score": 83,
-    "owner": "unassigned",
+    "notable_id": "notable-0fbc8e29-ae28-4454-953d-48aa3515e005",
+    "event_id": "0fbc8e29-ae28-4454-953d-48aa3515e005@@notable@@service_rdp_tier0",
+    "search_name": "Service Account Interactive RDP to Tier-0 Asset",
+    "rule_name": "Windows - Service Account Interactive Logon to Critical Asset - Rule",
+    "rule_id": "72355215-2cf1-420b-bc21-a8df1022a105",
+    "security_domain": "access",
+    "urgency": "critical",
+    "severity": "critical",
+    "risk_score": 94,
+    "risk_score_total": 123,
+    "risk_object": "CORP\\svc-backup",
+    "risk_object_type": "user",
+    "owner": "soc_tier2",
     "status": "new",
+    "disposition": "undetermined",
     "event_time": "2026-06-04T20:55:17Z",
-    "src_user": "corp\\svc-backup",
+    "_time": "2026-06-04T20:55:17.812Z",
+    "first_seen": "2026-06-04T20:41:02Z",
+    "last_seen": "2026-06-04T21:17:49Z",
+    "event_count": 11,
+    "src_user": "CORP\\svc-backup",
+    "user": "CORP\\svc-backup",
+    "user_sid": "S-1-5-21-1192744209-1785863588-481342671-2108",
+    "identity_category": "Service Account",
+    "identity_owner": "Enterprise Backup Operations",
+    "identity_last_password_change": "2026-01-11T03:15:44Z",
+    "identity_interactive_logon_allowed": false,
+    "identity_privileged": true,
     "src_host": "jump-01.corp.local",
     "src_ip": "10.10.5.22",
+    "src_asset_id": "SRV-000214",
+    "src_asset_category": "Privileged Access Workstation",
+    "src_asset_priority": "high",
     "dest_host": "db-prod-01.corp.local",
     "dest_ip": "10.30.8.40",
+    "dest_asset_id": "SRV-000031",
+    "dest_asset_category": "Production Database Server",
+    "dest_asset_priority": "critical",
+    "dest_asset_tier": "Tier-0",
+    "dest_environment": "production",
+    "dest_application": "Customer Billing Database",
+    "dest_owner_team": "Database Engineering",
+    "dest_data_classification": "restricted",
     "protocol": "RDP",
+    "transport": "tcp",
     "dest_port": 3389,
-    "event_id": "4624",
+    "event_id_windows": "4624",
+    "event_record_id": "18440592",
     "logon_type": 10,
+    "logon_process": "User32",
     "auth_package": "Negotiate",
-    "service_account_expected_on_dest": false,
+    "authentication_package": "Negotiate",
+    "key_length": 0,
+    "logon_id": "0x5f9b211",
+    "logon_guid": "{2A18AD01-4B0C-8042-CDF1-0B18DF2A5500}",
+    "linked_logon_id": "0x0",
+    "workstation_name": "JUMP-01",
+    "source_port": 51944,
+    "restricted_admin_mode": "No",
+    "virtual_account": "No",
+    "elevated_token": "Yes",
+    "session_name": "RDP-Tcp#7",
+    "session_duration_minutes": 22,
+    "rdp_client_name": "mstsc.exe",
+    "rdp_client_process_id": 10484,
+    "rdp_client_command_line": "mstsc.exe /v:db-prod-01.corp.local /admin",
     "prior_failed_logons_15m": 6,
-    "description": "Service account corp\\svc-backup initiated interactive RDP from jump-01 to db-prod-01 after six failed logon attempts; destination host is not in the approved jump path for this account."
+    "failure_event_ids": [
+      "4776",
+      "4625"
+    ],
+    "failure_status": "0xC000006A",
+    "failure_reason": "Unknown user name or bad password",
+    "failed_source_ips": [
+      "10.10.5.22"
+    ],
+    "password_spray_peer_accounts": 3,
+    "service_account_expected_on_dest": false,
+    "service_account_expected_protocols": [
+      "SMB",
+      "RPC"
+    ],
+    "approved_jump_path": "pam-gw-01.corp.local",
+    "source_is_approved_jump_host": false,
+    "pam_session_found": false,
+    "pam_ticket": "",
+    "change_ticket": "",
+    "after_hours": true,
+    "business_hours_timezone": "America/New_York",
+    "follow_on_processes": [
+      "cmd.exe",
+      "whoami.exe",
+      "nltest.exe"
+    ],
+    "follow_on_commands": [
+      "whoami /all",
+      "nltest /dclist.corp.local"
+    ],
+    "network_connections_after_logon": [
+      "db-prod-01 -> 10.30.1.10:445",
+      "db-prod-01 -> 10.30.1.11:389"
+    ],
+    "edr_vendor": "Microsoft Defender for Endpoint",
+    "edr_alert_id": "f8e4eaf3-9bd9-4540-8f9a-c50115931c05",
+    "edr_detection": "RDP session followed by domain discovery",
+    "source": "WinEventLog:Security",
+    "sourcetype": "XmlWinEventLog:Security",
+    "index": "wineventlog",
+    "splunk_server": "idx-prd-05",
+    "drilldown_search": "index=wineventlog (host=db-prod-01.corp.local OR host=jump-01.corp.local) user=\"CORP\\svc-backup\" earliest=-4h",
+    "risk_message": "A non-interactive backup service account established an unapproved after-hours RDP session to a Tier-0 database server after repeated authentication failures.",
+    "description": "CORP\\svc-backup established an elevated RDP session from jump-01 to the Tier-0 Customer Billing database server after six failed authentications. Interactive logon is prohibited for this account, no PAM session or change ticket exists, and the session immediately executed account and domain-discovery commands."
   },
   "analysis": {
     "alert_reconciliation": {
@@ -231,7 +323,7 @@
       ],
       "domains": [],
       "user_accounts": [
-        "corp\\svc-backup"
+        "CORP\\svc-backup"
       ],
       "hostnames": [
         "jump-01.corp.local",
@@ -241,7 +333,7 @@
       "file_paths": [],
       "file_hashes": [],
       "event_ids": [
-        "4624"
+        "0fbc8e29-ae28-4454-953d-48aa3515e005@@notable@@service_rdp_tier0"
       ],
       "urls": []
     },
@@ -293,5 +385,5 @@
       "preview_source": "stored_prompt_aligned_fixture"
     }
   },
-  "generated_at": "2026-06-10T22:09:16.938878+00:00"
+  "generated_at": "2026-07-15T03:27:47.027037+00:00"
 }
