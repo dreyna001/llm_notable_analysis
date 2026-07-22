@@ -39,9 +39,18 @@ export RAG_PACKAGE_SRC_DIR=/path/to/onprem_rag_notable_analysis
 export SDK_SOURCE_DIR=/path/to/onprem-llm-sdk
 ```
 
-Optional for analyst portal offline install:
+## Analyst portal UI (static SPA)
 
-- Pre-built `llm_notable_analysis_onprem_systemd/frontend/analyst-portal/dist/` on the transfer media, **or** Node.js/npm on a connected build host to run `npm ci && npm run build` before transfer.
+Build on a **connected** host; the air-gapped target only receives `dist/` (no npm on the target).
+
+| Step | Where | Action |
+| --- | --- | --- |
+| 1 | Connected host | `cd llm_notable_analysis_onprem_systemd/frontend/analyst-portal && npm install && npm run build` |
+| 2 | Transfer media | Include `frontend/analyst-portal/dist/` with the source bundle |
+| 3 | Air-gapped host | `sudo INSTALL_PORTAL_SKIP_FRONTEND_BUILD=true INSTALL_ANALYST_PORTAL=true bash scripts/install.sh` |
+
+- React/Tailwind/Radix assets are bundled into `dist/` at build time; nginx serves them locally at runtime.
+- Not supported: offline npm cache or building the SPA on the air-gapped host.
 
 ## 2) Python wheelhouse
 

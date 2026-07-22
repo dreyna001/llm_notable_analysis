@@ -2,6 +2,10 @@
 
 Minimal React + Vite + Tailwind + shadcn-style UI for the read-only analyst portal APIs.
 
+Visual design: "Federal SOC Dark" — see
+[`docs/operations/analyst_portal/ANALYST_PORTAL_THEME.md`](../../docs/operations/analyst_portal/ANALYST_PORTAL_THEME.md)
+(palette, fonts, radius, accessibility contrast notes, browser-openable mockup).
+
 ## Prerequisites
 
 - Shared repo virtualenv at `<repo-root>/.venv` (see [`DEVELOPING.md`](../../../DEVELOPING.md))

@@ -59,6 +59,7 @@ ops, chat security boundaries, and local dev preview.
 | [`analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](analyst_portal/ANALYST_PORTAL_OPERATIONS.md) | Enable/disable, portal service, nginx, health checks, DB maintenance, chunk rebuild, backfill, chat guardrails. |
 | [`analyst_portal/ANALYST_PORTAL_CHAT_SECURITY.md`](analyst_portal/ANALYST_PORTAL_CHAT_SECURITY.md) | LLM non-execution boundaries, prompting, post-checks, separation from analyzer actions. |
 | [`analyst_portal/ANALYST_PORTAL_PREVIEW.md`](analyst_portal/ANALYST_PORTAL_PREVIEW.md) | Dev preview with stored cases 1-5, synthetic cases 6-55, optional live chat LLM. |
+| [`analyst_portal/ANALYST_PORTAL_THEME.md`](analyst_portal/ANALYST_PORTAL_THEME.md) | "Federal SOC Dark" theme: palette, fonts, radius, WCAG notes, visual reference. |
 
 ## LLM Inference
 

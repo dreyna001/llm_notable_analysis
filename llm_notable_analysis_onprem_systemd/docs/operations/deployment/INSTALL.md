@@ -80,6 +80,7 @@ sudo bash scripts/install.sh
 | `VLLM_SKIP_INSTALL` | `false` | Skip vLLM venv creation (air-gapped / preinstalled vLLM) |
 | `INSTALL_PYTHON` | `true` | Run `install_python312.sh` when `python3.12` is missing |
 | `INSTALL_ANALYST_PORTAL` | `false` | OS packages, npm build, Postgres schema, nginx site, `analyst_portal` profile |
+| `INSTALL_PORTAL_SKIP_FRONTEND_BUILD` | `false` | Skip `npm run build`; require pre-built `frontend/analyst-portal/dist/` (air-gapped installs) |
 | `INSTALL_SYSTEMD_UNITS` | `true` | Copy units from `deploy/systemd/` |
 | `MODEL_DOWNLOAD` | `false` | Best-effort Hugging Face snapshot when `HF_TOKEN` is set |
 | `VLLM_RESET_OVERRIDES` | `false` | Clear existing `vllm.service.d/*.conf` drop-ins |
@@ -143,7 +144,7 @@ After install completes, these may still require operator input:
 | 2 | Create data/SFTP directories, cache paths, incoming symlink | Fails with path on error |
 | 2b | Prepare `/opt/models/` (best-effort) | Warns; does not fail install |
 | 3 | Configure SELinux contexts (if enabled) | Warns if semanage missing |
-| 3b | Build analyst portal frontend (`npm run build`) when `INSTALL_ANALYST_PORTAL=true` | Fails install |
+| 3b | Build analyst portal frontend (`npm run build`) when `INSTALL_ANALYST_PORTAL=true`, or verify pre-built `dist/` when `INSTALL_PORTAL_SKIP_FRONTEND_BUILD=true` | Fails install |
 | 4 | Copy application code to `/opt/notable-analyzer` (including RAG package and optional portal `dist/`) | Fails if source missing |
 | 5 | Create analyzer Python venv and install dependencies | Fails with pip output |
 | 5b | Create vLLM venv and install pinned vLLM (unless `VLLM_SKIP_INSTALL=true`) | Fails with pip output |

@@ -1156,16 +1156,35 @@ resolve_portal_frontend_toolchain() {
     PORTAL_NODE_TOOLCHAIN_PATH="$toolchain_path"
 }
 
+analyst_portal_frontend_dir() {
+    printf '%s/frontend/analyst-portal' "$REPO_DIR"
+}
+
+analyst_portal_dist_dir() {
+    printf '%s/dist' "$(analyst_portal_frontend_dir)"
+}
+
+require_analyst_portal_dist() {
+    local dist_dir
+    dist_dir="$(analyst_portal_dist_dir)"
+    if [[ -d "$dist_dir" && -f "$dist_dir/index.html" ]]; then
+        return 0
+    fi
+    err "Analyst portal dist/ is required but missing: $dist_dir/index.html. Build on a connected host: cd frontend/analyst-portal && npm install && npm run build. Transfer dist/ to this host, then rerun with INSTALL_PORTAL_SKIP_FRONTEND_BUILD=true. See docs/operations/deployment/OFFLINE_PRESTAGE_GUIDE.md"
+}
+
 build_analyst_portal_frontend() {
     if [[ "${INSTALL_ANALYST_PORTAL:-false}" != "true" ]]; then
         return 0
     fi
     if [[ "${INSTALL_PORTAL_SKIP_FRONTEND_BUILD:-false}" == "true" ]]; then
-        info "INSTALL_PORTAL_SKIP_FRONTEND_BUILD=true; skipping analyst portal frontend build"
+        info "INSTALL_PORTAL_SKIP_FRONTEND_BUILD=true; using pre-built analyst portal dist (air-gapped path)"
+        require_analyst_portal_dist
         return 0
     fi
 
-    local frontend_dir="$REPO_DIR/frontend/analyst-portal"
+    local frontend_dir
+    frontend_dir="$(analyst_portal_frontend_dir)"
     [[ -f "$frontend_dir/package.json" ]] || err "Missing analyst portal package.json: $frontend_dir/package.json"
     resolve_portal_frontend_toolchain
 
@@ -1377,7 +1396,11 @@ fi
 #------------------------------------------------------------------------------
 if [[ "${INSTALL_ANALYST_PORTAL:-false}" == "true" ]]; then
     echo ""
-    echo "[3b/8] Building analyst portal frontend..."
+    if [[ "${INSTALL_PORTAL_SKIP_FRONTEND_BUILD:-false}" == "true" ]]; then
+        echo "[3b/8] Verifying pre-built analyst portal frontend..."
+    else
+        echo "[3b/8] Building analyst portal frontend (connected host; requires npm registry)..."
+    fi
     build_analyst_portal_frontend
 fi
 
@@ -1414,7 +1437,7 @@ if [[ -d "$REPO_DIR/frontend/analyst-portal/dist" ]]; then
         || err "Failed to copy analyst portal React dist"
 else
     if [[ "${INSTALL_ANALYST_PORTAL:-false}" == "true" ]]; then
-        err "React analyst portal dist not found after frontend build"
+        require_analyst_portal_dist
     else
         record_issue "React analyst portal dist not found; run INSTALL_ANALYST_PORTAL=true bash scripts/install.sh or npm --prefix frontend/analyst-portal run build before installing the nginx SPA"
     fi
@@ -1710,8 +1733,10 @@ echo ""
 echo "Analyst portal bring-up:"
 echo "  - Full portal wiring (OS packages, npm build, Postgres schema, analyst_portal profile, nginx site):"
 echo "      sudo INSTALL_ANALYST_PORTAL=true bash scripts/install.sh"
+echo "  - Air-gapped UI: build frontend/analyst-portal on a connected host, transfer dist/, then:"
+echo "      sudo INSTALL_PORTAL_SKIP_FRONTEND_BUILD=true INSTALL_ANALYST_PORTAL=true bash scripts/install.sh"
 echo "  - Operator still required: TLS certs, htpasswd, nginx server_name, DNS, firewall, optional report backfill"
-echo "  - See docs/operations/analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md (rollout) and docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md (day-two ops)"
+echo "  - See docs/operations/deployment/OFFLINE_PRESTAGE_GUIDE.md and docs/operations/analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md"
 echo "  - Skip OS packages or frontend build when pre-staged:"
 echo "      sudo INSTALL_PORTAL_SKIP_OS_PACKAGES=true INSTALL_ANALYST_PORTAL=true bash scripts/install.sh"
 echo "      sudo INSTALL_PORTAL_SKIP_FRONTEND_BUILD=true INSTALL_ANALYST_PORTAL=true bash scripts/install.sh"

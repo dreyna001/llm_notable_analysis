@@ -98,6 +98,8 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("postgresql-", install_text)
         self.assertIn("pgvector", install_text)
         self.assertIn("build_analyst_portal_frontend", install_text)
+        self.assertIn("require_analyst_portal_dist", install_text)
+        self.assertIn("OFFLINE_PRESTAGE_GUIDE.md", install_text)
         self.assertIn("resolve_portal_frontend_toolchain", install_text)
         self.assertIn("PORTAL_NODE_TOOLCHAIN_PATH", install_text)
         self.assertIn("npm run build", install_text)

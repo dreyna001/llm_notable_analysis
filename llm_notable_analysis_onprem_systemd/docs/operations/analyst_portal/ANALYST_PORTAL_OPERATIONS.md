@@ -336,6 +336,11 @@ sudo INSTALL_PORTAL_SKIP_OS_PACKAGES=true INSTALL_ANALYST_PORTAL=true bash scrip
 sudo INSTALL_PORTAL_SKIP_FRONTEND_BUILD=true INSTALL_ANALYST_PORTAL=true bash scripts/install.sh
 ```
 
+Air-gapped: build the SPA on a connected host (`npm install && npm run build` in
+`frontend/analyst-portal/`), transfer `dist/`, then use
+`INSTALL_PORTAL_SKIP_FRONTEND_BUILD=true`. See
+[`../deployment/OFFLINE_PRESTAGE_GUIDE.md`](../deployment/OFFLINE_PRESTAGE_GUIDE.md).
+
 `INSTALL_ANALYST_PORTAL=true` treats Postgres schema setup as required. Use
 `INSTALL_PORTAL_ALLOW_PARTIAL=true` only when intentionally staging files before
 database access is available.
