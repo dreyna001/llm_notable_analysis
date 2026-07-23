@@ -359,6 +359,7 @@ class TestPortalApp(unittest.TestCase):
                 config,
                 connect=lambda _dsn: _FakeConnection(row_pages=[[], []]),
                 chat_embedding_model=_BadEmbeddingModel(),
+                chat_llm_gateway_ready=True,
             )
         ).get("/api/diagnostics/chat-readiness", headers=_AUTH_HEADERS)
 

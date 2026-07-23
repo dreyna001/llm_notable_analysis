@@ -6,6 +6,7 @@ import json
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -36,6 +37,12 @@ _AUTH_HEADERS = {
 }
 
 
+class _FakeEmbeddingModel:
+    def encode(self, texts, show_progress_bar=False, convert_to_numpy=True):
+        del show_progress_bar, convert_to_numpy
+        return [[1.0] + [0.0] * 1023 for _text in texts]
+
+
 def _portal_config() -> Config:
     return Config(
         PORTAL_ENABLED=True,
@@ -60,16 +67,25 @@ class TestPortalApiContract(unittest.TestCase):
         self.assertEqual(live_schema, committed_schema)
 
     def test_capabilities_json_validates_against_response_model(self) -> None:
-        client = TestClient(
-            build_portal_app(
-                _portal_config(),
-                connect=lambda _dsn: _FakeConnection(rows=[]),
+        with patch(
+            "llm_notable_analysis_onprem_systemd.onprem_service.case_chat."
+            "_get_embedding_model",
+            side_effect=AssertionError(
+                "Portal contract tests must inject an embedding test double."
+            ),
+        ):
+            client = TestClient(
+                build_portal_app(
+                    _portal_config(),
+                    connect=lambda _dsn: _FakeConnection(rows=[]),
+                    chat_embedding_model=_FakeEmbeddingModel(),
+                    chat_llm_gateway_ready=True,
+                )
             )
-        )
-        response = client.get("/api/capabilities", headers=_AUTH_HEADERS)
+            response = client.get("/api/capabilities", headers=_AUTH_HEADERS)
         self.assertEqual(response.status_code, 200)
         validated = portal_response(PortalCapabilitiesResponse, response.json())
-        self.assertEqual(validated.model_dump(), response.json())
+        self.assertEqual(validated.model_dump(exclude_unset=True), response.json())
 
     def test_case_list_json_validates_against_response_model(self) -> None:
         record = build_case_archive_record(

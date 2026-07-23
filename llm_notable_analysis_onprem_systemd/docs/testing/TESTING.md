@@ -73,6 +73,18 @@ Expected pytest collection (Linux validation host, current tree):
 Pass/fail on a healthy Linux dev host or CI: all collected tests pass. Noisy
 warnings during negative-path tests are expected; trust the final pytest result.
 
+### Offline test contract
+
+The unit and contract test bootstrap forces Hugging Face, Transformers, and
+dataset clients into offline mode, disables cloud-instance metadata lookup, and
+rejects TCP/IP resolution or connections, including loopback services. Tests
+must inject fakes for embedding models, LLMs, and remote integrations. Missing
+cached content must fail a test rather than trigger a download.
+
+Model/package downloads belong only in explicit install, prestage, or download
+scripts. The normal pytest and unittest commands in this guide do not require
+`HF_TOKEN` and must not contact Hugging Face or any other external service.
+
 Contract tests to run when changing runtime env, profiles, or deployment assets:
 
 - `tests/onprem_service/test_config_runtime_contract.py`
