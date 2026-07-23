@@ -19,12 +19,15 @@
 #   - --execute and an exact confirmation are required for deletion
 #   - a timestamped backup is created unless --skip-backup is explicit
 #   - configured paths are parsed without sourcing config.env
-#   - broad, relative, overlapping, and symlinked reset directories are rejected
+#   - broad, relative, and overlapping reset directories are rejected
+#   - only INCOMING_DIR may be a symlink, and its resolved target must match the
+#     supported SFTP incoming path
 set -euo pipefail
 IFS=$'\n\t'
 
 CONFIG_ENV="${CONFIG_ENV:-/etc/notable-analyzer/config.env}"
 BACKUP_ROOT="${BACKUP_ROOT:-/root/notable-reset-backups}"
+EXPECTED_INCOMING_SYMLINK_TARGET="${EXPECTED_INCOMING_SYMLINK_TARGET:-/var/sftp/soar/incoming}"
 EXECUTE=false
 ASSUME_YES=false
 SKIP_BACKUP=false
@@ -51,6 +54,9 @@ Options:
 
 The reset preserves RAG PostgreSQL schemas, SQLite/FAISS indexes, knowledge-base
 content, models, caches, code, configuration, credentials, and TLS material.
+
+Environment override for an approved non-default SFTP layout:
+  EXPECTED_INCOMING_SYMLINK_TARGET
 EOF
 }
 
@@ -158,7 +164,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-python3 - "$CONFIG_ENV" "$tmpdir/reset-values" <<'PY'
+python3 - \
+    "$CONFIG_ENV" \
+    "$EXPECTED_INCOMING_SYMLINK_TARGET" \
+    "$tmpdir/reset-values" <<'PY'
 import os
 import re
 import shlex
@@ -167,7 +176,8 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlparse
 
 config_path = Path(sys.argv[1])
-output_path = Path(sys.argv[2])
+expected_incoming_target_raw = sys.argv[2]
+output_path = Path(sys.argv[3])
 
 
 def parse_env(path: Path) -> dict[str, str]:
@@ -237,7 +247,7 @@ blocked_paths = {
 }
 
 
-def reset_path(value: str, label: str) -> str:
+def validate_reset_path(value: str, label: str) -> str:
     if "\x00" in value or "\n" in value:
         raise SystemExit(f"{label} contains an invalid character.")
     path = PurePosixPath(value)
@@ -249,6 +259,31 @@ def reset_path(value: str, label: str) -> str:
     if normalized in blocked_paths or len(PurePosixPath(normalized).parts) < 3:
         raise SystemExit(f"{label} is too broad to reset safely: {normalized}")
     return normalized
+
+
+expected_incoming_target = validate_reset_path(
+    expected_incoming_target_raw,
+    "EXPECTED_INCOMING_SYMLINK_TARGET",
+)
+
+
+def reset_path(value: str, label: str) -> str:
+    normalized = validate_reset_path(value, label)
+    if not os.path.islink(normalized):
+        return normalized
+    if label != "INCOMING_DIR":
+        raise SystemExit(f"{label} must not be a symlink: {normalized}")
+    resolved = os.path.realpath(normalized)
+    if resolved != expected_incoming_target:
+        raise SystemExit(
+            "INCOMING_DIR symlink target does not match the approved target: "
+            f"resolved={resolved}, expected={expected_incoming_target}"
+        )
+    if not os.path.isdir(resolved):
+        raise SystemExit(
+            f"INCOMING_DIR symlink target is not an existing directory: {resolved}"
+        )
+    return validate_reset_path(resolved, "INCOMING_DIR resolved target")
 
 
 def protected_path(value: str, label: str) -> str:
@@ -441,9 +476,6 @@ if [[ -L "$BACKUP_ROOT" ]]; then
 fi
 
 for reset_dir in "${RESET_DIRS[@]}"; do
-    if [[ -L "$reset_dir" ]]; then
-        err "Reset directory must not be a symlink: $reset_dir"
-    fi
     case "$BACKUP_ROOT/" in
         "$reset_dir/"*)
             err "--backup-root must not be inside a reset directory: $BACKUP_ROOT"

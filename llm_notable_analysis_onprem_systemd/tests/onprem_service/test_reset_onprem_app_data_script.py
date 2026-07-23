@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -94,6 +95,60 @@ class TestResetOnpremAppDataScript(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("protected RAG path overlaps", result.stderr)
+
+    def test_dry_run_resolves_approved_incoming_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = root / "config.env"
+            data_root = root / "runtime"
+            approved_target = root / "sftp" / "incoming"
+            approved_target.mkdir(parents=True)
+            self._write_config(config_path, data_root)
+            incoming_link = data_root / "incoming"
+            incoming_link.parent.mkdir(parents=True)
+            incoming_link.symlink_to(approved_target, target_is_directory=True)
+
+            result = subprocess.run(
+                ["bash", str(SCRIPT), "--config-env", str(config_path)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "EXPECTED_INCOMING_SYMLINK_TARGET": str(approved_target),
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertIn(
+                f"Clear INCOMING_DIR contents: {approved_target}",
+                result.stdout,
+            )
+
+    def test_rejects_unapproved_incoming_symlink_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = root / "config.env"
+            data_root = root / "runtime"
+            unexpected_target = root / "unexpected" / "incoming"
+            unexpected_target.mkdir(parents=True)
+            self._write_config(config_path, data_root)
+            incoming_link = data_root / "incoming"
+            incoming_link.parent.mkdir(parents=True)
+            incoming_link.symlink_to(unexpected_target, target_is_directory=True)
+
+            result = subprocess.run(
+                ["bash", str(SCRIPT), "--config-env", str(config_path)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "symlink target does not match the approved target",
+                result.stderr,
+            )
 
     def test_yes_requires_execute(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

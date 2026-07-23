@@ -200,6 +200,12 @@ credentials, and TLS material. Browser-local portal storage is outside the VM
 and is not cleared; clear site data in the browser separately when a fully empty
 client view is required.
 
+The supported installer symlink
+`/var/notables/incoming -> /var/sftp/soar/incoming` is resolved before backup
+and deletion. The resolved target must match the approved default exactly.
+Set `EXPECTED_INCOMING_SYMLINK_TARGET` only for an approved non-default SFTP
+layout. Symlinks for every other reset directory are rejected.
+
 Preview the exact targets without changing data:
 
 ```bash
