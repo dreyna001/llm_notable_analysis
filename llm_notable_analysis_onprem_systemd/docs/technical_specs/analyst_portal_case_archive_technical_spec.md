@@ -64,6 +64,7 @@ analysts browse retained notables and ask retrieval-bound chat questions over:
 | nginx is the documented front door | TLS, authentication, static SPA delivery, rate limits, and access logs stay outside FastAPI. |
 | FastAPI binds to loopback | Analyst subnets cannot reach Uvicorn directly; `PORTAL_ALLOW_NON_LOOPBACK_BIND=false` is the default. |
 | nginx basic auth is the v1 example | It provides a simple internal deployment path while allowing customer SSO to replace authentication at nginx later. |
+| OIDC is the recommended future state | oauth2-proxy runs on loopback, nginx uses `auth_request`, and the corporate IdP enforces MFA plus an approved analyst group. |
 | nginx injects a shared proxy secret | `X-Notable-Portal-Proxy-Secret` prevents direct loopback callers from impersonating an authenticated proxy request. |
 | nginx supplies trusted user identity | `PORTAL_TRUSTED_USER_HEADER=X-Forwarded-User` is accepted only after proxy-secret validation. |
 | Case visibility is flat in v1 | Every authenticated analyst can see every retained case; per-case RBAC is deferred. |
@@ -87,7 +88,7 @@ analysts browse retained notables and ask retrieval-bound chat questions over:
 
 ### Planned / deferred (not required for v1 operation)
 
-- Per-case RBAC, SSO-header nginx example, cross-case archive chat mode.
+- Per-case RBAC, OIDC/oauth2-proxy nginx example and break-glass procedure, cross-case archive chat mode.
 - Automatic chunk rebuild on analyzer replay failure recovery.
 - Dedicated `notable_portal` role grants in schema SQL (operators grant manually today).
 - Embedding every raw alert JSON field (full payload remains in `cases.alert_payload`).

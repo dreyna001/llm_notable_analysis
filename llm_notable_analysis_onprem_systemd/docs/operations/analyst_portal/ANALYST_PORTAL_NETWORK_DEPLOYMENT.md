@@ -56,7 +56,7 @@ Collect or approve these inputs before cutover:
 | Portal host IP | `10.10.20.15` | DNS A record target |
 | TLS certificate + key | Corp CA or internal wildcard | nginx terminates HTTPS |
 | Analyst subnets | `10.10.0.0/16` | Allowed to reach host TCP `443` |
-| Auth method | nginx basic auth (v1 default) | Customer SSO can replace later |
+| Auth method | nginx basic auth (v1 default) | Future state: corporate OIDC through oauth2-proxy |
 | nginx placement | Same host as analyzer (default) | Separate internal web host is OK if proxy path is preserved |
 | Repo checkout on host | `/path/to/llm_notable_analysis_onprem_systemd` | Used to run `install.sh` and maintenance scripts |
 
@@ -65,6 +65,13 @@ Out of scope for v1:
 - Public internet exposure.
 - Per-case RBAC or analyst self-service account management.
 - Exposing Uvicorn directly on the analyst network.
+
+### Future-state authentication
+
+- Put oauth2-proxy on loopback and use nginx `auth_request`.
+- Authenticate against the corporate OIDC provider; require MFA and an approved analyst group.
+- Forward only the verified username as `X-Forwarded-User`; retain the portal proxy-secret check.
+- Keep per-case RBAC separate from authentication; basic auth is break-glass only after migration.
 
 ## Step 1 — Install the base analyzer stack
 

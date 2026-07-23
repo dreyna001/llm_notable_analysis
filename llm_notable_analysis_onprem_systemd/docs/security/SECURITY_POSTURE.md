@@ -57,6 +57,8 @@ Splunk search and Elasticsearch execution use deterministic allowlists, bounds, 
 - Production access is intended via **nginx on TCP 443**: TLS termination, basic auth, static SPA, and API proxy to loopback.
 - nginx injects `X-Notable-Portal-Proxy-Secret` (must match `PORTAL_PROXY_SECRET`) and `X-Forwarded-User` so direct loopback callers cannot forge authenticated identity.
 - `PORTAL_ALLOW_NON_LOOPBACK_BIND=false` by default; non-loopback bind requires explicit approval.
+- Recommended future state: loopback oauth2-proxy + nginx `auth_request` + corporate OIDC with MFA and an approved analyst group.
+- OIDC replaces edge authentication only; the proxy-secret boundary remains and per-case RBAC is still a separate deferred control.
 - Portal chat is text-in/text-out only; it does not execute Splunk, ServiceNow, SOAR, or filesystem actions. See [`../operations/analyst_portal/ANALYST_PORTAL_CHAT_SECURITY.md`](../operations/analyst_portal/ANALYST_PORTAL_CHAT_SECURITY.md).
 
 Network deployment steps: [`../operations/analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](../operations/analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md).
