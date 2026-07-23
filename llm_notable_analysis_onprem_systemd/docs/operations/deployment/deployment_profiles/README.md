@@ -42,9 +42,11 @@ These do not replace the generic defaults in [`config.env.example`](../../../../
 | [`config.portal.env.rtx-pro-6000-blackwell-5analysts.example`](../../../../config.portal.env.rtx-pro-6000-blackwell-5analysts.example) | `/etc/notable-analyzer/portal.env` |
 | [`vllm.rtx-pro-6000-blackwell-5analysts.drop-in.example`](../../../../deploy/systemd/vllm.rtx-pro-6000-blackwell-5analysts.drop-in.example) | `/etc/systemd/system/vllm.service.d/override.conf` |
 
-Key overrides versus the generic template: `CAPABILITY_PROFILES=core,analyst_portal`,
-`CONCURRENCY_ENABLED=true`, `MAX_WORKERS=2`, `MAX_QUEUE_DEPTH=16`,
-`PORTAL_CHAT_MAX_CONCURRENCY=8`, and vLLM `--max-num-seqs 8`.
+Conservative overrides versus the generic template: `CAPABILITY_PROFILES=core,analyst_portal`,
+`CASE_QA_MAX_SESSIONS_PER_USER=25`, `CASE_QA_CHAT_HISTORY_RETENTION_DAYS=30`,
+`CONCURRENCY_ENABLED=false`, `MAX_WORKERS=1`, `MAX_QUEUE_DEPTH=8`,
+`PORTAL_CHAT_MAX_CONCURRENCY=4`, and vLLM `--max-num-seqs 4`.
+Raise analyzer and portal concurrency only after representative load testing.
 
 ## Profiles
 
