@@ -1,0 +1,71 @@
+flowchart TB
+  subgraph Subscription["Customer Azure Government subscription"]
+    subgraph Storage["Private storage accounts"]
+      BIN[("Input storage<br/>Blob input/incoming/<br/>Queue: blob trigger receipts")]
+      BOUT[("Output storage<br/>Blob reports/, cases/, chunks/<br/>Queues: analyzer + embed")]
+      BWEB[("Portal UI storage<br/>static $web SPA")]
+    end
+
+    subgraph Compute["Azure Functions (container)"]
+      ACR[(Azure Container Registry<br/>linux/amd64 image @sha256)]
+      INTAKE[Analyzer app: intake_blob<br/>Blob trigger]
+      ANZ[Analyzer app: analyzer_queue<br/>notable-analysis-jobs]
+      EMB[Embed app: case_embed_queue<br/>case-embed-invocations]
+      PLAM[Portal app: portal_http<br/>analyst_portal profile]
+    end
+
+    subgraph AI["Model + retrieval"]
+      OAI[Azure OpenAI<br/>analysis, chat, 1024-d embeddings<br/>customer deployments in usgovvirginia]
+      SEARCH[Azure AI Search<br/>knowledge + case indexes]
+    end
+
+    subgraph State["Transactional state"]
+      COSM[(Cosmos DB<br/>CaseIndex, idempotency,<br/>chat quota/sessions)]
+    end
+
+    subgraph Secret["Optional integrations"]
+      KV[Key Vault<br/>Splunk, MCP, Elastic,<br/>ServiceNow tokens]
+    end
+
+    subgraph PortalEdge["Optional analyst_portal"]
+      FD[Azure Front Door Premium<br/>private origin links]
+    end
+
+    subgraph Ops["Operations"]
+      AIOPS[Application Insights<br/>+ Log Analytics]
+      BICEP[Bicep main.bicep stack]
+    end
+
+    BIN -->|polling Blob trigger input/incoming/*| INTAKE
+    INTAKE -->|enqueue strict v1 job| BOUT
+    BOUT -->|dequeue notable-analysis-jobs| ANZ
+    ANZ -->|read input blob| BIN
+    ANZ -->|write reports/* cases/*| BOUT
+    ANZ -->|structured chat completion| OAI
+    ANZ -. optional hybrid retrieve .-> SEARCH
+    ANZ -. optional GetSecret .-> KV
+    ANZ -. conditional writes .-> COSM
+    ANZ -. optional HTTPS .-> SPL[Splunk REST / MCP]
+    ANZ -. optional HTTPS .-> ES[Elasticsearch _search]
+    ANZ -. optional HTTPS .-> SN[ServiceNow REST]
+    ANZ -. async embed invoke .-> EMB
+    EMB -->|embedding request| OAI
+    EMB -->|case vector upsert| SEARCH
+    EMB -->|retrieval-ready marker| COSM
+    PLAM -->|read CaseIndex + archive| COSM
+    PLAM -->|read case chunks| BOUT
+    PLAM -. pinned-case Q&A .-> SEARCH
+    PLAM -. bounded chat .-> OAI
+    FD --> BWEB
+    FD -->|/api/*| PLAM
+    INTAKE -. telemetry .-> AIOPS
+    ANZ -. telemetry .-> AIOPS
+    EMB -. telemetry .-> AIOPS
+    PLAM -. telemetry .-> AIOPS
+    BICEP -. provisions .-> BIN
+    BICEP -. provisions .-> BOUT
+    BICEP -. provisions .-> ANZ
+    ACR -. ContainerImageUri at deploy .-> ANZ
+    ACR -. same digest .-> EMB
+    ACR -. same digest .-> PLAM
+  end

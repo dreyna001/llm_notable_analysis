@@ -1,0 +1,19 @@
+sequenceDiagram
+  participant Dev as Development org<br/>ships code at milestone
+  participant Eng as Customer engineer / platform team<br/>owns integration
+  participant Entra as Entra ID + RBAC
+  participant ACR as Azure Container Registry
+  participant Build as Docker build scripts
+  participant Bicep as az deployment / setup-and-deploy
+  participant Storage as Private storage accounts
+  participant Func as Azure Functions apps
+
+  Dev->>Eng: Hand off source (README, main.bicep, Dockerfile, optional upstream for merges)
+  Eng->>Entra: Confirm subscription, managed identities, Azure OpenAI RBAC, Key Vault access
+  Eng->>ACR: Create or choose Government registry
+  Eng->>Build: docker build + push linux/amd64 image, capture @sha256 digest
+  Eng->>Bicep: deploy main.bicep with ContainerImageUri, CapabilityProfiles, OpenAI + Search params
+  Bicep->>Storage: Create input/output/portal storage, queues, lifecycle, private endpoints
+  Bicep->>Func: Create analyzer, embed, disposition, optional portal Function apps
+  Eng->>Storage: Upload test notable to input/incoming via private path
+  Storage-->>Eng: Verify report under output/reports/ + Application Insights traces

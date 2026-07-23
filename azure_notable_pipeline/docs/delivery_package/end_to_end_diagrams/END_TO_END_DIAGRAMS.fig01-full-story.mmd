@@ -1,0 +1,77 @@
+flowchart TB
+  subgraph Authoring["A. What detection engineers shape"]
+    DE[Thresholds & baselines<br/>on users / hosts]
+    NR[Searches, correlation logic,<br/>notable workflow]
+  end
+
+  subgraph Live["B. When a threshold trips"]
+    POP[Alert fires]
+    CORR[Correlation searches run<br/>enrich / roll up into one bundle]
+    NOT[One notable + one bundled<br/>payload for processing]
+    ANA[Analyst triage in SIEM<br/>e.g. Splunk]
+  end
+
+  subgraph Package["C. Integration handoff (typical)"]
+    SOAR[SOAR / playbook<br/>one JSON file per notable]
+    PUT["Private PUT to<br/>input/incoming/{finding_id}.json or .json.gz"]
+  end
+
+  subgraph Azure["D. Deployed Azure Government pipeline"]
+    TRG["Blob trigger (polling)<br/>prefix: input/incoming/"]
+    PUB["Strict v1 job publish<br/>queue: notable-analysis-jobs"]
+    ANZ[Analyzer Function<br/>container from ACR]
+    READ[Read + normalize JSON or plaintext]
+    PRM[Prompt stack + output contract:<br/>doctrine, evidence-gate,<br/>stateless / unknown discipline,<br/>6-way competing hypotheses,<br/>analyze_notable tool JSON schema]
+    SRCH[Optional Azure AI Search retrieve:<br/>SOC RAG, SPL grounding,<br/>Elastic grounding]
+    OAI[Azure OpenAI<br/>base analysis + optional<br/>query generation / interpretation]
+    VAL["Hallucination controls:<br/>required keys, parse + repair,<br/>content rules, ATT&CK v17.1 allowlist<br/>raw fallback for human review"]
+    QRY[Optional read-only investigation:<br/>Splunk REST/MCP or Elasticsearch _search<br/>policy validated and bounded]
+    MD[Report assembly:<br/>markdown + JSON + optional HTML]
+    OUT[("Output storage<br/>reports/{stem}.*")]
+    ARCH{{Optional case archive:<br/>Blob envelope + CaseIndex<br/>analyst_portal profile}}
+    EMB{{Optional embed Function:<br/>case-embed-invocations queue<br/>1024-d vectors to Search}}
+    PAPI{{Optional analyst portal:<br/>Front Door + portal Function<br/>+ static SPA}}
+    SPLK{{Splunk REST<br/>notable comment?}}
+    SN{{ServiceNow<br/>incident create?}}
+    COSM[(Cosmos DB<br/>state, CaseIndex, idempotency)]
+  end
+
+  subgraph Consume["E. Who consumes the output"]
+    REV[Analyst review:<br/>Blob reports, optional portal,<br/>and/or SIEM comment]
+  end
+
+  DE --> NR
+  NR --> POP
+  POP --> CORR
+  CORR --> NOT
+  NOT --> ANA
+  NOT --> SOAR
+  SOAR --> PUT
+  PUT --> TRG
+  TRG --> PUB
+  PUB --> ANZ
+  ANZ --> READ
+  READ --> PRM
+  PRM -. optional advisory context .-> SRCH
+  SRCH -. snippets .-> OAI
+  PRM --> OAI
+  OAI --> VAL
+  VAL -. optional generated queries .-> QRY
+  QRY -. normalized results .-> OAI
+  QRY --> MD
+  VAL --> MD
+  MD --> OUT
+  MD -. analyst_portal .-> ARCH
+  ARCH -. async embed job .-> EMB
+  ARCH -. CaseIndex upsert .-> COSM
+  EMB -. browse + pinned-case Q&A .-> PAPI
+  MD -. optional: ReportSinkMode notable_rest .-> SPLK
+  MD -. optional: ServiceNow approval .-> SN
+  SPLK -. idempotency .-> COSM
+  SN -. idempotency .-> COSM
+  OUT --> REV
+  ARCH --> REV
+  PAPI --> REV
+  SPLK --> REV
+  SN --> REV
+  ANA -. human parallel path .-> REV

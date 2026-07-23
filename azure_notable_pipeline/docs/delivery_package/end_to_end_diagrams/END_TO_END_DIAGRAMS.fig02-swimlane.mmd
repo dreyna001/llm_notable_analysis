@@ -1,0 +1,36 @@
+flowchart LR
+  subgraph Inputs["Inputs the customer must have or configure"]
+    I1[(Per-notable bundle:<br/>threshold alert + correlation context)]
+    I2[("Private input storage<br/>prefix: input/incoming/")]
+    I3[Deploy-time params:<br/>storage accounts, ContainerImageUri,<br/>CapabilityProfiles, ReportSinkMode,<br/>Azure OpenAI deployments, Search indexes]
+    I4[Runtime: Azure OpenAI access<br/>in Azure Government]
+    I5[Container image in ACR<br/>before Bicep deploy]
+  end
+
+  subgraph Middle["What happens in the middle"]
+    M1[Blob trigger observes upload]
+    M2[Publish strict v1 job to notable-analysis-jobs]
+    M3[Analyzer reads object body]
+    M4[Assemble bounded prompt + tool schema - Azure OpenAI]
+    M5[Validate, allowlist TTPs, repair, policies]
+    M6[Report generator + optional case archive]
+  end
+
+  subgraph Outputs["Outputs"]
+    O1[("Markdown + JSON reports under output/reports/;<br/>optional HTML when html_reports")]
+    O2[("Splunk notable comment, notable_rest + action_gated")]
+    O3[Application Insights + Log Analytics - traceability]
+    O4{{Optional analyst portal:<br/>CaseIndex browse + pinned-case Q&A<br/>analyst_portal profile}}
+  end
+
+  I1 --> I2
+  I2 --> M1
+  M1 --> M2
+  M2 --> M3
+  M3 --> M4
+  M4 --> M5
+  M5 --> M6
+  M6 --> O1
+  M6 -. notable_rest .-> O2
+  M6 --> O3
+  M6 -. analyst_portal archive .-> O4

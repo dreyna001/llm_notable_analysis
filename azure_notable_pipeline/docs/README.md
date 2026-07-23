@@ -3,6 +3,7 @@
 - [Normative Azure/AWS parity specification](technical_specs/AZURE_AWS_PARITY_TECHNICAL_SPEC.md)
 - [Azure Government architecture](architecture/AZURE_GOVERNMENT_ARCHITECTURE.md)
 - [End-to-end workflow diagrams](architecture/AZURE_GOVERNMENT_END_TO_END.md)
+- [Delivery-package data-flow diagrams](delivery_package/end_to_end_diagrams/END_TO_END_DIAGRAMS.md)
 - [Operations and recovery runbooks](operations/README.md)
 - [Azure production-readiness checklist](delivery_package/AZURE_READINESS.md)
 - [Executive workflow and readiness](delivery_package/EXECUTIVE_WORKFLOW_READINESS.md)
