@@ -55,7 +55,7 @@ const markdownComponents: Components = {
     }
     return (
       <a
-        className={cn("underline underline-offset-4", className)}
+        className={cn("text-link underline underline-offset-4", className)}
         href={safe}
         rel="noopener noreferrer"
         target="_blank"

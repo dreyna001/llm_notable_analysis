@@ -187,7 +187,9 @@ def _handle_static_asset(config: Config, path: str) -> dict[str, Any]:
         "headers": {
             "content-type": content_type,
             "cache-control": cache_control,
-            "content-security-policy": "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'",
+            # style-src/font-src allow the "Federal SOC Dark" Google Fonts import
+            # (Public Sans / Roboto Mono) in frontend/analyst-portal/src/index.css.
+            "content-security-policy": "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'",
             "x-content-type-options": "nosniff",
         },
         "isBase64Encoded": True,

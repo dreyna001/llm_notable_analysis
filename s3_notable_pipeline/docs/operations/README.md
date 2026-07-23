@@ -48,6 +48,7 @@ DynamoDB CaseIndex, read-only portal API, pinned-case Q&A, optional static SPA.
 | Guide | Purpose |
 |-------|---------|
 | [`analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](analyst_portal/ANALYST_PORTAL_OPERATIONS.md) | Portal stack, archive, chat, and day-two ops. |
+| [`analyst_portal/ANALYST_PORTAL_THEME.md`](analyst_portal/ANALYST_PORTAL_THEME.md) | Federal SOC Dark theme: palette, fonts, radius, WCAG notes, visual reference. |
 
 ## LLM Inference
 

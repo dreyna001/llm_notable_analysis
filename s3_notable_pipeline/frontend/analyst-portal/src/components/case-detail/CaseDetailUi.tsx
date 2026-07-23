@@ -194,7 +194,7 @@ export function hypothesisChipClass(type: string): string {
     "inline-flex shrink-0 rounded-sm px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
     type === "benign" && "bg-emerald-500/15 text-emerald-400",
     type === "adversary" && "bg-destructive/15 text-destructive",
-    type === "ttp" && "bg-primary/15 text-primary",
+    type === "ttp" && "bg-primary/15 text-link",
     type === "unknown" && "bg-muted text-muted-foreground",
   );
 }
@@ -204,7 +204,7 @@ export function hypothesisTitleClass(type: string): string {
     "min-w-0 flex-1 text-left text-sm font-medium",
     type === "benign" && "text-emerald-400",
     type === "adversary" && "text-destructive",
-    type === "ttp" && "text-primary",
+    type === "ttp" && "text-link",
     type === "unknown" && "text-muted-foreground",
   );
 }
@@ -237,7 +237,7 @@ export function miniTitleClass(titleClass: string): string {
     return cn(base, "text-amber-400");
   }
   if (titleClass.includes("pivot")) {
-    return cn(base, "text-primary");
+    return cn(base, "text-link");
   }
   return cn(base, "text-muted-foreground");
 }

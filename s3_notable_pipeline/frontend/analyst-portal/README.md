@@ -6,6 +6,8 @@ portal API (JWT browser auth, CloudFront/S3 static hosting).
 Deploy and operator runbooks:
 [`docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../../docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md).
 
+Visual design: "Federal SOC Dark" — see [docs/operations/analyst_portal/ANALYST_PORTAL_THEME.md](../../docs/operations/analyst_portal/ANALYST_PORTAL_THEME.md) (palette, fonts, radius, accessibility contrast notes, browser-openable mockup).
+
 ## Prerequisites
 
 - Node.js and npm on the workstation or CI runner (system install; not the on-prem

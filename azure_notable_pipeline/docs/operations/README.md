@@ -14,6 +14,7 @@
 | MITRE ATT&CK | [`security/MITRE_ATTACK_OPERATIONS.md`](security/MITRE_ATTACK_OPERATIONS.md) |
 | Retention and recovery | [`retention/AZURE_RETENTION_AND_RECOVERY.md`](retention/AZURE_RETENTION_AND_RECOVERY.md) |
 | Analyst portal | [`analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](analyst_portal/ANALYST_PORTAL_OPERATIONS.md) |
+| Analyst portal theme | [`analyst_portal/ANALYST_PORTAL_THEME.md`](analyst_portal/ANALYST_PORTAL_THEME.md) |
 | Portal deployment gate | [`ANALYST_PORTAL_DEPLOYMENT.md`](ANALYST_PORTAL_DEPLOYMENT.md) |
 | Monitoring, poison replay, escalation | [`AZURE_MONITORING_AND_RECOVERY.md`](AZURE_MONITORING_AND_RECOVERY.md) |
 | Storage, Functions, and Cosmos resilience | [`AZURE_RESILIENCE_PROFILE.md`](AZURE_RESILIENCE_PROFILE.md) |

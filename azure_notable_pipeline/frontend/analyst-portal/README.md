@@ -10,6 +10,8 @@ and upload `dist/` to `$web` with `az storage blob upload-batch --auth-mode
 login`; shared keys and SAS tokens are not supported. The deployment runner
 must resolve and reach the storage private endpoint.
 
+Visual design: "Federal SOC Dark" — see [docs/operations/analyst_portal/ANALYST_PORTAL_THEME.md](../../docs/operations/analyst_portal/ANALYST_PORTAL_THEME.md) (palette, fonts, radius, accessibility contrast notes, browser-openable mockup).
+
 Front Door routes `/api/*`, including chat, directly to the private portal
 Function and serves all other paths from the private `$web` origin. API caching
 is disabled. The synchronous chat timeout chain is browser 220 seconds,
