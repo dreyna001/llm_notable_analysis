@@ -51,6 +51,7 @@ Optional deep dives:
 | ServiceNow draft/create | [SERVICENOW_OPERATIONS.md](operations/integrations/SERVICENOW_OPERATIONS.md), [feature_enhancements_technical_spec.md](technical_specs/feature_enhancements_technical_spec.md) |
 | ServiceNow closed disposition sync (planned) | [SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md](operations/integrations/SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md) |
 | File drop and retention | [FILE_DROP_AND_RETENTION_OPERATIONS.md](operations/platform/FILE_DROP_AND_RETENTION_OPERATIONS.md) |
+| Reset server-side app data (preserves RAG) | [FILE_DROP_AND_RETENTION_OPERATIONS.md § Reset Server-Side Application Data](operations/platform/FILE_DROP_AND_RETENTION_OPERATIONS.md#reset-server-side-application-data) |
 | Planned gzip file intake | On-prem planned in [FILE_DROP_AND_RETENTION_OPERATIONS.md](operations/platform/FILE_DROP_AND_RETENTION_OPERATIONS.md); AWS implemented in [s3 FILE_DROP ops](../../s3_notable_pipeline/docs/operations/platform/FILE_DROP_AND_RETENTION_OPERATIONS.md) |
 | MITRE/TTP validation | [MITRE_TTP_OPERATIONS.md](operations/platform/MITRE_TTP_OPERATIONS.md) |
 | Offline / air-gap prep | [OFFLINE_PRESTAGE_GUIDE.md](operations/deployment/OFFLINE_PRESTAGE_GUIDE.md), [AIRGAPPED_DEPLOYMENT.md](operations/deployment/AIRGAPPED_DEPLOYMENT.md) |

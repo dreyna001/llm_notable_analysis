@@ -180,6 +180,49 @@ Defaults: `CONCURRENCY_ENABLED=false`, `MAX_WORKERS=1`, `MAX_QUEUE_DEPTH=8`.
    retention.
 6. Enable concurrency only after baseline sequential behavior is stable.
 
+## Reset Server-Side Application Data
+
+Use [`../../../scripts/reset_onprem_app_data.sh`](../../../scripts/reset_onprem_app_data.sh)
+to return the installed app to an empty server-side state without reinstalling
+the stack.
+
+The script clears:
+
+- all tables in the configured `CASE_POSTGRES_SCHEMA`, including cases, derived
+  case chunks, chat sessions, and chat messages;
+- optional `notable_dispositions` tables when that schema exists; and
+- contents of `INCOMING_DIR`, `PROCESSED_DIR`, `QUARANTINE_DIR`, `REPORT_DIR`,
+  `ARCHIVE_DIR`, and `SIDE_EFFECT_IDEMPOTENCY_DIR`.
+
+The script explicitly preserves PostgreSQL RAG schemas, SQLite/FAISS indexes,
+knowledge-base source/index directories, models, caches, code, configuration,
+credentials, and TLS material. Browser-local portal storage is outside the VM
+and is not cleared; clear site data in the browser separately when a fully empty
+client view is required.
+
+Preview the exact targets without changing data:
+
+```bash
+sudo bash scripts/reset_onprem_app_data.sh
+```
+
+Execute with a timestamped recovery backup and exact interactive confirmation:
+
+```bash
+sudo bash scripts/reset_onprem_app_data.sh --execute
+```
+
+For approved non-interactive automation:
+
+```bash
+sudo bash scripts/reset_onprem_app_data.sh --execute --yes
+```
+
+`--skip-backup` is available only with `--execute` and should be reserved for
+disposable environments. The script stops affected analyzer, portal, retention,
+and disposition-sync units, restores only units that were active beforehand,
+and does not restart vLLM, LiteLLM, PostgreSQL, or nginx.
+
 ## Related Docs
 
 - [`INSTALL.md`](../deployment/INSTALL.md)
