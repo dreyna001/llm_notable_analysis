@@ -230,6 +230,15 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("gemma-4-31B-it", script_text)
         self.assertIn("service-chain-smoke", script_text)
         self.assertIn('-H "@$auth_header_file"', script_text)
+        self.assertIn(
+            'curl "${litellm_curl_args[@]}" "$LITELLM_MODELS_URL"',
+            script_text,
+        )
+        self.assertIn(
+            'chat_curl_args=("${litellm_curl_args[@]}" '
+            '-H "Content-Type: application/json")',
+            script_text,
+        )
         self.assertIn("mv \"$tmp_payload\" \"$payload_file\"", script_text)
         self.assertIn("ALLOW_NON_LOOPBACK_HTTP", script_text)
         self.assertNotIn('-H "Authorization: Bearer $LLM_API_TOKEN"', script_text)

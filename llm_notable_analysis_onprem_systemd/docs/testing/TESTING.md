@@ -184,6 +184,8 @@ sudo bash llm_notable_analysis_onprem_systemd/scripts/smoke_service_chain.sh \
   --config-env /etc/notable-analyzer/config.env
 ```
 
+The smoke script uses `LLM_API_TOKEN` from the config file for both the LiteLLM
+models and chat-completion checks without placing the token in process arguments.
 `--skip-file-drop` checks only vLLM and LiteLLM HTTP paths. See script
 `--help` for `CONFIG_ENV`, timeout, and `ALLOW_NON_LOOPBACK_HTTP` overrides.
 

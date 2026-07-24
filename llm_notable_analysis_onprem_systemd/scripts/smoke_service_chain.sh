@@ -137,14 +137,23 @@ fi
 info "Checking vLLM health at $VLLM_HEALTH_URL"
 curl -fsS --max-time "$HTTP_TIMEOUT_SECONDS" "$VLLM_HEALTH_URL" >/dev/null
 
-info "Checking LiteLLM models endpoint at $LITELLM_MODELS_URL"
-curl -fsS --max-time "$HTTP_TIMEOUT_SECONDS" "$LITELLM_MODELS_URL" >/dev/null
-
 tmpdir="$(mktemp -d)"
 cleanup() {
     rm -rf "$tmpdir"
 }
 trap cleanup EXIT
+
+litellm_curl_args=(-fsS --max-time "$HTTP_TIMEOUT_SECONDS")
+auth_header_file=""
+if [[ -n "$LLM_API_TOKEN" ]]; then
+    auth_header_file="$tmpdir/auth_header.txt"
+    umask 077
+    printf 'Authorization: Bearer %s\n' "$LLM_API_TOKEN" > "$auth_header_file"
+    litellm_curl_args+=(-H "@$auth_header_file")
+fi
+
+info "Checking LiteLLM models endpoint at $LITELLM_MODELS_URL"
+curl "${litellm_curl_args[@]}" "$LITELLM_MODELS_URL" >/dev/null
 
 chat_payload="$tmpdir/chat_payload.json"
 chat_response="$tmpdir/chat_response.json"
@@ -170,17 +179,10 @@ print(
 )
 PY
 
-curl_args=(-fsS --max-time "$HTTP_TIMEOUT_SECONDS" -H "Content-Type: application/json")
-auth_header_file=""
-if [[ -n "$LLM_API_TOKEN" ]]; then
-    auth_header_file="$tmpdir/auth_header.txt"
-    umask 077
-    printf 'Authorization: Bearer %s\n' "$LLM_API_TOKEN" > "$auth_header_file"
-    curl_args+=(-H "@$auth_header_file")
-fi
+chat_curl_args=("${litellm_curl_args[@]}" -H "Content-Type: application/json")
 
 info "Checking LiteLLM chat completion for model $LLM_MODEL_NAME"
-curl "${curl_args[@]}" -d @"$chat_payload" "$LLM_API_URL" > "$chat_response"
+curl "${chat_curl_args[@]}" -d @"$chat_payload" "$LLM_API_URL" > "$chat_response"
 "$PYTHON_BIN" - "$chat_response" <<'PY'
 import json
 import sys
