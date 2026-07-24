@@ -4,8 +4,9 @@
 # Clears:
 #   - all tables in CASE_POSTGRES_SCHEMA (cases, derived case chunks, chats)
 #   - all tables in notable_dispositions when that optional schema exists
-#   - configured incoming, processed, quarantine, reports, archive, and
-#     side-effect idempotency directory contents
+#   - files and other non-directory entries under configured incoming,
+#     processed, quarantine, reports, archive, and side-effect idempotency
+#     directories
 #
 # Preserves:
 #   - PostgreSQL RAG schemas, including RAG_POSTGRES_SCHEMA/notable_rag
@@ -13,6 +14,8 @@
 #   - models, caches, code, virtual environments, systemd/nginx configuration,
 #     TLS material, Basic Auth credentials, and analyzer/portal env files
 #   - browser-local portal storage (clear site data separately when required)
+#   - runtime directory trees, including archive/processed, archive/quarantine,
+#     and archive/reports
 #
 # Safety:
 #   - dry-run is the default
@@ -580,8 +583,8 @@ fi
 
 for reset_dir in "${RESET_DIRS[@]}"; do
     if [[ -d "$reset_dir" ]]; then
-        info "Clearing contents of $reset_dir"
-        find "$reset_dir" -xdev -depth -mindepth 1 -delete
+        info "Clearing files under $reset_dir while preserving directories"
+        find "$reset_dir" -xdev -mindepth 1 ! -type d -delete
     else
         info "Directory does not exist; skipping $reset_dir"
     fi

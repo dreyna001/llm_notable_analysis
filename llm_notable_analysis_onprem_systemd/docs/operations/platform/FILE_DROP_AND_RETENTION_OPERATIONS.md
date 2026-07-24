@@ -191,14 +191,17 @@ The script clears:
 - all tables in the configured `CASE_POSTGRES_SCHEMA`, including cases, derived
   case chunks, chat sessions, and chat messages;
 - optional `notable_dispositions` tables when that schema exists; and
-- contents of `INCOMING_DIR`, `PROCESSED_DIR`, `QUARANTINE_DIR`, `REPORT_DIR`,
-  `ARCHIVE_DIR`, and `SIDE_EFFECT_IDEMPOTENCY_DIR`.
+- files and other non-directory entries under `INCOMING_DIR`, `PROCESSED_DIR`,
+  `QUARANTINE_DIR`, `REPORT_DIR`, `ARCHIVE_DIR`, and
+  `SIDE_EFFECT_IDEMPOTENCY_DIR`.
 
 The script explicitly preserves PostgreSQL RAG schemas, SQLite/FAISS indexes,
 knowledge-base source/index directories, models, caches, code, configuration,
 credentials, and TLS material. Browser-local portal storage is outside the VM
 and is not cleared; clear site data in the browser separately when a fully empty
-client view is required.
+client view is required. Runtime directory trees are also preserved, including
+the required `ARCHIVE_DIR/processed`, `ARCHIVE_DIR/quarantine`, and
+`ARCHIVE_DIR/reports` children.
 
 The supported installer symlink
 `/var/notables/incoming -> /var/sftp/soar/incoming` is resolved before backup

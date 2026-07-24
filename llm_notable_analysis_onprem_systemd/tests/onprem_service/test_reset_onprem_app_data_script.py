@@ -172,6 +172,18 @@ class TestResetOnpremAppDataScript(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("--yes requires --execute", result.stderr)
 
+    def test_reset_preserves_runtime_directory_trees(self) -> None:
+        script = SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn(
+            'find "$reset_dir" -xdev -mindepth 1 ! -type d -delete',
+            script,
+        )
+        self.assertNotIn(
+            'find "$reset_dir" -xdev -depth -mindepth 1 -delete',
+            script,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
