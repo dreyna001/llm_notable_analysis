@@ -2,6 +2,21 @@
 
 The core stack is installed, but production readiness is not yet complete.
 
+## Current Status — 2026-07-24
+
+| Area | Status |
+| --- | --- |
+| Source branch | `main`, clean after commit `980e5c9` |
+| Remote sync | Pending push; local `main` is 1 commit ahead of `origin/main` |
+| Target VM stack | Previously verified active: PostgreSQL, vLLM, LiteLLM, analyzer, portal, and nginx |
+| Target VM profile | Prepared but not yet applied to the VM |
+| Hardware profile | RTX PRO 6000 Blackwell 96 GB + Intel Core Ultra 9 285K |
+| Runtime profile | vLLM `0.85`, 32K context, 4 sequences, `bfloat16`, eager mode; analyzer workers `1`/queue `8`; portal chat concurrency `4` |
+| Context contract | Analyzer, portal, and vLLM are aligned at `32768` tokens |
+| Validation | 30 deployment-contract tests passed; isolated profile-apply test passed |
+| Secrets | Profile applicator preserves live DSNs, tokens, proxy secrets, credentials, and TLS files |
+| Package deployment | No `install.sh` rerun is required for the profile-only update |
+
 1. [x] Finish VM recovery and confirm one synthetic notable reaches `processed`,
    creates a report, and appears in the portal.
 2. [x] Pull the reset-script fix onto the VM and verify reset preserves all
@@ -37,6 +52,9 @@ The core stack is installed, but production readiness is not yet complete.
     the selected hardware profile.
 11. [ ] Validate Splunk, ServiceNow, Elasticsearch, and writeback approval
     controls only for profiles intended for production.
+12. [ ] Push commit `980e5c9`, pull it onto the target VM, apply the hardware
+    profile with `scripts/apply_rtx_pro_6000_blackwell_5analysts_profile.sh`,
+    restart the stack, and verify the resulting service chain.
 
 ## Basic Auth Item 6: What, Why, How, and Where
 
@@ -66,6 +84,7 @@ The core stack is installed, but production readiness is not yet complete.
   forgotten passwords rather than retrieve them, and the customer records this
   exception and the account-lifecycle owner.
 
-Immediate priorities are the SOAR SFTP ownership/permission contract,
-production portal network access, and Basic Auth operationalization. The reset
-and smoke-script code fixes are already committed to remote `main`.
+Immediate priorities are pushing and applying the hardware profile, validating
+the SOAR SFTP ownership/permission contract, production portal network access,
+and Basic Auth operationalization. The reset and smoke-script code fixes are
+already committed to remote `main`; commit `980e5c9` is currently local only.
