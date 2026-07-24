@@ -52,6 +52,60 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn('Environment="CUDA_HOME=/usr/local/cuda"', service_text)
         self.assertIn("/usr/local/cuda/bin:/opt/vllm/venv/bin", service_text)
 
+    def test_rtx_pro_6000_customer_profile_is_internally_consistent(self) -> None:
+        """Customer analyzer, portal, and vLLM settings should share one contract."""
+        analyzer_text = (
+            PROJECT_ROOT
+            / "config.env.rtx-pro-6000-blackwell-5analysts.example"
+        ).read_text(encoding="utf-8")
+        portal_text = (
+            PROJECT_ROOT
+            / "config.portal.env.rtx-pro-6000-blackwell-5analysts.example"
+        ).read_text(encoding="utf-8")
+        vllm_text = (
+            PROJECT_ROOT
+            / "deploy"
+            / "systemd"
+            / "vllm.rtx-pro-6000-blackwell-5analysts.drop-in.example"
+        ).read_text(encoding="utf-8")
+        apply_script = (
+            PROJECT_ROOT
+            / "scripts"
+            / "apply_rtx_pro_6000_blackwell_5analysts_profile.sh"
+        ).read_text(encoding="utf-8")
+
+        for env_text in (analyzer_text, portal_text):
+            self.assertIn("CAPABILITY_PROFILES=core,analyst_portal", env_text)
+            self.assertIn("CASE_QA_CHAT_HISTORY_ENABLED=true", env_text)
+            self.assertIn("CASE_QA_CHAT_HISTORY_RETENTION_DAYS=30", env_text)
+            self.assertIn("CASE_QA_MAX_MESSAGES_PER_SESSION=30", env_text)
+            self.assertIn("CASE_QA_MAX_SESSIONS_PER_USER=25", env_text)
+            self.assertIn("CASE_QA_MODEL_CONTEXT_TOKENS=32768", env_text)
+            self.assertNotIn("CASE_QA_MODEL_CONTEXT_TOKENS=128000", env_text)
+
+        self.assertIn("CONCURRENCY_ENABLED=false", analyzer_text)
+        self.assertIn("MAX_WORKERS=1", analyzer_text)
+        self.assertIn("MAX_QUEUE_DEPTH=8", analyzer_text)
+        self.assertIn("PORTAL_BIND_HOST=127.0.0.1", portal_text)
+        self.assertIn("PORTAL_CHAT_MAX_CONCURRENCY=4", portal_text)
+        self.assertIn("PORTAL_ALLOW_NON_LOOPBACK_BIND=false", portal_text)
+
+        for expected in (
+            "--host 127.0.0.1",
+            "--gpu-memory-utilization 0.85",
+            "--max-model-len 32768",
+            "--max-num-seqs 4",
+            "--dtype bfloat16",
+            "--enforce-eager",
+            'Environment="CUDA_HOME=/usr/local/cuda-13.3"',
+        ):
+            self.assertIn(expected, vllm_text)
+
+        self.assertIn("Dry-run is the default", apply_script)
+        self.assertIn("required_secrets", apply_script)
+        self.assertIn("not restarted", apply_script)
+        self.assertNotIn('source "$CONFIG_ENV"', apply_script)
+
     def test_litellm_service_is_loopback_only(self) -> None:
         """LiteLLM should bind only to loopback in the default unit."""
         service_text = (
