@@ -4,7 +4,7 @@ export const SEGMENT_COLORS: Record<string, string> = {
   system_prompt: "bg-muted-foreground/70",
   current_case: "bg-sky-500",
   knowledge_base: "bg-emerald-500",
-  prior_case: "bg-violet-500",
+  closed_ticket: "bg-violet-500",
   conversation: "bg-blue-400",
 };
 

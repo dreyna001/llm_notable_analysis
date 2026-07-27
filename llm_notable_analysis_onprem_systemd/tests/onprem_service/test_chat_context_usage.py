@@ -52,6 +52,28 @@ class ChatContextUsageTests(unittest.TestCase):
         self.assertGreater(usage["current_question_chars"], 0)
         self.assertLessEqual(usage["utilization_pct"], 100)
 
+    def test_build_context_usage_includes_closed_tickets_segment(self) -> None:
+        config = Config(CASE_QA_MODEL_CONTEXT_TOKENS=1000)
+        usage = build_context_usage(
+            config,
+            kind="case_grounded",
+            question="Disposition?",
+            system_prompt_chars=500,
+            sources=[
+                RetrievedSource(
+                    source_lane="closed_ticket",
+                    section="resolution",
+                    text="Prior ticket precedent.",
+                    ticket_id="ticket-1",
+                )
+            ],
+        )
+        segment_ids = {segment["id"] for segment in usage["segments"]}
+        self.assertIn("closed_ticket", segment_ids)
+        self.assertNotIn("prior_case", segment_ids)
+        labels = {segment["label"] for segment in usage["segments"]}
+        self.assertIn("Closed tickets", labels)
+
     def test_merge_gateway_usage_overrides_estimate(self) -> None:
         usage = {
             "prompt_tokens": 100,

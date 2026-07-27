@@ -25,6 +25,10 @@ from llm_notable_analysis_onprem_systemd.onprem_service.case_chat import (
     synthesized_answer_crosses_action_boundary,
     validate_chat_payload,
 )
+from llm_notable_analysis_onprem_systemd.onprem_service.closed_ticket_retrieval import (
+    ClosedTicketRetrievalHit,
+    ClosedTicketRetrievalOutcome,
+)
 from llm_notable_analysis_onprem_systemd.onprem_service.config import Config
 
 
@@ -886,6 +890,194 @@ class TestCaseChat(unittest.TestCase):
         self.assertIn("What is the verdict?", prompt)
         self.assertIn("Likely malicious", prompt)
         self.assertEqual(captured["max_tokens"], 800)
+
+
+class TestCaseChatClosedTicketLane(unittest.TestCase):
+    def test_closed_ticket_lane_merges_with_case_and_kb_when_enabled(self) -> None:
+        captured: list[RetrievedSource] = []
+        hit = ClosedTicketRetrievalHit(
+            ticket_id="ticket-1",
+            ticket_number="INC0001",
+            section="resolution",
+            field_path="$.resolution",
+            text="Prior ticket closed after credential reset.",
+            score=0.8,
+            source_url="https://snow/INC0001",
+            chunk_id="chunk-1",
+        )
+
+        def synthesize(_question, sources):
+            captured.extend(sources)
+            return f"{len(sources)} sources"
+
+        with patch(
+            "llm_notable_analysis_onprem_systemd.onprem_service.closed_ticket_retrieval.retrieve_closed_tickets_fail_soft",
+            return_value=ClosedTicketRetrievalOutcome(
+                hits=[hit],
+                context="historical context",
+            ),
+        ) as mock_retrieve:
+            response = answer_case_chat(
+                payload={
+                    "mode": "selected_case",
+                    "question": "Summarize disposition options.",
+                    "selected_case_id": "case-1",
+                },
+                config=_config(
+                    CASE_QA_CLOSED_TICKET_ENABLED=True,
+                    CLOSED_TICKET_RAG_ENABLED=True,
+                ),
+                connect=lambda _dsn: _FakeConnection(row_pages=[[_chunk_row()], []]),
+                embedding_model=_FakeEmbeddingModel(),
+                knowledge_base_provider=lambda _question: [
+                    RetrievedSource(
+                        source_lane="knowledge_base",
+                        section="knowledge_base.rag",
+                        field_path="$",
+                        text="Escalate credentialed PowerShell from admin hosts.",
+                    )
+                ],
+                synthesize=synthesize,
+            )
+
+        mock_retrieve.assert_called_once()
+        call_kwargs = mock_retrieve.call_args.kwargs
+        self.assertEqual(call_kwargs["question"], "Summarize disposition options.")
+        self.assertTrue(call_kwargs["current_case_snippets"])
+        self.assertIn("admin PowerShell", call_kwargs["current_case_snippets"][0])
+        lanes = {source.source_lane for source in captured}
+        self.assertEqual(
+            lanes,
+            {"current_case", "knowledge_base", "closed_ticket"},
+        )
+        self.assertEqual(response["answer_status"], "answered")
+        self.assertNotIn("citations", response)
+
+    def test_closed_ticket_lane_skipped_when_flags_disabled(self) -> None:
+        with patch(
+            "llm_notable_analysis_onprem_systemd.onprem_service.closed_ticket_retrieval.retrieve_closed_tickets_fail_soft",
+        ) as mock_retrieve:
+            answer_case_chat(
+                payload={
+                    "mode": "selected_case",
+                    "question": "What happened?",
+                    "selected_case_id": "case-1",
+                },
+                config=_config(),
+                connect=lambda _dsn: _FakeConnection(row_pages=[[_chunk_row()], []]),
+                embedding_model=_FakeEmbeddingModel(),
+                synthesize=lambda _question, _sources: "ok",
+            )
+        mock_retrieve.assert_not_called()
+
+    def test_closed_ticket_lane_requires_both_flags(self) -> None:
+        with patch(
+            "llm_notable_analysis_onprem_systemd.onprem_service.closed_ticket_retrieval.retrieve_closed_tickets_fail_soft",
+        ) as mock_retrieve:
+            answer_case_chat(
+                payload={
+                    "mode": "selected_case",
+                    "question": "What happened?",
+                    "selected_case_id": "case-1",
+                },
+                config=_config(CLOSED_TICKET_RAG_ENABLED=True),
+                connect=lambda _dsn: _FakeConnection(row_pages=[[_chunk_row()], []]),
+                embedding_model=_FakeEmbeddingModel(),
+                synthesize=lambda _question, _sources: "ok",
+            )
+        mock_retrieve.assert_not_called()
+
+    def test_closed_ticket_retrieval_failure_is_fail_soft(self) -> None:
+        with patch(
+            "llm_notable_analysis_onprem_systemd.onprem_service.closed_ticket_retrieval.retrieve_closed_tickets_fail_soft",
+            return_value=ClosedTicketRetrievalOutcome(hits=[], context=""),
+        ) as mock_retrieve:
+            response = answer_case_chat(
+                payload={
+                    "mode": "selected_case",
+                    "question": "What evidence supports this?",
+                    "selected_case_id": "case-1",
+                },
+                config=_config(
+                    CASE_QA_CLOSED_TICKET_ENABLED=True,
+                    CLOSED_TICKET_RAG_ENABLED=True,
+                ),
+                connect=lambda _dsn: _FakeConnection(row_pages=[[_chunk_row()], []]),
+                embedding_model=_FakeEmbeddingModel(),
+                synthesize=lambda _question, sources: (
+                    f"answered with {len(sources)} sources"
+                ),
+            )
+        mock_retrieve.assert_called_once()
+        self.assertEqual(response["answer_status"], "answered")
+        self.assertIn("answered with 1 sources", response["answer"])
+
+    def test_system_instructions_describe_closed_ticket_lane(self) -> None:
+        instructions = _case_grounded_system_instructions()
+        self.assertIn("closed_ticket", instructions)
+        self.assertIn("historical advisory precedent", instructions)
+        self.assertIn("disposition reasoning", instructions)
+
+    def test_build_prompt_includes_closed_ticket_provenance(self) -> None:
+        prompt = _build_prompt(
+            "Compare disposition.",
+            [
+                RetrievedSource(
+                    source_lane="closed_ticket",
+                    section="resolution",
+                    text="Reset credentials and closed.",
+                    ticket_id="ticket-abc",
+                    ticket_number="INC4242",
+                    provenance="closed_ticket_rag:vector",
+                )
+            ],
+        )
+        self.assertIn("SOURCE_LANE_JSON: \"closed_ticket\"", prompt)
+        self.assertIn("TICKET_ID_JSON: \"ticket-abc\"", prompt)
+        self.assertIn("TICKET_NUMBER_JSON: \"INC4242\"", prompt)
+        self.assertIn("PROVENANCE_JSON:", prompt)
+
+    def test_context_usage_includes_closed_tickets_segment(self) -> None:
+        with patch(
+            "llm_notable_analysis_onprem_systemd.onprem_service.closed_ticket_retrieval.retrieve_closed_tickets_fail_soft",
+            return_value=ClosedTicketRetrievalOutcome(
+                hits=[
+                    ClosedTicketRetrievalHit(
+                        ticket_id="ticket-1",
+                        ticket_number="INC0001",
+                        section="resolution",
+                        field_path="$.resolution",
+                        text="Historical precedent text.",
+                        score=0.5,
+                        source_url=None,
+                        chunk_id="chunk-1",
+                    )
+                ],
+                context="ctx",
+            ),
+        ):
+            response = answer_case_chat(
+                payload={
+                    "mode": "selected_case",
+                    "question": "What evidence supports this?",
+                    "selected_case_id": "case-1",
+                },
+                config=_config(
+                    CASE_QA_CLOSED_TICKET_ENABLED=True,
+                    CLOSED_TICKET_RAG_ENABLED=True,
+                ),
+                connect=lambda _dsn: _FakeConnection(row_pages=[[_chunk_row()], []]),
+                embedding_model=_FakeEmbeddingModel(),
+                synthesize=lambda _question, _sources: "Grounded answer.",
+            )
+
+        usage = response.get("context_usage")
+        self.assertIsInstance(usage, dict)
+        segment_ids = {segment["id"] for segment in usage["segments"]}
+        self.assertIn("closed_ticket", segment_ids)
+        self.assertNotIn("prior_case", segment_ids)
+        labels = {segment["label"] for segment in usage["segments"]}
+        self.assertIn("Closed tickets", labels)
 
 
 if __name__ == "__main__":

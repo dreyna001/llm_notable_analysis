@@ -140,7 +140,7 @@ def build_context_usage(
         for lane_id, label in (
             ("current_case", "Case context"),
             ("knowledge_base", "Knowledge base"),
-            ("prior_case", "Prior cases"),
+            ("closed_ticket", "Closed tickets"),
         ):
             lane_chars = _lane_block_chars(sources, lane_id)
             if lane_chars:

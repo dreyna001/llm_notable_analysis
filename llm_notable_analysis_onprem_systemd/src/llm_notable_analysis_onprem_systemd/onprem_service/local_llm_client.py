@@ -56,6 +56,11 @@ from .elasticsearch_query_grounding import (
     elasticsearch_grounding_failure_mode,
     init_elasticsearch_grounding_provider,
 )
+from .historical_closed_ticket_grounding import (
+    HISTORICAL_CLOSED_TICKET_RULES,
+    format_historical_closed_tickets_prompt_block,
+    retrieve_historical_closed_tickets_for_first_pass,
+)
 from .query_result_interpretation import (
     build_query_result_interpretation_prompt,
     build_query_result_interpretation_repair_prompt,
@@ -489,6 +494,7 @@ Additional constraints:
 - This contract is mandatory; omit unsupported facts rather than inventing values.
 - Direct alert evidence must come only from SECURITY ALERT INPUT.
 - SOC_OPERATIONAL_CONTEXT may inform analyst pivots and recommended validation steps, but it must not create findings, verdicts, IOCs, or TTP evidence by itself.
+- HISTORICAL_CLOSED_TICKETS may inform alert_reconciliation verdict/disposition, confidence, decision_drivers, competing_hypotheses framing, and recommended validation steps, but must not create direct evidence, IOCs, or TTP evidence by itself.
 - Keep direct evidence, inference, and recommended next steps separate.
 - explanation: must end with "Uncertainty: [brief statement]".
 - URLs are only allowed in ioc_extraction.urls[]; no URLs elsewhere.
@@ -1411,6 +1417,7 @@ class LocalLLMClient:
         alert_text: str,
         alert_time: Optional[str] = None,
         soc_operational_context: str = "",
+        historical_closed_tickets_context: str = "",
     ) -> str:
         """Build the analysis prompt.
 
@@ -1420,6 +1427,7 @@ class LocalLLMClient:
             alert_text: The alert content to analyze.
             alert_time: Optional timestamp for time window references.
             soc_operational_context: Optional retrieval-grounded SOC context block.
+            historical_closed_tickets_context: Optional closed-ticket RAG advisory block.
 
         Returns:
             Formatted prompt string.
@@ -1433,6 +1441,10 @@ class LocalLLMClient:
         soc_context_block = (soc_operational_context or "").strip()
         if not soc_context_block:
             soc_context_block = "SOC_OPERATIONAL_CONTEXT\n(none)\n"
+
+        historical_block = format_historical_closed_tickets_prompt_block(
+            historical_closed_tickets_context
+        )
 
         return f"""{json_hint}You are a cybersecurity expert producing a structured SOC analysis from a single alert.
 
@@ -1466,6 +1478,12 @@ SECURITY ALERT INPUT:
 {soc_context_block}
 
 {SOC_CONTEXT_RULES}
+
+---
+
+{historical_block}
+
+{HISTORICAL_CLOSED_TICKET_RULES}
 
 ---
 
@@ -1740,8 +1758,14 @@ SECURITY ALERT INPUT:
             return {"error": "Empty alert text", "ttp_analysis": []}
 
         soc_context = self._build_soc_operational_context(alert_text)
+        historical_context, closed_ticket_rag_meta = (
+            retrieve_historical_closed_tickets_for_first_pass(self.config, alert_text)
+        )
         prompt = self._build_prompt(
-            alert_text, alert_time, soc_operational_context=soc_context
+            alert_text,
+            alert_time,
+            soc_operational_context=soc_context,
+            historical_closed_tickets_context=historical_context,
         )
         structured_mode = _structured_output_mode(self.config)
 
@@ -1882,6 +1906,7 @@ SECURITY ALERT INPUT:
                 metadata["elasticsearch_grounding_unavailable_reason"] = (
                     str(elasticsearch_grounding_unavailable_reason)[:600]
                 )
+            metadata.update(closed_ticket_rag_meta)
             result_obj["metadata"] = metadata
             return result_obj
 
