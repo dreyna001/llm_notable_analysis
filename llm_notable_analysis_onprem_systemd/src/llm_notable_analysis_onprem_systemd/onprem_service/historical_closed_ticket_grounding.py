@@ -25,6 +25,24 @@ HISTORICAL CLOSED-TICKET RULES:
 """.strip()
 
 
+def merge_closed_ticket_rag_metadata_into_payload(
+    payload: Dict[str, Any],
+    closed_ticket_rag_meta: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Attach closed-ticket RAG metadata fields to an analyze_alert payload."""
+    merged = dict(payload)
+    metadata = dict(merged.get("metadata") or {})
+    metadata.update(closed_ticket_rag_meta)
+    merged["metadata"] = metadata
+    return merged
+
+
+def closed_ticket_rag_metadata_for_empty_alert(config: Config) -> Dict[str, Any]:
+    """Metadata when analyze_alert rejects empty input (no retrieval run)."""
+    enabled = bool(getattr(config, "CLOSED_TICKET_RAG_ENABLED", False))
+    return build_closed_ticket_rag_metadata(enabled=enabled)
+
+
 def build_closed_ticket_rag_metadata(
     *,
     enabled: bool,

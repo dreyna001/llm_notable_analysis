@@ -26,11 +26,14 @@ def main() -> int:
     if summary.index_errors:
         for error in summary.index_errors:
             logging.error("ServiceNow closed ticket index error: %s", error)
+        return 1
     logging.info(
         "ServiceNow closed ticket sync complete fetched=%s persisted=%s skipped_noop=%s "
         "deactivated=%s journals_fetched=%s attachments_fetched=%s attachments_downloaded=%s "
-        "malformed=%s reconciled=%s cursor_advanced=%s index_selected=%s index_ready=%s "
-        "index_failed=%s index_skipped=%s",
+        "malformed=%s reconciled=%s reconcile_incomplete=%s cursor_advanced=%s "
+        "retention_tickets_deleted=%s retention_files_deleted=%s "
+        "journal_fetches_truncated=%s attachment_metadata_truncated=%s "
+        "index_selected=%s index_ready=%s index_failed=%s index_skipped=%s",
         summary.fetched,
         summary.persisted,
         summary.skipped_noop,
@@ -40,7 +43,12 @@ def main() -> int:
         summary.attachments_downloaded,
         summary.malformed,
         summary.reconciled,
+        summary.reconcile_incomplete,
         summary.cursor_advanced,
+        summary.retention_tickets_deleted,
+        summary.retention_files_deleted,
+        summary.journal_fetches_truncated,
+        summary.attachment_metadata_truncated,
         summary.index_selected,
         summary.index_ready,
         summary.index_failed,

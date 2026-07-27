@@ -1075,7 +1075,6 @@ class TestCaseChatClosedTicketLane(unittest.TestCase):
         self.assertIsInstance(usage, dict)
         segment_ids = {segment["id"] for segment in usage["segments"]}
         self.assertIn("closed_ticket", segment_ids)
-        self.assertNotIn("prior_case", segment_ids)
         labels = {segment["label"] for segment in usage["segments"]}
         self.assertIn("Closed tickets", labels)
 

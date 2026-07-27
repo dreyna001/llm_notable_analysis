@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, Sequence
 from urllib.parse import quote
 
 import requests
@@ -32,12 +32,15 @@ JOB_NAME = "servicenow_closed_tickets"
 MAX_RECORDS_PER_RUN = 500
 PAGE_SIZE = 100
 MAX_RECONCILE_IDS_PER_RUN = 2000
+MAX_CHILD_RECORDS_PER_TICKET = 500
 MAX_HTTP_RETRIES = 3
 RETRY_BACKOFF_SECONDS = 2.0
 MALFORMED_ROW_FAIL_RATIO = 0.10
 _TABLE_NAME_RE = re.compile(r"^[a-z0-9_]+$")
+_SERVICENOW_SYS_ID_RE = re.compile(r"^[0-9a-f]{32}$", re.IGNORECASE)
 _JOURNAL_TABLE = "sys_journal_field"
 _ATTACHMENT_TABLE = "sys_attachment"
+_TRUNCATION_MARKER_KEY = "_sync_truncation"
 
 
 @dataclass(frozen=True)
@@ -83,6 +86,37 @@ class SyncSummary:
     index_failed: int = 0
     index_skipped: int = 0
     index_errors: list[str] = field(default_factory=list)
+    retention_tickets_deleted: int = 0
+    retention_files_deleted: int = 0
+    reconcile_incomplete: bool = False
+    journal_fetches_truncated: int = 0
+    attachment_metadata_truncated: int = 0
+
+
+@dataclass(frozen=True)
+class TicketChildFetchResult:
+    """Bounded child-row fetch for one ticket (journals or attachment metadata)."""
+
+    rows: list[Any]
+    truncated: bool
+
+
+@dataclass(frozen=True)
+class ReconcileResult:
+    """Reconciliation outcome; deactivation is skipped when the source set is incomplete."""
+
+    deactivated: int
+    seen_ids: frozenset[str]
+    complete: bool
+
+
+@dataclass(frozen=True)
+class RetentionPurgeSummary:
+    """Counts from expired closed-ticket retention purge."""
+
+    tickets_deleted: int = 0
+    files_deleted: int = 0
+    pending_file_deletes: tuple[str, ...] = ()
 
 
 def _table_api_url(base_url: str, table: str) -> str:
@@ -94,6 +128,26 @@ def _validate_table_name(table: str) -> str:
     if not _TABLE_NAME_RE.fullmatch(normalized):
         raise ValueError("SERVICENOW_CLOSED_TICKET_TABLE must match [a-z0-9_]+")
     return normalized
+
+
+def _validate_servicenow_sys_id(value: str, name: str) -> str:
+    """Validate a ServiceNow sys_id for safe filesystem and SQL use."""
+    normalized = str(value or "").strip()
+    if not _SERVICENOW_SYS_ID_RE.fullmatch(normalized):
+        raise ValueError(f"{name} must be a 32-character ServiceNow sys_id")
+    return normalized.lower()
+
+
+def _truncation_marker(kind: str, count: int) -> dict[str, Any]:
+    return {_TRUNCATION_MARKER_KEY: kind, "truncated_at_count": int(count)}
+
+
+def _apply_truncation_marker(rows: list[Any], kind: str, truncated: bool) -> list[Any]:
+    if not truncated:
+        return rows
+    output = list(rows)
+    output.append(_truncation_marker(kind, len(rows)))
+    return output
 
 
 def _combine_encoded_query(parts: list[str]) -> str:
@@ -371,6 +425,28 @@ def _fetch_table_rows(
         offset += limit
 
 
+def _fetch_table_rows_list(
+    config: Config,
+    *,
+    table: str,
+    encoded_query: str,
+    session: requests.Session | None = None,
+    max_records: int,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Fetch up to max_records rows; truncated=True when the cap was reached."""
+    rows = list(
+        _fetch_table_rows(
+            config,
+            table=table,
+            encoded_query=encoded_query,
+            session=session,
+            max_records=max_records,
+        )
+    )
+    truncated = len(rows) >= int(max_records)
+    return rows, truncated
+
+
 def fetch_closed_tickets(
     config: Config,
     *,
@@ -401,19 +477,25 @@ def fetch_ticket_journals(
     *,
     ticket_sys_id: str,
     session: requests.Session | None = None,
-) -> list[Any]:
-    """Fetch complete journal rows for one ticket (fail-soft at caller)."""
+) -> TicketChildFetchResult:
+    """Fetch journal rows for one ticket with bounded pagination."""
     query = f"element_id={ticket_sys_id}"
-    rows = list(
-        _fetch_table_rows(
-            config,
-            table=_JOURNAL_TABLE,
-            encoded_query=query,
-            session=session,
-            max_records=PAGE_SIZE,
-        )
+    rows, truncated = _fetch_table_rows_list(
+        config,
+        table=_JOURNAL_TABLE,
+        encoded_query=query,
+        session=session,
+        max_records=MAX_CHILD_RECORDS_PER_TICKET,
     )
-    return [_enrich_display_values(row) for row in rows]
+    enriched = [_enrich_display_values(row) for row in rows]
+    if truncated:
+        logger.warning(
+            "journal fetch truncated for ticket %s at %s rows (cap=%s)",
+            ticket_sys_id,
+            len(enriched),
+            MAX_CHILD_RECORDS_PER_TICKET,
+        )
+    return TicketChildFetchResult(rows=enriched, truncated=truncated)
 
 
 def fetch_ticket_attachment_rows(
@@ -422,18 +504,24 @@ def fetch_ticket_attachment_rows(
     source_table: str,
     ticket_sys_id: str,
     session: requests.Session | None = None,
-) -> list[dict[str, Any]]:
+) -> TicketChildFetchResult:
     query = f"table_name={source_table}^table_sys_id={ticket_sys_id}"
-    rows = list(
-        _fetch_table_rows(
-            config,
-            table=_ATTACHMENT_TABLE,
-            encoded_query=query,
-            session=session,
-            max_records=PAGE_SIZE,
-        )
+    rows, truncated = _fetch_table_rows_list(
+        config,
+        table=_ATTACHMENT_TABLE,
+        encoded_query=query,
+        session=session,
+        max_records=MAX_CHILD_RECORDS_PER_TICKET,
     )
-    return [_enrich_display_values(row) for row in rows]
+    enriched = [_enrich_display_values(row) for row in rows]
+    if truncated:
+        logger.warning(
+            "attachment metadata fetch truncated for ticket %s at %s rows (cap=%s)",
+            ticket_sys_id,
+            len(enriched),
+            MAX_CHILD_RECORDS_PER_TICKET,
+        )
+    return TicketChildFetchResult(rows=enriched, truncated=truncated)
 
 
 def _download_attachment_bytes(
@@ -485,6 +573,44 @@ def _atomic_write_bytes(path: Path, payload: bytes) -> None:
     finally:
         if tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
+
+
+def _safe_attachment_file_name(file_name: str | None, attachment_id: str) -> str:
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", file_name or attachment_id).strip("_")
+    if not safe_name:
+        safe_name = attachment_id
+    return safe_name[:200]
+
+
+def _resolve_attachment_target_path(
+    attachment_dir: Path,
+    *,
+    ticket_id: str,
+    attachment_id: str,
+    file_name: str | None,
+) -> Path:
+    """Build an attachment path guaranteed to stay under attachment_dir."""
+    tid = _validate_servicenow_sys_id(ticket_id, "ticket_id")
+    aid = _validate_servicenow_sys_id(attachment_id, "attachment_id")
+    root = attachment_dir.expanduser().resolve(strict=False)
+    rel = Path(tid) / f"{aid}_{_safe_attachment_file_name(file_name, aid)}"
+    target = (root / rel).resolve(strict=False)
+    target.relative_to(root)
+    return target
+
+
+def _delete_storage_path_safe(config: Config, storage_path: str | None) -> bool:
+    from .closed_ticket_index import resolve_safe_attachment_path
+
+    path = resolve_safe_attachment_path(config, storage_path)
+    if path is None or not path.is_file():
+        return False
+    try:
+        path.unlink()
+        return True
+    except OSError as exc:
+        logger.warning("failed to delete attachment file %s: %s", path, exc)
+        return False
 
 
 def _schema_ident(config: Config) -> str:
@@ -566,6 +692,43 @@ def _write_cursor(
     )
 
 
+def _normalize_utc_timestamp(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def compute_ticket_retention_expires_at(
+    *,
+    closed_at: datetime | None,
+    source_updated_at: datetime | None,
+    retention_days: int,
+    synced_at: datetime,
+) -> datetime:
+    """Compute expires_at from closed_at, else source_updated_at, else sync time."""
+    if closed_at is not None:
+        basis = _normalize_utc_timestamp(closed_at)
+    elif source_updated_at is not None:
+        basis = _normalize_utc_timestamp(source_updated_at)
+    else:
+        basis = _normalize_utc_timestamp(synced_at)
+    return basis + timedelta(days=int(retention_days))
+
+
+def _ticket_retention_expires_at(
+    ticket: TicketRecord,
+    *,
+    retention_days: int,
+    synced_at: datetime,
+) -> datetime:
+    return compute_ticket_retention_expires_at(
+        closed_at=ticket.closed_at,
+        source_updated_at=ticket.source_updated_at,
+        retention_days=retention_days,
+        synced_at=synced_at,
+    )
+
+
 def _existing_content_hash(conn: Any, schema: str, ticket_id: str) -> str | None:
     row = fetchone(
         conn.execute(
@@ -582,6 +745,14 @@ def _existing_content_hash(conn: Any, schema: str, ticket_id: str) -> str | None
     return str(row[0] if not isinstance(row, dict) else row.get("content_hash") or "")
 
 
+def _delete_ticket_chunks(conn: Any, schema: str, ticket_id: str) -> None:
+    """Remove indexed chunks for one ticket (expired or re-indexed rows)."""
+    conn.execute(
+        f"DELETE FROM {schema}.ticket_chunks WHERE ticket_id = %s",
+        (ticket_id,),
+    )
+
+
 def _upsert_ticket(
     conn: Any,
     schema: str,
@@ -593,8 +764,15 @@ def _upsert_ticket(
     if existing_hash == ticket.content_hash:
         return "skipped"
 
-    expires_at = datetime.now(timezone.utc) + timedelta(days=int(retention_days))
-    index_status = "pending"
+    synced_at = datetime.now(timezone.utc)
+    expires_at = _ticket_retention_expires_at(
+        ticket,
+        retention_days=retention_days,
+        synced_at=synced_at,
+    )
+    index_status = (
+        "not_indexed" if expires_at <= synced_at else "pending"
+    )
 
     conn.execute(
         f"""
@@ -631,7 +809,7 @@ def _upsert_ticket(
             expires_at = EXCLUDED.expires_at,
             index_status = CASE
                 WHEN {schema}.servicenow_tickets.content_hash IS DISTINCT FROM EXCLUDED.content_hash
-                THEN 'pending'
+                THEN EXCLUDED.index_status
                 ELSE {schema}.servicenow_tickets.index_status
             END,
             index_error = CASE
@@ -655,6 +833,8 @@ def _upsert_ticket(
             index_status,
         ),
     )
+    if existing_hash is not None and index_status == "not_indexed":
+        _delete_ticket_chunks(conn, schema, ticket.ticket_id)
     return "inserted" if existing_hash is None else "updated"
 
 
@@ -742,26 +922,39 @@ def _reconcile_active_tickets(
     source_table: str,
     retention_start: datetime,
     session: requests.Session | None = None,
-) -> tuple[int, set[str]]:
-    """Best-effort reconciliation over the retention window; returns deactivated count."""
+) -> ReconcileResult:
+    """Reconciliation over the retention window; skips deactivation when source fetch is truncated."""
     window_clause = f"sys_updated_on>={_sn_query_timestamp(retention_start)}"
     encoded_query = _combine_encoded_query([customer_query, window_clause])
-    seen_ids: set[str] = set()
-    for row in _fetch_table_rows(
+    rows, truncated = _fetch_table_rows_list(
         config,
         table=source_table,
         encoded_query=encoded_query,
         session=session,
         max_records=MAX_RECONCILE_IDS_PER_RUN,
-    ):
+    )
+    seen_ids: set[str] = set()
+    for row in rows:
         sys_id = str(_field_raw_value(row.get("sys_id")) or "").strip()
         if sys_id:
             seen_ids.add(sys_id)
 
-    if not seen_ids:
-        return 0, seen_ids
+    if truncated:
+        logger.warning(
+            "reconciliation incomplete: ServiceNow source fetch hit cap %s; "
+            "skipping deactivation for safety",
+            MAX_RECONCILE_IDS_PER_RUN,
+        )
+        return ReconcileResult(
+            deactivated=0,
+            seen_ids=frozenset(seen_ids),
+            complete=False,
+        )
 
-    rows = conn.execute(
+    if not seen_ids:
+        return ReconcileResult(deactivated=0, seen_ids=frozenset(), complete=True)
+
+    db_rows = conn.execute(
         f"""
         SELECT ticket_id
         FROM {schema}.servicenow_tickets
@@ -771,7 +964,7 @@ def _reconcile_active_tickets(
         (retention_start,),
     )
     stale_ids: list[str] = []
-    fetchall = getattr(rows, "fetchall", None)
+    fetchall = getattr(db_rows, "fetchall", None)
     if callable(fetchall):
         for row in fetchall():
             ticket_id = (
@@ -783,7 +976,95 @@ def _reconcile_active_tickets(
                 stale_ids.append(ticket_id)
 
     deactivated = _deactivate_tickets(conn, schema, stale_ids)
-    return deactivated, seen_ids
+    return ReconcileResult(
+        deactivated=deactivated,
+        seen_ids=frozenset(seen_ids),
+        complete=True,
+    )
+
+
+def purge_expired_closed_tickets_db(
+    conn: Any,
+    schema: str,
+    *,
+    now: datetime | None = None,
+) -> tuple[int, list[str]]:
+    """Delete expired ticket rows in the open transaction; return paths for post-commit unlink."""
+    effective_now = now or datetime.now(timezone.utc)
+    path_rows = conn.execute(
+        f"""
+        SELECT a.storage_path
+        FROM {schema}.attachments a
+        INNER JOIN {schema}.servicenow_tickets t ON t.ticket_id = a.ticket_id
+        WHERE t.expires_at IS NOT NULL
+          AND t.expires_at <= %s
+        """,
+        (effective_now,),
+    )
+    pending_paths: list[str] = []
+    fetchall = getattr(path_rows, "fetchall", None)
+    if callable(fetchall):
+        for row in fetchall():
+            storage_path = (
+                row[0]
+                if not isinstance(row, dict)
+                else row.get("storage_path")
+            )
+            text = str(storage_path or "").strip()
+            if text:
+                pending_paths.append(text)
+
+    delete_result = conn.execute(
+        f"""
+        DELETE FROM {schema}.servicenow_tickets
+        WHERE expires_at IS NOT NULL
+          AND expires_at <= %s
+        """,
+        (effective_now,),
+    )
+    tickets_deleted = int(getattr(delete_result, "rowcount", 0) or 0)
+    return tickets_deleted, pending_paths
+
+
+def delete_purged_closed_ticket_files(
+    config: Config,
+    storage_paths: Sequence[str],
+) -> int:
+    """Delete on-disk attachment files after the DB purge transaction commits."""
+    files_deleted = 0
+    for storage_path in storage_paths:
+        if _delete_storage_path_safe(config, storage_path):
+            files_deleted += 1
+    if files_deleted:
+        logger.info(
+            "closed-ticket retention purge files_deleted=%s",
+            files_deleted,
+        )
+    return files_deleted
+
+
+def purge_expired_closed_tickets(
+    config: Config,
+    conn: Any,
+    schema: str,
+) -> RetentionPurgeSummary:
+    """Delete expired rows, commit, then unlink files (safe for direct callers)."""
+    tickets_deleted, pending_paths = purge_expired_closed_tickets_db(conn, schema)
+    commit = getattr(conn, "commit", None)
+    if callable(commit):
+        commit()
+    files_deleted = delete_purged_closed_ticket_files(config, pending_paths)
+    if tickets_deleted or files_deleted:
+        logger.info(
+            "closed-ticket retention purge tickets_deleted=%s files_deleted=%s",
+            tickets_deleted,
+            files_deleted,
+        )
+    return RetentionPurgeSummary(
+        tickets_deleted=tickets_deleted,
+        files_deleted=files_deleted,
+        pending_file_deletes=tuple(pending_paths),
+    )
 
 
 def _process_attachments(
@@ -794,9 +1075,9 @@ def _process_attachments(
     ticket_id: str,
     source_table: str,
     session: requests.Session | None = None,
-) -> tuple[int, int]:
+) -> tuple[int, int, bool]:
     if not bool(config.SERVICENOW_CLOSED_TICKET_FETCH_ATTACHMENTS):
-        return 0, 0
+        return 0, 0, False
 
     attachment_dir = Path(str(config.CLOSED_TICKET_ATTACHMENT_DIR))
     max_bytes = int(config.CLOSED_TICKET_ATTACHMENT_MAX_BYTES)
@@ -804,7 +1085,7 @@ def _process_attachments(
     downloaded = 0
 
     try:
-        rows = fetch_ticket_attachment_rows(
+        attachment_fetch = fetch_ticket_attachment_rows(
             config,
             source_table=source_table,
             ticket_sys_id=ticket_id,
@@ -812,11 +1093,31 @@ def _process_attachments(
         )
     except Exception as exc:
         logger.warning("attachment metadata fetch failed for %s: %s", ticket_id, exc)
-        return 0, 0
+        return 0, 0, False
 
-    for row in rows:
+    if attachment_fetch.truncated:
+        logger.warning(
+            "attachment metadata truncated for ticket %s; indexing may be incomplete",
+            ticket_id,
+        )
+
+    metadata_truncated = attachment_fetch.truncated
+
+    for row in attachment_fetch.rows:
+        if not isinstance(row, dict):
+            continue
         attachment_id = str(_field_raw_value(row.get("sys_id")) or "").strip()
         if not attachment_id:
+            continue
+        try:
+            _validate_servicenow_sys_id(attachment_id, "attachment_id")
+            _validate_servicenow_sys_id(ticket_id, "ticket_id")
+        except ValueError as exc:
+            logger.warning(
+                "skipping attachment with invalid ids for ticket %s: %s",
+                ticket_id,
+                exc,
+            )
             continue
         fetched += 1
         file_name = str(_field_raw_value(row.get("file_name")) or "").strip() or None
@@ -832,11 +1133,17 @@ def _process_attachments(
             _fetch_attachment_row_state(conn, schema, attachment_id)
         )
         merged_metadata = _merge_attachment_source_metadata(existing_metadata, metadata)
+        metadata_unchanged = before_hash is not None and before_hash == metadata_hash
 
-        download_status = "pending"
-        storage_path: str | None = None
-        if size_bytes is not None and size_bytes > max_bytes:
+        download_status = before_status or "pending"
+        storage_path = before_storage_path
+
+        if metadata_unchanged and before_status == "downloaded" and before_storage_path:
+            pass
+        elif size_bytes is not None and size_bytes > max_bytes:
             download_status = "skipped"
+            if not metadata_unchanged:
+                storage_path = None
         else:
             try:
                 payload = _download_attachment_bytes(
@@ -851,19 +1158,32 @@ def _process_attachments(
                 )
                 payload = None
             if payload is None:
-                download_status = "failed"
+                if metadata_unchanged and before_storage_path:
+                    storage_path = before_storage_path
+                    download_status = before_status or "downloaded"
+                else:
+                    storage_path = None
+                    download_status = "failed"
             else:
-                safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", file_name or attachment_id)
-                rel_path = Path(ticket_id) / f"{attachment_id}_{safe_name}"
-                target = attachment_dir / rel_path
                 try:
+                    target = _resolve_attachment_target_path(
+                        attachment_dir,
+                        ticket_id=ticket_id,
+                        attachment_id=attachment_id,
+                        file_name=file_name,
+                    )
                     _atomic_write_bytes(target, payload)
                     storage_path = str(target)
                     download_status = "downloaded"
                     downloaded += 1
-                except OSError as exc:
+                except (OSError, ValueError) as exc:
                     logger.warning("attachment write failed for %s: %s", attachment_id, exc)
-                    download_status = "failed"
+                    if metadata_unchanged and before_storage_path:
+                        storage_path = before_storage_path
+                        download_status = before_status or "downloaded"
+                    else:
+                        storage_path = None
+                        download_status = "failed"
 
         _upsert_attachment_metadata(
             conn,
@@ -879,7 +1199,6 @@ def _process_attachments(
             download_status=download_status,
             storage_path=storage_path,
         )
-        before_storage = existing_metadata.get("storage_path")
         if _attachment_row_changed(
             before_hash=before_hash,
             before_status=before_status,
@@ -890,7 +1209,7 @@ def _process_attachments(
         ):
             _mark_ticket_index_pending(conn, schema, ticket_id)
 
-    return fetched, downloaded
+    return fetched, downloaded, metadata_truncated
 
 
 def run_closed_ticket_sync(
@@ -936,10 +1255,16 @@ def run_closed_ticket_sync(
     connect_fn = connect or default_connect
     conn = connect_fn(dsn)
     session = requests.Session()
+    pending_purge_paths: list[str] = []
     try:
         set_statement_timeout(
             conn, int(getattr(config, "CASE_POSTGRES_STATEMENT_TIMEOUT_MS", 5000))
         )
+        tickets_deleted, pending_purge_paths = purge_expired_closed_tickets_db(
+            conn, schema
+        )
+        summary.retention_tickets_deleted = tickets_deleted
+
         cursor_state = _read_cursor(conn, schema)
 
         rows = list(
@@ -962,10 +1287,17 @@ def run_closed_ticket_sync(
             sys_id = str(_field_raw_value(row.get("sys_id")) or "").strip()
             if bool(config.SERVICENOW_CLOSED_TICKET_FETCH_JOURNALS) and sys_id:
                 try:
-                    journals = fetch_ticket_journals(
+                    journal_fetch = fetch_ticket_journals(
                         config, ticket_sys_id=sys_id, session=session
                     )
-                    summary.journals_fetched += len(journals)
+                    if journal_fetch.truncated:
+                        summary.journal_fetches_truncated += 1
+                    journals = _apply_truncation_marker(
+                        journal_fetch.rows,
+                        "journals",
+                        journal_fetch.truncated,
+                    )
+                    summary.journals_fetched += len(journal_fetch.rows)
                 except Exception as exc:
                     logger.warning("journal fetch failed for %s: %s", sys_id, exc)
             try:
@@ -1005,7 +1337,7 @@ def run_closed_ticket_sync(
                 else:
                     summary.persisted += 1
 
-                att_fetched, att_downloaded = _process_attachments(
+                att_fetched, att_downloaded, att_truncated = _process_attachments(
                     config,
                     conn,
                     schema,
@@ -1015,6 +1347,8 @@ def run_closed_ticket_sync(
                 )
                 summary.attachments_fetched += att_fetched
                 summary.attachments_downloaded += att_downloaded
+                if att_truncated:
+                    summary.attachment_metadata_truncated += 1
 
                 if cursor_candidate is None or (
                     ticket.source_updated_at,
@@ -1036,7 +1370,7 @@ def run_closed_ticket_sync(
         last_reconciled_at = cursor_state.last_reconciled_at
         if should_reconcile:
             try:
-                deactivated, _ = _reconcile_active_tickets(
+                reconcile_result = _reconcile_active_tickets(
                     config,
                     conn,
                     schema,
@@ -1045,9 +1379,16 @@ def run_closed_ticket_sync(
                     retention_start=retention_start,
                     session=session,
                 )
-                summary.deactivated += deactivated
-                summary.reconciled = 1
-                last_reconciled_at = now
+                summary.deactivated += reconcile_result.deactivated
+                summary.reconcile_incomplete = not reconcile_result.complete
+                if reconcile_result.complete:
+                    summary.reconciled = 1
+                    last_reconciled_at = now
+                else:
+                    logger.warning(
+                        "reconciliation incomplete; deactivation skipped (seen_ids=%s)",
+                        len(reconcile_result.seen_ids),
+                    )
             except Exception as exc:
                 logger.warning("reconciliation pass failed: %s", exc)
 
@@ -1073,6 +1414,9 @@ def run_closed_ticket_sync(
                 )
 
         conn.commit()
+        summary.retention_files_deleted = delete_purged_closed_ticket_files(
+            config, pending_purge_paths
+        )
     except Exception as exc:
         conn.rollback()
         summary.errors.append(str(exc))
@@ -1096,6 +1440,8 @@ def run_closed_ticket_sync(
             index_summary = index_pending_closed_tickets(
                 config=config,
                 connect=connect_fn,
+                max_tickets=MAX_RECORDS_PER_RUN,
+                batch_size=min(PAGE_SIZE, MAX_RECORDS_PER_RUN),
             )
             summary.index_selected = index_summary.selected
             summary.index_ready = index_summary.ready

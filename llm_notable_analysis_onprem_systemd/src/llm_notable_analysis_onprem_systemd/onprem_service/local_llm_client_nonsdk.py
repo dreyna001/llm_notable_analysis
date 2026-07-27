@@ -51,7 +51,9 @@ from .elasticsearch_query_grounding import (
 )
 from .historical_closed_ticket_grounding import (
     HISTORICAL_CLOSED_TICKET_RULES,
+    closed_ticket_rag_metadata_for_empty_alert,
     format_historical_closed_tickets_prompt_block,
+    merge_closed_ticket_rag_metadata_into_payload,
     retrieve_historical_closed_tickets_for_first_pass,
 )
 from .query_result_interpretation import (
@@ -1136,6 +1138,7 @@ def build_poc_fallback_llm_payload(
     attempt: int,
     elapsed_primary: float,
     elapsed_repair: Optional[float],
+    closed_ticket_rag_meta: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build fallback payload that preserves raw model text for PoC review.
 
@@ -1162,7 +1165,7 @@ def build_poc_fallback_llm_payload(
     if not combined:
         combined = "(empty model response)"
 
-    return {
+    payload: Dict[str, Any] = {
         "poc_unstructured_output": True,
         "poc_fallback_reason": reason,
         "raw_response": combined,
@@ -1193,6 +1196,9 @@ def build_poc_fallback_llm_payload(
             ),
         },
     }
+    if closed_ticket_rag_meta:
+        payload["metadata"].update(closed_ticket_rag_meta)
+    return payload
 
 
 class LocalLLMClient:
@@ -1727,7 +1733,10 @@ SECURITY ALERT INPUT:
         """
         if not alert_text or not alert_text.strip():
             logger.error("Alert text is empty or whitespace only")
-            return {"error": "Empty alert text", "ttp_analysis": []}
+            return merge_closed_ticket_rag_metadata_into_payload(
+                {"error": "Empty alert text", "ttp_analysis": []},
+                closed_ticket_rag_metadata_for_empty_alert(self.config),
+            )
 
         soc_context = self._build_soc_operational_context(alert_text)
         historical_context, closed_ticket_rag_meta = (
@@ -2532,6 +2541,7 @@ SECURITY ALERT INPUT:
                     attempt=attempt + 1,
                     elapsed_primary=elapsed,
                     elapsed_repair=elapsed2,
+                    closed_ticket_rag_meta=closed_ticket_rag_meta,
                 )
 
             except RequestTimeoutError:
@@ -2541,10 +2551,13 @@ SECURITY ALERT INPUT:
                     time.sleep(retry_delay)
                     retry_delay *= 2
                 else:
-                    return {
-                        "error": "LLM API timeout after retries",
-                        "ttp_analysis": [],
-                    }
+                    return merge_closed_ticket_rag_metadata_into_payload(
+                        {
+                            "error": "LLM API timeout after retries",
+                            "ttp_analysis": [],
+                        },
+                        closed_ticket_rag_meta,
+                    )
 
             except (
                 TransportError,
@@ -2558,7 +2571,10 @@ SECURITY ALERT INPUT:
                     time.sleep(retry_delay)
                     retry_delay *= 2
                 else:
-                    return {"error": f"LLM API error: {e}", "ttp_analysis": []}
+                    return merge_closed_ticket_rag_metadata_into_payload(
+                        {"error": f"LLM API error: {e}", "ttp_analysis": []},
+                        closed_ticket_rag_meta,
+                    )
 
             except (
                 json.JSONDecodeError,
@@ -2578,9 +2594,13 @@ SECURITY ALERT INPUT:
                     attempt=attempt + 1,
                     elapsed_primary=elapsed,
                     elapsed_repair=elapsed2,
+                    closed_ticket_rag_meta=closed_ticket_rag_meta,
                 )
 
-        return {
-            "error": f"Max retries exceeded ({last_error or 'unknown'})",
-            "ttp_analysis": [],
-        }
+        return merge_closed_ticket_rag_metadata_into_payload(
+            {
+                "error": f"Max retries exceeded ({last_error or 'unknown'})",
+                "ttp_analysis": [],
+            },
+            closed_ticket_rag_meta,
+        )

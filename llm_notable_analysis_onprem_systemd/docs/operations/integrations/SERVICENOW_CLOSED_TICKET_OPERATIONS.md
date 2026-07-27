@@ -44,10 +44,16 @@ advisory retrieval for first-pass alert analysis and analyst portal chat.
 
 - **Raw sync:** `notable-closed-ticket-sync.service` (timer ~04:30) pulls tickets,
   journals, and optional attachments into `notable_closed_tickets.servicenow_tickets`.
-- **Auto-index:** When `CLOSED_TICKET_RAG_ENABLED=true`, the sync script indexes a
-  bounded batch of tickets with `index_status` in `pending` or `failed` (active,
-  unexpired only). Index failures are logged and recorded on the sync summary without
-  rolling back a successful raw sync.
+- **Auto-index:** When `CLOSED_TICKET_RAG_ENABLED=true`, the sync script indexes up to
+  **500** pending/failed tickets per run (`index_status` in `pending` or `failed`,
+  active and unexpired only). Raw sync alone does not index when RAG is disabled.
+  Index failures are logged and recorded on the sync summary without rolling back a
+  successful raw sync; the operator script exits non-zero when indexing fails so
+  systemd can retry indexing on the next timer run without re-pulling unchanged data.
+- **Retention:** Each sync run purges tickets whose `expires_at` has passed. Retention
+  is measured from `closed_at` (+ 30/60/90 days), falling back to `source_updated_at`
+  or sync time when closure is unavailable. Attachment files under
+  `CLOSED_TICKET_ATTACHMENT_DIR` are removed only after the purge transaction commits.
 
 Manual sync:
 

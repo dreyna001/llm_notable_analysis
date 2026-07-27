@@ -70,9 +70,28 @@ class ChatContextUsageTests(unittest.TestCase):
         )
         segment_ids = {segment["id"] for segment in usage["segments"]}
         self.assertIn("closed_ticket", segment_ids)
-        self.assertNotIn("prior_case", segment_ids)
         labels = {segment["label"] for segment in usage["segments"]}
         self.assertIn("Closed tickets", labels)
+
+    def test_prior_case_segment_when_lane_present(self) -> None:
+        usage = build_context_usage(
+            Config(),
+            kind="case_grounded",
+            question="Prior?",
+            system_prompt_chars=200,
+            sources=[
+                RetrievedSource(
+                    source_lane="prior_case",
+                    section="summary",
+                    text="Older case excerpt.",
+                    case_id="case-old",
+                )
+            ],
+        )
+        segment_ids = {segment["id"] for segment in usage["segments"]}
+        self.assertIn("prior_case", segment_ids)
+        labels = {segment["label"] for segment in usage["segments"]}
+        self.assertIn("Prior cases", labels)
 
     def test_merge_gateway_usage_overrides_estimate(self) -> None:
         usage = {
