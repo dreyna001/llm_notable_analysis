@@ -135,8 +135,10 @@ restore_services() {
         notable-analyzer.service
         notable-portal.service
         notable-disposition-sync.service
+        notable-closed-ticket-sync.service
         notable-retention.service
         notable-disposition-sync.timer
+        notable-closed-ticket-sync.timer
         notable-retention.timer
     )
 
@@ -507,8 +509,10 @@ fi
 stop_order=(
     notable-retention.timer
     notable-disposition-sync.timer
+    notable-closed-ticket-sync.timer
     notable-retention.service
     notable-disposition-sync.service
+    notable-closed-ticket-sync.service
     notable-portal.service
     notable-analyzer.service
 )
@@ -543,6 +547,17 @@ if [[ "$SKIP_BACKUP" != "true" ]]; then
     )"
     if [[ "$disposition_exists" == "true" ]]; then
         schema_args+=("--schema=notable_dispositions")
+    fi
+    closed_ticket_exists="$(
+        runuser -u postgres -- psql \
+            --dbname "$CASE_DATABASE" \
+            --tuples-only \
+            --no-align \
+            --set ON_ERROR_STOP=1 \
+            --command "SELECT CASE WHEN to_regnamespace('notable_closed_tickets') IS NULL THEN 'false' ELSE 'true' END;"
+    )"
+    if [[ "$closed_ticket_exists" == "true" ]]; then
+        schema_args+=("--schema=notable_closed_tickets")
     fi
 
     info "Backing up PostgreSQL app data to $backup_dir/postgres-app-data.sql"
@@ -598,7 +613,7 @@ runuser -u postgres -- psql \
 BEGIN;
 SELECT format('TRUNCATE TABLE %I.%I RESTART IDENTITY CASCADE;', schemaname, tablename)
 FROM pg_tables
-WHERE schemaname IN (:'case_schema', 'notable_dispositions')
+WHERE schemaname IN (:'case_schema', 'notable_dispositions', 'notable_closed_tickets')
 ORDER BY schemaname, tablename
 \gexec
 COMMIT;

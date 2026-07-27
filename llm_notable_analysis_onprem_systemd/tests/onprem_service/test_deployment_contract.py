@@ -185,6 +185,12 @@ class TestDeploymentContract(unittest.TestCase):
         )
 
         self.assertIn("read_config_value_best_effort", install_text)
+        self.assertIn("notable-closed-ticket-sync.service", install_text)
+        self.assertIn("notable-closed-ticket-sync.timer", install_text)
+        self.assertNotIn("systemctl enable notable-closed-ticket-sync.timer", install_text)
+        self.assertIn("run_closed_ticket_sync.py", install_text)
+        self.assertIn("rebuild_closed_ticket_chunks.py", install_text)
+        self.assertIn("Installed operator scripts", install_text)
         self.assertIn("curl -fsS --max-time 5", install_text)
         self.assertIn("mktemp \"$incoming_dir/.", install_text)
         self.assertIn("frontend/analyst-portal/dist", install_text)
@@ -202,6 +208,9 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("--config-env", script_text)
         self.assertIn("--portal-env", script_text)
         self.assertIn("notable_cases_schema.sql", script_text)
+        self.assertIn("closed_tickets_schema.sql", script_text)
+        self.assertIn("notable_closed_tickets", script_text)
+        self.assertIn("GRANT SELECT ON ALL TABLES IN SCHEMA notable_closed_tickets TO", script_text)
         self.assertIn("GRANT SELECT ON ALL TABLES", script_text)
         self.assertIn("notable_portal@127.0.0.1:5432/notable_rag", script_text)
         self.assertIn("GRANT INSERT, UPDATE, DELETE ON", script_text)
@@ -476,6 +485,28 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("cases_processed_at_case_id_idx", schema_text)
         self.assertIn("cases_search_name_trgm_idx", schema_text)
         self.assertIn("gin_trgm_ops", schema_text)
+
+    def test_closed_ticket_schema_contains_expected_tables(self) -> None:
+        """Closed ticket Postgres schema should match the raw sync contract."""
+        schema_text = (
+            PROJECT_ROOT / "deploy" / "postgres" / "closed_tickets_schema.sql"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("CREATE EXTENSION IF NOT EXISTS vector", schema_text)
+        self.assertIn("CREATE SCHEMA IF NOT EXISTS notable_closed_tickets", schema_text)
+        self.assertIn("CREATE TABLE IF NOT EXISTS notable_closed_tickets.sync_state", schema_text)
+        self.assertIn(
+            "CREATE TABLE IF NOT EXISTS notable_closed_tickets.servicenow_tickets",
+            schema_text,
+        )
+        self.assertIn("CREATE TABLE IF NOT EXISTS notable_closed_tickets.attachments", schema_text)
+        self.assertIn("attachments_download_status_idx", schema_text)
+        self.assertIn(
+            "CREATE TABLE IF NOT EXISTS notable_closed_tickets.ticket_chunks",
+            schema_text,
+        )
+        self.assertIn("ticket_chunks_search_vector_gin_idx", schema_text)
+        self.assertIn("ticket_chunks_embedding_hnsw_idx", schema_text)
 
     def test_postgres_rag_smoke_uses_disposable_pgvector_container(self) -> None:
         """Live RAG smoke should validate pgvector without host psql."""

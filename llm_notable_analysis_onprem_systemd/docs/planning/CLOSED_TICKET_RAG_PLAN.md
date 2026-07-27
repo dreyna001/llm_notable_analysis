@@ -8,6 +8,8 @@ false-positive investigation.
 
 ## Locked Decisions
 
+- Default closed-ticket retention window: **30 days** (`CLOSED_TICKET_RETENTION_DAYS`;
+  allowed values 30, 60, 90).
 - Each deployment and its data remain inside one customer environment.
 - Pull from ticketing systems; optionally add push later as an accelerator.
 - Store the complete source payload unchanged.
@@ -51,14 +53,20 @@ false-positive investigation.
 
 ## Implementation Slices
 
-1. Define the raw ticket envelope and connector interface.
-2. Implement ServiceNow pull, backfill, incremental sync, and reconciliation.
-3. Implement generic rendering, chunking, hybrid indexing, and deletion/update
-   propagation.
-4. Add closed-ticket retrieval to first alert analysis with citations.
-5. Add the ticket retrieval lane to the chatbot.
-6. Implement the Archer pull adapter against the same raw envelope.
-7. Add sync health, retrieval metrics, replay evaluation, and operator docs.
+### On-prem (implemented in `llm_notable_analysis_onprem_systemd`)
+
+1. ServiceNow closed-ticket raw sync, Postgres store, attachment download, bounded
+   post-sync indexing (`index_pending_closed_tickets`).
+2. Deterministic render/chunk, hybrid retrieval, first-pass advisory lane.
+3. Analyst portal chat closed-ticket lane (with portal env flags and DB grants).
+4. Operator runbook: `docs/operations/integrations/SERVICENOW_CLOSED_TICKET_OPERATIONS.md`.
+
+### Not in on-prem scope yet
+
+1. Define the raw ticket envelope and Archer connector interface.
+2. Add closed-ticket retrieval citations in product UI (advisory lane is prompt-only).
+3. Archer pull adapter against the same raw envelope.
+4. Sync health dashboards, retrieval metrics, replay evaluation.
 
 ## Implementation Execution
 

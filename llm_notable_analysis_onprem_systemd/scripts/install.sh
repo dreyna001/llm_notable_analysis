@@ -1430,6 +1430,20 @@ cp "$REPO_DIR/pyproject.toml" "$INSTALL_DIR/" \
     || err "Failed to copy pyproject.toml"
 cp "$REPO_DIR/requirements.txt" "$INSTALL_DIR/" \
     || err "Failed to copy requirements.txt"
+mkdir -p "$INSTALL_DIR/scripts"
+for operator_script in \
+    run_closed_ticket_sync.py \
+    rebuild_closed_ticket_chunks.py \
+    run_disposition_sync.py
+do
+    src_script="$REPO_DIR/scripts/$operator_script"
+    [[ -f "$src_script" ]] || err "Missing operator script: $src_script"
+    cp "$src_script" "$INSTALL_DIR/scripts/" \
+        || err "Failed to copy operator script $operator_script"
+    chmod 0755 "$INSTALL_DIR/scripts/$operator_script" \
+        || err "Failed to chmod operator script $operator_script"
+done
+info "Installed operator scripts under $INSTALL_DIR/scripts/"
 if [[ -d "$REPO_DIR/frontend/analyst-portal/dist" ]]; then
     mkdir -p "$INSTALL_DIR/frontend/analyst-portal"
     rm -rf "$INSTALL_DIR/frontend/analyst-portal/dist"
@@ -1607,6 +1621,8 @@ if [[ "${INSTALL_SYSTEMD_UNITS:-true}" == "true" ]]; then
         vllm.service
         notable-retention.service
         notable-retention.timer
+        notable-closed-ticket-sync.service
+        notable-closed-ticket-sync.timer
     )
 
     for unit in "${units[@]}"; do
@@ -1747,6 +1763,7 @@ echo "  sudo systemctl enable --now litellm"
 echo "  sudo systemctl enable --now notable-analyzer"
 echo "  sudo systemctl enable --now notable-portal      # when analyst_portal is enabled"
 echo "  sudo systemctl enable --now notable-retention.timer  # optional"
+echo "  sudo systemctl enable --now notable-closed-ticket-sync.timer  # when closed-ticket sync is enabled"
 echo ""
 echo "Verify:"
 echo "  sudo systemctl status vllm litellm notable-analyzer notable-portal"
