@@ -180,6 +180,7 @@ class TestLocalLlmClientContract(unittest.TestCase):
         )
         self.assertIn("SOC CONTEXT RULES", prompt)
         self.assertIn("SOC_OPERATIONAL_CONTEXT", prompt)
+        self.assertIn("HISTORICAL CLOSED-TICKET RULES", prompt)
         self.assertNotIn("SPL QUERY GENERATION (Enabled)", prompt)
 
     def test_build_prompt_places_output_contract_before_doctrine(self) -> None:

@@ -150,6 +150,9 @@ _ANSWER_CITATION_RE = re.compile(
     re.IGNORECASE,
 )
 _MAX_PROMPT_SOURCE_CHARS = 2400
+_MAX_CLOSED_TICKET_QUERY_SNIPPETS = 4
+_MAX_CLOSED_TICKET_QUERY_SNIPPET_CHARS = 800
+_MAX_CLOSED_TICKET_QUERY_SNIPPET_TOTAL_CHARS = 2400
 _MAX_CASE_ID_LENGTH = 128
 _READINESS_CASE_ID = "__portal_chat_readiness__"
 _READINESS_QUESTION = "portal chat readiness"
@@ -212,6 +215,10 @@ class RetrievedSource:
     chunk_id: str | None = None
     section: str = ""
     field_path: str = ""
+    ticket_id: str | None = None
+    ticket_number: str | None = None
+    source_url: str | None = None
+    provenance: str | None = None
 
 
 @dataclass
@@ -474,15 +481,128 @@ def _sources_from_candidates(
     return sources
 
 
+def _closed_ticket_lane_enabled(config: Config) -> bool:
+    return (
+        bool(getattr(config, "CASE_QA_CLOSED_TICKET_ENABLED", False))
+        and bool(getattr(config, "CLOSED_TICKET_RAG_ENABLED", False))
+    )
+
+
+def _bounded_current_case_snippets(
+    sources: Sequence[RetrievedSource],
+) -> list[str]:
+    """Collect bounded current-case text for closed-ticket retrieval queries."""
+    snippets: list[str] = []
+    used_chars = 0
+    for source in sources:
+        if source.source_lane != "current_case":
+            continue
+        if len(snippets) >= _MAX_CLOSED_TICKET_QUERY_SNIPPETS:
+            break
+        collapsed = re.sub(r"\s+", " ", str(source.text or "").strip())
+        if not collapsed:
+            continue
+        snippet = collapsed[:_MAX_CLOSED_TICKET_QUERY_SNIPPET_CHARS]
+        next_used = used_chars + len(snippet)
+        if next_used > _MAX_CLOSED_TICKET_QUERY_SNIPPET_TOTAL_CHARS:
+            break
+        snippets.append(snippet)
+        used_chars = next_used
+    return snippets
+
+
+def _adapt_closed_ticket_chat_sources(
+    raw_sources: Sequence[dict[str, Any]],
+) -> list[RetrievedSource]:
+    """Map closed-ticket retrieval dicts into RetrievedSource objects."""
+    adapted: list[RetrievedSource] = []
+    for item in raw_sources:
+        ticket_id = str(item.get("ticket_id") or "").strip() or None
+        ticket_number = str(item.get("ticket_number") or "").strip() or None
+        chunk_id = str(item.get("chunk_id") or "").strip() or None
+        source_url = str(item.get("source_url") or "").strip() or None
+        provenance = str(item.get("provenance") or "").strip() or None
+        adapted.append(
+            RetrievedSource(
+                source_lane=str(item.get("source_lane") or "closed_ticket"),
+                text=str(item.get("text") or ""),
+                score=float(item.get("score") or 0.0),
+                stored_source_lane=provenance or "closed_ticket_rag",
+                chunk_id=chunk_id,
+                section=str(item.get("section") or ""),
+                field_path=str(item.get("field_path") or ""),
+                ticket_id=ticket_id,
+                ticket_number=ticket_number,
+                source_url=source_url,
+                provenance=provenance,
+            )
+        )
+    return adapted
+
+
+def _retrieve_closed_ticket_sources(
+    *,
+    config: Config,
+    question: str,
+    case_sources: Sequence[RetrievedSource],
+    connect: ConnectionFactory | None = None,
+    embedding_model: Any = None,
+) -> list[RetrievedSource]:
+    """Fail-soft closed-ticket lane for selected-case chat."""
+    if not _closed_ticket_lane_enabled(config):
+        return []
+    from .closed_ticket_retrieval import (
+        ClosedTicketRetrievalOutcome,
+        closed_ticket_hits_to_chat_sources,
+        retrieve_closed_tickets_fail_soft,
+    )
+
+    snippets = _bounded_current_case_snippets(case_sources)
+    raw_outcome = retrieve_closed_tickets_fail_soft(
+        config=config,
+        question=question,
+        current_case_snippets=snippets,
+        connect=connect,
+        embedding_model=embedding_model,
+    )
+    if isinstance(raw_outcome, ClosedTicketRetrievalOutcome):
+        outcome = raw_outcome
+    else:
+        legacy_hits, legacy_context = raw_outcome
+        outcome = ClosedTicketRetrievalOutcome(
+            hits=legacy_hits,
+            context=legacy_context or "",
+        )
+    if outcome.error:
+        logger.warning(
+            "Closed-ticket chat retrieval failed soft: %s",
+            outcome.error,
+        )
+    return _adapt_closed_ticket_chat_sources(
+        closed_ticket_hits_to_chat_sources(outcome.hits)
+    )
+
+
 def _trim_sources(sources: Sequence[RetrievedSource], config: Config) -> list[RetrievedSource]:
     """Apply lane, total chunk, and character-budget limits."""
     lane_counts: dict[str, int] = {}
+    closed_ticket_lane_chars = 0
+    closed_ticket_lane_budget = int(
+        getattr(config, "CLOSED_TICKET_RAG_CONTEXT_BUDGET_CHARS", 6000)
+    )
+    closed_ticket_lane_cap = min(
+        int(config.CASE_QA_MAX_CHUNKS_PER_LANE),
+        int(getattr(config, "CLOSED_TICKET_RAG_MAX_SNIPPETS", 6)),
+    )
     kept: list[RetrievedSource] = []
     used_chars = 0
     for source in sources:
         lane = source.source_lane
         count = lane_counts.get(lane, 0)
-        if count >= config.CASE_QA_MAX_CHUNKS_PER_LANE:
+        lane_cap = config.CASE_QA_MAX_CHUNKS_PER_LANE
+        if lane == "closed_ticket":
+            lane_cap = closed_ticket_lane_cap
+        if count >= lane_cap:
             continue
         if len(kept) >= config.CASE_QA_MAX_TOTAL_CHUNKS:
             break
@@ -490,6 +610,11 @@ def _trim_sources(sources: Sequence[RetrievedSource], config: Config) -> list[Re
         next_chars = used_chars + len(text)
         if next_chars > config.CASE_QA_CONTEXT_BUDGET_CHARS:
             break
+        if lane == "closed_ticket":
+            next_lane_chars = closed_ticket_lane_chars + len(text)
+            if next_lane_chars > closed_ticket_lane_budget:
+                continue
+            closed_ticket_lane_chars = next_lane_chars
         kept.append(
             RetrievedSource(
                 source_lane=source.source_lane,
@@ -500,6 +625,10 @@ def _trim_sources(sources: Sequence[RetrievedSource], config: Config) -> list[Re
                 chunk_id=source.chunk_id,
                 section=source.section,
                 field_path=source.field_path,
+                ticket_id=source.ticket_id,
+                ticket_number=source.ticket_number,
+                source_url=source.source_url,
+                provenance=source.provenance,
             )
         )
         lane_counts[lane] = count + 1
@@ -1140,27 +1269,49 @@ def _finalize_general_knowledge_response(
 
 def _format_context_block(source: RetrievedSource) -> str:
     """Render one retrieved source block with lane metadata for synthesis."""
-    return (
+    block = (
         "<CONTEXT_BLOCK>\n"
         f"SOURCE_LANE_JSON: {json.dumps(source.source_lane, ensure_ascii=True)}\n"
         f"SECTION_JSON: {json.dumps(source.section or '', ensure_ascii=True)}\n"
+    )
+    if source.source_lane == "closed_ticket":
+        if source.ticket_id:
+            block += (
+                f"TICKET_ID_JSON: {json.dumps(source.ticket_id, ensure_ascii=True)}\n"
+            )
+        if source.ticket_number:
+            block += (
+                f"TICKET_NUMBER_JSON: "
+                f"{json.dumps(source.ticket_number, ensure_ascii=True)}\n"
+            )
+        if source.provenance:
+            block += (
+                f"PROVENANCE_JSON: {json.dumps(source.provenance, ensure_ascii=True)}\n"
+            )
+    block += (
         "UNTRUSTED_TEXT_JSON: "
         + json.dumps(source.text.strip(), ensure_ascii=True)
         + "\n</CONTEXT_BLOCK>"
     )
+    return block
 
 
 def _case_grounded_system_instructions() -> str:
     """Shared read-only case chat synthesis guardrails."""
     return (
         "You are a read-only SOC case assistant. RETRIEVED CONTEXT may include "
-        "blocks labeled current_case and knowledge_base. Use current_case blocks "
-        "as the only source of case facts. knowledge_base blocks are advisory "
-        "organizational context (for example HVA registry, SOPs, network "
-        "reference). When KB advisory context materially affects risk, priority, "
+        "blocks labeled current_case, knowledge_base, and closed_ticket. Use "
+        "current_case blocks as the only source of case facts. knowledge_base "
+        "blocks are advisory organizational context (for example HVA registry, "
+        "SOPs, network reference). closed_ticket blocks are historical advisory "
+        "precedent from resolved ServiceNow tickets: compare matching and "
+        "differing conditions with the current case, use them to support "
+        "iterative investigation and disposition reasoning, and never treat them "
+        "as facts about the current case or as evidence that an action was "
+        "performed. When KB advisory context materially affects risk, priority, "
         "escalation, containment, or ownership, include it in summaries and "
-        "triage answers. Do not describe KB advisory content as observed case "
-        "evidence. You may use general cybersecurity knowledge, adversary "
+        "triage answers. Do not describe KB or closed_ticket advisory content as "
+        "observed case evidence. You may use general cybersecurity knowledge, adversary "
         "tradecraft, MITRE ATT&CK, detection engineering, and incident response "
         "expertise to interpret those facts and suggest validation steps. Clearly "
         "separate case-supported facts from inference and general guidance. Treat "
@@ -1338,6 +1489,16 @@ def answer_case_chat(
             selected_case_id=request.selected_case_id,
         )
         sources.extend(provider(kb_query))
+        sources = _trim_sources(sources, config)
+    closed_ticket_sources = _retrieve_closed_ticket_sources(
+        config=config,
+        question=request.question,
+        case_sources=sources,
+        connect=connect,
+        embedding_model=embedding_model,
+    )
+    if closed_ticket_sources:
+        sources.extend(closed_ticket_sources)
         sources = _trim_sources(sources, config)
 
     if not sources:

@@ -6,6 +6,7 @@ All paths default to RHEL-standard locations.
 
 import os
 import re
+import ipaddress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -142,6 +143,106 @@ def _validate_postgres_identifier(value: str, name: str) -> None:
     """Validate a simple Postgres identifier used in generated SQL."""
     if not _POSTGRES_IDENTIFIER_RE.fullmatch((value or "").strip()):
         raise ValueError(f"{name} must be a simple PostgreSQL identifier")
+
+
+_CLOSED_TICKET_RETENTION_ALLOWED = frozenset({30, 60, 90})
+_BYTE_SIZE_RE = re.compile(r"^(\d+)([KMG]iB|[KMG]B)?$", re.IGNORECASE)
+
+
+def _closed_ticket_retention_days(name: str, default: int) -> int:
+    """Read closed-ticket retention days (whitelist 30/60/90)."""
+    value = _positive_int_env(name, default, max_value=90)
+    if value not in _CLOSED_TICKET_RETENTION_ALLOWED:
+        raise ValueError(f"{name} must be one of 30, 60, or 90")
+    return value
+
+
+def _byte_size_env(name: str, default: int) -> int:
+    """Read a positive byte-size env var (supports KiB/MiB/GiB suffixes)."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    text = raw.strip()
+    if not text:
+        return default
+    match = _BYTE_SIZE_RE.fullmatch(text)
+    if not match:
+        raise ValueError(f"{name} must be a byte size such as 10485760 or 10MiB")
+    amount = int(match.group(1))
+    suffix = (match.group(2) or "").upper()
+    multiplier = 1
+    if suffix in {"KIB", "KB"}:
+        multiplier = 1024
+    elif suffix in {"MIB", "MB"}:
+        multiplier = 1024 * 1024
+    elif suffix in {"GIB", "GB"}:
+        multiplier = 1024 * 1024 * 1024
+    value = amount * multiplier
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive byte size")
+    return value
+
+
+def _validate_servicenow_table_name(value: str, name: str) -> None:
+    """Validate a ServiceNow table API table name."""
+    normalized = str(value or "").strip()
+    if not re.fullmatch(r"[a-z0-9_]+", normalized):
+        raise ValueError(f"{name} must match [a-z0-9_]+")
+
+
+def _llm_openai_api_base(llm_api_url: str) -> str:
+    """Derive an OpenAI-compatible API base URL from LLM_API_URL."""
+    text = str(llm_api_url or "").strip().rstrip("/")
+    if text.endswith("/chat/completions"):
+        return text[:-len("/chat/completions")]
+    parsed = urlparse(text)
+    if parsed.scheme and parsed.netloc:
+        path = (parsed.path or "").rstrip("/")
+        if path.endswith("/chat/completions"):
+            path = path[:-len("/chat/completions")]
+        return f"{parsed.scheme}://{parsed.netloc}{path}".rstrip("/")
+    return text
+
+
+def _validate_openai_compatible_endpoint_url(value: str, name: str) -> None:
+    """Validate HTTPS or loopback HTTP for local OpenAI-compatible endpoints."""
+    parsed = urlparse(str(value or "").strip())
+    if parsed.scheme == "https":
+        if not parsed.netloc or parsed.username or parsed.password:
+            raise ValueError(f"{name} must be an HTTPS URL without userinfo")
+        return
+    if parsed.scheme == "http":
+        host = (parsed.hostname or "").strip().lower()
+        if host in {"127.0.0.1", "localhost"} or host.endswith(".localhost"):
+            return
+        try:
+            if ipaddress.ip_address(host).is_loopback:
+                return
+        except ValueError:
+            pass
+        raise ValueError(f"{name} must use HTTPS or loopback HTTP")
+    raise ValueError(f"{name} must use http:// or https://")
+
+
+def _apply_closed_ticket_vision_defaults(config: "Config") -> None:
+    """Resolve closed-ticket vision defaults from the primary LLM gateway settings."""
+    if not bool(config.CLOSED_TICKET_VISION_ENABLED):
+        return
+    if not str(config.CLOSED_TICKET_VISION_API_BASE or "").strip():
+        config.CLOSED_TICKET_VISION_API_BASE = _llm_openai_api_base(config.LLM_API_URL)
+    if not str(config.CLOSED_TICKET_VISION_MODEL or "").strip():
+        config.CLOSED_TICKET_VISION_MODEL = str(config.LLM_MODEL_NAME or "").strip()
+    if not str(config.CLOSED_TICKET_VISION_API_KEY or "").strip():
+        config.CLOSED_TICKET_VISION_API_KEY = str(config.LLM_API_TOKEN or "").strip()
+    _validate_openai_compatible_endpoint_url(
+        config.CLOSED_TICKET_VISION_API_BASE,
+        "CLOSED_TICKET_VISION_API_BASE",
+    )
+    if not str(config.CLOSED_TICKET_VISION_MODEL or "").strip():
+        raise ValueError(
+            "CLOSED_TICKET_VISION_MODEL or LLM_MODEL_NAME is required when "
+            "CLOSED_TICKET_VISION_ENABLED=true"
+        )
 
 
 def _validate_elasticsearch_runtime_contract(config: "Config") -> None:
@@ -309,6 +410,32 @@ class Config:
         SERVICENOW_DISPOSITION_CODE_MAP: Path to ServiceNow disposition code map JSON.
         SERVICENOW_DISPOSITION_BACKFILL_DAYS: First-run closed_at lookback window.
         DISPOSITION_RETENTION_DAYS: Retention window for synced disposition rows.
+        CLOSED_TICKET_RAG_ENABLED: Enables closed-ticket RAG retrieval lane.
+        CLOSED_TICKET_RETENTION_DAYS: Retention window for raw closed tickets (30/60/90).
+        SERVICENOW_CLOSED_TICKET_SYNC_ENABLED: Enables ServiceNow closed ticket raw sync.
+        SERVICENOW_CLOSED_TICKET_TOKEN: Bearer token for closed ticket Table API reads.
+        SERVICENOW_CLOSED_TICKET_TABLE: ServiceNow table for closed ticket pull.
+        SERVICENOW_CLOSED_TICKET_QUERY: Encoded query for closed security tickets.
+        SERVICENOW_CLOSED_TICKET_BACKFILL_DAYS: First-run sys_updated_on lookback window.
+        SERVICENOW_CLOSED_TICKET_CURSOR_OVERLAP_HOURS: Cursor overlap for incremental sync.
+        SERVICENOW_CLOSED_TICKET_RECONCILE_INTERVAL_DAYS: Reconciliation interval.
+        SERVICENOW_CLOSED_TICKET_FETCH_JOURNALS: Fetch sys_journal_field rows per ticket.
+        SERVICENOW_CLOSED_TICKET_FETCH_ATTACHMENTS: Fetch attachment metadata/content.
+        CLOSED_TICKET_ATTACHMENT_DIR: Local directory for downloaded attachments.
+        CLOSED_TICKET_ATTACHMENT_MAX_BYTES: Max attachment download size in bytes.
+        CLOSED_TICKET_POSTGRES_SCHEMA: Postgres schema for closed ticket raw store.
+        CLOSED_TICKET_POSTGRES_CHUNKS_TABLE: Chunks table name within closed ticket schema.
+        CLOSED_TICKET_RAG_MAX_SNIPPETS: Max snippets for closed-ticket RAG lane.
+        CLOSED_TICKET_RAG_CONTEXT_BUDGET_CHARS: Context budget for closed-ticket RAG lane.
+        CASE_QA_CLOSED_TICKET_ENABLED: Enables closed-ticket lane in case QA.
+        CASE_QA_CLOSED_TICKET_MAX_TICKETS: Max closed tickets in case QA lane.
+        CLOSED_TICKET_VISION_ENABLED: Enables optional vision extraction for images.
+        CLOSED_TICKET_VISION_API_BASE: OpenAI-compatible vision API base URL.
+        CLOSED_TICKET_VISION_MODEL: Vision-capable model name.
+        CLOSED_TICKET_VISION_API_KEY: Optional bearer token for vision API calls.
+        CLOSED_TICKET_VISION_TIMEOUT_SECONDS: Vision request timeout in seconds.
+        CLOSED_TICKET_VISION_MAX_TOKENS: Max tokens for vision descriptions.
+        CLOSED_TICKET_ATTACHMENT_MAX_TEXT_CHARS: Max decoded attachment text chars.
         SIDE_EFFECT_IDEMPOTENCY_ENABLED: Enables file-backed side-effect dedupe.
         SIDE_EFFECT_IDEMPOTENCY_DIR: Directory for side-effect idempotency markers.
         SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS: Retention window for idempotency markers.
@@ -516,6 +643,35 @@ class Config:
     SERVICENOW_DISPOSITION_BACKFILL_DAYS: int = 90
     DISPOSITION_RETENTION_DAYS: int = 365
 
+    CLOSED_TICKET_RAG_ENABLED: bool = False
+    CLOSED_TICKET_RETENTION_DAYS: int = 30
+    SERVICENOW_CLOSED_TICKET_SYNC_ENABLED: bool = False
+    SERVICENOW_CLOSED_TICKET_TOKEN: str = ""
+    SERVICENOW_CLOSED_TICKET_TABLE: str = "sn_si_incident"
+    SERVICENOW_CLOSED_TICKET_QUERY: str = ""
+    SERVICENOW_CLOSED_TICKET_BACKFILL_DAYS: int = 30
+    SERVICENOW_CLOSED_TICKET_CURSOR_OVERLAP_HOURS: int = 24
+    SERVICENOW_CLOSED_TICKET_RECONCILE_INTERVAL_DAYS: int = 7
+    SERVICENOW_CLOSED_TICKET_FETCH_JOURNALS: bool = True
+    SERVICENOW_CLOSED_TICKET_FETCH_ATTACHMENTS: bool = True
+    CLOSED_TICKET_ATTACHMENT_DIR: Path = field(
+        default_factory=lambda: Path("/var/notables/closed_ticket_attachments")
+    )
+    CLOSED_TICKET_ATTACHMENT_MAX_BYTES: int = 10 * 1024 * 1024
+    CLOSED_TICKET_POSTGRES_SCHEMA: str = "notable_closed_tickets"
+    CLOSED_TICKET_POSTGRES_CHUNKS_TABLE: str = "ticket_chunks"
+    CLOSED_TICKET_RAG_MAX_SNIPPETS: int = 6
+    CLOSED_TICKET_RAG_CONTEXT_BUDGET_CHARS: int = 6000
+    CASE_QA_CLOSED_TICKET_ENABLED: bool = False
+    CASE_QA_CLOSED_TICKET_MAX_TICKETS: int = 5
+    CLOSED_TICKET_VISION_ENABLED: bool = False
+    CLOSED_TICKET_VISION_API_BASE: str = ""
+    CLOSED_TICKET_VISION_MODEL: str = ""
+    CLOSED_TICKET_VISION_API_KEY: str = ""
+    CLOSED_TICKET_VISION_TIMEOUT_SECONDS: float = 30.0
+    CLOSED_TICKET_VISION_MAX_TOKENS: int = 400
+    CLOSED_TICKET_ATTACHMENT_MAX_TEXT_CHARS: int = 12000
+
     # Side-effect idempotency (external writes/actions only)
     SIDE_EFFECT_IDEMPOTENCY_ENABLED: bool = False
     SIDE_EFFECT_IDEMPOTENCY_DIR: Path = field(
@@ -609,6 +765,61 @@ class Config:
                 self.CASE_POSTGRES_SCHEMA,
                 "CASE_POSTGRES_SCHEMA",
             )
+        if self.CLOSED_TICKET_RETENTION_DAYS not in _CLOSED_TICKET_RETENTION_ALLOWED:
+            raise ValueError("CLOSED_TICKET_RETENTION_DAYS must be one of 30, 60, or 90")
+        if bool(self.SERVICENOW_CLOSED_TICKET_SYNC_ENABLED):
+            if not str(self.SERVICENOW_CLOSED_TICKET_TOKEN or "").strip():
+                raise ValueError(
+                    "SERVICENOW_CLOSED_TICKET_TOKEN is required when "
+                    "SERVICENOW_CLOSED_TICKET_SYNC_ENABLED=true"
+                )
+            if not str(self.SERVICENOW_CLOSED_TICKET_QUERY or "").strip():
+                raise ValueError(
+                    "SERVICENOW_CLOSED_TICKET_QUERY is required when "
+                    "SERVICENOW_CLOSED_TICKET_SYNC_ENABLED=true"
+                )
+            if not str(self.SERVICENOW_BASE_URL or "").strip().startswith("https://"):
+                raise ValueError(
+                    "SERVICENOW_BASE_URL must be HTTPS when "
+                    "SERVICENOW_CLOSED_TICKET_SYNC_ENABLED=true"
+                )
+            if not str(self.CASE_POSTGRES_DSN or "").strip():
+                raise ValueError(
+                    "CASE_POSTGRES_DSN is required when "
+                    "SERVICENOW_CLOSED_TICKET_SYNC_ENABLED=true"
+                )
+            _validate_servicenow_table_name(
+                self.SERVICENOW_CLOSED_TICKET_TABLE,
+                "SERVICENOW_CLOSED_TICKET_TABLE",
+            )
+            _validate_postgres_identifier(
+                self.CLOSED_TICKET_POSTGRES_SCHEMA,
+                "CLOSED_TICKET_POSTGRES_SCHEMA",
+            )
+            _validate_postgres_identifier(
+                self.CLOSED_TICKET_POSTGRES_CHUNKS_TABLE,
+                "CLOSED_TICKET_POSTGRES_CHUNKS_TABLE",
+            )
+            if bool(self.SERVICENOW_CLOSED_TICKET_FETCH_ATTACHMENTS):
+                if not str(self.CLOSED_TICKET_ATTACHMENT_DIR):
+                    raise ValueError(
+                        "CLOSED_TICKET_ATTACHMENT_DIR is required when "
+                        "SERVICENOW_CLOSED_TICKET_FETCH_ATTACHMENTS=true"
+                    )
+        if bool(self.CLOSED_TICKET_RAG_ENABLED):
+            if not str(self.CASE_POSTGRES_DSN or "").strip():
+                raise ValueError(
+                    "CASE_POSTGRES_DSN is required when CLOSED_TICKET_RAG_ENABLED=true"
+                )
+            _validate_postgres_identifier(
+                self.CLOSED_TICKET_POSTGRES_SCHEMA,
+                "CLOSED_TICKET_POSTGRES_SCHEMA",
+            )
+            _validate_postgres_identifier(
+                self.CLOSED_TICKET_POSTGRES_CHUNKS_TABLE,
+                "CLOSED_TICKET_POSTGRES_CHUNKS_TABLE",
+            )
+        _apply_closed_ticket_vision_defaults(self)
         _validate_elasticsearch_runtime_contract(self)
 
 
@@ -622,6 +833,9 @@ def load_config() -> Config:
         os.getenv("CAPABILITY_PROFILES", "core")
     )
     profile_flags = _profile_flag_defaults(capability_profiles)
+    closed_ticket_retention_days = _closed_ticket_retention_days(
+        "CLOSED_TICKET_RETENTION_DAYS", 30
+    )
 
     return Config(
         INGEST_MODE=os.getenv("INGEST_MODE", "file_drop"),
@@ -979,6 +1193,74 @@ def load_config() -> Config:
         ),
         DISPOSITION_RETENTION_DAYS=_positive_int_env(
             "DISPOSITION_RETENTION_DAYS", 365, max_value=3650
+        ),
+        CLOSED_TICKET_RAG_ENABLED=_bool_env("CLOSED_TICKET_RAG_ENABLED", False),
+        CLOSED_TICKET_RETENTION_DAYS=closed_ticket_retention_days,
+        SERVICENOW_CLOSED_TICKET_SYNC_ENABLED=_bool_env(
+            "SERVICENOW_CLOSED_TICKET_SYNC_ENABLED", False
+        ),
+        SERVICENOW_CLOSED_TICKET_TOKEN=os.getenv("SERVICENOW_CLOSED_TICKET_TOKEN", ""),
+        SERVICENOW_CLOSED_TICKET_TABLE=os.getenv(
+            "SERVICENOW_CLOSED_TICKET_TABLE", "sn_si_incident"
+        ).strip()
+        or "sn_si_incident",
+        SERVICENOW_CLOSED_TICKET_QUERY=os.getenv("SERVICENOW_CLOSED_TICKET_QUERY", ""),
+        SERVICENOW_CLOSED_TICKET_BACKFILL_DAYS=_positive_int_env(
+            "SERVICENOW_CLOSED_TICKET_BACKFILL_DAYS",
+            closed_ticket_retention_days,
+            max_value=3650,
+        ),
+        SERVICENOW_CLOSED_TICKET_CURSOR_OVERLAP_HOURS=_positive_int_env(
+            "SERVICENOW_CLOSED_TICKET_CURSOR_OVERLAP_HOURS", 24, max_value=168
+        ),
+        SERVICENOW_CLOSED_TICKET_RECONCILE_INTERVAL_DAYS=_positive_int_env(
+            "SERVICENOW_CLOSED_TICKET_RECONCILE_INTERVAL_DAYS", 7, max_value=90
+        ),
+        SERVICENOW_CLOSED_TICKET_FETCH_JOURNALS=_bool_env(
+            "SERVICENOW_CLOSED_TICKET_FETCH_JOURNALS", True
+        ),
+        SERVICENOW_CLOSED_TICKET_FETCH_ATTACHMENTS=_bool_env(
+            "SERVICENOW_CLOSED_TICKET_FETCH_ATTACHMENTS", True
+        ),
+        CLOSED_TICKET_ATTACHMENT_DIR=Path(
+            os.getenv(
+                "CLOSED_TICKET_ATTACHMENT_DIR",
+                "/var/notables/closed_ticket_attachments",
+            )
+        ),
+        CLOSED_TICKET_ATTACHMENT_MAX_BYTES=_byte_size_env(
+            "CLOSED_TICKET_ATTACHMENT_MAX_BYTES", 10 * 1024 * 1024
+        ),
+        CLOSED_TICKET_POSTGRES_SCHEMA=os.getenv(
+            "CLOSED_TICKET_POSTGRES_SCHEMA", "notable_closed_tickets"
+        ).strip()
+        or "notable_closed_tickets",
+        CLOSED_TICKET_POSTGRES_CHUNKS_TABLE=os.getenv(
+            "CLOSED_TICKET_POSTGRES_CHUNKS_TABLE", "ticket_chunks"
+        ).strip()
+        or "ticket_chunks",
+        CLOSED_TICKET_RAG_MAX_SNIPPETS=_positive_int_env(
+            "CLOSED_TICKET_RAG_MAX_SNIPPETS", 6, max_value=20
+        ),
+        CLOSED_TICKET_RAG_CONTEXT_BUDGET_CHARS=_positive_int_env(
+            "CLOSED_TICKET_RAG_CONTEXT_BUDGET_CHARS", 6000, max_value=50000
+        ),
+        CASE_QA_CLOSED_TICKET_ENABLED=_bool_env("CASE_QA_CLOSED_TICKET_ENABLED", False),
+        CASE_QA_CLOSED_TICKET_MAX_TICKETS=_positive_int_env(
+            "CASE_QA_CLOSED_TICKET_MAX_TICKETS", 5, max_value=20
+        ),
+        CLOSED_TICKET_VISION_ENABLED=_bool_env("CLOSED_TICKET_VISION_ENABLED", False),
+        CLOSED_TICKET_VISION_API_BASE=os.getenv("CLOSED_TICKET_VISION_API_BASE", ""),
+        CLOSED_TICKET_VISION_MODEL=os.getenv("CLOSED_TICKET_VISION_MODEL", ""),
+        CLOSED_TICKET_VISION_API_KEY=os.getenv("CLOSED_TICKET_VISION_API_KEY", ""),
+        CLOSED_TICKET_VISION_TIMEOUT_SECONDS=float(
+            os.getenv("CLOSED_TICKET_VISION_TIMEOUT_SECONDS", "30")
+        ),
+        CLOSED_TICKET_VISION_MAX_TOKENS=_positive_int_env(
+            "CLOSED_TICKET_VISION_MAX_TOKENS", 400, max_value=4096
+        ),
+        CLOSED_TICKET_ATTACHMENT_MAX_TEXT_CHARS=_positive_int_env(
+            "CLOSED_TICKET_ATTACHMENT_MAX_TEXT_CHARS", 12000, max_value=200000
         ),
         SIDE_EFFECT_IDEMPOTENCY_ENABLED=_profile_bool(
             "SIDE_EFFECT_IDEMPOTENCY_ENABLED", False, profile_flags

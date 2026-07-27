@@ -247,7 +247,8 @@ admin_sql_path.write_text("\n".join(admin_statements) + "\n", encoding="utf-8")
 grants_sql_path.write_text("\n".join(grant_statements) + "\n", encoding="utf-8")
 meta_path.write_text(
     f"CASE_DATABASE={shlex.quote(database)}\n"
-    f"ANALYZER_ROLE={shlex.quote(analyzer_role)}\n",
+    f"ANALYZER_ROLE={shlex.quote(analyzer_role)}\n"
+    f"PORTAL_ROLE={shlex.quote(portal_role)}\n",
     encoding="utf-8",
 )
 for path in (admin_sql_path, grants_sql_path, meta_path):
@@ -298,6 +299,33 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "${ANALYZER_ROLE}";
 EOF
 info "Granting analyzer role access to disposition schema"
 run_psql_as_admin "$CASE_DATABASE" "$disposition_grants_sql"
+
+CLOSED_TICKETS_SCHEMA_SQL="$repo_dir/deploy/postgres/closed_tickets_schema.sql"
+[[ -f "$CLOSED_TICKETS_SCHEMA_SQL" ]] || err "Missing closed ticket schema SQL: $CLOSED_TICKETS_SCHEMA_SQL"
+info "Applying closed ticket schema: $CLOSED_TICKETS_SCHEMA_SQL"
+run_psql_as_admin "$CASE_DATABASE" "$CLOSED_TICKETS_SCHEMA_SQL"
+
+closed_ticket_grants_sql="$tmpdir/closed_ticket_grants.sql"
+cat > "$closed_ticket_grants_sql" <<EOF
+GRANT USAGE ON SCHEMA notable_closed_tickets TO "${ANALYZER_ROLE}";
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA notable_closed_tickets TO "${ANALYZER_ROLE}";
+ALTER DEFAULT PRIVILEGES IN SCHEMA notable_closed_tickets
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "${ANALYZER_ROLE}";
+EOF
+info "Granting analyzer role access to closed ticket schema"
+run_psql_as_admin "$CASE_DATABASE" "$closed_ticket_grants_sql"
+
+closed_ticket_portal_grants_sql="$tmpdir/closed_ticket_portal_grants.sql"
+# shellcheck disable=SC1091
+source "$tmpdir/meta.env"
+cat > "$closed_ticket_portal_grants_sql" <<EOF
+GRANT USAGE ON SCHEMA notable_closed_tickets TO "${PORTAL_ROLE}";
+GRANT SELECT ON ALL TABLES IN SCHEMA notable_closed_tickets TO "${PORTAL_ROLE}";
+ALTER DEFAULT PRIVILEGES IN SCHEMA notable_closed_tickets
+GRANT SELECT ON TABLES TO "${PORTAL_ROLE}";
+EOF
+info "Granting read-only portal role access to closed ticket schema"
+run_psql_as_admin "$CASE_DATABASE" "$closed_ticket_portal_grants_sql"
 
 info "Granting read-only portal role access to case archive tables"
 run_psql_as_admin "$CASE_DATABASE" "$tmpdir/grants.sql"

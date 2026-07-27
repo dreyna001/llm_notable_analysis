@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily ServiceNow closed ticket raw sync for Notable Analyzer
+Documentation=https://github.com/your-org/notable-analyzer
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+Persistent=true
+RandomizedDelaySec=1800
+
+[Install]
+WantedBy=timers.target

@@ -22,6 +22,9 @@ to ServiceNow.
 - systemd: `notable-disposition-sync.service` + `notable-disposition-sync.timer`
 - Field/code map loaders and normalization via `verdicts.normalize_verdict()`
 
+For closed-ticket historical RAG (separate schema and sync), see
+[`SERVICENOW_CLOSED_TICKET_OPERATIONS.md`](SERVICENOW_CLOSED_TICKET_OPERATIONS.md).
+
 ## Not Shipped Yet
 
 - Portal UI / read API for analyst dispositions
