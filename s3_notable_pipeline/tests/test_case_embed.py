@@ -25,8 +25,14 @@ from s3_notable_pipeline.config import Config
 class FakeS3Client:
     """Fake S3 client for envelope reads and chunk rewrites."""
 
-    def __init__(self, envelope: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        envelope: dict[str, Any] | None = None,
+        *,
+        fail_put_after: int | None = None,
+    ) -> None:
         self.envelope = envelope or case_envelope()
+        self.fail_put_after = fail_put_after
         self.puts: list[dict[str, Any]] = []
         self.deletes: list[dict[str, Any]] = []
         self.list_calls: list[dict[str, Any]] = []
@@ -48,6 +54,8 @@ class FakeS3Client:
         self.deletes.append(kwargs)
 
     def put_object(self, **kwargs: Any) -> None:
+        if self.fail_put_after is not None and len(self.puts) >= self.fail_put_after:
+            raise RuntimeError("simulated S3 put failure")
         self.puts.append(kwargs)
 
 
@@ -127,7 +135,7 @@ class CaseEmbedTests(unittest.TestCase):
         self.assertIn("$", chunks[0].search_text)
         self.assertIn("Suspicious login", chunks[0].search_text)
 
-    def test_rewrite_case_chunks_deletes_prefix_and_writes_embeddings(self) -> None:
+    def test_rewrite_case_chunks_writes_before_deleting_obsolete_objects(self) -> None:
         chunks = build_case_chunks(case_envelope(), embed_config(CASE_QA_MAX_INDEX_CHUNKS_PER_CASE=2))
         s3 = FakeS3Client()
         bedrock = FakeBedrockClient()
@@ -142,13 +150,36 @@ class CaseEmbedTests(unittest.TestCase):
         )
 
         self.assertEqual(s3.list_calls[0]["Prefix"], "case_chunks/case-1/")
-        self.assertEqual(len(s3.deletes), 1)
         self.assertEqual(len(s3.puts), len(chunks))
+        self.assertEqual(len(s3.deletes), 1)
+        deleted_keys = {item["Key"] for item in s3.deletes[0]["Delete"]["Objects"]}
+        self.assertEqual(
+            deleted_keys,
+            {"case_chunks/case-1/old-1.json", "case_chunks/case-1/old-2.json"},
+        )
         chunk_body = json.loads(s3.puts[0]["Body"].decode("utf-8"))
         self.assertEqual(chunk_body["embedding_model"], "amazon.titan-embed-text-v2:0")
         self.assertEqual(len(chunk_body["embedding"]), 1024)
         self.assertIn("search_text", chunk_body)
         self.assertEqual(len(bedrock.requests), len(chunks))
+
+    def test_rewrite_failure_preserves_existing_chunk_objects(self) -> None:
+        chunks = build_case_chunks(case_envelope(), embed_config(CASE_QA_MAX_INDEX_CHUNKS_PER_CASE=2))
+        s3 = FakeS3Client(fail_put_after=1)
+        bedrock = FakeBedrockClient()
+
+        with self.assertRaises(RuntimeError):
+            rewrite_case_chunks(
+                bucket="case-bucket",
+                case_id="case-1",
+                chunks=chunks,
+                config=embed_config(),
+                s3_client=s3,
+                bedrock_client=bedrock,
+            )
+
+        self.assertEqual(len(s3.puts), 1)
+        self.assertEqual(s3.deletes, [])
 
     def test_embed_case_envelope_updates_ready_status(self) -> None:
         s3 = FakeS3Client()

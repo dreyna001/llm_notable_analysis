@@ -5,6 +5,7 @@ Ports the core logic from notable_analysis.py without modifying the original.
 """
 # pylint: disable=import-error
 
+import hashlib
 import json
 import re
 import time
@@ -876,6 +877,34 @@ def build_poc_fallback_llm_payload(
     }
 
 
+def _response_content_digest(text: str) -> str:
+    """Return a short non-reversible digest for log correlation only."""
+    payload = str(text or "").encode("utf-8")
+    if not payload:
+        return ""
+    return hashlib.sha256(payload).hexdigest()[:16]
+
+
+def _log_json_parse_failure(
+    *,
+    error: Exception,
+    raw_text: str,
+    candidate_text: str | None = None,
+) -> None:
+    logger.error(
+        "Failed to parse JSON response: %s; length=%d; digest=%s",
+        error,
+        len(raw_text or ""),
+        _response_content_digest(raw_text),
+    )
+    if candidate_text is not None and candidate_text != raw_text:
+        logger.error(
+            "Extracted JSON candidate differed from raw response; candidate_length=%d; candidate_digest=%s",
+            len(candidate_text),
+            _response_content_digest(candidate_text),
+        )
+
+
 def extract_json_object(raw_text: str) -> Tuple[str, Optional[str]]:
     """Extract a JSON object from text that may contain fences, preamble, or trailing content.
     
@@ -1323,10 +1352,11 @@ SECURITY ALERT INPUT:
                     return result, None, raw_text
                 except json.JSONDecodeError as e:
                     error_msg = f"JSON parse error: {e}"
-                    logger.error(f"Failed to parse JSON response: {e}")
-                    logger.error(f"Raw response (first 500 chars): {raw_text[:500]}")
-                    if candidate_text != raw_text:
-                        logger.error(f"Extracted candidate (first 500 chars): {candidate_text[:500]}")
+                    _log_json_parse_failure(
+                        error=e,
+                        raw_text=raw_text,
+                        candidate_text=candidate_text if candidate_text != raw_text else None,
+                    )
                     return None, error_msg, raw_text
         
         # No toolUse or text block found

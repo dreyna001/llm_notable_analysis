@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import copy
 import unittest
 from pathlib import Path
 from typing import Any
@@ -24,14 +25,42 @@ class ConditionalCheckFailedException(Exception):
     response = {"Error": {"Code": "ConditionalCheckFailedException"}}
 
 
+class PreconditionFailed(Exception):
+    """Fake S3 IfNoneMatch conflict with botocore-like response metadata."""
+
+    response = {"Error": {"Code": "PreconditionFailed"}}
+
+
+class _FakeBody:
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    def read(self) -> bytes:
+        return self._data
+
+
 class FakeS3Client:
-    """Capture S3 put_object calls."""
+    """Capture S3 put_object calls and optional object storage."""
 
     def __init__(self) -> None:
         self.puts: list[dict[str, Any]] = []
+        self.objects: dict[tuple[str, str], bytes] = {}
 
     def put_object(self, **kwargs: Any) -> None:
         self.puts.append(kwargs)
+        bucket = str(kwargs["Bucket"])
+        key = str(kwargs["Key"])
+        body = kwargs["Body"]
+        if not isinstance(body, bytes):
+            body = bytes(body)
+        object_key = (bucket, key)
+        if kwargs.get("IfNoneMatch") == "*" and object_key in self.objects:
+            raise PreconditionFailed()
+        self.objects[object_key] = body
+
+    def get_object(self, **kwargs: Any) -> dict[str, _FakeBody]:
+        body = self.objects[(str(kwargs["Bucket"]), str(kwargs["Key"]))]
+        return {"Body": _FakeBody(body)}
 
 
 class FakeDynamoDbClient:
@@ -50,13 +79,38 @@ class FakeDynamoDbClient:
         return {"Item": self.item}
 
     def put_item(self, **kwargs: Any) -> None:
-        self.puts.append(kwargs)
+        item = copy.deepcopy(kwargs["Item"])
+        stored = {**kwargs, "Item": item}
+        self.puts.append(stored)
         if self.item is not None:
             raise ConditionalCheckFailedException()
-        self.item = kwargs["Item"]
+        self.item = copy.deepcopy(item)
 
     def update_item(self, **kwargs: Any) -> None:
         self.updates.append(kwargs)
+        condition = str(kwargs.get("ConditionExpression", ""))
+        if condition == "attribute_not_exists(#run)":
+            return
+        if "#run.#state = :claimed" in condition:
+            names = kwargs["ExpressionAttributeNames"]
+            values = kwargs["ExpressionAttributeValues"]
+            run_attr = names["#run"]
+            if self.item is None:
+                raise ConditionalCheckFailedException()
+            run_value = values[":run"]
+            fence = values[":fence"]["S"]
+            existing_run = case_archive_module._from_ddb_value(self.item[run_attr])
+            if (
+                not isinstance(existing_run, dict)
+                or existing_run.get("state") != "claimed"
+                or existing_run.get("fencing_token") != fence
+            ):
+                raise ConditionalCheckFailedException()
+            self.item[run_attr] = run_value
+            self.item["latest_run_id"] = values[":run_id"]
+            self.item["latest_run_key"] = values[":run_key"]
+            self.item["latest_run_at"] = values[":run_at"]
+            self.item["case_envelope_key"] = values[":run_key"]
 
 
 class FakeLambdaClient:
@@ -412,6 +466,97 @@ class CaseArchiveTests(unittest.TestCase):
         payload = json.loads(sqs.messages[0]["MessageBody"])
         self.assertEqual(payload["case_id"], "abc-123-existing")
         self.assertEqual(payload["case_envelope_key"], result.case_envelope_key)
+
+    def test_claimed_run_replay_reconciles_envelope_and_finalizes(self) -> None:
+        source = SourceContext(
+            **{**source_context().__dict__, "processing_id": "processing-v1", "source_version_id": "v1"}
+        )
+        run_id = case_archive_module._build_run_id("abc-123", "processing-v1")
+        run_attribute = case_archive_module._run_attribute_name(run_id)
+        case_id = case_archive_module._build_case_id("abc-123")
+        processed_at = "2026-06-15T10:30:00Z"
+        envelope_key = case_archive_module._build_envelope_key(
+            archive_config(),
+            case_archive_module._coerce_utc_datetime(processed_at),
+            case_id,
+            run_id,
+            True,
+        )
+        existing = ddb_item(case_id=case_id)
+        existing[run_attribute] = case_archive_module._to_ddb_value(
+            {
+                "run_id": run_id,
+                "state": "claimed",
+                "fencing_token": "fence-replay",
+                "envelope_key": envelope_key,
+                "processing_id": "processing-v1",
+            }
+        )
+        s3 = FakeS3Client()
+        dynamodb = FakeDynamoDbClient(existing_item=existing)
+        sqs = FakeSqsClient()
+
+        result = archive_case(
+            analysis_result=analysis_result(),
+            config=archive_config(
+                PORTAL_ENABLED=True,
+                CASE_QA_ENABLED=True,
+                CASE_EMBED_QUEUE_URL="https://sqs.us-gov-east-1.amazonaws.com/123/embed",
+                PORTAL_JWT_ISSUER="https://issuer.example.test",
+                PORTAL_JWT_AUDIENCE="portal",
+            ),
+            source=source,
+            sink_result=sink_result(),
+            s3_client=s3,
+            dynamodb_client=dynamodb,
+            sqs_client=sqs,
+            processed_at=processed_at,
+        )
+
+        self.assertEqual(result.status, "success")
+        self.assertIn("reconciled", result.message)
+        self.assertEqual(result.case_envelope_key, envelope_key)
+        self.assertEqual(len(s3.puts), 1)
+        self.assertEqual(len(sqs.messages), 1)
+        completed_run = case_archive_module._from_ddb_value(dynamodb.item[run_attribute])
+        self.assertEqual(completed_run["state"], "completed")
+
+    def test_claimed_run_envelope_mismatch_fails_closed(self) -> None:
+        source = SourceContext(
+            **{**source_context().__dict__, "processing_id": "processing-v1", "source_version_id": "v1"}
+        )
+        run_id = case_archive_module._build_run_id("abc-123", "processing-v1")
+        run_attribute = case_archive_module._run_attribute_name(run_id)
+        case_id = case_archive_module._build_case_id("abc-123")
+        envelope_key = case_archive_module._build_envelope_key(
+            archive_config(),
+            case_archive_module._coerce_utc_datetime("2026-06-15T10:30:00Z"),
+            case_id,
+            run_id,
+            True,
+        )
+        s3 = FakeS3Client()
+        s3.objects[("case-bucket", envelope_key)] = b'{"unexpected": true}'
+        existing = ddb_item(case_id=case_id)
+        existing[run_attribute] = case_archive_module._to_ddb_value(
+            {
+                "run_id": run_id,
+                "state": "claimed",
+                "fencing_token": "fence-1",
+                "envelope_key": envelope_key,
+            }
+        )
+
+        with self.assertRaises(case_archive_module.CaseEnvelopeMismatchError):
+            archive_case(
+                analysis_result=analysis_result(),
+                config=archive_config(),
+                source=source,
+                sink_result=sink_result(),
+                s3_client=s3,
+                dynamodb_client=FakeDynamoDbClient(existing_item=existing),
+                processed_at="2026-06-15T10:30:00Z",
+            )
 
     def test_case_identity_collision_suppresses_archive_write(self) -> None:
         s3 = FakeS3Client()

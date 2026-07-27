@@ -1,6 +1,12 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: GovCloud S3 notable analysis pipeline using customer-approved Bedrock models
+Metadata:
+  cfn-lint:
+    config:
+      # The optional portal override ARN is empty unless its matching condition is true.
+      ignore_checks:
+        - W1030
 
 Parameters:
   InputBucketName:
@@ -45,8 +51,7 @@ Parameters:
   BedrockAnalysisModelArn:
     Type: String
     Description: Exact ARN corresponding to BedrockAnalysisModelId for least-privilege IAM.
-    Default: ''
-    AllowedPattern: '^$|^arn:aws-us-gov:bedrock:us-gov-east-1:([0-9]{12})?:(foundation-model|inference-profile)/.+$'
+    AllowedPattern: '^arn:aws-us-gov:bedrock:us-gov-east-1:([0-9]{12})?:(foundation-model|inference-profile)/.+$'
   
   SplunkSinkMode:
     Type: String
@@ -430,6 +435,12 @@ Parameters:
     Type: String
     Description: Optional Bedrock model override for portal answer synthesis.
     Default: ''
+
+  PortalChatBedrockModelArn:
+    Type: String
+    Description: Exact ARN for PortalChatBedrockModelId when set; otherwise portal chat uses BedrockAnalysisModelArn.
+    Default: ''
+    AllowedPattern: '^$|^arn:aws-us-gov:bedrock:us-gov-east-1:([0-9]{12})?:(foundation-model|inference-profile)/.+$'
 
   PortalUiBucketName:
     Type: String
@@ -933,6 +944,8 @@ Rules:
         AssertDescription: DeploymentPartition must match the CloudFormation partition.
       - Assert: !Equals [!Ref DeploymentRegion, !Ref AWS::Region]
         AssertDescription: DeploymentRegion must match AWS::Region and be us-gov-east-1.
+      - Assert: !Equals [!Ref AwsAccountId, !Ref AWS::AccountId]
+        AssertDescription: AwsAccountId must match the deployment account.
       - Assert: !Not [!Equals [!Ref BedrockAnalysisModelId, '']]
         AssertDescription: BedrockAnalysisModelId must be selected for the customer deployment.
       - Assert: !Not [!Equals [!Ref BedrockAnalysisModelArn, '']]
@@ -968,6 +981,32 @@ Rules:
           - !Not [!Equals [!Ref PortalRequiredAnalystRole, '']]
           - !Not [!Equals [!Ref PortalRequiredAnalystScope, '']]
         AssertDescription: Set a customer analyst role or scope for the JWT portal.
+  RequireCaseIndexForPortalFeatures:
+    RuleCondition: !Or
+      - !Equals [!Ref PortalEnabled, 'true']
+      - !Equals [!Ref CaseQaEnabled, 'true']
+    Assertions:
+      - Assert: !Not [!Equals [!Ref CaseIndexTableName, '']]
+        AssertDescription: CaseIndexTableName is required when portal or Case Q&A is enabled.
+  RequireCaseArchiveForPortal:
+    RuleCondition: !Equals [!Ref PortalEnabled, 'true']
+    Assertions:
+      - Assert: !Equals [!Ref CaseArchiveEnabled, 'true']
+        AssertDescription: CaseArchiveEnabled must be true when PortalEnabled is true.
+  RequireChatHistoryPrerequisites:
+    RuleCondition: !Equals [!Ref CaseQaChatHistoryEnabled, 'true']
+    Assertions:
+      - Assert: !Equals [!Ref PortalEnabled, 'true']
+        AssertDescription: PortalEnabled is required when chat history is enabled.
+      - Assert: !Equals [!Ref CaseQaEnabled, 'true']
+        AssertDescription: CaseQaEnabled is required when chat history is enabled.
+      - Assert: !Not [!Equals [!Ref CaseIndexTableName, '']]
+        AssertDescription: CaseIndexTableName is required when chat history is enabled.
+  RequirePortalChatBedrockModelArn:
+    RuleCondition: !Not [!Equals [!Ref PortalChatBedrockModelId, '']]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref PortalChatBedrockModelArn, '']]
+        AssertDescription: PortalChatBedrockModelArn is required when PortalChatBedrockModelId is set.
 
 Conditions:
   IsNotableRest: !Equals [!Ref SplunkSinkMode, notable_rest]
@@ -1002,10 +1041,12 @@ Conditions:
     - !Not [!Equals [!Ref CustomerVpcSubnetIds, '']]
     - !Not [!Equals [!Ref CustomerSecurityGroupIds, '']]
   HasCustomerKmsKey: !Not [!Equals [!Ref CustomerKmsKeyArn, '']]
+  HasCustomerKmsAdminRole: !Not [!Equals [!Ref CustomerKmsKeyAdminRoleArn, '']]
   HasAlarmTopic: !Not [!Equals [!Ref AlarmNotificationTopicArn, '']]
   HasRagIngestion: !Equals [!Ref RagIngestionEnabled, 'true']
   HasRagSource: !Not [!Equals [!Ref RagSourceBucketName, '']]
   HasOpenSearch: !Not [!Equals [!Ref OpenSearchDomainArn, '']]
+  HasPortalChatBedrockModelOverride: !Not [!Equals [!Ref PortalChatBedrockModelId, '']]
  
 Resources:
   CustomerKmsReadPolicy:
@@ -1034,6 +1075,22 @@ Resources:
               - kms:DescribeKey
               - kms:GenerateDataKey
             Resource: !Ref CustomerKmsKeyArn
+
+  LambdaVpcEniPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: HasCustomerVpc
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - ec2:CreateNetworkInterface
+              - ec2:DescribeNetworkInterfaces
+              - ec2:DeleteNetworkInterface
+              - ec2:AssignPrivateIpAddresses
+              - ec2:UnassignPrivateIpAddresses
+            Resource: '*'
 
   AnalyzerDeadLetterQueue:
     Type: AWS::SQS::Queue
@@ -1138,7 +1195,6 @@ Resources:
     Type: AWS::S3::Bucket
     DependsOn:
       - AnalyzerQueuePolicy
-      - RagIngestionQueuePolicy
     Properties:
       BucketName: !Ref InputBucketName
       PublicAccessBlockConfiguration:
@@ -1221,9 +1277,12 @@ Resources:
     Properties:
       TableName: !Ref SideEffectIdempotencyTableName
       BillingMode: PAY_PER_REQUEST
-      SSESpecification:
-        SSEEnabled: true
-        KMSMasterKeyId: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+      SSESpecification: !If
+        - HasCustomerKmsKey
+        - SSEEnabled: true
+          SSEType: KMS
+          KMSMasterKeyId: !Ref CustomerKmsKeyArn
+        - SSEEnabled: true
       AttributeDefinitions:
         - AttributeName: id
           AttributeType: S
@@ -1240,9 +1299,12 @@ Resources:
     Properties:
       TableName: !Ref CaseIndexTableName
       BillingMode: PAY_PER_REQUEST
-      SSESpecification:
-        SSEEnabled: true
-        KMSMasterKeyId: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+      SSESpecification: !If
+        - HasCustomerKmsKey
+        - SSEEnabled: true
+          SSEType: KMS
+          KMSMasterKeyId: !Ref CustomerKmsKeyArn
+        - SSEEnabled: true
       AttributeDefinitions:
         - AttributeName: case_id
           AttributeType: S
@@ -1281,9 +1343,12 @@ Resources:
     Properties:
       TableName: !Sub '${AWS::StackName}-servicenow-dispositions'
       BillingMode: PAY_PER_REQUEST
-      SSESpecification:
-        SSEEnabled: true
-        KMSMasterKeyId: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+      SSESpecification: !If
+        - HasCustomerKmsKey
+        - SSEEnabled: true
+          SSEType: KMS
+          KMSMasterKeyId: !Ref CustomerKmsKeyArn
+        - SSEEnabled: true
       AttributeDefinitions:
         - AttributeName: snow_sys_id
           AttributeType: S
@@ -1320,9 +1385,12 @@ Resources:
     Properties:
       TableName: !Sub '${AWS::StackName}-disposition-sync-state'
       BillingMode: PAY_PER_REQUEST
-      SSESpecification:
-        SSEEnabled: true
-        KMSMasterKeyId: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+      SSESpecification: !If
+        - HasCustomerKmsKey
+        - SSEEnabled: true
+          SSEType: KMS
+          KMSMasterKeyId: !Ref CustomerKmsKeyArn
+        - SSEEnabled: true
       AttributeDefinitions:
         - AttributeName: job_name
           AttributeType: S
@@ -1336,9 +1404,12 @@ Resources:
     Properties:
       TableName: !Sub '${AWS::StackName}-chat-sessions'
       BillingMode: PAY_PER_REQUEST
-      SSESpecification:
-        SSEEnabled: true
-        KMSMasterKeyId: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+      SSESpecification: !If
+        - HasCustomerKmsKey
+        - SSEEnabled: true
+          SSEType: KMS
+          KMSMasterKeyId: !Ref CustomerKmsKeyArn
+        - SSEEnabled: true
       AttributeDefinitions:
         - AttributeName: session_id
           AttributeType: S
@@ -1368,9 +1439,12 @@ Resources:
     Properties:
       TableName: !Sub '${AWS::StackName}-chat-messages'
       BillingMode: PAY_PER_REQUEST
-      SSESpecification:
-        SSEEnabled: true
-        KMSMasterKeyId: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+      SSESpecification: !If
+        - HasCustomerKmsKey
+        - SSEEnabled: true
+          SSEType: KMS
+          KMSMasterKeyId: !Ref CustomerKmsKeyArn
+        - SSEEnabled: true
       AttributeDefinitions:
         - AttributeName: session_id
           AttributeType: S
@@ -1403,7 +1477,6 @@ Resources:
       Environment:
         Variables:
           AWS_PARTITION: !Ref DeploymentPartition
-          AWS_REGION: !Ref DeploymentRegion
           ANALYZER_QUEUE_URL: !Ref AnalyzerQueue
           CASE_EMBED_QUEUE_URL: !If [HasCaseQa, !Ref EmbedQueue, '']
           RAG_INGEST_QUEUE_URL: !If [HasRagIngestion, !Ref RagIngestionQueue, '']
@@ -1517,6 +1590,7 @@ Resources:
           MAX_DECOMPRESSED_INPUT_BYTES: !Ref MaxDecompressedInputBytes
       Policies:
         - !If [HasCustomerKmsKey, !Ref CustomerKmsWritePolicy, !Ref AWS::NoValue]
+        - !If [HasCustomerVpc, !Ref LambdaVpcEniPolicy, !Ref AWS::NoValue]
         - Statement:
             - Effect: Allow
               Action:
@@ -1664,8 +1738,7 @@ Resources:
       Environment:
         Variables:
           AWS_PARTITION: !Ref DeploymentPartition
-          AWS_REGION: !Ref DeploymentRegion
-          CASE_EMBED_QUEUE_URL: !If [HasCaseQa, !Ref EmbedQueue, '']
+          CASE_EMBED_QUEUE_URL: !Ref EmbedQueue
           RAG_TENANT_ID: !Ref RagTenantId
           RAG_RETRIEVAL_BACKEND: opensearch
           OPENSEARCH_ENDPOINT: !Ref OpenSearchEndpoint
@@ -1685,6 +1758,7 @@ Resources:
           CASE_QA_EMBED_NORMALIZE: !Ref CaseQaEmbedNormalize
       Policies:
         - !If [HasCustomerKmsKey, !Ref CustomerKmsWritePolicy, !Ref AWS::NoValue]
+        - !If [HasCustomerVpc, !Ref LambdaVpcEniPolicy, !Ref AWS::NoValue]
         - Statement:
             - Effect: Allow
               Action:
@@ -1780,7 +1854,6 @@ Resources:
       Environment:
         Variables:
           AWS_PARTITION: !Ref DeploymentPartition
-          AWS_REGION: !Ref DeploymentRegion
           RAG_INGEST_QUEUE_URL: !Ref RagIngestionQueue
           RAG_SOURCE_BUCKET: !If [HasRagSource, !Ref RagSourceBucketName, !Ref InputBucketName]
           RAG_SOURCE_PREFIX: !Ref RagSourcePrefix
@@ -1799,6 +1872,7 @@ Resources:
           CUSTOMER_SECURITY_GROUP_IDS: !Ref CustomerSecurityGroupIds
       Policies:
         - !If [HasCustomerKmsKey, !Ref CustomerKmsReadPolicy, !Ref AWS::NoValue]
+        - !If [HasCustomerVpc, !Ref LambdaVpcEniPolicy, !Ref AWS::NoValue]
         - Statement:
             - Effect: Allow
               Action:
@@ -1873,7 +1947,6 @@ Resources:
       Environment:
         Variables:
           AWS_PARTITION: !Ref DeploymentPartition
-          AWS_REGION: !Ref DeploymentRegion
           CUSTOMER_KMS_KEY_ARN: !Ref CustomerKmsKeyArn
           CUSTOMER_VPC_SUBNET_IDS: !Ref CustomerVpcSubnetIds
           CUSTOMER_SECURITY_GROUP_IDS: !Ref CustomerSecurityGroupIds
@@ -1899,6 +1972,7 @@ Resources:
             Schedule: rate(1 day)
             Enabled: true
       Policies:
+        - !If [HasCustomerVpc, !Ref LambdaVpcEniPolicy, !Ref AWS::NoValue]
         - !If
           - HasServiceNowDispositionSyncSecret
           - Statement:
@@ -1976,7 +2050,6 @@ Resources:
       Environment:
         Variables:
           AWS_PARTITION: !Ref DeploymentPartition
-          AWS_REGION: !Ref DeploymentRegion
           CUSTOMER_KMS_KEY_ARN: !Ref CustomerKmsKeyArn
           CUSTOMER_VPC_SUBNET_IDS: !Ref CustomerVpcSubnetIds
           CUSTOMER_SECURITY_GROUP_IDS: !Ref CustomerSecurityGroupIds
@@ -2034,6 +2107,7 @@ Resources:
             - ''
       Policies:
         - !If [HasCustomerKmsKey, !Ref CustomerKmsReadPolicy, !Ref AWS::NoValue]
+        - !If [HasCustomerVpc, !Ref LambdaVpcEniPolicy, !Ref AWS::NoValue]
         - !If
           - HasPortalUiDeployment
           - Statement:
@@ -2074,7 +2148,10 @@ Resources:
               Action:
                 - bedrock:InvokeModel
               Resource:
-                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*'
+                - !If
+                  - HasPortalChatBedrockModelOverride
+                  - !Ref PortalChatBedrockModelArn
+                  - !Ref BedrockAnalysisModelArn
         - !If
           - HasOpenSearch
           - Statement:
@@ -2166,7 +2243,6 @@ Resources:
   PortalHttpApiHealthRoute:
     Type: AWS::ApiGatewayV2::Route
     Condition: HasPortalApi
-    DependsOn: PortalHttpApiIntegration
     Properties:
       ApiId: !Ref PortalHttpApi
       RouteKey: GET /health
@@ -2176,7 +2252,6 @@ Resources:
   PortalHttpApiReadyRoute:
     Type: AWS::ApiGatewayV2::Route
     Condition: HasPortalApi
-    DependsOn: PortalHttpApiIntegration
     Properties:
       ApiId: !Ref PortalHttpApi
       RouteKey: GET /ready
@@ -2186,7 +2261,6 @@ Resources:
   PortalHttpApiDefaultRoute:
     Type: AWS::ApiGatewayV2::Route
     Condition: HasPortalApi
-    DependsOn: PortalHttpApiIntegration
     Properties:
       ApiId: !Ref PortalHttpApi
       RouteKey: 'ANY /api/{proxy+}'
@@ -2197,7 +2271,6 @@ Resources:
   PortalHttpApiApiRootRoute:
     Type: AWS::ApiGatewayV2::Route
     Condition: HasPortalApi
-    DependsOn: PortalHttpApiIntegration
     Properties:
       ApiId: !Ref PortalHttpApi
       RouteKey: 'ANY /api'
@@ -2208,7 +2281,6 @@ Resources:
   PortalHttpApiStaticRoute:
     Type: AWS::ApiGatewayV2::Route
     Condition: HasPortalUiDeployment
-    DependsOn: PortalHttpApiIntegration
     Properties:
       ApiId: !Ref PortalHttpApi
       RouteKey: 'GET /{proxy+}'
@@ -2218,7 +2290,6 @@ Resources:
   PortalHttpApiStaticRootRoute:
     Type: AWS::ApiGatewayV2::Route
     Condition: HasPortalUiDeployment
-    DependsOn: PortalHttpApiIntegration
     Properties:
       ApiId: !Ref PortalHttpApi
       RouteKey: 'GET /'
@@ -2280,7 +2351,7 @@ Resources:
 
   CaseEmbedLogGroup:
     Type: AWS::Logs::LogGroup
-    Condition: HasCaseIndex
+    Condition: HasCaseQa
     Properties:
       LogGroupName: !Sub '/aws/lambda/${CaseEmbedLambdaName}'
       RetentionInDays: !Ref LogRetentionDays
@@ -2367,7 +2438,7 @@ Resources:
 
   EmbedDlqAlarm:
     Type: AWS::CloudWatch::Alarm
-    Condition: HasCaseIndex
+    Condition: HasCaseQa
     Properties:
       Namespace: AWS/SQS
       MetricName: ApproximateNumberOfMessagesVisible
@@ -2384,7 +2455,7 @@ Resources:
 
   EmbedErrorAlarm:
     Type: AWS::CloudWatch::Alarm
-    Condition: HasCaseIndex
+    Condition: HasCaseQa
     Properties:
       Namespace: AWS/Lambda
       MetricName: Errors
@@ -2468,6 +2539,11 @@ Resources:
       AlarmActions: !If [HasAlarmTopic, [!Ref AlarmNotificationTopicArn], !Ref AWS::NoValue]
 
 Outputs:
+  CustomerKmsKeyAdminRoleArn:
+    Condition: HasCustomerKmsAdminRole
+    Description: Customer role recorded for KMS key-administration alignment.
+    Value: !Ref CustomerKmsKeyAdminRoleArn
+
   FunctionArn:
     Description: Lambda Function ARN
     Value: !GetAtt NotableAnalyzerFunction.Arn

@@ -367,6 +367,109 @@ class CompressedInputTests(unittest.TestCase):
         html_call = next(c for c in mock_put.call_args_list if c.kwargs["Key"].endswith(".html"))
         self.assertEqual(html_call.kwargs["ContentType"], "text/html")
 
+    def test_partial_report_replay_reconciles_existing_markdown_and_writes_json(self) -> None:
+        """A retry after markdown-only success should verify md and finish json/html."""
+        store: dict[tuple[str, str], bytes] = {}
+
+        class S3PreconditionFailed(Exception):
+            response = {"Error": {"Code": "PreconditionFailed"}}
+
+        identity = self.lambda_handler.S3ProcessingIdentity(
+            bucket="input",
+            key="incoming/example.json",
+            version_id="v1",
+            etag="etag-1",
+            sequencer="001",
+        )
+        analysis = {
+            "markdown": "# Report",
+            "html": "<html></html>",
+            "llm_response": {"finding": "abc"},
+        }
+
+        def put_object(**kwargs):
+            bucket = kwargs["Bucket"]
+            key = kwargs["Key"]
+            body = kwargs["Body"]
+            object_key = (bucket, key)
+            if kwargs.get("IfNoneMatch") == "*":
+                if object_key in store:
+                    if store[object_key] != body:
+                        raise self.lambda_handler.S3ReportArtifactMismatchError("mismatch")
+                    raise S3PreconditionFailed()
+                store[object_key] = body
+                if key.endswith(".json"):
+                    raise RuntimeError("transient json failure")
+
+        def get_object(**kwargs):
+            body = store[(kwargs["Bucket"], kwargs["Key"])]
+            return {"Body": types.SimpleNamespace(read=lambda b=body: b)}
+
+        with (
+            patch.dict(
+                "os.environ",
+                {"OUTPUT_BUCKET_NAME": "out", "HTML_REPORT_ENABLED": "true"},
+                clear=True,
+            ),
+            patch.object(self.lambda_handler.s3_client, "put_object", side_effect=put_object, create=True),
+            patch.object(self.lambda_handler.s3_client, "get_object", side_effect=get_object, create=True),
+        ):
+            first = self.lambda_handler.write_to_s3_sink(
+                "incoming/example.json",
+                "# Report",
+                analysis,
+                processing_identity=identity,
+            )
+            second = self.lambda_handler.write_to_s3_sink(
+                "incoming/example.json",
+                "# Report",
+                analysis,
+                processing_identity=identity,
+            )
+
+        self.assertEqual(first["status"], "error")
+        self.assertEqual(second["status"], "success")
+        self.assertIn("json_key", second)
+        self.assertIn("html_key", second)
+        self.assertEqual(len(store), 3)
+
+    def test_report_artifact_content_mismatch_fails_closed(self) -> None:
+        identity = self.lambda_handler.S3ProcessingIdentity(
+            bucket="input",
+            key="incoming/example.json",
+            version_id="v1",
+            etag="etag-1",
+            sequencer="001",
+        )
+        md_key = self.lambda_handler._report_key("reports", identity.key, "md", identity)
+        store = {("out", md_key): b"# Different"}
+
+        class S3PreconditionFailed(Exception):
+            response = {"Error": {"Code": "PreconditionFailed"}}
+
+        def put_object(**kwargs):
+            if kwargs.get("IfNoneMatch") == "*":
+                raise S3PreconditionFailed()
+
+        def get_object(**kwargs):
+            body = store[(kwargs["Bucket"], kwargs["Key"])]
+            return {"Body": types.SimpleNamespace(read=lambda b=body: b)}
+
+        with (
+            patch.dict("os.environ", {"OUTPUT_BUCKET_NAME": "out"}, clear=True),
+            patch.object(self.lambda_handler.s3_client, "put_object", side_effect=put_object, create=True),
+            patch.object(self.lambda_handler.s3_client, "get_object", side_effect=get_object, create=True),
+        ):
+            result = self.lambda_handler.write_to_s3_sink(
+                "incoming/example.json",
+                "# Report",
+                {"llm_response": {}},
+                processing_identity=identity,
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("does not match intended content", result["message"])
+
     def test_archive_failure_is_suppressed_after_successful_report_write(self) -> None:
         """Suppress mode should preserve report output and record archive failure."""
         with patch.object(

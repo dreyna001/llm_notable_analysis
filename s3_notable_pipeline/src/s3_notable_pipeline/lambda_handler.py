@@ -139,6 +139,57 @@ class BedrockAnalysisFailure(RuntimeError):
         self.retryable = retryable
 
 
+class S3ReportArtifactMismatchError(ValueError):
+    """Existing S3 report artifact content does not match the intended payload."""
+
+
+def _is_s3_precondition_failed(exc: Exception) -> bool:
+    response = getattr(exc, "response", {})
+    if isinstance(response, dict):
+        error = response.get("Error", {})
+        if isinstance(error, dict):
+            code = str(error.get("Code", ""))
+            if code in {"PreconditionFailed", "412"}:
+                return True
+    return exc.__class__.__name__ in {"PreconditionFailed", "PreconditionFailedException"}
+
+
+def _put_s3_report_artifact(
+    *,
+    bucket: str,
+    key: str,
+    body: bytes,
+    content_type: str,
+    create_only: bool,
+) -> None:
+    """Write one report artifact, reconciling create-only conflicts on replay."""
+
+    if not create_only:
+        s3_client.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=body,
+            ContentType=content_type,
+        )
+        return
+    try:
+        s3_client.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=body,
+            ContentType=content_type,
+            IfNoneMatch="*",
+        )
+    except Exception as exc:
+        if not _is_s3_precondition_failed(exc):
+            raise
+        existing = s3_client.get_object(Bucket=bucket, Key=key)["Body"].read()
+        if existing != body:
+            raise S3ReportArtifactMismatchError(
+                f"existing report artifact s3://{bucket}/{key} does not match intended content"
+            )
+
+
 def _s3_event_records(record: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
     """Unwrap direct S3 records and S3 notifications delivered through SQS."""
 
@@ -468,35 +519,36 @@ def write_to_s3_sink(
         if llm_response is None:
             llm_response = {}
         json_body = json.dumps(llm_response, ensure_ascii=False, indent=2, default=str)
+        create_only = processing_identity is not None
+        md_bytes = markdown.encode("utf-8")
+        json_bytes = json_body.encode("utf-8")
 
-        # Write markdown report
-        put_kwargs = {"IfNoneMatch": "*"} if processing_identity is not None else {}
-        s3_client.put_object(
-            Bucket=output_bucket,
-            Key=md_key,
-            Body=markdown.encode('utf-8'),
-            ContentType='text/markdown',
-            **put_kwargs,
+        _put_s3_report_artifact(
+            bucket=output_bucket,
+            key=md_key,
+            body=md_bytes,
+            content_type="text/markdown",
+            create_only=create_only,
         )
         logger.info(f"Wrote markdown report to s3://{output_bucket}/{md_key}")
 
-        s3_client.put_object(
-            Bucket=output_bucket,
-            Key=json_key,
-            Body=json_body.encode('utf-8'),
-            ContentType="application/json",
-            **put_kwargs,
+        _put_s3_report_artifact(
+            bucket=output_bucket,
+            key=json_key,
+            body=json_bytes,
+            content_type="application/json",
+            create_only=create_only,
         )
         logger.info(f"Wrote Bedrock JSON to s3://{output_bucket}/{json_key}")
 
         html_report = analysis_result.get("html")
         if config.HTML_REPORT_ENABLED and isinstance(html_report, str) and html_report:
-            s3_client.put_object(
-                Bucket=output_bucket,
-                Key=html_key,
-                Body=html_report.encode('utf-8'),
-                ContentType="text/html",
-                **put_kwargs,
+            _put_s3_report_artifact(
+                bucket=output_bucket,
+                key=html_key,
+                body=html_report.encode("utf-8"),
+                content_type="text/html",
+                create_only=create_only,
             )
             logger.info(f"Wrote HTML report to s3://{output_bucket}/{html_key}")
 
@@ -510,6 +562,9 @@ def write_to_s3_sink(
             result["html_key"] = html_key
         return result
         
+    except S3ReportArtifactMismatchError as e:
+        logger.error("S3 report artifact mismatch: %s", e)
+        return {"status": "error", "message": str(e)}
     except Exception as e:
         logger.error(f"Error writing to S3 sink: {str(e)}")
         return {"status": "error", "message": str(e)}

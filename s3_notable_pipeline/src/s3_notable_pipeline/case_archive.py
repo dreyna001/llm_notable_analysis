@@ -19,6 +19,10 @@ IDENTIFIER_FIELDS = ("finding_id", "notable_id", "sid")
 CORRELATION_FIELDS = ("correlation_id", "correlationId", "event_id")
 
 
+class CaseEnvelopeMismatchError(ValueError):
+    """Existing case envelope content does not match the intended payload."""
+
+
 @dataclass(frozen=True)
 class SourceContext:
     """Source alert context needed to write a case archive envelope."""
@@ -81,57 +85,6 @@ def archive_case(
     retrieval_status = "pending" if config.CASE_QA_ENABLED else "not_indexed"
     envelope_key = _build_envelope_key(config, processed_at_dt, case_id, run_id, bool(source.processing_id))
 
-    existing_item = _get_case_index_item(dynamodb_client, config.CASE_INDEX_TABLE, case_id)
-    if existing_item:
-        if not _identity_matches(
-            existing_item,
-            source_key=source.input_key,
-            correlation_id=correlation_id,
-            finding_id=finding_id,
-        ):
-            return ArchiveWriteResult(
-                status="skipped",
-                case_id=case_id,
-                message="case identity collision suppressed",
-            )
-        existing_run = existing_item.get(_run_attribute_name(run_id))
-        if isinstance(existing_run, dict):
-            run_state = str(existing_run.get("state", "")).strip()
-            if run_state == "completed":
-                _republish_pending_embed(
-                    config=config,
-                    item=existing_item,
-                    run=existing_run,
-                    sqs_client=sqs_client,
-                    lambda_client=lambda_client,
-                )
-                return _run_result_from_item(existing_item, existing_run, retrieval_status, source_completeness)
-            return ArchiveWriteResult(
-                status="skipped",
-                case_id=case_id,
-                case_envelope_key=str(existing_run.get("envelope_key", envelope_key)),
-                retrieval_status=retrieval_status,
-                source_completeness=source_completeness,
-                message="case run is already claimed",
-            )
-        # Keep legacy rows replay-safe when they predate immutable run metadata.
-        if not source.processing_id:
-            _republish_pending_embed(
-                config=config,
-                item=existing_item,
-                run={},
-                sqs_client=sqs_client,
-                lambda_client=lambda_client,
-            )
-            return ArchiveWriteResult(
-                status="success",
-                case_id=case_id,
-                case_envelope_key=str(existing_item.get("case_envelope_key", envelope_key)),
-                retrieval_status=str(existing_item.get("retrieval_status", retrieval_status)),
-                source_completeness=str(existing_item.get("source_completeness", source_completeness)),
-                message="case archive replay matched existing identity",
-            )
-
     envelope = {
         "case_schema_version": config.CASE_SCHEMA_VERSION,
         "analysis_schema_version": config.CASE_ANALYSIS_SCHEMA_VERSION,
@@ -163,6 +116,76 @@ def archive_case(
         "alert_payload": archived_alert,
         "analysis": archived_analysis,
     }
+    envelope_body = _encode_envelope(envelope)
+
+    existing_item = _get_case_index_item(dynamodb_client, config.CASE_INDEX_TABLE, case_id)
+    if existing_item:
+        if not _identity_matches(
+            existing_item,
+            source_key=source.input_key,
+            correlation_id=correlation_id,
+            finding_id=finding_id,
+        ):
+            return ArchiveWriteResult(
+                status="skipped",
+                case_id=case_id,
+                message="case identity collision suppressed",
+            )
+        existing_run = existing_item.get(_run_attribute_name(run_id))
+        if isinstance(existing_run, dict):
+            run_state = str(existing_run.get("state", "")).strip()
+            if run_state == "completed":
+                _republish_pending_embed(
+                    config=config,
+                    item=existing_item,
+                    run=existing_run,
+                    sqs_client=sqs_client,
+                    lambda_client=lambda_client,
+                )
+                return _run_result_from_item(existing_item, existing_run, retrieval_status, source_completeness)
+            if run_state == "claimed":
+                return _recover_claimed_run(
+                    config=config,
+                    case_id=case_id,
+                    run_id=run_id,
+                    run_attribute=_run_attribute_name(run_id),
+                    existing_item=existing_item,
+                    existing_run=existing_run,
+                    envelope_key=envelope_key,
+                    envelope_body=envelope_body,
+                    processed_at_dt=processed_at_dt,
+                    retrieval_status=retrieval_status,
+                    source_completeness=source_completeness,
+                    s3_client=s3_client,
+                    dynamodb_client=dynamodb_client,
+                    sqs_client=sqs_client,
+                    lambda_client=lambda_client,
+                )
+            return ArchiveWriteResult(
+                status="skipped",
+                case_id=case_id,
+                case_envelope_key=str(existing_run.get("envelope_key", envelope_key)),
+                retrieval_status=retrieval_status,
+                source_completeness=source_completeness,
+                message="case run is already claimed",
+            )
+        # Keep legacy rows replay-safe when they predate immutable run metadata.
+        if not source.processing_id:
+            _republish_pending_embed(
+                config=config,
+                item=existing_item,
+                run={},
+                sqs_client=sqs_client,
+                lambda_client=lambda_client,
+            )
+            return ArchiveWriteResult(
+                status="success",
+                case_id=case_id,
+                case_envelope_key=str(existing_item.get("case_envelope_key", envelope_key)),
+                retrieval_status=str(existing_item.get("retrieval_status", retrieval_status)),
+                source_completeness=str(existing_item.get("source_completeness", source_completeness)),
+                message="case archive replay matched existing identity",
+            )
 
     run_fencing_token = uuid4().hex
     item = _build_case_index_item(
@@ -233,6 +256,25 @@ def archive_case(
                 message="case archive run replay matched existing identity",
             )
         if existing_item and _identity_matches(existing_item, source_key=source.input_key, correlation_id=correlation_id, finding_id=finding_id):
+            existing_run = (existing_item or {}).get(run_attribute)
+            if isinstance(existing_run, dict) and str(existing_run.get("state", "")).strip() == "claimed":
+                return _recover_claimed_run(
+                    config=config,
+                    case_id=case_id,
+                    run_id=run_id,
+                    run_attribute=run_attribute,
+                    existing_item=existing_item or {},
+                    existing_run=existing_run,
+                    envelope_key=envelope_key,
+                    envelope_body=envelope_body,
+                    processed_at_dt=processed_at_dt,
+                    retrieval_status=retrieval_status,
+                    source_completeness=source_completeness,
+                    s3_client=s3_client,
+                    dynamodb_client=dynamodb_client,
+                    sqs_client=sqs_client,
+                    lambda_client=lambda_client,
+                )
             return ArchiveWriteResult(status="skipped", case_id=case_id, case_envelope_key=envelope_key, message="case run claim is already held")
         return ArchiveWriteResult(
             status="skipped",
@@ -241,33 +283,126 @@ def archive_case(
             message="case identity collision suppressed",
         )
 
-    s3_client.put_object(
-        Bucket=config.CASE_ARCHIVE_BUCKET,
-        Key=envelope_key,
-        Body=json.dumps(envelope, ensure_ascii=False, default=str).encode("utf-8"),
-        ContentType="application/json",
-        IfNoneMatch="*",
+    _verify_or_write_envelope(
+        s3_client=s3_client,
+        bucket=config.CASE_ARCHIVE_BUCKET,
+        envelope_key=envelope_key,
+        envelope_body=envelope_body,
     )
 
-    completed_run = {**run_record, "state": "completed", "completed_at": _format_utc(processed_at_dt)}
-    dynamodb_client.update_item(
-        TableName=config.CASE_INDEX_TABLE,
-        Key={"case_id": {"S": case_id}},
-        UpdateExpression=(
-            "SET #run = :run, latest_run_id = :run_id, latest_run_key = :run_key, "
-            "latest_run_at = :run_at, case_envelope_key = :run_key"
-        ),
-        ConditionExpression="#run.#state = :claimed AND #run.#fence = :fence",
-        ExpressionAttributeNames={"#run": run_attribute, "#state": "state", "#fence": "fencing_token"},
-        ExpressionAttributeValues={
-            ":run": _to_ddb_value(completed_run),
-            ":run_id": {"S": run_id},
-            ":run_key": {"S": envelope_key},
-            ":run_at": {"S": _format_utc(processed_at_dt)},
-            ":claimed": {"S": "claimed"},
-            ":fence": {"S": run_fencing_token},
-        },
+    _finalize_run_and_publish_embed(
+        config=config,
+        dynamodb_client=dynamodb_client,
+        case_id=case_id,
+        run_id=run_id,
+        run_attribute=run_attribute,
+        run_record=run_record,
+        envelope_key=envelope_key,
+        processed_at_dt=processed_at_dt,
+        sqs_client=sqs_client,
+        lambda_client=lambda_client,
+        existing_item=existing_item,
     )
+    return ArchiveWriteResult(
+        status="success",
+        case_id=case_id,
+        case_envelope_key=envelope_key,
+        retrieval_status=retrieval_status,
+        source_completeness=source_completeness,
+    )
+
+
+def _encode_envelope(envelope: dict[str, Any]) -> bytes:
+    return json.dumps(envelope, ensure_ascii=False, default=str).encode("utf-8")
+
+
+def _is_s3_precondition_failed(exc: Exception) -> bool:
+    response = getattr(exc, "response", {})
+    if isinstance(response, dict):
+        error = response.get("Error", {})
+        if isinstance(error, dict):
+            code = str(error.get("Code", ""))
+            if code in {"PreconditionFailed", "412"}:
+                return True
+    return exc.__class__.__name__ in {"PreconditionFailed", "PreconditionFailedException"}
+
+
+def _verify_or_write_envelope(
+    *,
+    s3_client: Any,
+    bucket: str,
+    envelope_key: str,
+    envelope_body: bytes,
+) -> None:
+    """Create the envelope once, reconciling create-only conflicts on replay."""
+
+    try:
+        s3_client.put_object(
+            Bucket=bucket,
+            Key=envelope_key,
+            Body=envelope_body,
+            ContentType="application/json",
+            IfNoneMatch="*",
+        )
+    except Exception as exc:
+        if not _is_s3_precondition_failed(exc):
+            raise
+        existing = s3_client.get_object(Bucket=bucket, Key=envelope_key)["Body"].read()
+        if existing != envelope_body:
+            raise CaseEnvelopeMismatchError(
+                f"existing case envelope s3://{bucket}/{envelope_key} does not match intended content"
+            )
+
+
+def _finalize_run_and_publish_embed(
+    *,
+    config: Config,
+    dynamodb_client: Any,
+    case_id: str,
+    run_id: str,
+    run_attribute: str,
+    run_record: dict[str, Any],
+    envelope_key: str,
+    processed_at_dt: datetime,
+    sqs_client: Any | None,
+    lambda_client: Any | None,
+    existing_item: dict[str, Any] | None,
+) -> None:
+    completed_run = {**run_record, "state": "completed", "completed_at": _format_utc(processed_at_dt)}
+    try:
+        dynamodb_client.update_item(
+            TableName=config.CASE_INDEX_TABLE,
+            Key={"case_id": {"S": case_id}},
+            UpdateExpression=(
+                "SET #run = :run, latest_run_id = :run_id, latest_run_key = :run_key, "
+                "latest_run_at = :run_at, case_envelope_key = :run_key"
+            ),
+            ConditionExpression="#run.#state = :claimed AND #run.#fence = :fence",
+            ExpressionAttributeNames={"#run": run_attribute, "#state": "state", "#fence": "fencing_token"},
+            ExpressionAttributeValues={
+                ":run": _to_ddb_value(completed_run),
+                ":run_id": {"S": run_id},
+                ":run_key": {"S": envelope_key},
+                ":run_at": {"S": _format_utc(processed_at_dt)},
+                ":claimed": {"S": "claimed"},
+                ":fence": {"S": str(run_record.get("fencing_token", ""))},
+            },
+        )
+    except Exception as exc:
+        if not _is_conditional_check_failed(exc):
+            raise
+        item = _get_case_index_item(dynamodb_client, config.CASE_INDEX_TABLE, case_id) or existing_item or {}
+        run = item.get(run_attribute)
+        if not isinstance(run, dict) or str(run.get("state", "")).strip() != "completed":
+            raise
+        _republish_pending_embed(
+            config=config,
+            item=item,
+            run=run,
+            sqs_client=sqs_client,
+            lambda_client=lambda_client,
+        )
+        return
 
     _publish_embed_request(
         config=config,
@@ -277,12 +412,63 @@ def archive_case(
         envelope_bucket=config.CASE_ARCHIVE_BUCKET,
         envelope_key=envelope_key,
     )
+
+
+def _recover_claimed_run(
+    *,
+    config: Config,
+    case_id: str,
+    run_id: str,
+    run_attribute: str,
+    existing_item: dict[str, Any],
+    existing_run: dict[str, Any],
+    envelope_key: str,
+    envelope_body: bytes,
+    processed_at_dt: datetime,
+    retrieval_status: str,
+    source_completeness: str,
+    s3_client: Any,
+    dynamodb_client: Any,
+    sqs_client: Any | None,
+    lambda_client: Any | None,
+) -> ArchiveWriteResult:
+    """Reconcile a claimed run after partial envelope, finalize, or embed failures."""
+
+    stored_key = str(existing_run.get("envelope_key", envelope_key)).strip() or envelope_key
+    if stored_key != envelope_key:
+        return ArchiveWriteResult(
+            status="skipped",
+            case_id=case_id,
+            case_envelope_key=stored_key,
+            message="case run claim is already held",
+        )
+
+    _verify_or_write_envelope(
+        s3_client=s3_client,
+        bucket=config.CASE_ARCHIVE_BUCKET,
+        envelope_key=envelope_key,
+        envelope_body=envelope_body,
+    )
+    _finalize_run_and_publish_embed(
+        config=config,
+        dynamodb_client=dynamodb_client,
+        case_id=case_id,
+        run_id=run_id,
+        run_attribute=run_attribute,
+        run_record=existing_run,
+        envelope_key=envelope_key,
+        processed_at_dt=processed_at_dt,
+        sqs_client=sqs_client,
+        lambda_client=lambda_client,
+        existing_item=existing_item,
+    )
     return ArchiveWriteResult(
         status="success",
         case_id=case_id,
         case_envelope_key=envelope_key,
         retrieval_status=retrieval_status,
         source_completeness=source_completeness,
+        message="case archive claimed run replay reconciled",
     )
 
 

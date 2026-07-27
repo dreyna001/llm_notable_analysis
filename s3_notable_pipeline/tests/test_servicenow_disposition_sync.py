@@ -19,6 +19,7 @@ if str(SRC_DIR) not in sys.path:
 from s3_notable_pipeline.config import Config
 from s3_notable_pipeline.servicenow_disposition_sync import (
     JOB_NAME,
+    SyncCursor,
     load_code_map,
     load_field_map,
     normalize_disposition,
@@ -27,6 +28,7 @@ from s3_notable_pipeline.servicenow_disposition_sync import (
     _iter_table_api_pages,
     _process_row,
     _prepare_ddb_attributes,
+    _read_cursor,
 )
 
 
@@ -414,8 +416,13 @@ class ServiceNowDispositionSyncTests(unittest.TestCase):
             )
         )
         params = request_mock.call_args.kwargs["params"]
-        self.assertIn("sys_updated_on>", params["sysparm_query"])
-        self.assertNotIn("stateIN", params["sysparm_query"])
+        query = params["sysparm_query"]
+        self.assertIn("sys_updated_on>", query)
+        self.assertIn("^NQsys_updated_on=", query)
+        self.assertIn("^sys_id>", query)
+        self.assertTrue(query.endswith("^ORDERBYsys_updated_on^ORDERBYsys_id"))
+        self.assertNotIn("stateIN", query)
+        self.assertNotIn("sysparm_order_by", params)
 
     @patch("s3_notable_pipeline.servicenow_disposition_sync._request_with_retry")
     def test_iter_table_api_pages_backfill_uses_field_map_state_column(
@@ -507,6 +514,114 @@ class ServiceNowDispositionSyncTests(unittest.TestCase):
         self.assertEqual(result["status"], "error")
         self.assertFalse(result["cursor_advanced"])
         self.assertIsNone(dynamodb.items.get((config.DISPOSITION_SYNC_STATE_TABLE, JOB_NAME)))
+
+    def _sync_row(self, *, sys_id: str, number: str) -> dict[str, str]:
+        return {
+            "sys_id": sys_id,
+            "number": number,
+            "state": "3",
+            "closed_at": "2026-01-01 09:00:00",
+            "sys_updated_on": "2026-01-01 10:00:00",
+            "close_code": "true positive",
+            "close_notes": "notes",
+            "correlation_id": "",
+        }
+
+    @patch("s3_notable_pipeline.servicenow_disposition_sync._iter_table_api_pages")
+    def test_compound_cursor_drains_more_than_run_limit_at_same_timestamp(
+        self,
+        mock_pages: MagicMock,
+    ) -> None:
+        rows = [
+            self._sync_row(sys_id=f"snow-{index:04d}", number=f"SIR{index:04d}")
+            for index in range(501)
+        ]
+        observed_cursors: list[Any] = []
+
+        def pages(**kwargs: Any) -> Any:
+            cursor = kwargs["cursor"]
+            observed_cursors.append(cursor)
+            if cursor is None:
+                return iter([rows[:500]])
+            self.assertEqual(
+                cursor,
+                SyncCursor(datetime(2026, 1, 1, 10, 0, tzinfo=UTC), "snow-0499"),
+            )
+            return iter([[rows[500]]])
+
+        mock_pages.side_effect = pages
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _sync_config(Path(tmpdir))
+            dynamodb = FakeDynamoDbClient()
+            first = run_disposition_sync(
+                config=config,
+                dynamodb_client=dynamodb,
+                s3_client=FakeS3Client(),
+                http_session=FakeHttpSession([]),
+                now=datetime(2026, 1, 2, tzinfo=UTC),
+            )
+            second = run_disposition_sync(
+                config=config,
+                dynamodb_client=dynamodb,
+                s3_client=FakeS3Client(),
+                http_session=FakeHttpSession([]),
+                now=datetime(2026, 1, 3, tzinfo=UTC),
+            )
+        self.assertEqual(first["fetched"], 500)
+        self.assertEqual(second["fetched"], 1)
+        self.assertEqual(len(observed_cursors), 2)
+        self.assertIsNone(observed_cursors[0])
+        checkpoint = dynamodb.items.get((config.DISPOSITION_SYNC_STATE_TABLE, JOB_NAME))
+        self.assertIsNotNone(checkpoint)
+        self.assertEqual(checkpoint["cursor_value"]["S"], "2026-01-01T10:00:00Z")
+        self.assertEqual(checkpoint["cursor_sys_id"]["S"], "snow-0500")
+
+    @patch("s3_notable_pipeline.servicenow_disposition_sync._iter_table_api_pages")
+    def test_timestamp_only_checkpoint_replays_boundary_for_backward_compatibility(
+        self,
+        mock_pages: MagicMock,
+    ) -> None:
+        observed: dict[str, Any] = {}
+
+        def pages(**kwargs: Any) -> Any:
+            observed["cursor"] = kwargs["cursor"]
+            return iter([])
+
+        mock_pages.side_effect = pages
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _sync_config(Path(tmpdir))
+            dynamodb = FakeDynamoDbClient()
+            dynamodb.put_item(
+                TableName=config.DISPOSITION_SYNC_STATE_TABLE,
+                Item={
+                    "job_name": {"S": JOB_NAME},
+                    "cursor_value": {"S": "2026-01-01T10:00:00Z"},
+                },
+            )
+            result = run_disposition_sync(
+                config=config,
+                dynamodb_client=dynamodb,
+                s3_client=FakeS3Client(),
+                http_session=FakeHttpSession([]),
+                now=datetime(2026, 1, 2, tzinfo=UTC),
+            )
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(
+            observed["cursor"],
+            SyncCursor(datetime(2026, 1, 1, 10, 0, tzinfo=UTC), ""),
+        )
+
+    def test_read_cursor_accepts_legacy_timestamp_only_state(self) -> None:
+        dynamodb = FakeDynamoDbClient()
+        dynamodb.put_item(
+            TableName="disposition-sync-state",
+            Item={
+                "job_name": {"S": JOB_NAME},
+                "cursor_value": {"S": "2026-01-01T10:00:00Z"},
+            },
+        )
+        cursor = _read_cursor(dynamodb, "disposition-sync-state")
+        self.assertEqual(cursor, SyncCursor(datetime(2026, 1, 1, 10, 0, tzinfo=UTC), ""))
 
 
 if __name__ == "__main__":

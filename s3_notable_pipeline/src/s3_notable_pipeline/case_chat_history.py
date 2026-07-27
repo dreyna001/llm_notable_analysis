@@ -8,7 +8,7 @@ import os
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable
 
 from .config import Config
 
@@ -18,6 +18,9 @@ _VALID_ANSWER_STATUSES = frozenset(
 )
 _USER_UPDATED_INDEX = "UserUpdatedIndex"
 _CLIENT_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._-]{8,128}$")
+_MESSAGE_SORT_PREFIX = "s#"
+_GET_MESSAGE_QUERY_PAGE_SIZE = 25
+_UTC_NOW_PROVIDER: Callable[[], datetime] | None = None
 
 
 class ChatSessionNotFoundError(LookupError):
@@ -403,7 +406,7 @@ def persist_chat_history(
                 raise ValueError("client_request_id was reused for a different chat request.")
             return session_id
 
-    reserved = _reserve_turn_capacity(
+    reserved, reserved_base_sequence = _reserve_turn_capacity(
         config=config,
         dynamodb_client=dynamodb_client,
         session_id=session_id,
@@ -417,15 +420,14 @@ def persist_chat_history(
     assistant_content = truncate_stored_message(str(response.get("answer") or ""), max_bytes)
     assistant_answer_status = normalize_stored_answer_status(response.get("answer_status"))
 
-    current = _count_messages(
-        config=config,
-        dynamodb_client=dynamodb_client,
-        session_id=session_id,
-    )
-    max_messages = max(1, int(config.CASE_QA_MAX_MESSAGES_PER_SESSION))
-    if current + 2 > max_messages:
-        raise ValueError(
-            f"Chat session exceeded the configured message limit of {max_messages}."
+    if reserved_base_sequence is not None:
+        user_sequence = reserved_base_sequence
+        assistant_sequence = reserved_base_sequence + 1
+    else:
+        user_sequence, assistant_sequence = _allocate_turn_sequences(
+            config=config,
+            dynamodb_client=dynamodb_client,
+            session_id=session_id,
         )
 
     now = _utc_now()
@@ -446,10 +448,10 @@ def persist_chat_history(
     user_item: dict[str, Any] = {
         "session_id": {"S": session_id},
         "created_at_message_id": {
-            "S": (
-                f"turn#{turn_id}#user"
-                if normalized_request_id
-                else _message_sort_key(user_created, user_message_id)
+            "S": _message_sort_key(
+                user_created,
+                user_sequence,
+                user_message_id,
             )
         },
         "message_id": {"S": user_message_id},
@@ -457,14 +459,15 @@ def persist_chat_history(
         "content": {"S": user_content},
         "created_at": {"S": user_created},
         "expires_at_epoch": {"N": str(expires_epoch)},
+        "message_sequence": {"N": str(user_sequence)},
     }
     assistant_item: dict[str, Any] = {
         "session_id": {"S": session_id},
         "created_at_message_id": {
-            "S": (
-                f"turn#{turn_id}#assistant"
-                if normalized_request_id
-                else _message_sort_key(assistant_created, assistant_message_id)
+            "S": _message_sort_key(
+                assistant_created,
+                assistant_sequence,
+                assistant_message_id,
             )
         },
         "message_id": {"S": assistant_message_id},
@@ -472,6 +475,7 @@ def persist_chat_history(
         "content": {"S": assistant_content},
         "created_at": {"S": assistant_created},
         "expires_at_epoch": {"N": str(expires_epoch)},
+        "message_sequence": {"N": str(assistant_sequence)},
     }
     if normalized_request_id:
         fingerprint = _request_fingerprint(
@@ -636,11 +640,25 @@ def _reserve_turn_capacity(
     mode: str,
     selected_case_id: str | None,
     turn_id: str,
-) -> bool:
+    _attempt: int = 0,
+) -> tuple[bool, int | None]:
     """Atomically reserve two message slots when the native client supports it."""
 
     if not hasattr(dynamodb_client, "transact_write_items"):
-        return False
+        return False, None
+    record = _load_chat_session(
+        config=config,
+        dynamodb_client=dynamodb_client,
+        session_id=session_id,
+        user_id=user_id,
+        require_owner=True,
+        validate_scope=(mode, selected_case_id),
+    )
+    _bootstrap_session_message_count(
+        config=config,
+        dynamodb_client=dynamodb_client,
+        session_id=session_id,
+    )
     record = _load_chat_session(
         config=config,
         dynamodb_client=dynamodb_client,
@@ -651,7 +669,7 @@ def _reserve_turn_capacity(
     )
     pending = record.get("pending_turns") or {}
     if isinstance(pending, dict) and turn_id in pending:
-        return True
+        return True, int(pending[turn_id])
     if "pending_turns" not in record:
         dynamodb_client.update_item(
             TableName=config.CHAT_SESSIONS_TABLE,
@@ -684,15 +702,16 @@ def _reserve_turn_capacity(
             ),
             ConditionExpression=(
                 "attribute_exists(session_id) AND "
-                "(attribute_not_exists(message_count) OR message_count + :two <= :maximum) AND "
+                "message_count <= :maximum_before AND "
+                "message_count = :current AND "
                 "attribute_not_exists(pending_turns.#turn)"
             ),
             ExpressionAttributeNames={"#turn": turn_id},
             ExpressionAttributeValues={
                 ":current": {"N": str(current)},
                 ":two": {"N": "2"},
-                ":maximum": {"N": str(max_messages)},
-                ":reserved": {"N": str(_now_epoch())},
+                ":maximum_before": {"N": str(max_messages - 2)},
+                ":reserved": {"N": str(current)},
             },
         )
     except Exception as exc:
@@ -705,13 +724,29 @@ def _reserve_turn_capacity(
             validate_scope=(mode, selected_case_id),
         )
         if turn_id in (latest.get("pending_turns") or {}):
-            return True
+            return True, int(latest["pending_turns"][turn_id])
         if "ConditionalCheckFailed" in str(exc):
+            latest_count = int(latest.get("message_count") or 0)
+            if latest_count + 2 <= max_messages:
+                if _attempt >= 4:
+                    raise RuntimeError(
+                        "Concurrent chat turn reservation contention; retry the request."
+                    ) from exc
+                return _reserve_turn_capacity(
+                    config=config,
+                    dynamodb_client=dynamodb_client,
+                    session_id=session_id,
+                    user_id=user_id,
+                    mode=mode,
+                    selected_case_id=selected_case_id,
+                    turn_id=turn_id,
+                    _attempt=_attempt + 1,
+                )
             raise ValueError(
                 f"Chat session exceeded the configured message limit of {max_messages}."
             ) from exc
         raise
-    return True
+    return True, current
 
 
 def _release_turn_capacity(
@@ -850,15 +885,117 @@ def _get_message_item(
     turn_id: str,
     role: str,
 ) -> dict[str, Any] | None:
-    response = dynamodb_client.get_item(
-        TableName=config.CHAT_MESSAGES_TABLE,
-        Key={
-            "session_id": {"S": session_id},
-            "created_at_message_id": {"S": f"turn#{turn_id}#{role}"},
-        },
-        ConsistentRead=True,
+    target_message_id = f"turn#{turn_id}#{role}"
+    exclusive_start_key: dict[str, Any] | None = None
+    while True:
+        request: dict[str, Any] = {
+            "TableName": config.CHAT_MESSAGES_TABLE,
+            "KeyConditionExpression": "session_id = :session_id",
+            "FilterExpression": "message_id = :message_id",
+            "ExpressionAttributeValues": {
+                ":session_id": {"S": session_id},
+                ":message_id": {"S": target_message_id},
+            },
+            "ConsistentRead": True,
+            "Limit": _GET_MESSAGE_QUERY_PAGE_SIZE,
+        }
+        if exclusive_start_key is not None:
+            request["ExclusiveStartKey"] = exclusive_start_key
+        response = dynamodb_client.query(**request)
+        for item in response.get("Items") or []:
+            if item.get("message_id", {}).get("S") == target_message_id:
+                return item
+        exclusive_start_key = response.get("LastEvaluatedKey")
+        if not exclusive_start_key:
+            return None
+
+
+def _bootstrap_session_message_count(
+    *,
+    config: Config,
+    dynamodb_client: Any,
+    session_id: str,
+) -> None:
+    record = _load_chat_session_if_present(
+        config=config,
+        dynamodb_client=dynamodb_client,
+        session_id=session_id,
     )
-    return response.get("Item")
+    if record is None:
+        return
+    stored_count = (
+        int(record["message_count"])
+        if record.get("message_count") is not None
+        else None
+    )
+    counted = _count_messages(
+        config=config,
+        dynamodb_client=dynamodb_client,
+        session_id=session_id,
+    )
+    if stored_count is not None and stored_count >= counted:
+        return
+    condition = (
+        "attribute_not_exists(message_count)"
+        if stored_count is None
+        else "message_count = :observed"
+    )
+    values = {":counted": {"N": str(counted)}}
+    if stored_count is not None:
+        values[":observed"] = {"N": str(stored_count)}
+    try:
+        dynamodb_client.update_item(
+            TableName=config.CHAT_SESSIONS_TABLE,
+            Key={"session_id": {"S": session_id}},
+            UpdateExpression="SET message_count = :counted",
+            ConditionExpression=condition,
+            ExpressionAttributeValues=values,
+        )
+    except Exception:
+        return
+
+
+def _allocate_turn_sequences(
+    *,
+    config: Config,
+    dynamodb_client: Any,
+    session_id: str,
+) -> tuple[int, int]:
+    """Atomically reserve two monotonic message sequence numbers for one turn."""
+
+    _bootstrap_session_message_count(
+        config=config,
+        dynamodb_client=dynamodb_client,
+        session_id=session_id,
+    )
+    max_messages = max(1, int(config.CASE_QA_MAX_MESSAGES_PER_SESSION))
+    try:
+        response = dynamodb_client.update_item(
+            TableName=config.CHAT_SESSIONS_TABLE,
+            Key={"session_id": {"S": session_id}},
+            UpdateExpression="ADD message_count :two",
+            ConditionExpression=(
+                "attribute_exists(session_id) AND "
+                "message_count <= :maximum_before"
+            ),
+            ExpressionAttributeValues={
+                ":two": {"N": "2"},
+                ":maximum_before": {"N": str(max_messages - 2)},
+            },
+            ReturnValues="UPDATED_OLD",
+        )
+    except Exception as exc:
+        if "ConditionalCheckFailed" in str(exc):
+            raise ValueError(
+                f"Chat session exceeded the configured message limit of {max_messages}."
+            ) from exc
+        raise
+    attributes = response.get("Attributes") or {}
+    if "message_count" in attributes:
+        base_sequence = int(attributes["message_count"]["N"])
+    else:
+        base_sequence = 0
+    return base_sequence, base_sequence + 1
 
 
 def _load_chat_session_if_present(
@@ -989,7 +1126,64 @@ def _list_message_rows(
             "created_at_message_id": item["created_at_message_id"],
         }
         rows.append(row)
+    _sort_message_rows(rows)
     return rows
+
+
+def _sort_message_rows(rows: list[dict[str, Any]]) -> None:
+    legacy_rows = [
+        row for row in rows if _row_message_sequence(row) is None
+    ]
+    legacy_rows.sort(
+        key=lambda row: (
+            str(row.get("created_at") or _legacy_created_at_from_sort_key(row)),
+            0 if row.get("role") == "user" else 1,
+            str(row.get("message_id") or ""),
+        )
+    )
+    legacy_order = {id(row): index for index, row in enumerate(legacy_rows)}
+
+    def order_key(row: dict[str, Any]) -> int:
+        sequence = _row_message_sequence(row)
+        if sequence is not None:
+            return sequence
+        return legacy_order[id(row)]
+
+    rows.sort(key=order_key)
+
+
+def _row_message_sequence(row: dict[str, Any]) -> int | None:
+    raw = row.get("message_sequence")
+    if raw is not None and str(raw).isdigit():
+        return int(raw)
+    return _parse_sequence_from_sort_key(row.get("created_at_message_id"))
+
+
+def _parse_sequence_from_sort_key(sort_key: Any) -> int | None:
+    text = str(sort_key or "")
+    if not text:
+        return None
+    if text.startswith(_MESSAGE_SORT_PREFIX):
+        parts = text.split("#", 3)
+        if len(parts) >= 2 and parts[1].isdigit():
+            return int(parts[1])
+    head = text.split("#", 1)[0]
+    if head.isdigit() and len(head) == 10:
+        return int(head)
+    return None
+
+
+def _legacy_created_at_from_sort_key(row: dict[str, Any]) -> str:
+    text = str(row.get("created_at_message_id") or "")
+    if text.startswith(_MESSAGE_SORT_PREFIX):
+        parts = text.split("#", 3)
+        if len(parts) >= 3:
+            return parts[2]
+    if "#" in text:
+        head = text.split("#", 1)[0]
+        if not (head.isdigit() and len(head) == 10):
+            return head
+    return ""
 
 
 def _count_messages(
@@ -1003,6 +1197,7 @@ def _count_messages(
         KeyConditionExpression="session_id = :session_id",
         ExpressionAttributeValues={":session_id": {"S": session_id}},
         Select="COUNT",
+        ConsistentRead=True,
     )
     return int(response.get("Count", 0))
 
@@ -1064,11 +1259,16 @@ def _session_sort_key(updated_at: str, session_id: str) -> str:
     return f"{updated_at}#{session_id}"
 
 
-def _message_sort_key(created_at: str, message_id: str) -> str:
-    return f"{created_at}#{message_id}"
+def _message_sort_key(created_at: str, sequence: int, message_id: str) -> str:
+    return (
+        f"{_MESSAGE_SORT_PREFIX}{int(sequence):010d}#{created_at}#{message_id}"
+    )
 
 
 def _utc_now() -> datetime:
+    provider = _UTC_NOW_PROVIDER
+    if provider is not None:
+        return provider()
     return datetime.now(timezone.utc)
 
 

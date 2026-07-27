@@ -61,8 +61,10 @@ startup fails when it is empty.
 
 **Analyst portal chat (separate function):** `PortalApiFunction` receives the
 same default `BEDROCK_MODEL_ID`. Optional override:
-`PortalChatBedrockModelId` / `PORTAL_CHAT_BEDROCK_MODEL_ID`. When blank, portal
-chat falls back to `BEDROCK_MODEL_ID`.
+`PortalChatBedrockModelId` / `PORTAL_CHAT_BEDROCK_MODEL_ID`. When setting that
+override, also set `PortalChatBedrockModelArn` to the exact corresponding ARN
+used by portal IAM. When blank, portal chat falls back to `BEDROCK_MODEL_ID` and
+`BedrockAnalysisModelArn`.
 
 ### How should Lambda timeout and memory be sized?
 

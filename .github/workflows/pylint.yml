@@ -36,3 +36,45 @@ jobs:
           python -m unittest discover \
             -s llm_notable_analysis_onprem_systemd/tests/onprem_service \
             -p "test_*.py"
+
+  s3-notable-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: s3_notable_pipeline
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+
+      - name: Run Python unit tests
+        run: |
+          python -m pytest tests -q
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: s3_notable_pipeline/frontend/analyst-portal/package-lock.json
+
+      - name: Install analyst portal dependencies
+        working-directory: s3_notable_pipeline/frontend/analyst-portal
+        run: npm ci
+
+      - name: Run analyst portal unit tests
+        working-directory: s3_notable_pipeline/frontend/analyst-portal
+        run: npm test
+
+      - name: Build analyst portal
+        working-directory: s3_notable_pipeline/frontend/analyst-portal
+        run: npm run build

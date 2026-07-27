@@ -73,13 +73,21 @@ who owns recovery tasks. It does not change runtime behavior.
   themselves fail the invocation; report sink failure does.
 - Report objects use deterministic keys derived from the input stem
   (`reports/<stem>.md`, `.json`, optional `.html`) and are overwritten on
-  reprocess (no collision suffix).
+  reprocess when no S3 processing identity is present. When versioned processing
+  identity is available, report keys include a `--<processing_id>` suffix and
+  are created with `IfNoneMatch="*"`. Retries reconcile existing artifacts by
+  verifying byte-identical content before writing missing siblings; content
+  mismatch fails closed.
 - Side-effect idempotency is **off by default**; the `action_gated` profile sets
   `SIDE_EFFECT_IDEMPOTENCY_ENABLED=true`. It applies only to Splunk notable
   update and ServiceNow incident create, not Bedrock calls, local S3 reports,
   read-only investigation queries, or case archive writes.
 - Case archive replay uses CaseIndex identity checks in `case_archive.py` (separate
-  from side-effect idempotency). With `CASE_ARCHIVE_FAILURE_MODE=suppress`
+  from side-effect idempotency). Claimed runs stuck after partial envelope,
+  completion, or embed publication are reconciled on replay: verify the expected
+  envelope (or write it when missing), finalize the run, and republish pending
+  embed requests without duplicating completed side effects. Envelope content
+  mismatch fails closed. With `CASE_ARCHIVE_FAILURE_MODE=suppress`
   (default), archive errors are logged and attached to `sink_result` without
   failing the record; `fail_closed` propagates the error and fails the record.
 - Stale `in_progress` side-effect markers can be reclaimed after
@@ -106,6 +114,9 @@ who owns recovery tasks. It does not change runtime behavior.
 
 - Applies mainly to `notable_rest`: S3 markdown/JSON/HTML may already exist while
   Splunk POST has not succeeded.
+- When processing identity is present, partial S3 report writes use create-only
+  keys; a retry verifies existing artifacts and completes missing markdown/JSON/HTML
+  siblings. Content mismatch fails closed.
 - ServiceNow create may already have succeeded earlier in the same attempt (before
   report generation); that outcome is not rolled back.
 - A retry overwrites report objects at the same keys and may retry Splunk

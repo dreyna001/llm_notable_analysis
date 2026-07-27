@@ -11,7 +11,36 @@ how to add cases.
 Unit tests must not call live AWS, Bedrock, Splunk, Elasticsearch, ServiceNow,
 or MCP endpoints. Mock AWS clients and HTTP calls, and keep fixtures bounded.
 
-Run the full Python test suite from `s3_notable_pipeline`:
+### Python environment (local or CI)
+
+From `s3_notable_pipeline` with Python **3.12+**:
+
+```bash
+python -m venv .venv
+```
+
+PowerShell:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e ".[test]"
+```
+
+Bash:
+
+```bash
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[test]"
+```
+
+Runtime pins match `requirements.txt` (Lambda image). `boto3` is listed in
+`pyproject.toml` for local runs and tests because the Lambda base image provides
+it at deploy time. Test-only packages (`pytest`, `PyYAML`) install via the
+`test` extra.
+
+Run the full Python test suite from `s3_notable_pipeline` (with the venv active):
 
 ```bash
 python -m pytest tests
@@ -41,9 +70,10 @@ python -m unittest discover -s tests -p "test_case_chat.py" -v
 python -m unittest discover -s tests -p "test_portal_chat.py" -v
 ```
 
-Portal frontend checks do not call real AWS:
+Portal frontend checks do not call real AWS. From `s3_notable_pipeline`:
 
 ```bash
+npm ci --prefix frontend/analyst-portal
 npm --prefix frontend/analyst-portal test
 npm --prefix frontend/analyst-portal run build
 ```

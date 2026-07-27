@@ -54,6 +54,14 @@ class DispositionSyncConfigError(Exception):
     """Disposition sync configuration or map validation failed."""
 
 
+@dataclass(frozen=True, order=True)
+class SyncCursor:
+    """Stable ServiceNow page boundary ordered by update time then sys_id."""
+
+    updated_at: datetime
+    sys_id: str = ""
+
+
 @dataclass(frozen=True)
 class DispositionSyncSummary:
     """Structured result for one sync run."""
@@ -132,7 +140,7 @@ def run_disposition_sync(
     deactivated = 0
     malformed = 0
     errors = 0
-    max_sys_updated_on: datetime | None = None
+    max_cursor: SyncCursor | None = None
 
     try:
         for page_rows in _iter_table_api_pages(
@@ -178,9 +186,11 @@ def run_disposition_sync(
                     linked += 1
 
                 row_updated = outcome.get("sys_updated_on")
-                if isinstance(row_updated, datetime):
-                    if max_sys_updated_on is None or row_updated > max_sys_updated_on:
-                        max_sys_updated_on = row_updated
+                snow_sys_id = str(outcome.get("snow_sys_id") or "").strip()
+                if isinstance(row_updated, datetime) and snow_sys_id:
+                    row_cursor = SyncCursor(row_updated, snow_sys_id)
+                    if max_cursor is None or row_cursor > max_cursor:
+                        max_cursor = row_cursor
 
             if page_total and (page_malformed / page_total) > MALFORMED_PAGE_FAIL_RATIO:
                 raise RuntimeError(
@@ -190,11 +200,11 @@ def run_disposition_sync(
             if fetched >= MAX_RECORDS_PER_RUN:
                 break
 
-        if max_sys_updated_on is not None:
+        if max_cursor is not None:
             _write_cursor(
                 dynamodb_client,
                 config.DISPOSITION_SYNC_STATE_TABLE,
-                cursor_value=max_sys_updated_on,
+                cursor=max_cursor,
                 updated_at=run_at,
             )
             summary = DispositionSyncSummary(
@@ -344,20 +354,20 @@ def _process_row(
 
     if not is_closed:
         if not existing:
-            return {"action": "skipped", "sys_updated_on": sys_updated_on}
+            return {"action": "skipped", "sys_updated_on": sys_updated_on, "snow_sys_id": snow_sys_id}
         if existing.get("is_active") is False:
-            return {"action": "skipped", "sys_updated_on": sys_updated_on}
+            return {"action": "skipped", "sys_updated_on": sys_updated_on, "snow_sys_id": snow_sys_id}
         _upsert_disposition_item(
             dynamodb_client=dynamodb_client,
             table_name=config.DISPOSITION_TABLE,
             item=_merge_deactivated_item(existing, sys_updated_on=sys_updated_on, run_at=run_at),
         )
-        return {"action": "deactivated", "sys_updated_on": sys_updated_on}
+        return {"action": "deactivated", "sys_updated_on": sys_updated_on, "snow_sys_id": snow_sys_id}
 
     mapped_for_hash = {key: mapped.get(key) for key in sorted(mapped)}
     row_hash = payload_hash(mapped_for_hash)
     if existing and str(existing.get("payload_hash", "")) == row_hash:
-        return {"action": "skipped", "sys_updated_on": sys_updated_on}
+        return {"action": "skipped", "sys_updated_on": sys_updated_on, "snow_sys_id": snow_sys_id}
 
     disposition_normalized, disposition_raw = normalize_disposition(
         mapped.get("close_code"),
@@ -404,6 +414,7 @@ def _process_row(
     return {
         "action": "upserted",
         "sys_updated_on": sys_updated_on,
+        "snow_sys_id": snow_sys_id,
         "linked": bool(case_id),
     }
 
@@ -565,7 +576,7 @@ def _iter_table_api_pages(
     api_fields: list[str],
     closed_states: list[str],
     field_map: dict[str, Any],
-    cursor: datetime | None,
+    cursor: SyncCursor | datetime | None,
     backfill_days: int,
     run_at: datetime,
     token: str,
@@ -576,6 +587,7 @@ def _iter_table_api_pages(
     fetched_total = 0
     closed_field = field_map["fields"]["closed_at"]
     updated_field = field_map["fields"]["sys_updated_on"]
+    sys_id_field = field_map["fields"]["sys_id"]
 
     state_field = field_map["fields"]["state"]
 
@@ -587,7 +599,13 @@ def _iter_table_api_pages(
                 f"^{state_field}IN{_comma_join(closed_states)}"
             )
         else:
-            query = f"{updated_field}>{_servicenow_query_timestamp(cursor)}"
+            boundary = cursor if isinstance(cursor, SyncCursor) else SyncCursor(cursor)
+            timestamp = _servicenow_query_timestamp(boundary.updated_at)
+            query = (
+                f"{updated_field}>{timestamp}"
+                f"^NQ{updated_field}={timestamp}^{sys_id_field}>{boundary.sys_id}"
+            )
+        query += f"^ORDERBY{updated_field}^ORDERBY{sys_id_field}"
 
         url = f"{base_url.rstrip('/')}/api/now/table/{table_name}"
         params = {
@@ -597,7 +615,6 @@ def _iter_table_api_pages(
             "sysparm_exclude_reference_link": "true",
             "sysparm_limit": str(PAGE_SIZE),
             "sysparm_offset": str(offset),
-            "sysparm_order_by": updated_field,
         }
         response = _request_with_retry(
             session=session,
@@ -665,7 +682,7 @@ def _api_field_list(field_map: dict[str, Any]) -> list[str]:
     return sorted(columns)
 
 
-def _read_cursor(dynamodb_client: Any, table_name: str) -> datetime | None:
+def _read_cursor(dynamodb_client: Any, table_name: str) -> SyncCursor | None:
     response = dynamodb_client.get_item(
         TableName=table_name,
         Key={"job_name": {"S": JOB_NAME}},
@@ -678,14 +695,17 @@ def _read_cursor(dynamodb_client: Any, table_name: str) -> datetime | None:
     cursor_text = str(row.get("cursor_value", "")).strip()
     if not cursor_text:
         return None
-    return _parse_servicenow_datetime(cursor_text)
+    updated_at = _parse_servicenow_datetime(cursor_text)
+    if updated_at is None:
+        return None
+    return SyncCursor(updated_at, str(row.get("cursor_sys_id") or "").strip())
 
 
 def _write_cursor(
     dynamodb_client: Any,
     table_name: str,
     *,
-    cursor_value: datetime,
+    cursor: SyncCursor,
     updated_at: datetime,
 ) -> None:
     dynamodb_client.put_item(
@@ -693,7 +713,8 @@ def _write_cursor(
         Item=_to_ddb_item(
             {
                 "job_name": JOB_NAME,
-                "cursor_value": _format_servicenow_timestamp(cursor_value),
+                "cursor_value": _format_servicenow_timestamp(cursor.updated_at),
+                "cursor_sys_id": cursor.sys_id,
                 "updated_at": _format_servicenow_timestamp(updated_at),
             }
         ),

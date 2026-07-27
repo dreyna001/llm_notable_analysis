@@ -238,11 +238,11 @@ def rewrite_case_chunks(
     envelope_key: str = "",
     tenant_id: str = "",
 ) -> None:
-    """Delete existing chunk objects and write fresh embedded chunks."""
+    """Replace embedded chunk objects without deleting usable chunks until writes succeed."""
 
     prefix = f"{config.CASE_ARCHIVE_CHUNKS_PREFIX}/{case_id}/"
-    _delete_prefix(bucket=bucket, prefix=prefix, s3_client=s3_client)
-    opensearch_documents: list[dict[str, Any]] = []
+    existing_keys = _list_prefix_keys(bucket=bucket, prefix=prefix, s3_client=s3_client)
+    prepared: list[tuple[str, dict[str, Any], list[float]]] = []
     for chunk in chunks:
         embedding = embed_text(chunk.search_text, config, bedrock_client)
         body = {
@@ -258,9 +258,15 @@ def rewrite_case_chunks(
             "embedding_model": config.CASE_QA_EMBEDDING_MODEL,
             "metadata": chunk.metadata,
         }
+        object_key = f"{prefix}{chunk.chunk_id}.json"
+        prepared.append((object_key, body, embedding))
+
+    new_keys = {object_key for object_key, _, _ in prepared}
+    opensearch_documents: list[dict[str, Any]] = []
+    for object_key, body, embedding in prepared:
         s3_client.put_object(
             Bucket=bucket,
-            Key=f"{prefix}{chunk.chunk_id}.json",
+            Key=object_key,
             Body=json.dumps(body, ensure_ascii=False, default=str).encode("utf-8"),
             ContentType="application/json",
         )
@@ -288,6 +294,9 @@ def rewrite_case_chunks(
             adapter=adapter_for(config),
             batch_size=int(config_value(config, "OPENSEARCH_BULK_BATCH_SIZE", 100)),
         )
+    obsolete_keys = sorted(existing_keys - new_keys)
+    if obsolete_keys:
+        _delete_object_keys(bucket=bucket, keys=obsolete_keys, s3_client=s3_client)
 
 
 def embed_text(text: str, config: Config, bedrock_client: Any) -> list[float]:
@@ -367,21 +376,28 @@ def _opensearch_case_enabled(config: Config) -> bool:
     return opensearch_enabled(config, case=True)
 
 
-def _delete_prefix(bucket: str, prefix: str, s3_client: Any) -> None:
+def _list_prefix_keys(bucket: str, prefix: str, s3_client: Any) -> set[str]:
+    keys: set[str] = set()
     token: str | None = None
     while True:
         kwargs: dict[str, Any] = {"Bucket": bucket, "Prefix": prefix}
         if token:
             kwargs["ContinuationToken"] = token
         response = s3_client.list_objects_v2(**kwargs)
-        keys = [{"Key": item["Key"]} for item in response.get("Contents", [])]
-        for start in range(0, len(keys), 1000):
-            batch = keys[start : start + 1000]
-            if batch:
-                s3_client.delete_objects(Bucket=bucket, Delete={"Objects": batch})
+        for item in response.get("Contents", []):
+            key = str(item.get("Key", "")).strip()
+            if key:
+                keys.add(key)
         if not response.get("IsTruncated"):
-            return
+            return keys
         token = response.get("NextContinuationToken")
+
+
+def _delete_object_keys(bucket: str, keys: list[str], s3_client: Any) -> None:
+    for start in range(0, len(keys), 1000):
+        batch = [{"Key": key} for key in keys[start : start + 1000]]
+        if batch:
+            s3_client.delete_objects(Bucket=bucket, Delete={"Objects": batch})
 
 
 def _make_chunk(
