@@ -22,7 +22,7 @@ chat, KB files) are preserved; only chunk rows are cleared.
 Options:
   --config-env PATH   Analyzer config.env (default: /etc/notable-analyzer/config.env)
   --portal-env PATH   Optional portal.env for supplemental config keys
-  --target-dim N      Target vector dimension (default: RAG_VECTOR_DIMENSIONS or 768)
+  --target-dim N      Target vector dimension (default: 768 for Granite migration)
   --dry-run           Print planned SQL without modifying databases
   -h, --help          Show this help
 

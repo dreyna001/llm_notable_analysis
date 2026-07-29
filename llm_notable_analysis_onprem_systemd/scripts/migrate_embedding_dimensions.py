@@ -17,7 +17,8 @@ from typing import Any, Callable, Sequence
 from urllib.parse import urlparse
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
-_SUPPORTED_TARGET_DIMENSIONS = frozenset({768})
+DEFAULT_GRANITE_TARGET_DIMENSION = 768
+_SUPPORTED_TARGET_DIMENSIONS = frozenset({DEFAULT_GRANITE_TARGET_DIMENSION})
 
 ExecuteFn = Callable[[str, str], tuple[int, str, str]]
 
@@ -414,7 +415,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--target-dim",
         type=int,
         default=None,
-        help="Target vector dimension (default: RAG_VECTOR_DIMENSIONS or 768)",
+        help=(
+            "Target vector dimension "
+            f"(default: {DEFAULT_GRANITE_TARGET_DIMENSION} for Granite migration)"
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -432,14 +436,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(f"Missing config file: {config_env}")
 
     portal_env = Path(args.portal_env) if args.portal_env else None
-    config = parse_config_env(config_env)
-    target_dim = args.target_dim
-    if target_dim is None:
-        raw = config.get("RAG_VECTOR_DIMENSIONS", "768")
-        try:
-            target_dim = int(raw)
-        except ValueError as exc:
-            raise SystemExit(f"Invalid RAG_VECTOR_DIMENSIONS: {raw!r}") from exc
+    target_dim = args.target_dim if args.target_dim is not None else DEFAULT_GRANITE_TARGET_DIMENSION
 
     try:
         return run_migration(

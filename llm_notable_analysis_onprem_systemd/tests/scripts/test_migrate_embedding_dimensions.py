@@ -200,6 +200,38 @@ class TestMigrateEmbeddingDimensions(unittest.TestCase):
                     execute=execute,
                 )
 
+    def test_main_defaults_to_granite_target_when_config_still_mixedbread(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_env = _write_config(
+                Path(tmpdir),
+                RAG_VECTOR_DIMENSIONS="1024",
+                RAG_POSTGRES_DSN="postgresql://rag",
+                CASE_POSTGRES_DSN="postgresql://cases",
+            )
+            execute = _FakeExecute(
+                {
+                    (
+                        "postgresql://cases",
+                        "notable_cases",
+                        "case_chunks",
+                    ): migration.TableInspection(exists=True, type_text="vector(1024)"),
+                }
+            )
+            original_execute = migration.default_execute
+            migration.default_execute = execute  # type: ignore[method-assign]
+            try:
+                result = migration.main(
+                    [
+                        "--config-env",
+                        str(config_env),
+                        "--dry-run",
+                    ]
+                )
+            finally:
+                migration.default_execute = original_execute  # type: ignore[method-assign]
+            self.assertEqual(result, 0)
+            self.assertEqual(execute.executed, [])
+
     def test_parse_config_env_rejects_unsafe_keys(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "config.env"
