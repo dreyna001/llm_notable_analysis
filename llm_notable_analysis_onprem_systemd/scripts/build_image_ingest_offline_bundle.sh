@@ -233,19 +233,49 @@ else
     info "SKIP_TESSDATA=true; tessdata/ left unchanged"
 fi
 
+download_tesseract_deb_closure() {
+    local deb_dir="$1"
+    shift
+    local packages=("$@")
+    local pkg deb_names=()
+
+    if ! command -v apt-cache >/dev/null 2>&1; then
+        warn "apt-cache not found; cannot resolve tesseract package dependencies"
+        return 1
+    fi
+
+    mapfile -t deb_names < <(
+        apt-cache depends --recurse --no-recommends --no-suggests \
+            --no-conflicts --no-breaks --no-replaces --no-enhances \
+            "${packages[@]}" 2>/dev/null \
+            | awk '/^[[:alnum:]/ { print $1 }' \
+            | sort -u
+    )
+
+    if [[ ${#deb_names[@]} -eq 0 ]]; then
+        warn "Could not resolve dependency list for: ${packages[*]}"
+        return 1
+    fi
+
+    mkdir -p "$deb_dir"
+    (
+        cd "$deb_dir"
+        for pkg in "${deb_names[@]}"; do
+            apt-get download "$pkg" 2>/dev/null || warn "apt-get download failed for $pkg"
+        done
+    )
+}
+
 if [[ "$SKIP_DEBS" != "true" ]]; then
     if command -v apt-get >/dev/null 2>&1; then
-        info "Downloading Ubuntu/Debian packages into debs/"
-        (
-            cd "$OUTPUT_DIR/debs"
-            apt-get download \
-                tesseract-ocr \
-                tesseract-ocr-eng \
-                libleptonica-dev \
-                2>/dev/null || warn "apt-get download failed; debs/ may be incomplete"
-        )
+        info "Downloading Ubuntu/Debian tesseract runtime packages (with dependencies) into debs/"
+        download_tesseract_deb_closure "$OUTPUT_DIR/debs" tesseract-ocr tesseract-ocr-eng \
+            || warn "Dependency-aware deb download failed; debs/ may be incomplete"
         if [[ -z "$(find "$OUTPUT_DIR/debs" -maxdepth 1 -name '*.deb' -print -quit)" ]]; then
             warn "No .deb files downloaded. Air-gapped hosts must install tesseract-ocr manually."
+        else
+            deb_count="$(find "$OUTPUT_DIR/debs" -maxdepth 1 -name '*.deb' | wc -l | tr -d ' ')"
+            info "debs/: $deb_count .deb file(s) staged"
         fi
     else
         warn "apt-get not found; debs/ will remain empty. Install tesseract OS packages manually on the target."

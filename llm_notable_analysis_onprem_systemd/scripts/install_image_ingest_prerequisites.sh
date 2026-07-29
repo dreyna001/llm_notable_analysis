@@ -159,11 +159,26 @@ install_debs_if_present() {
         return 0
     fi
     if command -v tesseract >/dev/null 2>&1; then
-        info "tesseract already installed; skipping dpkg -i debs/*.deb"
+        info "tesseract already installed; skipping OS package install"
         return 0
     fi
-    info "Installing OS packages from bundle debs/"
-    run_or_dry dpkg -i "${debs[@]}"
+    if command -v apt-get >/dev/null 2>&1; then
+        info "Installing OS packages from bundle debs/ via apt-get"
+        info "When apt repositories are reachable, apt-get resolves any missing dependencies"
+        if [[ "$DRY_RUN" == "true" ]]; then
+            info "[dry-run] apt-get install -y ${debs[*]}"
+        else
+            apt-get install -y "${debs[@]}"
+        fi
+        return 0
+    fi
+    info "Installing OS packages from bundle debs/ via dpkg -i (air-gapped; bundle must include all dependencies)"
+    if [[ "$DRY_RUN" == "true" ]]; then
+        info "[dry-run] dpkg -i ${debs[*]}"
+        return 0
+    fi
+    dpkg -i "${debs[@]}" || err \
+        "dpkg failed. Rebuild the bundle on a connected host so debs/ includes dependency closures, or install tesseract-ocr from local apt media."
 }
 
 install_tessdata_if_needed() {
