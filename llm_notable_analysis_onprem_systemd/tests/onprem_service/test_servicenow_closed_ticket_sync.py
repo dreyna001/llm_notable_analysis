@@ -791,7 +791,7 @@ class TestServiceNowClosedTicketSync(unittest.TestCase):
         self.assertIn("CREATE SCHEMA IF NOT EXISTS notable_closed_tickets", schema_text)
         self.assertIn("cursor_sys_id", schema_text)
         self.assertIn("ticket_chunks", schema_text)
-        self.assertIn("embedding vector(1024)", schema_text)
+        self.assertIn("embedding vector(768)", schema_text)
         self.assertIn("ticket_chunks_embedding_hnsw_idx", schema_text)
         self.assertIn("attachments_download_status_idx", schema_text)
         self.assertIn("semantic_extraction_status", schema_text)

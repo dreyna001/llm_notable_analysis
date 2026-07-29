@@ -60,11 +60,23 @@ export type CaseRawSectionResponse = {
 
 export type ChatMode = "selected_case";
 
+export type ChatImageMediaType =
+  | "image/png"
+  | "image/jpeg"
+  | "image/webp"
+  | "image/gif";
+
+export type ChatImagePayload = {
+  media_type: ChatImageMediaType;
+  data_base64: string;
+};
+
 export type ChatRequest = {
   mode: ChatMode;
   question: string;
   selected_case_id?: string;
   session_id?: string | null;
+  images?: ChatImagePayload[];
 };
 
 export type ChatContextUsageSegment = {
@@ -138,4 +150,7 @@ export type PortalCapabilities = {
   chat_ready: boolean;
   chat_dependency_status?: ChatDependencyStatus | null;
   chat_degraded_reason?: string | null;
+  chat_images_enabled?: boolean;
+  max_chat_images?: number;
+  max_chat_image_bytes?: number;
 };

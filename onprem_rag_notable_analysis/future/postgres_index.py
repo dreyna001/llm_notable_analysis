@@ -21,7 +21,7 @@ class PostgresRAGSchemaConfig:
 
     schema: str = "notable_rag"
     chunks_table: str = "kb_chunks"
-    vector_dimensions: int = 1024
+    vector_dimensions: int = 768
     fts_config: str = "english"
 
 

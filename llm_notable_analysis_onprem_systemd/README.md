@@ -37,7 +37,7 @@ integration detail live under [`docs/`](docs/).
 | Portal config template | [`config.portal.env.example`](config.portal.env.example) |
 | Tests and validation | [`docs/testing/TESTING.md`](docs/testing/TESTING.md) |
 | Local dev (repo `.venv`, portal preview) | [`../DEVELOPING.md`](../DEVELOPING.md) |
-| Host paths vs local checkout | [Filesystem map](#filesystem-map) |
+| Host paths vs local checkout | [Filesystem map](#filesystem-map), [HOST_LAYOUT_AND_UPDATES.md](docs/operations/deployment/HOST_LAYOUT_AND_UPDATES.md) |
 | Security posture | [`docs/operations/security/SECURITY_OPERATIONS.md`](docs/operations/security/SECURITY_OPERATIONS.md), [`docs/security/SECURITY_POSTURE.md`](docs/security/SECURITY_POSTURE.md) |
 | Deployment readiness | [`docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.md`](docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.md) |
 | Developer / maintainer guide | [`docs/internal/DEVELOPER_MAINTAINER_GUIDE.md`](docs/internal/DEVELOPER_MAINTAINER_GUIDE.md) |
@@ -93,8 +93,14 @@ Installed Python package:
 
 ## Filesystem map
 
-Source checkout only until `scripts/install.sh` runs on the host. Local dev uses
-the git tree and repo-root `.venv`; see [Local dev](#local-dev-repo-checkout-no-full-install).
+Production hosts keep **two trees**: a **git checkout** (where you `git pull` and
+run `scripts/install.sh`) and **`/opt/notable-analyzer`** (what `systemd` runs).
+Runtime secrets and tuning live in **`/etc/notable-analyzer/`**, not in either
+tree. That split is intentional; see
+[`docs/operations/deployment/HOST_LAYOUT_AND_UPDATES.md`](docs/operations/deployment/HOST_LAYOUT_AND_UPDATES.md).
+
+Local dev uses only the git tree and repo-root `.venv`; see
+[Local dev](#local-dev-repo-checkout-no-full-install).
 
 ### Installed host (production)
 

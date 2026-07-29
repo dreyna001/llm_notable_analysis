@@ -60,8 +60,11 @@ browser binaries match that OS.
 
 Production host paths (`/opt/notable-analyzer`, `/var/notables`, Postgres, nginx)
 are documented in the package
-[`Filesystem map`](llm_notable_analysis_onprem_systemd/README.md#filesystem-map).
-Local dev uses this repo-root `.venv` only — not `/opt/notable-analyzer/venv`.
+[`Filesystem map`](llm_notable_analysis_onprem_systemd/README.md#filesystem-map)
+and
+[`HOST_LAYOUT_AND_UPDATES.md`](llm_notable_analysis_onprem_systemd/docs/operations/deployment/HOST_LAYOUT_AND_UPDATES.md)
+(git checkout vs install tree vs `/etc/notable-analyzer/`). Local dev uses this
+repo-root `.venv` only — not `/opt/notable-analyzer/venv`.
 
 ## Daily workflow
 

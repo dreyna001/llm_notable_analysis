@@ -91,7 +91,7 @@ def _minimal_record(*, case_id: str, config: Config):
 
 
 class PreviewFakeDbTests(unittest.TestCase):
-    def test_fake_embedding_returns_1024_dimensions(self) -> None:
+    def test_fake_embedding_returns_768_dimensions(self) -> None:
         model = PreviewFakeEmbeddingModel()
         vectors = model.encode(["question one", "question two"])
         self.assertEqual(len(vectors), 2)

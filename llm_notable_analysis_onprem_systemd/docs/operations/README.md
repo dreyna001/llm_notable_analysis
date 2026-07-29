@@ -31,7 +31,9 @@ starting values. Not controlled by capability profiles.
 | Guide | Purpose |
 |-------|---------|
 | [`deployment/INSTALL.md`](deployment/INSTALL.md) | Host install, services, post-install smoke checks. |
+| [`deployment/HOST_LAYOUT_AND_UPDATES.md`](deployment/HOST_LAYOUT_AND_UPDATES.md) | Git checkout vs `/opt/notable-analyzer` vs `/etc/notable-analyzer/`; pull and upgrade workflow. |
 | [`deployment/OFFLINE_PRESTAGE_GUIDE.md`](deployment/OFFLINE_PRESTAGE_GUIDE.md) | Artifacts to stage before an air-gapped install. |
+| [`rag/IMAGE_INGEST_PREREQUISITES.md`](rag/IMAGE_INGEST_PREREQUISITES.md) | OCR, PDF, Granite retrieval, offline image-ingest bundle. |
 | [`deployment/AIRGAPPED_DEPLOYMENT.md`](deployment/AIRGAPPED_DEPLOYMENT.md) | Air-gapped bring-up: AWS-to-on-prem mapping, sizing, acceptance checks. |
 | [`deployment/deployment_profiles/README.md`](deployment/deployment_profiles/README.md) | Recommended vLLM and `config.env` starting values per CPU/GPU build. |
 
@@ -78,6 +80,7 @@ Requires the `rag` profile. Source document lifecycle and retrieval tuning.
 | Guide | Purpose |
 |-------|---------|
 | [`rag/KNOWLEDGE_BASE_OPERATIONS.md`](rag/KNOWLEDGE_BASE_OPERATIONS.md) | Add, rebuild, validate, and roll back KB source documents. |
+| [`rag/IMAGE_INGEST_PREREQUISITES.md`](rag/IMAGE_INGEST_PREREQUISITES.md) | Image/OCR/PDF prerequisites, Granite migration, offline bundle. |
 | [`rag/RAG_OPERATIONS.md`](rag/RAG_OPERATIONS.md) | RAG enablement, fail-open/fail-closed posture, backend, embeddings, rerank, context budgets. |
 
 ## Investigation

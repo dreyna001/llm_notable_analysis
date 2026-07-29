@@ -1,22 +1,34 @@
-import { ArrowUp, Square } from "lucide-react";
+import { ArrowUp, ImagePlus, Square, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
   useRef,
   useState,
   type FormEvent,
+  type ChangeEvent,
   type KeyboardEvent,
 } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { postChat } from "../api/client";
-import type { ChatContextUsage, ChatMode, ChatResponse } from "../types";
+import type {
+  ChatContextUsage,
+  ChatImagePayload,
+  ChatMode,
+  ChatResponse,
+} from "../types";
 import {
   formatChatApiError,
   isChatRecoverableServerSession,
 } from "../utils/formatApiError";
 import { answerStatusLabel, shouldShowAnswerStatus } from "../utils/answerStatus";
 import { resolveChatEmptyState } from "../utils/chatEmptyState";
+import {
+  CHAT_IMAGE_ACCEPT_ATTR,
+  fileToChatImagePayload,
+  formatChatImageFileSize,
+  validateChatImageFile,
+} from "../utils/chatImageAttachment";
 import { sanitizeChatAnswer } from "../utils/sanitizeChatAnswer";
 import { ChatConversationSkeleton } from "./LoadingSkeletons";
 import { ContextUsageIndicator } from "./ContextUsageIndicator";
@@ -49,12 +61,22 @@ type ChatPanelProps = {
   initialSessionId?: string | null;
   loadingHistory?: boolean;
   maxQuestionChars?: number;
+  chatImagesEnabled?: boolean;
+  maxChatImages?: number;
+  maxChatImageBytes?: number;
   disabledReason?: string;
   composerDisabled?: boolean;
   serverSyncError?: string | null;
   onStateChange?: (state: ChatPanelState) => void;
   onChatCancelled?: (state: ChatPanelState) => void;
   onOrphanedChatResponse?: (payload: OrphanedChatResponse) => void;
+};
+
+type ComposerAttachment = {
+  file: File;
+  previewUrl: string;
+  name: string;
+  size: number;
 };
 
 const COMPOSER_MAX_HEIGHT_PX = 200;
@@ -79,6 +101,9 @@ export function ChatPanel({
   initialSessionId = null,
   loadingHistory = false,
   maxQuestionChars,
+  chatImagesEnabled = false,
+  maxChatImages,
+  maxChatImageBytes,
   disabledReason,
   composerDisabled = false,
   serverSyncError,
@@ -91,11 +116,18 @@ export function ChatPanel({
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId);
   const [error, setError] = useState<string | null>(null);
   const [waitingElapsedSec, setWaitingElapsedSec] = useState(0);
+  const [attachment, setAttachment] = useState<ComposerAttachment | null>(null);
+  const [attachmentConverting, setAttachmentConverting] = useState(false);
   const threadRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const chatAbortRef = useRef<AbortController | null>(null);
   const chatRequestGenRef = useRef(0);
   const pendingQuestionRef = useRef<string | null>(null);
+  const pendingAttachmentPayloadRef = useRef<ChatImagePayload | null>(null);
+
+  const imageUploadEnabled =
+    chatImagesEnabled === true && (maxChatImages ?? 1) >= 1;
 
   const buildPanelState = useCallback(
     (nextTurns: ChatTurn[]): ChatPanelState => ({
@@ -107,7 +139,10 @@ export function ChatPanel({
   );
 
   const isBusy = turns.some((turn) => turn.awaitingResponse);
-  const inputDisabled = Boolean(disabledReason) || composerDisabled || loadingHistory;
+  const inputDisabled =
+    Boolean(disabledReason) || composerDisabled || loadingHistory;
+  const sendDisabled =
+    inputDisabled || !question.trim() || attachmentConverting;
   const latestContextUsage = [...turns]
     .reverse()
     .find((turn) => turn.response?.context_usage)?.response?.context_usage as
@@ -163,6 +198,81 @@ export function ChatPanel({
     };
   }, []);
 
+  const clearAttachment = useCallback(() => {
+    setAttachment((current) => {
+      if (current?.previewUrl) {
+        URL.revokeObjectURL(current.previewUrl);
+      }
+      return null;
+    });
+    pendingAttachmentPayloadRef.current = null;
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (attachment?.previewUrl) {
+        URL.revokeObjectURL(attachment.previewUrl);
+      }
+    };
+  }, [attachment?.previewUrl]);
+
+  function handleAttachmentSelect(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) {
+      return;
+    }
+
+    const validationError = validateChatImageFile(file, {
+      maxBytes: maxChatImageBytes,
+    });
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    setAttachment((current) => {
+      if (current?.previewUrl) {
+        URL.revokeObjectURL(current.previewUrl);
+      }
+      const previewUrl = URL.createObjectURL(file);
+      return {
+        file,
+        previewUrl,
+        name: file.name,
+        size: file.size,
+      };
+    });
+    pendingAttachmentPayloadRef.current = null;
+    setError(null);
+  }
+
+  function handleRemoveAttachment() {
+    clearAttachment();
+    setError(null);
+  }
+
+  async function resolveRequestImages(): Promise<ChatImagePayload[] | undefined> {
+    if (!attachment) {
+      return undefined;
+    }
+    if (pendingAttachmentPayloadRef.current) {
+      return [pendingAttachmentPayloadRef.current];
+    }
+
+    setAttachmentConverting(true);
+    try {
+      const payload = await fileToChatImagePayload(attachment.file);
+      pendingAttachmentPayloadRef.current = payload;
+      return [payload];
+    } finally {
+      setAttachmentConverting(false);
+    }
+  }
+
   function cancelPendingChat() {
     chatRequestGenRef.current += 1;
     chatAbortRef.current?.abort();
@@ -187,6 +297,7 @@ export function ChatPanel({
       setQuestion(restoreRef.text);
       requestAnimationFrame(adjustComposerHeight);
     }
+    clearAttachment();
     setError("Stopped. You can edit and send again.");
     onChatCancelled?.(buildPanelState(nextTurns));
   }
@@ -206,6 +317,14 @@ export function ChatPanel({
     }
     if (maxQuestionChars != null && trimmed.length > maxQuestionChars) {
       setError(`Question must be ${maxQuestionChars} characters or fewer.`);
+      return;
+    }
+
+    let requestImages: ChatImagePayload[] | undefined;
+    try {
+      requestImages = await resolveRequestImages();
+    } catch {
+      setError("Could not read the selected image. Try choosing a different file.");
       return;
     }
 
@@ -244,6 +363,7 @@ export function ChatPanel({
             selected_case_id:
               mode === "selected_case" ? selectedCaseId : undefined,
             session_id: activeSessionId,
+            ...(requestImages ? { images: requestImages } : {}),
           },
           { signal: abortController.signal },
         );
@@ -294,12 +414,14 @@ export function ChatPanel({
             : turn,
         ),
       );
+      clearAttachment();
     } catch (err: unknown) {
       if (
         abortController.signal.aborted ||
         requestGen !== chatRequestGenRef.current
       ) {
         setTurns((value) => value.filter((turn) => !turn.awaitingResponse));
+        clearAttachment();
         return;
       }
       setTurns((value) => value.filter((turn) => turn.id !== turnId));
@@ -396,7 +518,67 @@ export function ChatPanel({
               {serverSyncError ? <p>{serverSyncError}</p> : null}
             </div>
           ) : null}
+          {imageUploadEnabled && attachment ? (
+            <div className="mb-2 flex items-center gap-3 rounded-md border border-border bg-muted/40 px-3 py-2">
+              <img
+                alt=""
+                className="size-10 shrink-0 rounded object-cover"
+                src={attachment.previewUrl}
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm">{attachment.name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {formatChatImageFileSize(attachment.size)}
+                </p>
+              </div>
+              <Button
+                aria-label="Remove attached image"
+                className="size-8 shrink-0"
+                disabled={inputDisabled || attachmentConverting || isBusy}
+                size="icon"
+                type="button"
+                variant="ghost"
+                onClick={handleRemoveAttachment}
+              >
+                <X className="size-4" />
+              </Button>
+            </div>
+          ) : null}
+          {imageUploadEnabled && attachmentConverting ? (
+            <p className="mb-2 text-sm text-muted-foreground">
+              Preparing image...
+            </p>
+          ) : null}
           <div className="flex items-end gap-3 rounded-lg bg-muted/70 px-4 py-3 shadow-sm">
+            {imageUploadEnabled ? (
+              <>
+                <input
+                  ref={fileInputRef}
+                  accept={CHAT_IMAGE_ACCEPT_ATTR}
+                  className="sr-only"
+                  disabled={inputDisabled || attachmentConverting || isBusy}
+                  tabIndex={-1}
+                  type="file"
+                  onChange={handleAttachmentSelect}
+                />
+                <Button
+                  aria-label="Attach image"
+                  className="size-8 shrink-0 rounded-md"
+                  disabled={
+                    inputDisabled ||
+                    attachmentConverting ||
+                    isBusy ||
+                    Boolean(attachment)
+                  }
+                  size="icon"
+                  type="button"
+                  variant="ghost"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <ImagePlus className="size-4" />
+                </Button>
+              </>
+            ) : null}
             <textarea
               ref={textareaRef}
               className="chat-scrollbar max-h-[200px] min-h-[24px] flex-1 resize-none overflow-y-auto border-0 bg-transparent py-0.5 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground"
@@ -437,9 +619,7 @@ export function ChatPanel({
             ) : (
               <Button
                 className="size-8 shrink-0 rounded-md"
-                disabled={
-                  inputDisabled || !question.trim()
-                }
+                disabled={sendDisabled}
                 size="icon"
                 type="submit"
               >

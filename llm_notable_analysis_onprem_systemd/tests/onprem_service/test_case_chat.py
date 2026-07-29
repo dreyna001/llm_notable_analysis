@@ -76,7 +76,7 @@ class _FakeEmbeddingModel:
     def encode(self, texts, show_progress_bar=False, convert_to_numpy=True):
         del show_progress_bar, convert_to_numpy
         self.encoded_texts.extend(texts)
-        return [[1.0] + [0.0] * 1023 for _text in texts]
+        return [[1.0] + [0.0] * 767 for _text in texts]
 
 
 class _BadEmbeddingModel:
@@ -98,7 +98,19 @@ def _config(**overrides: object) -> Config:
         "CASE_QA_CONTEXT_BUDGET_CHARS": 12000,
     }
     defaults.update(overrides)
-    return Config(**defaults)
+    dynamic_keys = {
+        key
+        for key in overrides
+        if str(key).startswith("CASE_QA_CHAT_IMAGES")
+        or str(key).startswith("CASE_QA_MAX_CHAT_IMAGE")
+    }
+    constructor_keys = {
+        key: value for key, value in defaults.items() if key not in dynamic_keys
+    }
+    config = Config(**constructor_keys)
+    for key in dynamic_keys:
+        setattr(config, str(key), defaults[key])
+    return config
 
 
 def _chunk_row(
@@ -1077,6 +1089,134 @@ class TestCaseChatClosedTicketLane(unittest.TestCase):
         self.assertIn("closed_ticket", segment_ids)
         labels = {segment["label"] for segment in usage["segments"]}
         self.assertIn("Closed tickets", labels)
+
+
+def _make_png_payload(*, width: int = 24, height: int = 24) -> dict[str, str]:
+    import base64
+    import io
+
+    from PIL import Image
+
+    image = Image.new("RGB", (width, height), (0, 128, 255))
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return {"media_type": "image/png", "data_base64": encoded}
+
+
+class TestCaseChatImages(unittest.TestCase):
+    def test_validate_chat_payload_accepts_images_when_enabled(self) -> None:
+        request = validate_chat_payload(
+            {
+                "mode": "selected_case",
+                "question": "What does this screenshot show?",
+                "selected_case_id": "case-1",
+                "images": [_make_png_payload()],
+            },
+            _config(CASE_QA_CHAT_IMAGES_ENABLED=True),
+        )
+        self.assertEqual(len(request.images), 1)
+        self.assertEqual(request.images[0].media_type, "image/png")
+
+    def test_build_prompt_includes_analyst_image_advisory(self) -> None:
+        prompt = _build_prompt(
+            "What does this show?",
+            [
+                RetrievedSource(
+                    source_lane="current_case",
+                    text="Evidence text.",
+                )
+            ],
+            has_analyst_images=True,
+        )
+        self.assertIn("analyst-provided context", prompt)
+        self.assertIn("not archived case evidence", prompt)
+
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat._context_usage_for_request",
+        return_value={"kind": "case_grounded", "prompt_tokens": 1},
+    )
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat.openai_chat_complete",
+        return_value=("Grounded answer.", 0.1),
+    )
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat.persist_chat_history",
+        return_value="session-1",
+    )
+    def test_answer_case_chat_passes_multimodal_payload_without_persisting_images(
+        self,
+        mock_persist,
+        mock_complete,
+        _mock_context_usage,
+    ) -> None:
+        response = answer_case_chat(
+            payload={
+                "mode": "selected_case",
+                "question": "What does this screenshot show?",
+                "selected_case_id": "case-1",
+                "images": [_make_png_payload()],
+            },
+            config=_config(
+                CASE_QA_CHAT_IMAGES_ENABLED=True,
+                CASE_QA_CHAT_HISTORY_ENABLED=True,
+            ),
+            connect=lambda _dsn: _FakeConnection(row_pages=[[_chunk_row()], []]),
+            embedding_model=_FakeEmbeddingModel(),
+            user_id="analyst@example.com",
+            llm_session=object(),
+        )
+
+        self.assertEqual(response["answer_status"], "answered")
+        _, kwargs = mock_complete.call_args
+        user_content = kwargs["user_content"]
+        self.assertIsInstance(user_content, list)
+        self.assertEqual(user_content[0]["type"], "text")
+        self.assertTrue(
+            user_content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+        )
+        persist_kwargs = mock_persist.call_args.kwargs
+        self.assertEqual(
+            persist_kwargs["question"],
+            "What does this screenshot show?",
+        )
+        self.assertNotIn("images", persist_kwargs)
+
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat._context_usage_for_request",
+        return_value={"kind": "general_knowledge", "prompt_tokens": 1},
+    )
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat.openai_chat_complete",
+        return_value=("General answer with image.", 0.1),
+    )
+    def test_general_knowledge_fallback_keeps_request_scoped_images(
+        self,
+        mock_complete,
+        _mock_context_usage,
+    ) -> None:
+        response = answer_case_chat(
+            payload={
+                "mode": "selected_case",
+                "question": "What is TLS?",
+                "selected_case_id": "case-1",
+                "images": [_make_png_payload()],
+            },
+            config=_config(
+                CASE_QA_GENERAL_KNOWLEDGE_ENABLED=True,
+                CASE_QA_CHAT_IMAGES_ENABLED=True,
+            ),
+            connect=lambda _dsn: _FakeConnection(row_pages=[[], []]),
+            embedding_model=_FakeEmbeddingModel(),
+            llm_session=object(),
+        )
+
+        self.assertEqual(response["answer_status"], "answered")
+        _, kwargs = mock_complete.call_args
+        user_content = kwargs["user_content"]
+        self.assertIsInstance(user_content, list)
+        prompt_text = user_content[0]["text"]
+        self.assertIn("analyst-provided context", prompt_text)
 
 
 if __name__ == "__main__":

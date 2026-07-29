@@ -36,13 +36,18 @@ chunks + optional closed-ticket lane).
 | --- | --- | --- | --- |
 | `CAPABILITY_PROFILES` | `core,rag,analyst_portal` | `core,analyst_portal` | Profiles are process-local |
 | `RAG_ENABLED` + `RAG_POSTGRES_*` | via `rag` profile | **explicit `true`** | Portal must duplicate RAG DSN/schema |
-| `RAG_RERANK_ENABLED` | `true` | `true` | Stage rerank model offline |
+| `RAG_RERANK_ENABLED` | `true` | `true` | Stage Granite rerank model offline |
+| `RAG_EMBEDDING_MODEL` | `ibm-granite/granite-embedding-english-r2` | same | 768-dim; replaces Mixedbread |
+| `RAG_RERANK_MODEL` | `ibm-granite/granite-embedding-reranker-english-r2` | same | Apache 2.0 US lineage |
+| `RAG_VECTOR_DIMENSIONS` / `CASE_QA_VECTOR_DIMENSIONS` | `768` | `768` | Must match; rebuild indexes on change |
 | `SPL_QUERY_RAG_ENABLED` | `true` | `true` | Requires SPL KB ingest |
 | `SPL_QUERY_GENERATION_ENABLED` | `true` | n/a | SPL drafts in analysis; no live Splunk without `spl_readonly` |
 | `CLOSED_TICKET_RAG_ENABLED` | `true` | `true` | Retrieval after tickets indexed |
 | `CASE_QA_CLOSED_TICKET_ENABLED` | `true` | `true` | Chat closed-ticket lane |
 | `SERVICENOW_CLOSED_TICKET_SYNC_ENABLED` | `true` when SN ready | n/a | Needs token, HTTPS base URL, encoded query |
+| `CLOSED_TICKET_VISION_ENABLED` | `true` | n/a | Image ticket attachments -> Gemma 4 vision; scans -> Tesseract OCR |
 | `CASE_QA_CHAT_HISTORY_ENABLED` | `true` | `true` | Match retention days |
+| `CASE_QA_CHAT_IMAGES_ENABLED` | n/a | `true` | Request-scoped chat images; requires multimodal Gemma |
 | `PORTAL_PROXY_SECRET` | same value | same value | nginx → portal |
 
 ## Beyond config (required for on-prem)
@@ -57,10 +62,14 @@ chunks + optional closed-ticket lane).
    (general + SPL corpora).
 4. **Closed tickets** — Configure ServiceNow read-only sync; enable
    `SERVICENOW_CLOSED_TICKET_SYNC_ENABLED`; install and enable
-   `notable-closed-ticket-sync.timer`; verify chunks in
+   `notable-closed-ticket-sync.timer`; set `CLOSED_TICKET_VISION_ENABLED=true`
+   (or run `scripts/configure_closed_ticket_vision_defaults.sh`) when ticket
+   attachments include screenshots; verify chunks in
    `notable_closed_tickets.ticket_chunks` ([`../integrations/SERVICENOW_CLOSED_TICKET_OPERATIONS.md`](../integrations/SERVICENOW_CLOSED_TICKET_OPERATIONS.md)).
-5. **Offline models** — Embedding + rerank weights under `HF_HOME` /
-   `SENTENCE_TRANSFORMERS_HOME` when air-gapped ([`OFFLINE_PRESTAGE_GUIDE.md`](OFFLINE_PRESTAGE_GUIDE.md)).
+5. **Offline models** — Granite embed + rerank weights and image-ingest bundle
+   (Tesseract, pypdfium2, Pillow) under `HF_HOME` / bundle install when air-gapped
+   ([`OFFLINE_PRESTAGE_GUIDE.md`](OFFLINE_PRESTAGE_GUIDE.md),
+   [`../rag/IMAGE_INGEST_PREREQUISITES.md`](../rag/IMAGE_INGEST_PREREQUISITES.md)).
 6. **Portal network** — nginx TLS, Basic Auth, DNS/firewall
    ([`../analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](../analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md)).
 7. **SOAR file drop** — SFTP ownership/permissions on `INCOMING_DIR`.

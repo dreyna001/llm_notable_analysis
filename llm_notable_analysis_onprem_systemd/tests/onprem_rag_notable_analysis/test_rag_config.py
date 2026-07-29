@@ -5,15 +5,15 @@ from onprem_rag_notable_analysis.future.rag_config import RAGConfig
 
 
 class TestRAGConfig(unittest.TestCase):
-    def test_default_embedding_model_is_mixedbread(self) -> None:
-        """RAG defaults should match the on-prem Mixedbread embedding target."""
+    def test_default_embedding_model_is_granite(self) -> None:
+        """RAG defaults should match the on-prem Granite embedding target."""
         config = RAGConfig()
 
         self.assertEqual(config.backend, "postgres")
         self.assertEqual(
-            config.embedding_model_name, "mixedbread-ai/mxbai-embed-large-v1"
+            config.embedding_model_name, "ibm-granite/granite-embedding-english-r2"
         )
-        self.assertEqual(config.vector_dimensions, 1024)
+        self.assertEqual(config.vector_dimensions, 768)
         self.assertFalse(config.fail_closed)
 
     def test_postgres_config_requires_dsn(self) -> None:

@@ -81,10 +81,9 @@ macro, and datamodel grounding in the SPL-generation call, operators use
 `RAG_RERANK_ENABLED`, `RAG_RERANK_MODEL`, `HF_HOME`,
 `SENTENCE_TRANSFORMERS_HOME`
 
-- Default embedding model: `mixedbread-ai/mxbai-embed-large-v1`.
-- Default vector dimension: `1024`. Must match `CASE_QA_VECTOR_DIMENSIONS`
-  (currently fixed at `1024` for v1).
-- Default reranker model: `mixedbread-ai/mxbai-rerank-large-v2`, disabled by
+- Default embedding model: `ibm-granite/granite-embedding-english-r2`.
+- Default vector dimension: `768`. Must match `CASE_QA_VECTOR_DIMENSIONS`.
+- Default reranker model: `ibm-granite/granite-embedding-reranker-english-r2`, disabled by
   default.
 - `HF_HOME` and `SENTENCE_TRANSFORMERS_HOME` are not `RAG_*` keys; packaged
   systemd units set them under `/var/notables/cache/...` for model loading.
@@ -100,41 +99,42 @@ macro, and datamodel grounding in the SPL-generation call, operators use
 
 | Component | Model | Notes |
 | --- | --- | --- |
-| Embedder | `mixedbread-ai/mxbai-embed-large-v1` | Apache 2.0, US-made |
-| Vector dims | `1024` | Must match `RAG_VECTOR_DIMENSIONS` and `CASE_QA_VECTOR_DIMENSIONS` |
-| Reranker | `mixedbread-ai/mxbai-rerank-large-v2` | Apache 2.0, disabled by default |
+| Embedder | `ibm-granite/granite-embedding-english-r2` | Apache 2.0, US IBM Granite |
+| Vector dims | `768` | Must match `RAG_VECTOR_DIMENSIONS` and `CASE_QA_VECTOR_DIMENSIONS` |
+| Reranker | `ibm-granite/granite-embedding-reranker-english-r2` | Apache 2.0, disabled by default |
 | Loader | `SentenceTransformer` + `CrossEncoder` | In-process in analyzer |
 | KB rebuild | Required when embedder or dims change | Not required for reranker-only |
 
 **Config defaults:**
 
 ```bash
-RAG_EMBEDDING_MODEL=mixedbread-ai/mxbai-embed-large-v1
-RAG_VECTOR_DIMENSIONS=1024
-CASE_QA_EMBEDDING_MODEL=mixedbread-ai/mxbai-embed-large-v1
-CASE_QA_VECTOR_DIMENSIONS=1024
-RAG_RERANK_MODEL=mixedbread-ai/mxbai-rerank-large-v2
+RAG_EMBEDDING_MODEL=ibm-granite/granite-embedding-english-r2
+RAG_VECTOR_DIMENSIONS=768
+CASE_QA_EMBEDDING_MODEL=ibm-granite/granite-embedding-english-r2
+CASE_QA_VECTOR_DIMENSIONS=768
+RAG_RERANK_MODEL=ibm-granite/granite-embedding-reranker-english-r2
 RAG_RERANK_ENABLED=false
 ```
 
 **Operator rollout:**
 
-1. Stage both Mixedbread models under `HF_HOME` / `SENTENCE_TRANSFORMERS_HOME`.
-2. Update `/etc/notable-analyzer/config.env` and portal env if used.
-3. Run `scripts/setup_postgres_rag.sh` and rebuild general, SPL, and Elastic KB
+1. Stage Granite embedder and reranker models under `HF_HOME` / `SENTENCE_TRANSFORMERS_HOME`.
+2. For Mixedbread-era hosts, run `scripts/migrate_embedding_dimensions.sh` before
+   `scripts/configure_us_granite_retrieval_defaults.sh`.
+3. Update `/etc/notable-analyzer/config.env` and portal env if used.
+4. Run `scripts/setup_postgres_rag.sh` and rebuild general, SPL, and Elastic KB
    corpora per [`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md).
-4. On existing portal hosts, apply case-archive schema dimension changes, then
-   re-embed case chunks for archived cases.
-5. Enable `RAG_RERANK_ENABLED=true` only after latency testing.
+5. On existing portal hosts, re-embed case chunks for archived cases.
+6. Enable `RAG_RERANK_ENABLED=true` only after latency testing.
 
-**Existing Postgres hosts (case archive):** new installs use `vector(1024)` in
-`deploy/postgres/notable_cases_schema.sql`. Hosts still on older `vector(768)`
-case-chunk indexes require a planned migration and full re-embed before portal
-Q&A retrieval is trusted again. General `kb_chunks` tables follow
-`RAG_VECTOR_DIMENSIONS` via ingest/setup DDL.
+**Existing Postgres hosts (Mixedbread 1024-dim):** run
+`scripts/migrate_embedding_dimensions.sh` to alter chunk tables to `vector(768)`
+without deleting cases, tickets, attachments, or chat rows. New installs use
+`vector(768)` in `deploy/postgres/notable_cases_schema.sql`. General `kb_chunks`
+tables follow `RAG_VECTOR_DIMENSIONS` via ingest/setup DDL.
 
-Query embeddings use the Mixedbread retrieval prompt prefix automatically at
-encode time. Document/chunk embeddings do not.
+Query embeddings follow the configured Granite embedder at encode time.
+Document/chunk embeddings do not use a retrieval prefix.
 
 ### How much context should enter the prompt?
 

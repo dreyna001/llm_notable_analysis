@@ -61,6 +61,53 @@ Manual sync:
 /opt/notable-analyzer/venv/bin/python /opt/notable-analyzer/scripts/run_closed_ticket_sync.py
 ```
 
+## Image attachments (vision and OCR)
+
+General SOC **KB ingest does not index standalone image files** until the text+image
+pipeline is enabled; see [`../rag/IMAGE_INGEST_PREREQUISITES.md`](../rag/IMAGE_INGEST_PREREQUISITES.md).
+
+For **closed-ticket** attachments:
+
+- **Raster images** (PNG/JPEG/GIF/WebP): when `CLOSED_TICKET_VISION_ENABLED=true`,
+  the shared extraction module calls **Gemma 4 31B** on the same OpenAI-compatible
+  gateway as analysis (`LLM_API_URL` / `LLM_MODEL_NAME`, via LiteLLM and vLLM).
+  Empty `CLOSED_TICKET_VISION_API_BASE`, `_MODEL`, and `_API_KEY` inherit those LLM
+  settings at startup. Vision is advisory; OCR text is preserved when vision fails
+  (`vision_failed`, `vision_partial`, or per-raster warnings in extraction metadata).
+- **Scanned PDFs and image-only pages**: OCR via **Tesseract** plus optional per-page
+  advisory vision through the same shared extraction path (after
+  `install_image_ingest_prerequisites.sh`); no alternate PDF or OCR backends.
+- **DOCX embedded images**: OCR and optional vision for embedded rasters via the shared
+  extractor; bounds inherit `IMAGE_INGEST_*` when set, with
+  `CLOSED_TICKET_ATTACHMENT_MAX_BYTES` / `_MAX_TEXT_CHARS` overrides retained.
+
+Customer-default enablement (preserves secrets and DSNs):
+
+```bash
+sudo bash scripts/configure_closed_ticket_vision_defaults.sh \
+  --config-env /etc/notable-analyzer/config.env
+sudo systemctl restart notable-analyzer
+```
+
+PDF attachments use **pypdfium2/PDFium** for page rasterization when prerequisites are
+installed; vision is not applied to vector PDF text. Text/json/csv attachments decode
+without vision or OCR.
+
+Validate multimodal chat before production sync (replace token and use a small PNG):
+
+```bash
+source /etc/notable-analyzer/config.env
+IMG_B64="$(printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' | tr -d '\n')"
+curl -fsS "${LLM_API_URL%/chat/completions}/chat/completions" \
+  -H "Authorization: Bearer ${LLM_API_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"${LLM_MODEL_NAME}\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"What color is this image? One word.\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64,${IMG_B64}\"}}]}]}"
+```
+
+If the call fails, check `journalctl -u vllm` and LiteLLM model support for
+`image_url` on your vLLM build; indexing still proceeds with OCR text and explicit
+`vision_failed` / `vision_partial` extraction statuses (never silent vision success).
+
 ## Status verification
 
 ```sql

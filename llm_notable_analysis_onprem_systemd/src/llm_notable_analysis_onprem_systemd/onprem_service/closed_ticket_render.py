@@ -83,7 +83,7 @@ def closed_ticket_embedding_model(config: Config) -> str:
         value = getattr(config, key, None)
         if value:
             return str(value).strip()
-    return "mixedbread-ai/mxbai-embed-large-v1"
+    return "ibm-granite/granite-embedding-english-r2"
 
 
 def closed_ticket_chunk_schema_version(config: Config) -> int:

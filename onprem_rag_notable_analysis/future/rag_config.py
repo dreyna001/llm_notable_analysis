@@ -53,11 +53,11 @@ class RAGConfig:
     postgres_chunks_table: str = "kb_chunks"
     postgres_fts_config: str = "english"
     postgres_statement_timeout_ms: int = 5000
-    vector_dimensions: int = 1024
+    vector_dimensions: int = 768
 
-    embedding_model_name: str = "mixedbread-ai/mxbai-embed-large-v1"
+    embedding_model_name: str = "ibm-granite/granite-embedding-english-r2"
     rerank_enabled: bool = False
-    rerank_model_name: str = "mixedbread-ai/mxbai-rerank-large-v2"
+    rerank_model_name: str = "ibm-granite/granite-embedding-reranker-english-r2"
 
     max_snippets_120b: int = 5
     max_snippets_20b: int = 4

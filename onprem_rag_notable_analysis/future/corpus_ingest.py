@@ -18,21 +18,345 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import tempfile
 import time
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Iterable, List, Sequence, Tuple
+from typing import Callable, Iterable, List, Sequence, Tuple
+
+from urllib.parse import urlparse
 
 from .chunking import ChunkRecord, chunk_sections, split_into_sections
+from .image_extraction import (
+    STATUS_EMBEDDED_IMAGE_LIMIT_EXCEEDED,
+    STATUS_EXTRACTED,
+    STATUS_OUTPUT_TRUNCATED,
+    STATUS_PAGE_LIMIT_EXCEEDED,
+    STATUS_VISION_DESCRIBED,
+    STATUS_VISION_PARTIAL,
+    ImageExtractionResult,
+    VisionDescriber,
+    extract_image_content,
+)
+from .image_extraction_config import ImageExtractionConfig
+from .image_vision import (
+    ImageVisionConfig,
+    describe_image_with_vision,
+)
 from .keyword_index import reset_and_build_sqlite_index
 from .postgres_ingest import build_postgres_index
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_SUFFIXES = {".docx", ".txt"}
+TEXT_SUFFIXES = {".txt", ".docx"}
+IMAGE_MEDIA_SUFFIXES = {".png", ".jpeg", ".jpg", ".webp", ".gif"}
+PDF_SUFFIXES = {".pdf"}
+MEDIA_SUFFIXES = IMAGE_MEDIA_SUFFIXES | PDF_SUFFIXES
+ALL_SUPPORTED_SUFFIXES = TEXT_SUFFIXES | MEDIA_SUFFIXES
+
+_INDEXABLE_EXTRACTION_STATUSES = frozenset(
+    {
+        STATUS_EXTRACTED,
+        STATUS_OUTPUT_TRUNCATED,
+        STATUS_PAGE_LIMIT_EXCEEDED,
+        STATUS_EMBEDDED_IMAGE_LIMIT_EXCEEDED,
+    }
+)
+
+
+def _is_indexable_extraction_result(result: ImageExtractionResult) -> bool:
+    """Return True when extracted text should become KB chunks."""
+    if not (result.text or "").strip():
+        return False
+    if result.status in _INDEXABLE_EXTRACTION_STATUSES:
+        return True
+    return result.vision_status in {STATUS_VISION_DESCRIBED, STATUS_VISION_PARTIAL}
+
+_SUFFIX_TO_MIME: dict[str, str] = {
+    ".txt": "text/plain",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".pdf": "application/pdf",
+}
+
+_SECTION_BODY = "Body"
+_SECTION_OCR = "OCR Content"
+_SECTION_EMBEDDED_OCR = "Embedded Images OCR"
+
+
+def _parse_bool_value(raw: str, *, default: bool) -> bool:
+    """Parse a boolean string using the same tokens as onprem_service config."""
+    normalized = (raw or "").strip().lower()
+    if normalized in {"true", "1", "yes"}:
+        return True
+    if normalized in {"false", "0", "no"}:
+        return False
+    if not normalized:
+        return default
+    raise ValueError(f"Invalid boolean value: {raw!r}")
+
+
+def _parse_byte_size(raw: str, *, default: int) -> int:
+    """Parse a positive byte size (supports KiB/MiB/GiB suffixes)."""
+    text = (raw or "").strip()
+    if not text:
+        return default
+    match = re.fullmatch(r"^(\d+)([KMG]iB|[KMG]B)?$", text, re.IGNORECASE)
+    if not match:
+        raise ValueError(f"Invalid byte size: {raw!r}")
+    amount = int(match.group(1))
+    suffix = (match.group(2) or "").upper()
+    multiplier = 1
+    if suffix in {"KIB", "KB"}:
+        multiplier = 1024
+    elif suffix in {"MIB", "MB"}:
+        multiplier = 1024 * 1024
+    elif suffix in {"GIB", "GB"}:
+        multiplier = 1024 * 1024 * 1024
+    value = amount * multiplier
+    if value <= 0:
+        raise ValueError(f"Invalid byte size: {raw!r}")
+    return value
+
+
+def _parse_positive_int(raw: str, *, default: int) -> int:
+    """Parse a positive integer from config text."""
+    text = (raw or "").strip()
+    if not text:
+        return default
+    value = int(text)
+    if value <= 0:
+        raise ValueError(f"Expected positive integer, got {raw!r}")
+    return value
+
+
+def _parse_positive_float(raw: str, *, default: float) -> float:
+    """Parse a positive float from config text."""
+    text = (raw or "").strip()
+    if not text:
+        return default
+    value = float(text)
+    if value <= 0:
+        raise ValueError(f"Expected positive number, got {raw!r}")
+    return value
+
+
+def _parse_mime_allowlist(raw: str) -> frozenset[str]:
+    """Parse a comma-separated MIME allowlist."""
+    items = frozenset(
+        part.split(";", 1)[0].strip().lower()
+        for part in (raw or "").split(",")
+        if part.strip()
+    )
+    if not items:
+        raise ValueError("IMAGE_INGEST_ALLOWED_MIME_TYPES must contain at least one MIME type")
+    return items
+
+
+_DEFAULT_MIME_ALLOWLIST = (
+    "application/pdf,"
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document,"
+    "image/gif,image/jpeg,image/jpg,image/png,image/webp"
+)
+
+
+@dataclass(frozen=True)
+class CorpusImageIngestOptions:
+    """Runtime options for KB image/PDF/DOCX-image extraction during ingest."""
+
+    enabled: bool = False
+    extraction_config: ImageExtractionConfig = field(
+        default_factory=ImageExtractionConfig
+    )
+    vision_enabled: bool = False
+    vision_config: ImageVisionConfig | None = None
+
+
+@dataclass
+class ExtractionStatusCounts:
+    """Aggregate extraction outcomes surfaced in ingest_report.json."""
+
+    attempted: int = 0
+    indexed: int = 0
+    failed: int = 0
+    skipped: int = 0
+    by_status: dict[str, int] = field(default_factory=dict)
+
+    def record(self, status: str, *, indexed: bool) -> None:
+        self.attempted += 1
+        self.by_status[status] = self.by_status.get(status, 0) + 1
+        if indexed:
+            self.indexed += 1
+        else:
+            self.failed += 1
+
+    def record_skip(self) -> None:
+        self.skipped += 1
+
+    def as_report_dict(self) -> dict:
+        return {
+            "attempted": self.attempted,
+            "indexed": self.indexed,
+            "failed": self.failed,
+            "skipped": self.skipped,
+            "by_status": dict(sorted(self.by_status.items())),
+        }
+
+
+def _llm_openai_api_base(llm_api_url: str) -> str:
+    """Derive an OpenAI-compatible API base URL from LLM_API_URL."""
+    text = str(llm_api_url or "").strip().rstrip("/")
+    if text.endswith("/chat/completions"):
+        return text[: -len("/chat/completions")]
+    parsed = urlparse(text)
+    if parsed.scheme and parsed.netloc:
+        path = (parsed.path or "").rstrip("/")
+        if path.endswith("/chat/completions"):
+            path = path[: -len("/chat/completions")]
+        return f"{parsed.scheme}://{parsed.netloc}{path}".rstrip("/")
+    return text
+
+
+def _resolve_image_vision_config(
+    config_values: dict[str, str],
+    *,
+    vision_enabled: bool,
+) -> ImageVisionConfig | None:
+    """Build loopback vision config, inheriting LLM gateway fields when empty."""
+    if not vision_enabled:
+        return None
+    api_base = _config_default(config_values, "IMAGE_VISION_API_BASE", "").strip()
+    model = _config_default(config_values, "IMAGE_VISION_MODEL", "").strip()
+    api_key = _config_default(config_values, "IMAGE_VISION_API_KEY", "").strip()
+    if not api_base:
+        api_base = _llm_openai_api_base(
+            _config_default(config_values, "LLM_API_URL", "")
+        )
+    if not model:
+        model = _config_default(config_values, "LLM_MODEL_NAME", "").strip()
+    if not api_key:
+        api_key = _config_default(config_values, "LLM_API_TOKEN", "").strip()
+    return ImageVisionConfig(
+        enabled=True,
+        api_base=api_base,
+        model=model,
+        api_key=api_key,
+        timeout_seconds=_parse_positive_float(
+            _config_default(config_values, "IMAGE_VISION_TIMEOUT_SECONDS", "30"),
+            default=30.0,
+        ),
+        max_tokens=_parse_positive_int(
+            _config_default(config_values, "IMAGE_VISION_MAX_TOKENS", "400"),
+            default=400,
+        ),
+    )
+
+
+def build_vision_describer_from_options(
+    image_options: CorpusImageIngestOptions,
+) -> VisionDescriber | None:
+    """Return a loopback vision callback when KB vision is enabled and configured."""
+    if not image_options.vision_enabled or image_options.vision_config is None:
+        return None
+    vision_config = image_options.vision_config
+
+    def _describe(image_bytes: bytes, content_type: str):
+        return describe_image_with_vision(
+            image_bytes=image_bytes,
+            content_type=content_type,
+            config=vision_config,
+        )
+
+    return _describe
+
+
+def build_image_ingest_options_from_config_values(
+    config_values: dict[str, str],
+) -> CorpusImageIngestOptions:
+    """Build image-ingest options from parsed config.env key/value pairs."""
+    enabled = _parse_bool_value(
+        _config_default(config_values, "IMAGE_INGEST_ENABLED", "false"),
+        default=False,
+    )
+    allowed_mime_types = _parse_mime_allowlist(
+        _config_default(
+            config_values,
+            "IMAGE_INGEST_ALLOWED_MIME_TYPES",
+            _DEFAULT_MIME_ALLOWLIST,
+        )
+    )
+    extraction_config = ImageExtractionConfig(
+        allowed_mime_types=allowed_mime_types,
+        max_bytes=_parse_byte_size(
+            _config_default(config_values, "IMAGE_INGEST_MAX_BYTES", "10485760"),
+            default=10 * 1024 * 1024,
+        ),
+        max_pixels=_parse_positive_int(
+            _config_default(config_values, "IMAGE_INGEST_MAX_PIXELS", "25000000"),
+            default=25_000_000,
+        ),
+        max_width=_parse_positive_int(
+            _config_default(config_values, "IMAGE_INGEST_MAX_WIDTH", "8192"),
+            default=8192,
+        ),
+        max_height=_parse_positive_int(
+            _config_default(config_values, "IMAGE_INGEST_MAX_HEIGHT", "8192"),
+            default=8192,
+        ),
+        max_pdf_pages=_parse_positive_int(
+            _config_default(config_values, "IMAGE_INGEST_MAX_PDF_PAGES", "50"),
+            default=50,
+        ),
+        max_embedded_images=_parse_positive_int(
+            _config_default(config_values, "IMAGE_INGEST_MAX_EMBEDDED_IMAGES", "20"),
+            default=20,
+        ),
+        max_output_chars=_parse_positive_int(
+            _config_default(config_values, "IMAGE_INGEST_MAX_OUTPUT_CHARS", "12000"),
+            default=12_000,
+        ),
+        tesseract_binary=_config_default(
+            config_values,
+            "IMAGE_INGEST_TESSERACT_BINARY",
+            "tesseract",
+        ).strip()
+        or "tesseract",
+        tesseract_lang=_config_default(
+            config_values,
+            "IMAGE_INGEST_TESSERACT_LANG",
+            "eng",
+        ).strip()
+        or "eng",
+        tesseract_timeout_seconds=_parse_positive_float(
+            _config_default(
+                config_values,
+                "IMAGE_INGEST_TESSERACT_TIMEOUT_SECONDS",
+                "60",
+            ),
+            default=60.0,
+        ),
+    )
+    vision_enabled = _parse_bool_value(
+        _config_default(config_values, "IMAGE_VISION_ENABLED", "false"),
+        default=False,
+    )
+    vision_config = _resolve_image_vision_config(
+        config_values,
+        vision_enabled=vision_enabled,
+    )
+    return CorpusImageIngestOptions(
+        enabled=enabled,
+        extraction_config=extraction_config,
+        vision_enabled=vision_enabled,
+        vision_config=vision_config,
+    )
 
 
 def _configure_logging(verbose: bool) -> None:
@@ -137,40 +461,37 @@ def _read_docx(path: Path) -> str:
         ) from exc
 
 
-def _read_source(path: Path) -> str:
-    """Read one supported source file.
-
-    Args:
-        path: Source document path.
-
-    Returns:
-        Extracted text content.
-
-    Raises:
-        ValueError: If file extension is unsupported.
-    """
-    if path.suffix.casefold() == ".txt":
-        return _read_txt(path)
-    if path.suffix.casefold() == ".docx":
-        return _read_docx(path)
-    raise ValueError(f"Unsupported source type: {path}")
+def _mime_for_path(path: Path) -> str:
+    """Return the configured MIME type for a supported source suffix."""
+    return _SUFFIX_TO_MIME[path.suffix.casefold()]
 
 
-def _discover_docs(source_dir: Path) -> List[Path]:
+def _is_media_path(path: Path) -> bool:
+    """Return whether a path is a non-text media source."""
+    return path.suffix.casefold() in MEDIA_SUFFIXES
+
+
+def _discover_docs(
+    source_dir: Path,
+    *,
+    image_ingest_enabled: bool,
+) -> List[Path]:
     """Discover supported source docs recursively.
 
     Args:
         source_dir: Root source-doc directory.
+        image_ingest_enabled: When True, include PNG/JPEG/WebP/GIF/PDF sources.
 
     Returns:
-        Sorted list of `.docx`/`.txt` file paths.
+        Sorted list of supported file paths.
     """
     if not source_dir.exists():
         return []
+    allowed_suffixes = ALL_SUPPORTED_SUFFIXES if image_ingest_enabled else TEXT_SUFFIXES
     files = [
         p
         for p in source_dir.rglob("*")
-        if p.is_file() and p.suffix.casefold() in SUPPORTED_SUFFIXES
+        if p.is_file() and p.suffix.casefold() in allowed_suffixes
     ]
     return sorted(files)
 
@@ -191,13 +512,135 @@ def _doc_id_from_path(source_dir: Path, path: Path) -> str:
     return f"{stem}_{digest}"
 
 
+def _sections_from_extraction(
+    *,
+    path: Path,
+    data: bytes,
+    content_type: str,
+    section_name: str,
+    image_options: CorpusImageIngestOptions,
+    extraction_counts: ExtractionStatusCounts,
+    warnings: List[str],
+    vision_describer: VisionDescriber | None,
+) -> List[Tuple[str, str]]:
+    """Run shared extraction and convert successful OCR output into sections."""
+    result = extract_image_content(
+        data,
+        content_type=content_type,
+        config=image_options.extraction_config,
+        vision_describer=vision_describer,
+    )
+    indexed = _is_indexable_extraction_result(result)
+    extraction_counts.record(result.status, indexed=indexed)
+    if not indexed:
+        detail = result.error_message or result.status
+        warnings.append(f"Extraction failed for {path.name}: {detail}")
+        return []
+
+    if result.status != STATUS_EXTRACTED:
+        if not (
+            indexed
+            and result.vision_status
+            in {STATUS_VISION_DESCRIBED, STATUS_VISION_PARTIAL}
+        ):
+            warnings.append(
+                f"Extraction for {path.name} completed with status={result.status}"
+            )
+    if result.vision_warnings:
+        for vision_warning in result.vision_warnings:
+            warnings.append(f"Vision for {path.name}: {vision_warning}")
+    elif (
+        image_options.vision_enabled
+        and result.vision_status
+        and result.vision_status not in {"vision_described"}
+    ):
+        warnings.append(
+            f"Vision for {path.name} completed with status={result.vision_status}"
+        )
+
+    return [(section_name, result.text or "")]
+
+
+def _build_docx_sections(
+    *,
+    path: Path,
+    image_options: CorpusImageIngestOptions,
+    extraction_counts: ExtractionStatusCounts,
+    warnings: List[str],
+    vision_describer: VisionDescriber | None,
+) -> List[Tuple[str, str]]:
+    """Build sections for DOCX body text plus optional embedded-image OCR."""
+    sections: List[Tuple[str, str]] = []
+    try:
+        raw_text = _read_docx(path)
+    except Exception as exc:
+        warnings.append(f"Failed to parse DOCX body for {path.name}: {exc}")
+        raw_text = ""
+
+    if (raw_text or "").strip():
+        body_sections = split_into_sections(raw_text, default_title=path.stem)
+        if body_sections:
+            for heading, body in body_sections:
+                section_path = heading if heading != path.stem else _SECTION_BODY
+                sections.append((section_path, body))
+        else:
+            sections.append((_SECTION_BODY, raw_text.strip()))
+    elif not image_options.enabled:
+        warnings.append(f"Skipped empty document: {path.name}")
+        return []
+
+    if not image_options.enabled:
+        return sections
+
+    data = path.read_bytes()
+    embedded_sections = _sections_from_extraction(
+        path=path,
+        data=data,
+        content_type=_mime_for_path(path),
+        section_name=_SECTION_EMBEDDED_OCR,
+        image_options=image_options,
+        extraction_counts=extraction_counts,
+        warnings=warnings,
+        vision_describer=vision_describer,
+    )
+    sections.extend(embedded_sections)
+    if not sections:
+        warnings.append(f"No indexable content in {path.name}")
+    return sections
+
+
+def _build_media_sections(
+    *,
+    path: Path,
+    image_options: CorpusImageIngestOptions,
+    extraction_counts: ExtractionStatusCounts,
+    warnings: List[str],
+    vision_describer: VisionDescriber | None,
+) -> List[Tuple[str, str]]:
+    """Build OCR (and optional vision) sections for standalone image/PDF sources."""
+    data = path.read_bytes()
+    content_type = _mime_for_path(path)
+    return _sections_from_extraction(
+        path=path,
+        data=data,
+        content_type=content_type,
+        section_name=_SECTION_OCR,
+        image_options=image_options,
+        extraction_counts=extraction_counts,
+        warnings=warnings,
+        vision_describer=vision_describer,
+    )
+
+
 def _build_chunks(
     *,
     source_dir: Path,
     files: Sequence[Path],
     target_words: int,
     overlap_words: int,
-) -> Tuple[List[ChunkRecord], List[str]]:
+    image_options: CorpusImageIngestOptions,
+    vision_describer: VisionDescriber | None = None,
+) -> Tuple[List[ChunkRecord], List[str], ExtractionStatusCounts]:
     """Parse source docs and build chunk records.
 
     Args:
@@ -205,22 +648,63 @@ def _build_chunks(
         files: Source document paths.
         target_words: Desired chunk size.
         overlap_words: Overlap size between adjacent chunks.
+        image_options: Image/PDF/DOCX-image extraction settings.
+        vision_describer: Optional injectable loopback vision callback.
 
     Returns:
-        Tuple of `(chunks, warnings)`.
+        Tuple of `(chunks, warnings, extraction_counts)`.
     """
     chunks: List[ChunkRecord] = []
     warnings: List[str] = []
+    extraction_counts = ExtractionStatusCounts()
+
+    if image_options.vision_enabled and vision_describer is None:
+        warnings.append(
+            "IMAGE_VISION_ENABLED=true but vision is not configured "
+            "(missing loopback api_base/model); OCR-only indexing continues"
+        )
+
     for path in files:
+        suffix = path.suffix.casefold()
         try:
-            raw_text = _read_source(path)
-            if not (raw_text or "").strip():
-                warnings.append(f"Skipped empty document: {path.name}")
+            if _is_media_path(path):
+                if not image_options.enabled:
+                    extraction_counts.record_skip()
+                    warnings.append(
+                        f"Skipped non-text media (IMAGE_INGEST_ENABLED=false): {path.name}"
+                    )
+                    continue
+                sections = _build_media_sections(
+                    path=path,
+                    image_options=image_options,
+                    extraction_counts=extraction_counts,
+                    warnings=warnings,
+                    vision_describer=vision_describer,
+                )
+            elif suffix == ".docx":
+                sections = _build_docx_sections(
+                    path=path,
+                    image_options=image_options,
+                    extraction_counts=extraction_counts,
+                    warnings=warnings,
+                    vision_describer=vision_describer,
+                )
+            elif suffix == ".txt":
+                raw_text = _read_txt(path)
+                if not (raw_text or "").strip():
+                    warnings.append(f"Skipped empty document: {path.name}")
+                    continue
+                sections = split_into_sections(raw_text, default_title=path.stem)
+                if not sections:
+                    warnings.append(f"No sections detected in {path.name}; skipped")
+                    continue
+            else:
+                warnings.append(f"Unsupported source type: {path.name}")
                 continue
-            sections = split_into_sections(raw_text, default_title=path.stem)
+
             if not sections:
-                warnings.append(f"No sections detected in {path.name}; skipped")
                 continue
+
             doc_id = _doc_id_from_path(source_dir, path)
             chunks.extend(
                 chunk_sections(
@@ -233,7 +717,7 @@ def _build_chunks(
             )
         except Exception as exc:
             warnings.append(f"Failed to parse {path.name}: {exc}")
-    return chunks, warnings
+    return chunks, warnings, extraction_counts
 
 
 def _write_chunks_jsonl(path: Path, chunks: Iterable[ChunkRecord]) -> int:
@@ -280,10 +764,12 @@ def ingest_corpus(
     postgres_schema: str = "notable_rag",
     postgres_chunks_table: str = "kb_chunks",
     postgres_fts_config: str = "english",
-    vector_dimensions: int = 1024,
+    vector_dimensions: int = 768,
     embedding_batch_size: int = 64,
     postgres_statement_timeout_ms: int = 0,
     ensure_postgres_schema: bool = True,
+    image_options: CorpusImageIngestOptions | None = None,
+    vision_describer: VisionDescriber | None = None,
 ) -> dict:
     """Ingest source docs and publish retrieval artifacts.
 
@@ -302,17 +788,25 @@ def ingest_corpus(
         embedding_batch_size: Embedding batch size for Postgres ingestion.
         postgres_statement_timeout_ms: Optional Postgres statement timeout for ingest.
         ensure_postgres_schema: Create schema/table/indexes before Postgres ingest.
+        image_options: Optional KB image/PDF/DOCX-image extraction settings.
+        vision_describer: Optional injectable loopback vision callback for KB images.
 
     Returns:
         Ingestion report dictionary.
     """
+    resolved_image_options = image_options or CorpusImageIngestOptions()
     started = time.time()
-    files = _discover_docs(source_dir)
-    chunks, warnings = _build_chunks(
+    files = _discover_docs(
+        source_dir,
+        image_ingest_enabled=resolved_image_options.enabled,
+    )
+    chunks, warnings, extraction_counts = _build_chunks(
         source_dir=source_dir,
         files=files,
         target_words=target_words,
         overlap_words=overlap_words,
+        image_options=resolved_image_options,
+        vision_describer=vision_describer,
     )
     normalized_backend = (backend or "sqlite_faiss").strip().lower()
 
@@ -347,6 +841,9 @@ def ingest_corpus(
             "source_file_count": len(files),
             "chunk_count": chunk_count,
             "vector_count": indexed_vectors,
+            "image_ingest_enabled": resolved_image_options.enabled,
+            "image_vision_enabled": resolved_image_options.vision_enabled,
+            "extraction_status": extraction_counts.as_report_dict(),
             "warnings": warnings,
             "elapsed_seconds": round(time.time() - started, 3),
         }
@@ -388,6 +885,9 @@ def ingest_corpus(
             "source_file_count": len(files),
             "chunk_count": chunk_count,
             "vector_count": indexed_vectors,
+            "image_ingest_enabled": resolved_image_options.enabled,
+            "image_vision_enabled": resolved_image_options.vision_enabled,
+            "extraction_status": extraction_counts.as_report_dict(),
             "warnings": warnings,
             "elapsed_seconds": round(time.time() - started, 3),
         }
@@ -423,7 +923,7 @@ def _parse_args() -> argparse.Namespace:
         "--source-dir",
         type=Path,
         default=Path("/opt/llm-notable-analysis/knowledge_base/source_docs"),
-        help="Source docs directory (.docx, .txt).",
+        help="Source docs directory (.txt, .docx, and image/PDF when enabled).",
     )
     parser.add_argument(
         "--index-dir",
@@ -487,7 +987,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--vector-dimensions",
         type=int,
-        default=int(_config_default(config_values, "RAG_VECTOR_DIMENSIONS", "1024")),
+        default=int(_config_default(config_values, "RAG_VECTOR_DIMENSIONS", "768")),
     )
     parser.add_argument(
         "--postgres-statement-timeout-ms",
@@ -503,6 +1003,15 @@ def _parse_args() -> argparse.Namespace:
         help="Skip Postgres extension/schema/table/index DDL during ingest.",
     )
     parser.add_argument("--embedding-batch-size", type=int, default=64)
+    parser.add_argument(
+        "--image-ingest-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=_parse_bool_value(
+            _config_default(config_values, "IMAGE_INGEST_ENABLED", "false"),
+            default=False,
+        ),
+        help="Enable OCR/PDF/DOCX-image extraction (IMAGE_INGEST_ENABLED).",
+    )
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args()
 
@@ -515,6 +1024,17 @@ def main() -> int:
     """
     args = _parse_args()
     _configure_logging(args.verbose)
+    pre_parser_config = {}
+    if args.config_env is not None:
+        pre_parser_config = _parse_config_env(args.config_env)
+    image_options = build_image_ingest_options_from_config_values(pre_parser_config)
+    image_options = CorpusImageIngestOptions(
+        enabled=bool(args.image_ingest_enabled),
+        extraction_config=image_options.extraction_config,
+        vision_enabled=image_options.vision_enabled,
+        vision_config=image_options.vision_config,
+    )
+    vision_describer = build_vision_describer_from_options(image_options)
     try:
         report = ingest_corpus(
             source_dir=args.source_dir,
@@ -531,6 +1051,8 @@ def main() -> int:
             embedding_batch_size=args.embedding_batch_size,
             postgres_statement_timeout_ms=args.postgres_statement_timeout_ms,
             ensure_postgres_schema=not args.skip_postgres_schema_setup,
+            image_options=image_options,
+            vision_describer=vision_describer,
         )
         logger.info(
             "Ingestion succeeded: files=%s chunks=%s vectors=%s",

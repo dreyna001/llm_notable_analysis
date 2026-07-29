@@ -331,3 +331,12 @@ info "Granting read-only portal role access to case archive tables"
 run_psql_as_admin "$CASE_DATABASE" "$tmpdir/grants.sql"
 
 info "PostgreSQL case archive setup complete"
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+vision_helper="$script_dir/configure_closed_ticket_vision_defaults.sh"
+if [[ -f "$vision_helper" ]]; then
+    info "Applying closed-ticket vision defaults (image attachment indexing)"
+    bash "$vision_helper" --config-env "$CONFIG_ENV"
+else
+    info "Optional: run scripts/configure_closed_ticket_vision_defaults.sh after merging config.env"
+fi

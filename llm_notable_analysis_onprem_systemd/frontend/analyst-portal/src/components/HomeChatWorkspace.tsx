@@ -989,6 +989,9 @@ export function HomeChatWorkspace({
           initialTurns={initialPanelTurns}
           loadingHistory={loadingSessionId === activeSession.localId}
           maxQuestionChars={capabilities?.max_question_chars}
+          chatImagesEnabled={capabilities?.chat_images_enabled}
+          maxChatImages={capabilities?.max_chat_images}
+          maxChatImageBytes={capabilities?.max_chat_image_bytes}
           mode="selected_case"
           selectedCaseId={effectiveSelectedCaseId}
           disabledReason={chatDisabledReason}

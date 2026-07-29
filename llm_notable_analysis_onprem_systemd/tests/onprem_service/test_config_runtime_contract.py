@@ -15,8 +15,8 @@ from llm_notable_analysis_onprem_systemd.onprem_service.local_llm_client_nonsdk 
 
 
 class TestConfigRuntimeContract(unittest.TestCase):
-    def test_defaults_target_litellm_and_mixedbread_contract(self) -> None:
-        """Default config should expose the on-prem LiteLLM and Mixedbread targets."""
+    def test_defaults_target_litellm_and_granite_contract(self) -> None:
+        """Default config should expose the on-prem LiteLLM and Granite targets."""
         with patch.dict(os.environ, {}, clear=True):
             config = load_config()
 
@@ -27,13 +27,13 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.RAG_BACKEND, "postgres")
         self.assertFalse(config.RAG_FAIL_CLOSED)
         self.assertEqual(
-            config.RAG_EMBEDDING_MODEL, "mixedbread-ai/mxbai-embed-large-v1"
+            config.RAG_EMBEDDING_MODEL, "ibm-granite/granite-embedding-english-r2"
         )
         self.assertFalse(config.RAG_RERANK_ENABLED)
         self.assertEqual(
-            config.RAG_RERANK_MODEL, "mixedbread-ai/mxbai-rerank-large-v2"
+            config.RAG_RERANK_MODEL, "ibm-granite/granite-embedding-reranker-english-r2"
         )
-        self.assertEqual(config.RAG_VECTOR_DIMENSIONS, 1024)
+        self.assertEqual(config.RAG_VECTOR_DIMENSIONS, 768)
         self.assertEqual(config.RAG_POSTGRES_STATEMENT_TIMEOUT_MS, 5000)
         self.assertEqual(config.RAG_FUSED_RANK_LIMIT_120B, 8)
         self.assertEqual(config.RAG_FUSED_RANK_LIMIT_20B, 6)
@@ -50,9 +50,9 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertFalse(config.CASE_QA_ENABLED)
         self.assertFalse(config.CASE_QA_CHAT_HISTORY_ENABLED)
         self.assertEqual(
-            config.CASE_QA_EMBEDDING_MODEL, "mixedbread-ai/mxbai-embed-large-v1"
+            config.CASE_QA_EMBEDDING_MODEL, "ibm-granite/granite-embedding-english-r2"
         )
-        self.assertEqual(config.CASE_QA_VECTOR_DIMENSIONS, 1024)
+        self.assertEqual(config.CASE_QA_VECTOR_DIMENSIONS, 768)
         self.assertEqual(config.CASE_QA_LEXICAL_TOP_K, 30)
         self.assertEqual(config.CASE_QA_VECTOR_TOP_K, 30)
         self.assertEqual(config.CASE_QA_RRF_K, 60)
@@ -76,6 +76,13 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertFalse(config.SIDE_EFFECT_IDEMPOTENCY_ENABLED)
         self.assertEqual(config.SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS, 30)
         self.assertFalse(config.SPL_QUERY_RAG_ENABLED)
+        self.assertFalse(config.IMAGE_INGEST_ENABLED)
+        self.assertEqual(config.IMAGE_INGEST_MAX_BYTES, 10 * 1024 * 1024)
+        self.assertEqual(config.IMAGE_INGEST_TESSERACT_BINARY, "tesseract")
+        self.assertFalse(config.IMAGE_VISION_ENABLED)
+        self.assertFalse(config.CASE_QA_CHAT_IMAGES_ENABLED)
+        self.assertEqual(config.CASE_QA_MAX_CHAT_IMAGES, 1)
+        self.assertEqual(config.CASE_QA_MAX_CHAT_IMAGE_BYTES, 750_000)
         self.assertEqual(
             config.SPL_QUERY_RAG_SOURCE_DIR.as_posix(),
             "/opt/llm-notable-analysis/knowledge_base/spl_query_source_docs",
@@ -301,9 +308,9 @@ class TestConfigRuntimeContract(unittest.TestCase):
             "RAG_POSTGRES_CHUNKS_TABLE": "chunks",
             "RAG_POSTGRES_FTS_CONFIG": "simple",
             "RAG_POSTGRES_STATEMENT_TIMEOUT_MS": "2500",
-            "RAG_VECTOR_DIMENSIONS": "1024",
+            "RAG_VECTOR_DIMENSIONS": "768",
             "RAG_RERANK_ENABLED": "true",
-            "RAG_RERANK_MODEL": "mixedbread-ai/mxbai-rerank-large-v2",
+            "RAG_RERANK_MODEL": "ibm-granite/granite-embedding-reranker-english-r2",
             "RAG_FUSED_RANK_LIMIT_120B": "9",
             "RAG_FUSED_RANK_LIMIT_20B": "7",
             "RAG_NEAR_DUPLICATE_SIMILARITY_THRESHOLD": "0.85",
@@ -323,10 +330,10 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.RAG_POSTGRES_CHUNKS_TABLE, "chunks")
         self.assertEqual(config.RAG_POSTGRES_FTS_CONFIG, "simple")
         self.assertEqual(config.RAG_POSTGRES_STATEMENT_TIMEOUT_MS, 2500)
-        self.assertEqual(config.RAG_VECTOR_DIMENSIONS, 1024)
+        self.assertEqual(config.RAG_VECTOR_DIMENSIONS, 768)
         self.assertTrue(config.RAG_RERANK_ENABLED)
         self.assertEqual(
-            config.RAG_RERANK_MODEL, "mixedbread-ai/mxbai-rerank-large-v2"
+            config.RAG_RERANK_MODEL, "ibm-granite/granite-embedding-reranker-english-r2"
         )
         self.assertEqual(config.RAG_FUSED_RANK_LIMIT_120B, 9)
         self.assertEqual(config.RAG_FUSED_RANK_LIMIT_20B, 7)
@@ -358,8 +365,8 @@ class TestConfigRuntimeContract(unittest.TestCase):
             "CASE_QA_MAX_ANSWER_TOKENS": "900",
             "CASE_QA_CHUNK_SCHEMA_VERSION": "2",
             "CASE_QA_EMBEDDING_MODEL": "custom/mxbai",
-            "CASE_QA_VECTOR_DIMENSIONS": "1024",
-            "RAG_VECTOR_DIMENSIONS": "1024",
+            "CASE_QA_VECTOR_DIMENSIONS": "768",
+            "RAG_VECTOR_DIMENSIONS": "768",
             "CASE_QA_CHAT_HISTORY_RETENTION_DAYS": "14",
             "CASE_QA_MAX_MESSAGES_PER_SESSION": "40",
             "CASE_QA_MAX_STORED_MESSAGE_BYTES": "5000",
@@ -397,7 +404,7 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.CASE_QA_MAX_ANSWER_TOKENS, 900)
         self.assertEqual(config.CASE_QA_CHUNK_SCHEMA_VERSION, 2)
         self.assertEqual(config.CASE_QA_EMBEDDING_MODEL, "custom/mxbai")
-        self.assertEqual(config.CASE_QA_VECTOR_DIMENSIONS, 1024)
+        self.assertEqual(config.CASE_QA_VECTOR_DIMENSIONS, 768)
         self.assertFalse(config.CASE_QA_CHAT_HISTORY_ENABLED)
         self.assertEqual(config.CASE_QA_CHAT_HISTORY_RETENTION_DAYS, 14)
         self.assertEqual(config.CASE_QA_MAX_MESSAGES_PER_SESSION, 40)
@@ -454,14 +461,22 @@ class TestConfigRuntimeContract(unittest.TestCase):
             config = load_config()
         self.assertTrue(config.CASE_QA_CHAT_HISTORY_ENABLED)
 
-    def test_case_qa_vector_dimensions_are_fixed_for_v1(self) -> None:
-        """Case archive schema is vector(1024), so v1 config must not drift."""
+    def test_vector_dimensions_must_match_and_be_supported(self) -> None:
+        """On-prem retrieval requires aligned Granite-compatible dimensions."""
         with patch.dict(
             os.environ,
-            {"CASE_QA_VECTOR_DIMENSIONS": "768"},
+            {"CASE_QA_VECTOR_DIMENSIONS": "768", "RAG_VECTOR_DIMENSIONS": "1024"},
             clear=True,
         ):
-            with self.assertRaisesRegex(ValueError, "CASE_QA_VECTOR_DIMENSIONS"):
+            with self.assertRaisesRegex(ValueError, "RAG_VECTOR_DIMENSIONS must match"):
+                load_config()
+
+        with patch.dict(
+            os.environ,
+            {"CASE_QA_VECTOR_DIMENSIONS": "1024", "RAG_VECTOR_DIMENSIONS": "1024"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(ValueError, "RAG_VECTOR_DIMENSIONS must be one of"):
                 load_config()
 
     def test_case_archive_enabled_rejects_invalid_postgres_schema(self) -> None:
@@ -820,6 +835,23 @@ class TestConfigRuntimeContract(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "provider is unavailable"):
             client._build_soc_operational_context("PowerShell alert")
+
+    def test_image_ingest_env_parsing(self) -> None:
+        """Image ingest bounds should parse byte-size suffixes from env."""
+        with patch.dict(
+            os.environ,
+            {
+                "IMAGE_INGEST_ENABLED": "true",
+                "IMAGE_INGEST_MAX_BYTES": "8MiB",
+                "IMAGE_INGEST_MAX_PDF_PAGES": "25",
+            },
+            clear=True,
+        ):
+            config = load_config()
+
+        self.assertTrue(config.IMAGE_INGEST_ENABLED)
+        self.assertEqual(config.IMAGE_INGEST_MAX_BYTES, 8 * 1024 * 1024)
+        self.assertEqual(config.IMAGE_INGEST_MAX_PDF_PAGES, 25)
 
 
 if __name__ == "__main__":

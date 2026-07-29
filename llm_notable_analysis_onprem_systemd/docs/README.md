@@ -10,7 +10,8 @@ Use this page to pick **where to start** without reading the whole root [`README
 
 3. **[Operations guide index](operations/README.md)** — Customer tuning guides by area (deployment, platform, portal, LLM, RAG, investigation, integrations, security).
 
-4. **[Installation](operations/deployment/INSTALL.md)** — Host bring-up with `scripts/install.sh`, prerequisites, post-install checks.
+4. **[Installation](operations/deployment/INSTALL.md)** — Host bring-up with `scripts/install.sh`, prerequisites, post-install checks. **[Host layout and updates](operations/deployment/HOST_LAYOUT_AND_UPDATES.md)** — Git checkout vs `/opt/notable-analyzer` vs `/etc/notable-analyzer/` (intended production layout).
+
 
 5. **[Capability profiles](operations/platform/CAPABILITY_PROFILES.md)** and **[runtime env contract](../config.env.example)** — Enable supported bundles with `CAPABILITY_PROFILES`; secrets, paths, and tuning stay in `config.env` (`/etc/notable-analyzer/config.env` on the host). Portal uses [`config.portal.env.example`](../config.portal.env.example) as `/etc/notable-analyzer/portal.env`. Hardware starting values: **[deployment profiles](operations/deployment/deployment_profiles/README.md)**.
 
@@ -27,6 +28,7 @@ Optional deep dives:
 - **[SPL operations](operations/investigation/SPL_OPERATIONS.md)** — Indexes, execution limits, REST vs MCP, rollout.
 - **[Future enhancements roadmap](planning/FUTURE_ENHANCEMENTS_ROADMAP.md)** — Backlog (threat intel, SOAR invocation, observability, and related work).
 - **[On-prem production readiness TODO](planning/ONPREM_PRODUCTION_READINESS_TODO.md)** — Lightweight checklist of remaining VM, network, security, and operational go-live work.
+- **[On-prem customer deployment setup TODO](planning/ONPREM_CUSTOMER_DEPLOYMENT_SETUP_TODO.md)** — Customer-host env/Postgres/KB bring-up, auroraaihost tracker, and `install.sh` automation backlog.
 - **[AI integrity / drift plan](planning/ai_integrity_drift_monitoring_plan.md)** — Planned integrity and quality-monitoring work.
 - **[Golden eval (first slice)](testing/GOLDEN_EVAL.md)** — Analyzer disposition baseline corpus and rubric tests; broader harness backlog in [golden_eval_harness_todo.md](planning/golden_eval_harness_todo.md).
 

@@ -18,7 +18,7 @@ from llm_notable_analysis_onprem_systemd.onprem_service.case_store import (
 from llm_notable_analysis_onprem_systemd.onprem_service.config import Config
 
 # Matches production CASE_QA_VECTOR_DIMENSIONS / RAG_VECTOR_DIMENSIONS v1 contract.
-PREVIEW_FAKE_VECTOR_DIMENSIONS = 1024
+PREVIEW_FAKE_VECTOR_DIMENSIONS = 768
 
 
 class PreviewFakeResult:

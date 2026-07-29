@@ -70,6 +70,7 @@ from .portal_api_models import (
     PortalCapabilitiesResponse,
     portal_response,
 )
+from .portal_chat_images import portal_chat_image_capabilities
 from .portal_case_detail_view import (
     build_case_detail_view,
     build_case_raw_section_page,
@@ -521,6 +522,7 @@ def _portal_capabilities_payload(
         payload["chat_dependency_status"] = chat_dependency_status
     if case_qa_enabled and not chat_ready and chat_degraded_reason:
         payload["chat_degraded_reason"] = chat_degraded_reason
+    payload.update(portal_chat_image_capabilities(config))
     return payload
 
 

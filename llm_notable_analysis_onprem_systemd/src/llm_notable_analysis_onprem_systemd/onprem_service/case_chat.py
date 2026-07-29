@@ -45,7 +45,13 @@ from .openai_transport_nonsdk import (
     ResponseFormatError,
     ServerError,
     TransportError,
+    UserMessageContent,
     openai_chat_complete,
+)
+from .portal_chat_images import (
+    ValidatedChatImage,
+    build_multimodal_user_content,
+    validate_chat_images,
 )
 
 logger = logging.getLogger(__name__)
@@ -193,6 +199,7 @@ class ChatRequest:
     question: str
     selected_case_id: str | None = None
     session_id: str | None = None
+    images: tuple[ValidatedChatImage, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -703,11 +710,13 @@ def validate_chat_payload(payload: Any, config: Config) -> ChatRequest:
         raise ValueError("selected_case_id is required for portal chat.")
     session_id = payload.get("session_id")
     session_id = str(session_id).strip() if session_id else None
+    images = validate_chat_images(payload.get("images"), config)
     return ChatRequest(
         mode=mode,  # type: ignore[arg-type]
         question=question,
         selected_case_id=selected_case_id,
         session_id=session_id,
+        images=images,
     )
 
 
@@ -934,13 +943,13 @@ def _build_general_knowledge_base_context(config: Config, question: str) -> str:
         postgres_statement_timeout_ms=int(
             getattr(config, "RAG_POSTGRES_STATEMENT_TIMEOUT_MS", 5000)
         ),
-        vector_dimensions=int(getattr(config, "RAG_VECTOR_DIMENSIONS", 1024)),
+        vector_dimensions=int(getattr(config, "RAG_VECTOR_DIMENSIONS", 768)),
         embedding_model_name=getattr(
-            config, "RAG_EMBEDDING_MODEL", "mixedbread-ai/mxbai-embed-large-v1"
+            config, "RAG_EMBEDDING_MODEL", "ibm-granite/granite-embedding-english-r2"
         ),
         rerank_enabled=bool(getattr(config, "RAG_RERANK_ENABLED", False)),
         rerank_model_name=getattr(
-            config, "RAG_RERANK_MODEL", "mixedbread-ai/mxbai-rerank-large-v2"
+            config, "RAG_RERANK_MODEL", "ibm-granite/granite-embedding-reranker-english-r2"
         ),
         max_snippets_120b=int(getattr(config, "RAG_MAX_SNIPPETS_120B", 5)),
         max_snippets_20b=int(getattr(config, "RAG_MAX_SNIPPETS_20B", 4)),
@@ -1164,6 +1173,7 @@ def _build_general_knowledge_prompt(
     question: str,
     *,
     conversation_history: Sequence[ChatTurn] | None = None,
+    has_analyst_images: bool = False,
 ) -> str:
     """Build a bounded prompt for broad technology answers."""
     history_block = _render_conversation_history(conversation_history)
@@ -1173,6 +1183,7 @@ def _build_general_knowledge_prompt(
         + "\n\n"
         + _markdown_output_format_instructions()
         + "\n\n"
+        + _render_analyst_image_advisory(has_analyst_images=has_analyst_images)
         + history_block
         + "QUESTION_JSON:\n"
         + json.dumps(question.strip(), ensure_ascii=True)
@@ -1186,37 +1197,22 @@ def _default_synthesize_general_knowledge(
     session: Any = None,
     conversation_history: Sequence[ChatTurn] | None = None,
     text_complete: TextCompleteFn | None = None,
+    images: tuple[ValidatedChatImage, ...] = (),
 ) -> str:
     """Call the configured local LLM for bounded technology answers."""
     prompt = _build_general_knowledge_prompt(
         question,
         conversation_history=conversation_history,
+        has_analyst_images=bool(images),
     )
-    max_tokens = config.CASE_QA_MAX_ANSWER_TOKENS
-    if text_complete is not None:
-        return text_complete(prompt, max_tokens).strip()
-    if session is not None:
-        answer, _latency = openai_chat_complete(
-            session,
-            config,
-            prompt=prompt,
-            max_tokens=config.CASE_QA_MAX_ANSWER_TOKENS,
-            temperature=0.0,
-            connect_timeout_sec=min(5, int(config.LLM_TIMEOUT)),
-            read_timeout_sec=int(config.LLM_TIMEOUT),
-        )
-        return answer.strip()
-    with requests.Session() as http_session:
-        answer, _latency = openai_chat_complete(
-            http_session,
-            config,
-            prompt=prompt,
-            max_tokens=config.CASE_QA_MAX_ANSWER_TOKENS,
-            temperature=0.0,
-            connect_timeout_sec=min(5, int(config.LLM_TIMEOUT)),
-            read_timeout_sec=int(config.LLM_TIMEOUT),
-        )
-        return answer.strip()
+    return _llm_complete(
+        config,
+        prompt=prompt,
+        max_tokens=config.CASE_QA_MAX_ANSWER_TOKENS,
+        session=session,
+        text_complete=text_complete,
+        images=images,
+    )
 
 
 def _finalize_general_knowledge_response(
@@ -1230,6 +1226,7 @@ def _finalize_general_knowledge_response(
     llm_session: Any,
     conversation_history: Sequence[ChatTurn] | None = None,
     text_complete: TextCompleteFn | None = None,
+    images: tuple[ValidatedChatImage, ...] = (),
 ) -> dict[str, Any] | None:
     """Return a sanitized technology response, or None when disabled/unusable."""
     if not bool(config.CASE_QA_GENERAL_KNOWLEDGE_ENABLED):
@@ -1243,6 +1240,7 @@ def _finalize_general_knowledge_response(
             session=llm_session,
             conversation_history=conversation_history,
             text_complete=text_complete,
+            images=images,
         )
     answer = sanitize_portal_chat_answer(answer)
     if not answer:
@@ -1334,10 +1332,69 @@ def _case_grounded_system_instructions() -> str:
     )
 
 
+def _analyst_image_context_advisory() -> str:
+    """Prompt guidance for request-scoped analyst image attachments."""
+    return (
+        "The analyst attached image(s) with this request as supplemental context. "
+        "These images are analyst-provided context for this turn only, not archived "
+        "case evidence. Treat visible image content separately from RETRIEVED CONTEXT "
+        "and do not cite images as stored case facts."
+    )
+
+
+def _render_analyst_image_advisory(*, has_analyst_images: bool) -> str:
+    if not has_analyst_images:
+        return ""
+    return _analyst_image_context_advisory() + "\n\n"
+
+
+def _llm_complete(
+    config: Config,
+    *,
+    prompt: str,
+    max_tokens: int,
+    session: Any = None,
+    text_complete: TextCompleteFn | None = None,
+    images: tuple[ValidatedChatImage, ...] = (),
+) -> str:
+    """Call the configured local LLM with optional request-scoped images."""
+    user_content: UserMessageContent = prompt
+    if images:
+        user_content = build_multimodal_user_content(prompt, images)
+    if text_complete is not None and not images:
+        return text_complete(prompt, max_tokens).strip()
+    if session is not None:
+        answer, _latency = openai_chat_complete(
+            session,
+            config,
+            prompt=prompt,
+            user_content=user_content if images else None,
+            max_tokens=max_tokens,
+            temperature=0.0,
+            connect_timeout_sec=min(5, int(config.LLM_TIMEOUT)),
+            read_timeout_sec=int(config.LLM_TIMEOUT),
+        )
+        return answer.strip()
+    with requests.Session() as http_session:
+        answer, _latency = openai_chat_complete(
+            http_session,
+            config,
+            prompt=prompt,
+            user_content=user_content if images else None,
+            max_tokens=max_tokens,
+            temperature=0.0,
+            connect_timeout_sec=min(5, int(config.LLM_TIMEOUT)),
+            read_timeout_sec=int(config.LLM_TIMEOUT),
+        )
+        return answer.strip()
+
+
 def _build_prompt(
     question: str,
     sources: Sequence[RetrievedSource],
     conversation_history: Sequence[ChatTurn] | None = None,
+    *,
+    has_analyst_images: bool = False,
 ) -> str:
     """Build a bounded prompt for answer synthesis."""
     source_blocks = [_format_context_block(source) for source in sources]
@@ -1348,6 +1405,7 @@ def _build_prompt(
         + "\n\n"
         + _markdown_output_format_instructions()
         + "\n\n"
+        + _render_analyst_image_advisory(has_analyst_images=has_analyst_images)
         + history_block
         + "QUESTION_JSON:\n"
         + json.dumps(question.strip(), ensure_ascii=True)
@@ -1369,38 +1427,23 @@ def _default_synthesize_answer(
     session: Any = None,
     conversation_history: Sequence[ChatTurn] | None = None,
     text_complete: TextCompleteFn | None = None,
+    images: tuple[ValidatedChatImage, ...] = (),
 ) -> str:
     """Call the configured local LLM for bounded answer synthesis."""
     prompt = _build_prompt(
         question,
         sources,
         conversation_history=conversation_history,
+        has_analyst_images=bool(images),
     )
-    max_tokens = config.CASE_QA_MAX_ANSWER_TOKENS
-    if text_complete is not None:
-        return text_complete(prompt, max_tokens).strip()
-    if session is not None:
-        answer, _latency = openai_chat_complete(
-            session,
-            config,
-            prompt=prompt,
-            max_tokens=config.CASE_QA_MAX_ANSWER_TOKENS,
-            temperature=0.0,
-            connect_timeout_sec=min(5, int(config.LLM_TIMEOUT)),
-            read_timeout_sec=int(config.LLM_TIMEOUT),
-        )
-        return answer.strip()
-    with requests.Session() as http_session:
-        answer, _latency = openai_chat_complete(
-            http_session,
-            config,
-            prompt=prompt,
-            max_tokens=config.CASE_QA_MAX_ANSWER_TOKENS,
-            temperature=0.0,
-            connect_timeout_sec=min(5, int(config.LLM_TIMEOUT)),
-            read_timeout_sec=int(config.LLM_TIMEOUT),
-        )
-        return answer.strip()
+    return _llm_complete(
+        config,
+        prompt=prompt,
+        max_tokens=config.CASE_QA_MAX_ANSWER_TOKENS,
+        session=session,
+        text_complete=text_complete,
+        images=images,
+    )
 
 
 def _finalize_chat_response(
@@ -1512,6 +1555,7 @@ def answer_case_chat(
             llm_session=llm_session,
             conversation_history=conversation_history,
             text_complete=text_complete,
+            images=request.images,
         )
         if general_response is not None:
             return _finalize_chat_response(
@@ -1571,6 +1615,7 @@ def answer_case_chat(
             session=llm_session,
             conversation_history=conversation_history,
             text_complete=text_complete,
+            images=request.images,
         )
     answer = sanitize_portal_chat_answer(answer)
     if not answer or _should_fallback_to_general_knowledge(answer):
@@ -1584,6 +1629,7 @@ def answer_case_chat(
             llm_session=llm_session,
             conversation_history=conversation_history,
             text_complete=text_complete,
+            images=request.images,
         )
         if general_response is not None:
             return _finalize_chat_response(

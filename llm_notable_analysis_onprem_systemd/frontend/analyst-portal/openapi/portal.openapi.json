@@ -764,6 +764,11 @@
             "title": "Chat History Enabled",
             "type": "boolean"
           },
+          "chat_images_enabled": {
+            "default": false,
+            "title": "Chat Images Enabled",
+            "type": "boolean"
+          },
           "chat_ready": {
             "title": "Chat Ready",
             "type": "boolean"
@@ -774,6 +779,16 @@
           },
           "max_answer_tokens": {
             "title": "Max Answer Tokens",
+            "type": "integer"
+          },
+          "max_chat_image_bytes": {
+            "default": 750000,
+            "title": "Max Chat Image Bytes",
+            "type": "integer"
+          },
+          "max_chat_images": {
+            "default": 1,
+            "title": "Max Chat Images",
             "type": "integer"
           },
           "max_chat_sessions_per_user": {

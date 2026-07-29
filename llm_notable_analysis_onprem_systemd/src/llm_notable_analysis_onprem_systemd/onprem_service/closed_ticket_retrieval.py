@@ -109,7 +109,7 @@ def _vector_dimensions(config: Config) -> int:
         value = getattr(config, key, None)
         if value is not None:
             return int(value)
-    return 1024
+    return 768
 
 
 def _collapse_ws(text: str) -> str:
@@ -326,7 +326,7 @@ def _rerank_candidates(
         if model is None:
             CrossEncoder = _lazy_import_cross_encoder()
             model_name = str(
-                getattr(config, "RAG_RERANK_MODEL", "mixedbread-ai/mxbai-rerank-large-v2")
+                getattr(config, "RAG_RERANK_MODEL", "ibm-granite/granite-embedding-reranker-english-r2")
             )
             model = CrossEncoder(model_name)
         pairs = [(query_text, candidate.text) for candidate in candidates]

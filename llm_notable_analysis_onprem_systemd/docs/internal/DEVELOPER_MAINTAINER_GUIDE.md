@@ -50,6 +50,10 @@ python -m llm_notable_analysis_onprem_systemd.onprem_service.onprem_main_nonsdk
 Production units use the SDK-backed `onprem_main` path
 (`deploy/systemd/notable-analyzer.service`).
 
+On an installed host, **`systemd` runs `/opt/notable-analyzer`**, not the git
+checkout. Pull and install/sync semantics:
+[`../operations/deployment/HOST_LAYOUT_AND_UPDATES.md`](../operations/deployment/HOST_LAYOUT_AND_UPDATES.md).
+
 ## Repository Layout
 
 ```text

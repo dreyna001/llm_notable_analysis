@@ -17,7 +17,7 @@ class TestPostgresIndex(unittest.TestCase):
             PostgresRAGSchemaConfig(
                 schema="soc_kb",
                 chunks_table="chunks",
-                vector_dimensions=1024,
+                vector_dimensions=768,
                 fts_config="english",
             )
         )
@@ -25,7 +25,7 @@ class TestPostgresIndex(unittest.TestCase):
 
         self.assertIn("CREATE EXTENSION IF NOT EXISTS vector", sql)
         self.assertIn('"soc_kb"."chunks"', sql)
-        self.assertIn("embedding vector(1024) NOT NULL", sql)
+        self.assertIn("embedding vector(768) NOT NULL", sql)
         self.assertIn("search_vector tsvector GENERATED ALWAYS AS", sql)
         self.assertIn("USING hnsw (embedding vector_cosine_ops)", sql)
         self.assertIn("USING gin (search_vector)", sql)

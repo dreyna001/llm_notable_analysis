@@ -199,6 +199,11 @@ Installed systemd units: `notable-analyzer.service`, `litellm.service`, `vllm.se
 
 Optional RAG content paths (from [`../../../config.env.example`](../../../config.env.example)): `/opt/llm-notable-analysis/knowledge_base/` for source docs and ingest indexes.
 
+**Git checkout vs install tree:** `install.sh` copies code into `/opt/notable-analyzer`;
+`git pull` on the host updates the checkout only until you re-run the installer.
+Env files under `/etc/notable-analyzer/` are separate from both. See
+[`HOST_LAYOUT_AND_UPDATES.md`](HOST_LAYOUT_AND_UPDATES.md).
+
 ---
 
 ## Users and Permissions

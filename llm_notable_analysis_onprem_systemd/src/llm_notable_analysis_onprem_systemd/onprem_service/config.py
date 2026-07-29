@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 _TRUE_VALUES = {"true", "1", "yes"}
 _FALSE_VALUES = {"false", "0", "no"}
 _POSTGRES_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
+_SUPPORTED_ONPREM_VECTOR_DIMENSIONS = frozenset({768})
 
 _CAPABILITY_PROFILE_FLAGS: dict[str, dict[str, Any]] = {
     "core": {},
@@ -158,6 +159,22 @@ def _closed_ticket_retention_days(name: str, default: int) -> int:
     return value
 
 
+def _positive_float_env(
+    name: str, default: float, *, max_value: float | None = None
+) -> float:
+    """Read a positive float env var with an optional upper bound."""
+    raw = os.getenv(name, str(default))
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive number") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive number")
+    if max_value is not None and value > max_value:
+        raise ValueError(f"{name} must be <= {max_value}")
+    return value
+
+
 def _byte_size_env(name: str, default: int) -> int:
     """Read a positive byte-size env var (supports KiB/MiB/GiB suffixes)."""
     raw = os.getenv(name)
@@ -223,6 +240,27 @@ def _validate_openai_compatible_endpoint_url(value: str, name: str) -> None:
             pass
         raise ValueError(f"{name} must use HTTPS or loopback HTTP")
     raise ValueError(f"{name} must use http:// or https://")
+
+
+def _apply_image_vision_defaults(config: "Config") -> None:
+    """Resolve KB image vision defaults from the primary LLM gateway settings."""
+    if not bool(config.IMAGE_VISION_ENABLED):
+        return
+    if not str(config.IMAGE_VISION_API_BASE or "").strip():
+        config.IMAGE_VISION_API_BASE = _llm_openai_api_base(config.LLM_API_URL)
+    if not str(config.IMAGE_VISION_MODEL or "").strip():
+        config.IMAGE_VISION_MODEL = str(config.LLM_MODEL_NAME or "").strip()
+    if not str(config.IMAGE_VISION_API_KEY or "").strip():
+        config.IMAGE_VISION_API_KEY = str(config.LLM_API_TOKEN or "").strip()
+    _validate_openai_compatible_endpoint_url(
+        config.IMAGE_VISION_API_BASE,
+        "IMAGE_VISION_API_BASE",
+    )
+    if not str(config.IMAGE_VISION_MODEL or "").strip():
+        raise ValueError(
+            "IMAGE_VISION_MODEL or LLM_MODEL_NAME is required when "
+            "IMAGE_VISION_ENABLED=true"
+        )
 
 
 def _apply_closed_ticket_vision_defaults(config: "Config") -> None:
@@ -330,6 +368,24 @@ class Config:
         RAG_VECTOR_TOP_K: pgvector/FAISS candidate pull size.
         RAG_CANDIDATE_POOL_LIMIT: Candidate cap before quality gates.
         RAG_RRF_K: Reciprocal-rank-fusion smoothing constant.
+        IMAGE_INGEST_ENABLED: Enables OCR/PDF/DOCX-image extraction during KB ingest.
+        IMAGE_INGEST_ALLOWED_MIME_TYPES: CSV MIME allowlist for KB image ingest.
+        IMAGE_INGEST_MAX_BYTES: Max raw file bytes for KB image ingest.
+        IMAGE_INGEST_MAX_PIXELS: Max decoded pixel count per raster image.
+        IMAGE_INGEST_MAX_WIDTH: Max decoded image width in pixels.
+        IMAGE_INGEST_MAX_HEIGHT: Max decoded image height in pixels.
+        IMAGE_INGEST_MAX_PDF_PAGES: Max PDF pages rendered and OCR'd during ingest.
+        IMAGE_INGEST_MAX_EMBEDDED_IMAGES: Max embedded images extracted from DOCX.
+        IMAGE_INGEST_MAX_OUTPUT_CHARS: Max combined OCR/text output per extraction.
+        IMAGE_INGEST_TESSERACT_BINARY: Tesseract executable name or path.
+        IMAGE_INGEST_TESSERACT_LANG: Tesseract language code.
+        IMAGE_INGEST_TESSERACT_TIMEOUT_SECONDS: Subprocess timeout for one OCR call.
+        IMAGE_VISION_ENABLED: Enables optional loopback vision captions for KB images.
+        IMAGE_VISION_API_BASE: OpenAI-compatible vision API base URL.
+        IMAGE_VISION_MODEL: Vision-capable model name.
+        IMAGE_VISION_API_KEY: Optional bearer token for vision API calls.
+        IMAGE_VISION_TIMEOUT_SECONDS: Vision request timeout in seconds.
+        IMAGE_VISION_MAX_TOKENS: Max tokens for KB image vision descriptions.
         CASE_ARCHIVE_ENABLED: Enables Postgres case archive writes.
         CASE_POSTGRES_DSN: PostgreSQL DSN for case archive storage.
         CASE_POSTGRES_SCHEMA: PostgreSQL schema for case archive tables.
@@ -346,6 +402,11 @@ class Config:
         CASE_QA_MAX_INDEX_CHUNKS_PER_CASE: Max chunks built and embedded per archived case.
         CASE_QA_CONTEXT_BUDGET_CHARS: Max retrieval context characters for chat.
         CASE_QA_MAX_QUESTION_CHARS: Max analyst question length.
+        CASE_QA_CHAT_IMAGES_ENABLED: Enables request-scoped chat image uploads.
+        CASE_QA_MAX_CHAT_IMAGES: Max images per chat request.
+        CASE_QA_MAX_CHAT_IMAGE_BYTES: Max decoded bytes per chat image.
+        CASE_QA_MAX_CHAT_IMAGE_DIMENSION: Max width/height per chat image.
+        CASE_QA_MAX_CHAT_IMAGE_PIXELS: Max width*height per chat image.
         CASE_QA_MAX_ANSWER_TOKENS: Max chat answer generation tokens.
         CASE_QA_MODEL_CONTEXT_TOKENS: Estimated model context window for portal usage UI.
         CASE_QA_CHUNK_SCHEMA_VERSION: Case chunk schema version.
@@ -495,15 +556,15 @@ class Config:
             "/opt/llm-notable-analysis/knowledge_base/index/kb.faiss"
         )
     )
-    RAG_EMBEDDING_MODEL: str = "mixedbread-ai/mxbai-embed-large-v1"
+    RAG_EMBEDDING_MODEL: str = "ibm-granite/granite-embedding-english-r2"
     RAG_RERANK_ENABLED: bool = False
-    RAG_RERANK_MODEL: str = "mixedbread-ai/mxbai-rerank-large-v2"
+    RAG_RERANK_MODEL: str = "ibm-granite/granite-embedding-reranker-english-r2"
     RAG_POSTGRES_DSN: str = "postgresql://notable_analyzer@127.0.0.1:5432/notable_rag"
     RAG_POSTGRES_SCHEMA: str = "notable_rag"
     RAG_POSTGRES_CHUNKS_TABLE: str = "kb_chunks"
     RAG_POSTGRES_FTS_CONFIG: str = "english"
     RAG_POSTGRES_STATEMENT_TIMEOUT_MS: int = 5000
-    RAG_VECTOR_DIMENSIONS: int = 1024
+    RAG_VECTOR_DIMENSIONS: int = 768
     RAG_MAX_SNIPPETS_120B: int = 5
     RAG_MAX_SNIPPETS_20B: int = 4
     RAG_CONTEXT_BUDGET_CHARS_120B: int = 2200
@@ -515,6 +576,30 @@ class Config:
     RAG_VECTOR_TOP_K: int = 30
     RAG_CANDIDATE_POOL_LIMIT: int = 40
     RAG_RRF_K: int = 60
+
+    # KB image/PDF/DOCX embedded-image ingest (corpus_ingest CLI)
+    IMAGE_INGEST_ENABLED: bool = False
+    IMAGE_INGEST_ALLOWED_MIME_TYPES: str = (
+        "application/pdf,"
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document,"
+        "image/gif,image/jpeg,image/jpg,image/png,image/webp"
+    )
+    IMAGE_INGEST_MAX_BYTES: int = 10 * 1024 * 1024
+    IMAGE_INGEST_MAX_PIXELS: int = 25_000_000
+    IMAGE_INGEST_MAX_WIDTH: int = 8192
+    IMAGE_INGEST_MAX_HEIGHT: int = 8192
+    IMAGE_INGEST_MAX_PDF_PAGES: int = 50
+    IMAGE_INGEST_MAX_EMBEDDED_IMAGES: int = 20
+    IMAGE_INGEST_MAX_OUTPUT_CHARS: int = 12_000
+    IMAGE_INGEST_TESSERACT_BINARY: str = "tesseract"
+    IMAGE_INGEST_TESSERACT_LANG: str = "eng"
+    IMAGE_INGEST_TESSERACT_TIMEOUT_SECONDS: float = 60.0
+    IMAGE_VISION_ENABLED: bool = False
+    IMAGE_VISION_API_BASE: str = ""
+    IMAGE_VISION_MODEL: str = ""
+    IMAGE_VISION_API_KEY: str = ""
+    IMAGE_VISION_TIMEOUT_SECONDS: float = 30.0
+    IMAGE_VISION_MAX_TOKENS: int = 400
 
     # Analyst portal and case archive (planned portal path, disabled by default)
     CASE_ARCHIVE_ENABLED: bool = False
@@ -533,11 +618,16 @@ class Config:
     CASE_QA_MAX_INDEX_CHUNKS_PER_CASE: int = 200
     CASE_QA_CONTEXT_BUDGET_CHARS: int = 12000
     CASE_QA_MAX_QUESTION_CHARS: int = 2000
+    CASE_QA_CHAT_IMAGES_ENABLED: bool = False
+    CASE_QA_MAX_CHAT_IMAGES: int = 1
+    CASE_QA_MAX_CHAT_IMAGE_BYTES: int = 750_000
+    CASE_QA_MAX_CHAT_IMAGE_DIMENSION: int = 4096
+    CASE_QA_MAX_CHAT_IMAGE_PIXELS: int = 16_777_216
     CASE_QA_MAX_ANSWER_TOKENS: int = 800
     CASE_QA_MODEL_CONTEXT_TOKENS: int = 128_000
     CASE_QA_CHUNK_SCHEMA_VERSION: int = 1
-    CASE_QA_EMBEDDING_MODEL: str = "mixedbread-ai/mxbai-embed-large-v1"
-    CASE_QA_VECTOR_DIMENSIONS: int = 1024
+    CASE_QA_EMBEDDING_MODEL: str = "ibm-granite/granite-embedding-english-r2"
+    CASE_QA_VECTOR_DIMENSIONS: int = 768
     CASE_QA_CHAT_HISTORY_ENABLED: bool = False
     CASE_QA_GENERAL_KNOWLEDGE_ENABLED: bool = True
     CASE_QA_CHAT_HISTORY_RETENTION_DAYS: int = 7
@@ -724,11 +814,14 @@ class Config:
             and self.INVESTIGATION_QUERY_BACKEND == "elasticsearch"
         ):
             self.SPL_QUERY_GENERATION_ENABLED = False
-        if self.CASE_QA_VECTOR_DIMENSIONS != 1024:
-            raise ValueError("CASE_QA_VECTOR_DIMENSIONS must be 1024 for v1")
         if self.RAG_VECTOR_DIMENSIONS != self.CASE_QA_VECTOR_DIMENSIONS:
             raise ValueError(
                 "RAG_VECTOR_DIMENSIONS must match CASE_QA_VECTOR_DIMENSIONS"
+            )
+        if self.RAG_VECTOR_DIMENSIONS not in _SUPPORTED_ONPREM_VECTOR_DIMENSIONS:
+            raise ValueError(
+                "RAG_VECTOR_DIMENSIONS must be one of "
+                f"{sorted(_SUPPORTED_ONPREM_VECTOR_DIMENSIONS)} for on-prem"
             )
         if bool(self.CASE_ARCHIVE_ENABLED):
             if not str(self.CASE_POSTGRES_DSN or "").strip():
@@ -822,6 +915,25 @@ class Config:
                 self.CLOSED_TICKET_POSTGRES_CHUNKS_TABLE,
                 "CLOSED_TICKET_POSTGRES_CHUNKS_TABLE",
             )
+        if self.IMAGE_INGEST_MAX_BYTES < 1:
+            raise ValueError("IMAGE_INGEST_MAX_BYTES must be >= 1")
+        if self.IMAGE_INGEST_MAX_PIXELS < 1:
+            raise ValueError("IMAGE_INGEST_MAX_PIXELS must be >= 1")
+        if self.IMAGE_INGEST_MAX_WIDTH < 1 or self.IMAGE_INGEST_MAX_HEIGHT < 1:
+            raise ValueError("IMAGE_INGEST_MAX_WIDTH and IMAGE_INGEST_MAX_HEIGHT must be >= 1")
+        if self.IMAGE_INGEST_MAX_PDF_PAGES < 1:
+            raise ValueError("IMAGE_INGEST_MAX_PDF_PAGES must be >= 1")
+        if self.IMAGE_INGEST_MAX_EMBEDDED_IMAGES < 1:
+            raise ValueError("IMAGE_INGEST_MAX_EMBEDDED_IMAGES must be >= 1")
+        if self.IMAGE_INGEST_MAX_OUTPUT_CHARS < 1:
+            raise ValueError("IMAGE_INGEST_MAX_OUTPUT_CHARS must be >= 1")
+        if not (self.IMAGE_INGEST_TESSERACT_BINARY or "").strip():
+            raise ValueError("IMAGE_INGEST_TESSERACT_BINARY must not be empty")
+        if not (self.IMAGE_INGEST_TESSERACT_LANG or "").strip():
+            raise ValueError("IMAGE_INGEST_TESSERACT_LANG must not be empty")
+        if self.IMAGE_INGEST_TESSERACT_TIMEOUT_SECONDS <= 0:
+            raise ValueError("IMAGE_INGEST_TESSERACT_TIMEOUT_SECONDS must be > 0")
+        _apply_image_vision_defaults(self)
         _apply_closed_ticket_vision_defaults(self)
         _validate_elasticsearch_runtime_contract(self)
 
@@ -886,11 +998,11 @@ def load_config() -> Config:
             )
         ),
         RAG_EMBEDDING_MODEL=os.getenv(
-            "RAG_EMBEDDING_MODEL", "mixedbread-ai/mxbai-embed-large-v1"
+            "RAG_EMBEDDING_MODEL", "ibm-granite/granite-embedding-english-r2"
         ),
         RAG_RERANK_ENABLED=_bool_env("RAG_RERANK_ENABLED", False),
         RAG_RERANK_MODEL=os.getenv(
-            "RAG_RERANK_MODEL", "mixedbread-ai/mxbai-rerank-large-v2"
+            "RAG_RERANK_MODEL", "ibm-granite/granite-embedding-reranker-english-r2"
         ),
         RAG_POSTGRES_DSN=os.getenv(
             "RAG_POSTGRES_DSN",
@@ -903,7 +1015,7 @@ def load_config() -> Config:
             os.getenv("RAG_POSTGRES_STATEMENT_TIMEOUT_MS", "5000")
         ),
         RAG_VECTOR_DIMENSIONS=int(
-            os.getenv("RAG_VECTOR_DIMENSIONS", "1024")
+            os.getenv("RAG_VECTOR_DIMENSIONS", "768")
         ),
         RAG_MAX_SNIPPETS_120B=int(os.getenv("RAG_MAX_SNIPPETS_120B", "5")),
         RAG_MAX_SNIPPETS_20B=int(os.getenv("RAG_MAX_SNIPPETS_20B", "4")),
@@ -922,6 +1034,57 @@ def load_config() -> Config:
         RAG_VECTOR_TOP_K=int(os.getenv("RAG_VECTOR_TOP_K", "30")),
         RAG_CANDIDATE_POOL_LIMIT=int(os.getenv("RAG_CANDIDATE_POOL_LIMIT", "40")),
         RAG_RRF_K=int(os.getenv("RAG_RRF_K", "60")),
+        IMAGE_INGEST_ENABLED=_bool_env("IMAGE_INGEST_ENABLED", False),
+        IMAGE_INGEST_ALLOWED_MIME_TYPES=os.getenv(
+            "IMAGE_INGEST_ALLOWED_MIME_TYPES",
+            (
+                "application/pdf,"
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document,"
+                "image/gif,image/jpeg,image/jpg,image/png,image/webp"
+            ),
+        ),
+        IMAGE_INGEST_MAX_BYTES=_byte_size_env(
+            "IMAGE_INGEST_MAX_BYTES", 10 * 1024 * 1024
+        ),
+        IMAGE_INGEST_MAX_PIXELS=_positive_int_env(
+            "IMAGE_INGEST_MAX_PIXELS", 25_000_000, max_value=200_000_000
+        ),
+        IMAGE_INGEST_MAX_WIDTH=_positive_int_env(
+            "IMAGE_INGEST_MAX_WIDTH", 8192, max_value=16384
+        ),
+        IMAGE_INGEST_MAX_HEIGHT=_positive_int_env(
+            "IMAGE_INGEST_MAX_HEIGHT", 8192, max_value=16384
+        ),
+        IMAGE_INGEST_MAX_PDF_PAGES=_positive_int_env(
+            "IMAGE_INGEST_MAX_PDF_PAGES", 50, max_value=500
+        ),
+        IMAGE_INGEST_MAX_EMBEDDED_IMAGES=_positive_int_env(
+            "IMAGE_INGEST_MAX_EMBEDDED_IMAGES", 20, max_value=200
+        ),
+        IMAGE_INGEST_MAX_OUTPUT_CHARS=_positive_int_env(
+            "IMAGE_INGEST_MAX_OUTPUT_CHARS", 12_000, max_value=200_000
+        ),
+        IMAGE_INGEST_TESSERACT_BINARY=os.getenv(
+            "IMAGE_INGEST_TESSERACT_BINARY", "tesseract"
+        ).strip()
+        or "tesseract",
+        IMAGE_INGEST_TESSERACT_LANG=os.getenv(
+            "IMAGE_INGEST_TESSERACT_LANG", "eng"
+        ).strip()
+        or "eng",
+        IMAGE_INGEST_TESSERACT_TIMEOUT_SECONDS=_positive_float_env(
+            "IMAGE_INGEST_TESSERACT_TIMEOUT_SECONDS", 60.0, max_value=600.0
+        ),
+        IMAGE_VISION_ENABLED=_bool_env("IMAGE_VISION_ENABLED", False),
+        IMAGE_VISION_API_BASE=os.getenv("IMAGE_VISION_API_BASE", ""),
+        IMAGE_VISION_MODEL=os.getenv("IMAGE_VISION_MODEL", ""),
+        IMAGE_VISION_API_KEY=os.getenv("IMAGE_VISION_API_KEY", ""),
+        IMAGE_VISION_TIMEOUT_SECONDS=_positive_float_env(
+            "IMAGE_VISION_TIMEOUT_SECONDS", 30.0, max_value=300.0
+        ),
+        IMAGE_VISION_MAX_TOKENS=_positive_int_env(
+            "IMAGE_VISION_MAX_TOKENS", 400, max_value=4096
+        ),
         CASE_ARCHIVE_ENABLED=_profile_bool(
             "CASE_ARCHIVE_ENABLED", False, profile_flags
         ),
@@ -967,6 +1130,19 @@ def load_config() -> Config:
         CASE_QA_MAX_QUESTION_CHARS=_positive_int_env(
             "CASE_QA_MAX_QUESTION_CHARS", 2000, max_value=20000
         ),
+        CASE_QA_CHAT_IMAGES_ENABLED=_bool_env("CASE_QA_CHAT_IMAGES_ENABLED", False),
+        CASE_QA_MAX_CHAT_IMAGES=_positive_int_env(
+            "CASE_QA_MAX_CHAT_IMAGES", 1, max_value=4
+        ),
+        CASE_QA_MAX_CHAT_IMAGE_BYTES=_positive_int_env(
+            "CASE_QA_MAX_CHAT_IMAGE_BYTES", 750_000, max_value=5_000_000
+        ),
+        CASE_QA_MAX_CHAT_IMAGE_DIMENSION=_positive_int_env(
+            "CASE_QA_MAX_CHAT_IMAGE_DIMENSION", 4096, max_value=8192
+        ),
+        CASE_QA_MAX_CHAT_IMAGE_PIXELS=_positive_int_env(
+            "CASE_QA_MAX_CHAT_IMAGE_PIXELS", 16_777_216, max_value=33_554_432
+        ),
         CASE_QA_MAX_ANSWER_TOKENS=_positive_int_env(
             "CASE_QA_MAX_ANSWER_TOKENS", 800, max_value=16000
         ),
@@ -977,10 +1153,10 @@ def load_config() -> Config:
             "CASE_QA_CHUNK_SCHEMA_VERSION", 1, max_value=1000
         ),
         CASE_QA_EMBEDDING_MODEL=os.getenv(
-            "CASE_QA_EMBEDDING_MODEL", "mixedbread-ai/mxbai-embed-large-v1"
+            "CASE_QA_EMBEDDING_MODEL", "ibm-granite/granite-embedding-english-r2"
         ),
         CASE_QA_VECTOR_DIMENSIONS=_positive_int_env(
-            "CASE_QA_VECTOR_DIMENSIONS", 1024, max_value=100000
+            "CASE_QA_VECTOR_DIMENSIONS", 768, max_value=100000
         ),
         CASE_QA_CHAT_HISTORY_ENABLED=_profile_bool(
             "CASE_QA_CHAT_HISTORY_ENABLED", False, profile_flags

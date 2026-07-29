@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
 import requests
 
@@ -129,19 +129,51 @@ def _headers(config: Config, correlation_id: str) -> Dict[str, str]:
     return headers
 
 
+UserMessageContent = Union[str, Sequence[Dict[str, Any]]]
+
+
 def _payload(
     config: Config,
     *,
-    prompt: str,
+    user_content: UserMessageContent,
     max_tokens: int,
     temperature: float,
 ) -> Dict[str, Any]:
     return {
         "model": config.LLM_MODEL_NAME,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [{"role": "user", "content": user_content}],
         "max_tokens": max_tokens,
         "temperature": temperature,
     }
+
+
+def _validate_user_content(user_content: UserMessageContent) -> None:
+    if isinstance(user_content, str):
+        if not user_content.strip():
+            raise ValueError("prompt must not be empty")
+        return
+    if not user_content:
+        raise ValueError("prompt must not be empty")
+    has_text = False
+    for part in user_content:
+        if not isinstance(part, dict):
+            raise ValueError("multimodal content parts must be objects")
+        part_type = str(part.get("type") or "").strip()
+        if part_type == "text":
+            text = part.get("text")
+            if isinstance(text, str) and text.strip():
+                has_text = True
+        elif part_type == "image_url":
+            image_url = part.get("image_url")
+            if not isinstance(image_url, dict):
+                raise ValueError("image_url content part must include image_url")
+            url = image_url.get("url")
+            if not isinstance(url, str) or not url.startswith("data:image/"):
+                raise ValueError("image_url content must use an internal data URL")
+        else:
+            raise ValueError(f"unsupported multimodal content type: {part_type}")
+    if not has_text:
+        raise ValueError("prompt must not be empty")
 
 
 def openai_chat_complete(
@@ -154,19 +186,23 @@ def openai_chat_complete(
     connect_timeout_sec: float,
     read_timeout_sec: float,
     correlation_id: Optional[str] = None,
+    user_content: UserMessageContent | None = None,
 ) -> Tuple[str, float]:
     """POST chat completion; return (text, latency_seconds).
 
     Raises the same exception types LocalLLMClient.analyze_alert catches.
     """
-    if not prompt or not prompt.strip():
-        raise ValueError("prompt must not be empty")
+    content = user_content if user_content is not None else prompt
+    _validate_user_content(content)
 
     corr = correlation_id or str(uuid.uuid4())
     timeout = (float(connect_timeout_sec), float(read_timeout_sec))
     verify = config.LLM_API_URL.lower().startswith("https://")
     body = _payload(
-        config, prompt=prompt, max_tokens=max_tokens, temperature=temperature
+        config,
+        user_content=content,
+        max_tokens=max_tokens,
+        temperature=temperature,
     )
 
     overall_start = time.perf_counter()
@@ -246,7 +282,10 @@ def openai_chat_complete_tool_call(
     timeout = (float(connect_timeout_sec), float(read_timeout_sec))
     verify = config.LLM_API_URL.lower().startswith("https://")
     body = _payload(
-        config, prompt=prompt, max_tokens=max_tokens, temperature=temperature
+        config,
+        user_content=prompt,
+        max_tokens=max_tokens,
+        temperature=temperature,
     )
     body["tools"] = [tool_spec]
     body["tool_choice"] = {"type": "function", "function": {"name": tool_name}}

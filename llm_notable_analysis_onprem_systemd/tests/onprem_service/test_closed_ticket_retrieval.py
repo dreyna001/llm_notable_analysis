@@ -47,8 +47,8 @@ class _FakeEmbeddingModel:
         del show_progress_bar, convert_to_numpy
         vectors = []
         for index, _ in enumerate(texts):
-            row = [0.0] * 1024
-            row[index % 1024] = 1.0
+            row = [0.0] * 768
+            row[index % 768] = 1.0
             vectors.append(row)
         return vectors
 

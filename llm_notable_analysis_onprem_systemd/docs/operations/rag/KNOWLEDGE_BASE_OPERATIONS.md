@@ -19,6 +19,12 @@ There are three supported KB content lanes for investigation queries:
 - **Elasticsearch query KB**: Elastic-specific facts rendered as
   `ELASTICSEARCH_GROUNDING_CONTEXT` when `ELASTICSEARCH_GROUNDING_ENABLED=true`.
 
+**Image and embedded-media ingest** (PNG/JPEG/GIF/WebP, PDF, DOCX embedded images) is
+enabled when `IMAGE_INGEST_ENABLED=true` in `config.env`. The `corpus_ingest` CLI reads
+those settings via `--config-env` (used by `setup_postgres_rag.sh`). Prerequisites:
+Tesseract, Pillow, pypdfium2 — stage and verify with
+[`IMAGE_INGEST_PREREQUISITES.md`](IMAGE_INGEST_PREREQUISITES.md).
+
 Splunk and Elastic grounding KBs are separate from each other and from the
 general SOC KB. See
 [`SPL_OPERATIONS.md`](../investigation/SPL_OPERATIONS.md) and
@@ -132,8 +138,28 @@ retrieval only; ingest still needs matching `--source-dir`).
   (`setup_postgres_rag.sh` has no Elastic flag). Run `setup_postgres_rag.sh` once
   without `--skip-db-setup` if pgvector/schema are not provisioned yet.
 
-Supported source formats: `.txt` and `.docx`, discovered recursively under each
-source directory.
+Supported source formats when `IMAGE_INGEST_ENABLED=true`:
+
+- `.txt` — body text (unchanged)
+- `.docx` — body text plus OCR from embedded images (`Embedded Images OCR` section)
+- `.png`, `.jpeg`, `.jpg`, `.webp`, `.gif` — standalone OCR chunks (`OCR Content`)
+- `.pdf` — scanned-page OCR (`OCR Content`)
+
+When `IMAGE_INGEST_ENABLED=false`, only `.txt` and `.docx` body text are indexed;
+standalone images and PDFs are skipped with warnings in `ingest_report.json`.
+
+Optional loopback vision captions for KB images, PDF pages, and DOCX embedded
+images require `IMAGE_VISION_ENABLED=true`. `setup_postgres_rag.sh` passes
+`--config-env` to `corpus_ingest`, which constructs the loopback Gemma vision
+callback from `IMAGE_VISION_*` (empty base/model/token inherit `LLM_API_URL`,
+`LLM_MODEL_NAME`, and `LLM_API_TOKEN`). OCR remains the indexed source of truth;
+vision output is advisory and vision failures appear in `ingest_report.json`
+`warnings` without dropping OCR text.
+
+Alert analysis and portal chat consume KB **text** snippets only; they do not send raw
+KB images to the LLM.
+
+All supported formats are discovered recursively under each source directory.
 
 Config source: `/etc/notable-analyzer/config.env`. SQLite/FAISS remains a
 fallback backend (`RAG_BACKEND=sqlite_faiss`) for lab use; new on-prem deployments
@@ -556,7 +582,8 @@ host if rollback auditability is required.
   retrieved context.
 - `RAG_BACKEND=postgres` for the Postgres/pgvector path.
 - `RAG_POSTGRES_DSN` points to the intended local database.
-- `RAG_VECTOR_DIMENSIONS=1024` for `mixedbread-ai/mxbai-embed-large-v1`.
+- `RAG_VECTOR_DIMENSIONS=768` for `ibm-granite/granite-embedding-english-r2`.
+- Image-ingest prerequisites verified when KB images or embedded PDF/DOCX images are in scope ([`IMAGE_INGEST_PREREQUISITES.md`](IMAGE_INGEST_PREREQUISITES.md)).
 - `RAG_RERANK_ENABLED=true` only after the reranker model is staged and tested.
 - `SPL_QUERY_RAG_ENABLED=true` only after the SPL source docs have been ingested
   into `SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE`; SPL generation itself should come
@@ -572,6 +599,7 @@ host if rollback auditability is required.
 
 ## Related Docs
 
+- [`IMAGE_INGEST_PREREQUISITES.md`](IMAGE_INGEST_PREREQUISITES.md) — OCR, PDF, Granite, offline bundle
 - [`RAG_OPERATIONS.md`](RAG_OPERATIONS.md) — shared retrieval tuning
 - [`SPL_OPERATIONS.md`](../investigation/SPL_OPERATIONS.md) — Splunk generation, execution, onboarding
 - [`ELASTICSEARCH_OPERATIONS.md`](../investigation/ELASTICSEARCH_OPERATIONS.md) — Elastic generation, execution, onboarding

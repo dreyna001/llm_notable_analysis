@@ -25,12 +25,19 @@ from llm_notable_analysis_onprem_systemd.onprem_service.openai_transport_nonsdk 
 )
 from llm_notable_analysis_onprem_systemd.onprem_service.portal_app import (
     _parse_list_filters,
+    _portal_capabilities_payload,
+    _raise_portal_chat_session_error,
     build_portal_app,
     check_case_archive_ready,
     parse_iso8601_timestamp,
     parse_utc_calendar_date,
     utc_day_end,
     utc_day_start,
+)
+from llm_notable_analysis_onprem_systemd.onprem_service.case_chat import validate_chat_payload
+from llm_notable_analysis_onprem_systemd.onprem_service.portal_api_models import (
+    PortalCapabilitiesResponse,
+    portal_response,
 )
 
 _USER_HEADERS = {"X-Forwarded-User": "analyst@example.com"}
@@ -96,7 +103,7 @@ class _FakeConnection:
 class _FakeEmbeddingModel:
     def encode(self, texts, show_progress_bar=False, convert_to_numpy=True):
         del texts, show_progress_bar, convert_to_numpy
-        return [[1.0] + [0.0] * 1023]
+        return [[1.0] + [0.0] * 767]
 
 
 class _BadEmbeddingModel:
@@ -410,6 +417,9 @@ class TestPortalApp(unittest.TestCase):
                     "archive_retrieval": "ready",
                     "llm_gateway": "ready",
                 },
+                "chat_images_enabled": False,
+                "max_chat_images": 1,
+                "max_chat_image_bytes": 750000,
             },
         )
 
@@ -1265,6 +1275,78 @@ class TestPortalApp(unittest.TestCase):
         self.assertIn("What is the verdict?", prompt)
         self.assertIn("Likely malicious", prompt)
         self.assertEqual(captured["max_tokens"], 800)
+
+
+def _make_png_payload(*, width: int = 24, height: int = 24) -> dict[str, str]:
+    import base64
+    import io
+
+    from PIL import Image
+
+    image = Image.new("RGB", (width, height), (0, 128, 255))
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return {"media_type": "image/png", "data_base64": encoded}
+
+
+class TestPortalChatImagesHttp(unittest.TestCase):
+    @patch(
+        "llm_notable_analysis_onprem_systemd.onprem_service.case_chat._probe_llm_reachable",
+        return_value=True,
+    )
+    def test_capabilities_payload_exposes_chat_image_limits(
+        self,
+        _mock_llm_probe,
+    ) -> None:
+        config = Config(
+            PORTAL_ENABLED=True,
+            CASE_ARCHIVE_ENABLED=True,
+            CASE_QA_ENABLED=True,
+            PORTAL_PROXY_SECRET="portal-secret",
+        )
+        config.CASE_QA_CHAT_IMAGES_ENABLED = True
+        config.CASE_QA_MAX_CHAT_IMAGES = 2
+        config.CASE_QA_MAX_CHAT_IMAGE_BYTES = 500000
+        payload = _portal_capabilities_payload(
+            config,
+            connect=lambda _dsn: _FakeConnection(rows=[]),
+            chat_embedding_model=_FakeEmbeddingModel(),
+            chat_llm_gateway_ready=True,
+        )
+
+        self.assertTrue(payload["chat_images_enabled"])
+        self.assertEqual(payload["max_chat_images"], 2)
+        self.assertEqual(payload["max_chat_image_bytes"], 500000)
+        portal_response(PortalCapabilitiesResponse, payload)
+
+    def test_validate_chat_payload_rejects_images_when_disabled(self) -> None:
+        config = Config(
+            PORTAL_ENABLED=True,
+            CASE_ARCHIVE_ENABLED=True,
+            CASE_QA_ENABLED=True,
+            PORTAL_PROXY_SECRET="portal-secret",
+        )
+        with self.assertRaisesRegex(ValueError, "Chat images are not enabled."):
+            validate_chat_payload(
+                {
+                    "mode": "selected_case",
+                    "selected_case_id": "case-1",
+                    "question": "What does this show?",
+                    "images": [_make_png_payload()],
+                },
+                config,
+            )
+
+    def test_raise_portal_chat_session_error_maps_image_validation_to_400(self) -> None:
+        from fastapi import HTTPException
+
+        with self.assertRaises(HTTPException) as ctx:
+            _raise_portal_chat_session_error(
+                ValueError("Chat images are not enabled.")
+            )
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail, "Chat images are not enabled.")
 
 
 if __name__ == "__main__":

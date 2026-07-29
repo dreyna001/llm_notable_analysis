@@ -2,7 +2,7 @@
 
 Goal: list exactly what to download before installing on an offline host.
 
-Related: [`INSTALL.md`](INSTALL.md) (connected install), [`AIRGAPPED_DEPLOYMENT.md`](AIRGAPPED_DEPLOYMENT.md) (air-gap bring-up), [`../rag/RAG_OPERATIONS.md`](../rag/RAG_OPERATIONS.md) (RAG models and cache paths).
+Related: [`INSTALL.md`](INSTALL.md) (connected install), [`AIRGAPPED_DEPLOYMENT.md`](AIRGAPPED_DEPLOYMENT.md) (air-gap bring-up), [`../rag/RAG_OPERATIONS.md`](../rag/RAG_OPERATIONS.md) (RAG models and cache paths), [`../rag/IMAGE_INGEST_PREREQUISITES.md`](../rag/IMAGE_INGEST_PREREQUISITES.md) (image/OCR/multimodal prerequisites).
 
 ## What This Controls
 
@@ -147,9 +147,9 @@ When `rag` or `analyst_portal` is enabled, stage embedding (and optional rerank)
 
 | Role | Model | When |
 | --- | --- | --- |
-| RAG embedder | `mixedbread-ai/mxbai-embed-large-v1` | `rag` profile |
-| RAG reranker | `mixedbread-ai/mxbai-rerank-large-v2` | `RAG_RERANK_ENABLED=true` |
-| Case Q&A embedder | `mixedbread-ai/mxbai-embed-large-v1` | `analyst_portal` profile |
+| RAG embedder | `ibm-granite/granite-embedding-english-r2` (768-dim) | `rag` profile |
+| RAG reranker | `ibm-granite/granite-embedding-reranker-english-r2` | `RAG_RERANK_ENABLED=true` |
+| Case Q&A embedder | `ibm-granite/granite-embedding-english-r2` (768-dim) | `analyst_portal` profile |
 
 Default cache paths (override in `/etc/notable-analyzer/config.env` if needed):
 
@@ -157,6 +157,39 @@ Default cache paths (override in `/etc/notable-analyzer/config.env` if needed):
 - `SENTENCE_TRANSFORMERS_HOME=/var/notables/cache/sentence-transformers`
 
 Keep weights outside the repo. Record checksums per local policy. See [`../rag/RAG_OPERATIONS.md`](../rag/RAG_OPERATIONS.md) and [`../rag/KNOWLEDGE_BASE_OPERATIONS.md`](../rag/KNOWLEDGE_BASE_OPERATIONS.md) for KB source documents and rebuild steps.
+
+### Image ingest offline bundle (OCR, PDF, Granite)
+
+When KB images, portal chat images, closed-ticket scans, or PDF/DOCX embedded images
+are in scope, pre-stage the **image-ingest bundle** in addition to the main wheelhouse
+and LLM weights.
+
+**Phase 1 (connected staging host):**
+
+```bash
+cd llm_notable_analysis_onprem_systemd
+bash scripts/build_image_ingest_offline_bundle.sh \
+  --output-dir /mnt/staging/image-ingest-bundle
+```
+
+**Phase 2 (air-gapped target, after `install.sh`):**
+
+```bash
+sudo bash scripts/install_image_ingest_prerequisites.sh \
+  --bundle-dir /mnt/media/image-ingest-bundle
+sudo bash scripts/configure_us_granite_retrieval_defaults.sh \
+  --config-env /etc/notable-analyzer/config.env \
+  --portal-env /etc/notable-analyzer/portal.env
+sudo bash scripts/verify_image_ingest_prerequisites.sh \
+  --config-env /etc/notable-analyzer/config.env
+```
+
+Bundle contents: Tesseract/Leptonica OS packages, approved language data, Python wheels
+(`pypdfium2`, `Pillow`), and IBM Granite embed/rerank weights. Vision uses the
+existing Gemma 4 vLLM stack (no separate vision model download).
+
+Full scope, stack table, migration notes, and retention boundaries:
+[`../rag/IMAGE_INGEST_PREREQUISITES.md`](../rag/IMAGE_INGEST_PREREQUISITES.md).
 
 ## 4) OS-level dependencies
 
@@ -207,7 +240,8 @@ For analyst portal (`INSTALL_ANALYST_PORTAL=true`), also stage or pre-install:
 - [ ] All three source trees present (or `RAG_PACKAGE_SRC_DIR` / `SDK_SOURCE_DIR` set).
 - [ ] Wheelhouse contains platform-compatible wheels for analyzer, LiteLLM, and vLLM venvs.
 - [ ] LLM model tree includes `config.json` at the planned `VLLM_MODEL_PATH`.
-- [ ] RAG/portal embedding models staged under planned `HF_HOME` / `SENTENCE_TRANSFORMERS_HOME` when those profiles are in scope.
+- [ ] RAG/portal Granite embedding + rerank models staged under planned `HF_HOME` / `SENTENCE_TRANSFORMERS_HOME` when those profiles are in scope.
+- [ ] Image-ingest bundle built and transferred when OCR/PDF/KB images or chat images are in scope (`verify_image_ingest_prerequisites.sh` passes).
 - [ ] Python 3.12 OS packages staged when `INSTALL_PYTHON=false`.
 - [ ] GPU driver/CUDA verified on target when using vLLM.
 - [ ] Checksums/manifests recorded per local policy.
@@ -264,5 +298,6 @@ Requires only `llm_notable_analysis_onprem_systemd/` and `onprem-llm-sdk/` (no R
 | Air-gap bring-up | [`AIRGAPPED_DEPLOYMENT.md`](AIRGAPPED_DEPLOYMENT.md) |
 | RAG models and tuning | [`../rag/RAG_OPERATIONS.md`](../rag/RAG_OPERATIONS.md) |
 | KB source lifecycle | [`../rag/KNOWLEDGE_BASE_OPERATIONS.md`](../rag/KNOWLEDGE_BASE_OPERATIONS.md) |
+| Image/OCR prerequisites | [`../rag/IMAGE_INGEST_PREREQUISITES.md`](../rag/IMAGE_INGEST_PREREQUISITES.md) |
 | Analyst portal rollout | [`../analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](../analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md) |
 | Hardware starting points | [`deployment_profiles/README.md`](deployment_profiles/README.md) |

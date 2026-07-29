@@ -138,7 +138,7 @@ def _vector_dimensions(config: Config) -> int:
         value = getattr(config, key, None)
         if value is not None:
             return int(value)
-    return 1024
+    return 768
 
 
 def _json(value: Any) -> str:
