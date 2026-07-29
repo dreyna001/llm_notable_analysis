@@ -81,12 +81,22 @@ sudo bash scripts/configure_us_granite_retrieval_defaults.sh \
 
 ### Phase 1 — Build bundle on a connected staging host
 
-Run on a Linux host that matches the target OS/arch and Python 3.12 profile:
+Run on a Linux host that matches the target OS/arch and Python 3.12 profile.
+Uses the analyzer venv at `/opt/notable-analyzer/venv` for `pip` and Hugging Face
+downloads when present (system `python3.12` often has no pip on production hosts).
 
 ```bash
 cd /path/to/llm_notable_analysis_onprem_systemd
 bash scripts/build_image_ingest_offline_bundle.sh \
   --output-dir /mnt/staging/image-ingest-bundle
+```
+
+If the analyzer venv is elsewhere:
+
+```bash
+bash scripts/build_image_ingest_offline_bundle.sh \
+  --output-dir /mnt/staging/image-ingest-bundle \
+  --analyzer-venv /opt/notable-analyzer/venv
 ```
 
 The bundle typically includes:

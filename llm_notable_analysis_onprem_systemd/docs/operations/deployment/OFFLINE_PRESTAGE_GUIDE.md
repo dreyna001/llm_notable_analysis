@@ -166,6 +166,9 @@ and LLM weights.
 
 **Phase 1 (connected staging host):**
 
+Uses `/opt/notable-analyzer/venv/bin/python` for pip and model downloads when that
+venv exists (same pattern as `scripts/install.sh` model staging).
+
 ```bash
 cd llm_notable_analysis_onprem_systemd
 bash scripts/build_image_ingest_offline_bundle.sh \

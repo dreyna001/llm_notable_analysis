@@ -18,7 +18,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 OUTPUT_DIR="${OUTPUT_DIR:-}"
-PYTHON_BIN="${PYTHON_BIN:-python3.12}"
+INSTALL_DIR="${INSTALL_DIR:-/opt/notable-analyzer}"
+ANALYZER_VENV="${ANALYZER_VENV:-$INSTALL_DIR/venv}"
+PYTHON_BIN="${PYTHON_BIN:-}"
+PYTHON_BIN_EXPLICIT="${PYTHON_BIN_EXPLICIT:-false}"
 SKIP_MODELS="${SKIP_MODELS:-false}"
 SKIP_WHEELS="${SKIP_WHEELS:-false}"
 SKIP_TESSDATA="${SKIP_TESSDATA:-false}"
@@ -46,16 +49,24 @@ Target host must match this machine's Linux arch and Python 3.12 profile.
 Default output directory: ./offline-bundles/image-ingest-YYYYMMDD
 
 Options:
-  --output-dir PATH   Bundle root directory (created if missing)
-  --skip-models       Skip IBM Granite model downloads
-  --skip-wheels       Skip Python wheel download (Pillow, pypdfium2)
-  --skip-tessdata     Skip Tesseract language data download
-  --skip-debs         Skip apt-get download of tesseract OS packages
-  --python PATH       Python interpreter for wheel/model staging (default: python3.12)
-  -h, --help          Show this help
+  --output-dir PATH      Bundle root directory (created if missing)
+  --skip-models          Skip IBM Granite model downloads
+  --skip-wheels          Skip Python wheel download (Pillow, pypdfium2)
+  --skip-tessdata        Skip Tesseract language data download
+  --skip-debs            Skip apt-get download of tesseract OS packages
+  --analyzer-venv PATH   Analyzer virtualenv for pip/model staging
+                         (default: /opt/notable-analyzer/venv)
+  --python PATH          Python interpreter (overrides --analyzer-venv)
+  -h, --help             Show this help
+
+Python selection (first match wins after explicit --python):
+  1. --python PATH or PYTHON_BIN env
+  2. \$ANALYZER_VENV/bin/python when present
+  3. python3.12 on PATH (must have pip)
 
 Environment overrides:
-  OUTPUT_DIR, PYTHON_BIN, SKIP_MODELS, SKIP_WHEELS, SKIP_TESSDATA, SKIP_DEBS,
+  OUTPUT_DIR, INSTALL_DIR, ANALYZER_VENV, PYTHON_BIN,
+  SKIP_MODELS, SKIP_WHEELS, SKIP_TESSDATA, SKIP_DEBS,
   PILLOW_VERSION, PYPDFIUM2_VERSION, HUGGINGFACE_HUB_PIP_SPEC,
   TESSDATA_ENG_URL, TESSDATA_OSD_URL, HF_TOKEN, HUGGINGFACE_TOKEN
 EOF
@@ -76,6 +87,41 @@ warn() {
 
 require_command() {
     command -v "$1" >/dev/null 2>&1 || err "Missing required command: $1"
+}
+
+python_has_pip() {
+    local py="$1"
+    [[ -x "$py" || "$(command -v "$py" 2>/dev/null || true)" != "" ]] || return 1
+    "$py" -m pip --version >/dev/null 2>&1
+}
+
+resolve_python_bin() {
+    if [[ "$PYTHON_BIN_EXPLICIT" == "true" && -n "$PYTHON_BIN" ]]; then
+        return 0
+    fi
+
+    if [[ -n "$PYTHON_BIN" ]]; then
+        return 0
+    fi
+
+    if [[ -x "$ANALYZER_VENV/bin/python" ]]; then
+        PYTHON_BIN="$ANALYZER_VENV/bin/python"
+        return 0
+    fi
+
+    if command -v python3.12 >/dev/null 2>&1; then
+        PYTHON_BIN="python3.12"
+        return 0
+    fi
+
+    err "No Python 3.12 found. Pass --python PATH or install the analyzer venv at $ANALYZER_VENV"
+}
+
+require_python_with_pip() {
+    resolve_python_bin
+    require_command "$PYTHON_BIN"
+    python_has_pip "$PYTHON_BIN" || err \
+        "Python at $PYTHON_BIN has no pip module. Use the analyzer venv (--analyzer-venv $ANALYZER_VENV) or pass --python to a venv with pip."
 }
 
 require_arg_value() {
@@ -123,9 +169,15 @@ while [[ $# -gt 0 ]]; do
             SKIP_DEBS="true"
             shift
             ;;
+        --analyzer-venv)
+            require_arg_value "$1" "${2:-}"
+            ANALYZER_VENV="$2"
+            shift 2
+            ;;
         --python)
             require_arg_value "$1" "${2:-}"
             PYTHON_BIN="$2"
+            PYTHON_BIN_EXPLICIT="true"
             shift 2
             ;;
         -h|--help)
@@ -142,9 +194,11 @@ if [[ -z "$OUTPUT_DIR" ]]; then
     OUTPUT_DIR="$REPO_DIR/offline-bundles/image-ingest-$(date +%Y%m%d)"
 fi
 
-require_command "$PYTHON_BIN"
+require_python_with_pip
 require_command curl
 require_command sha256sum
+
+info "Using Python for bundle staging: $PYTHON_BIN"
 
 py_version="$("$PYTHON_BIN" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
 if [[ "$py_version" != "3.12" ]]; then
@@ -156,7 +210,6 @@ mkdir -p "$OUTPUT_DIR"/{wheels,tessdata,debs,models}
 info "Building image-ingest offline bundle at: $OUTPUT_DIR"
 
 if [[ "$SKIP_WHEELS" != "true" ]]; then
-    require_command "$PYTHON_BIN"
     platform_tag="$(detect_manylinux_platform)"
     info "Downloading Python wheels for $platform_tag / Python 3.12"
     "$PYTHON_BIN" -m pip install --quiet --upgrade pip wheel
