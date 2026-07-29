@@ -1,9 +1,14 @@
 # Customer default deployment (portal + RAG + closed tickets)
 
-Normative **example env** pair for portal-first customer go-live:
+Normative **repo templates** (copy to the host):
 
-- `config.env.example` → `/etc/notable-analyzer/config.env`
-- `config.portal.env.example` → `/etc/notable-analyzer/portal.env`
+- `config.env.example` → `/etc/notable-analyzer/config.env` (analyzer)
+- `config.portal.env.example` → `/etc/notable-analyzer/portal.env` (portal)
+
+There are only **two runtime env files** on the host. The `.example` files in git are templates, not loaded at runtime.
+
+Optional **hardware-tuned** overlays (same two-file model, different LLM/chat knobs):
+`config.env.rtx-pro-6000-blackwell-5analysts.example` and matching `config.portal.env.*` + vLLM drop-in — use when applying the Blackwell profile script, not as a third runtime file.
 
 Capability bundle: `CAPABILITY_PROFILES=core,rag,analyst_portal` on the analyzer;
 `core,analyst_portal` on the portal process, plus mirrored RAG/SPL/closed-ticket
