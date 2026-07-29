@@ -310,7 +310,7 @@ class TestDeploymentContract(unittest.TestCase):
         """Example config should stay aligned with code defaults and RAG knobs."""
         config_text = (PROJECT_ROOT / "config.env.example").read_text(encoding="utf-8")
 
-        self.assertIn("CAPABILITY_PROFILES=core", config_text)
+        self.assertIn("CAPABILITY_PROFILES=core,rag,analyst_portal", config_text)
         self.assertIn("LLM_MAX_TOKENS=4096", config_text)
         self.assertIn("LLM_TIMEOUT=240", config_text)
         self.assertIn("INVESTIGATION_MAX_CONCURRENT_QUERIES=6", config_text)
@@ -324,6 +324,12 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("RAG_FAIL_CLOSED=false", config_text)
         self.assertIn("HF_HOME=/var/notables/cache/huggingface", config_text)
         self.assertIn("HTML_REPORT_ENABLED=false", config_text)
+        self.assertIn("MARKDOWN_REPORT_ENABLED=false", config_text)
+        self.assertIn("RAG_RERANK_ENABLED=true", config_text)
+        self.assertIn("SPL_QUERY_RAG_ENABLED=true", config_text)
+        self.assertIn("SPL_QUERY_GENERATION_ENABLED=true", config_text)
+        self.assertIn("CLOSED_TICKET_RAG_ENABLED=true", config_text)
+        self.assertIn("CASE_QA_CLOSED_TICKET_ENABLED=true", config_text)
         self.assertIn("RAG_FUSED_RANK_LIMIT_120B=8", config_text)
         self.assertIn("RAG_RRF_K=60", config_text)
         self.assertIn("CASE_ARCHIVE_ENABLED=false", config_text)
@@ -332,7 +338,7 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("CASE_RETENTION_DELETE_BATCH_SIZE=500", config_text)
         self.assertIn("CASE_QA_ENABLED=false", config_text)
         self.assertIn("CASE_QA_MAX_INDEX_CHUNKS_PER_CASE=200", config_text)
-        self.assertIn("CASE_QA_CHAT_HISTORY_ENABLED=false", config_text)
+        self.assertIn("CASE_QA_CHAT_HISTORY_ENABLED=true", config_text)
         self.assertIn("CASE_QA_LEXICAL_TOP_K=30", config_text)
         self.assertIn("PORTAL_ENABLED=false", config_text)
         self.assertIn("PORTAL_BIND_HOST=127.0.0.1", config_text)
@@ -342,7 +348,6 @@ class TestDeploymentContract(unittest.TestCase):
             "PORTAL_PROXY_SECRET_HEADER=X-Notable-Portal-Proxy-Secret",
             config_text,
         )
-        self.assertIn("SPL_QUERY_RAG_ENABLED=false", config_text)
         self.assertIn("SPL_QUERY_RAG_POSTGRES_CHUNKS_TABLE=spl_query_chunks", config_text)
         self.assertIn("SPL_QUERY_RAG_FAILURE_MODE=suppress", config_text)
 
@@ -350,6 +355,11 @@ class TestDeploymentContract(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("CAPABILITY_PROFILES=core,analyst_portal", portal_config_text)
+        self.assertIn("RAG_ENABLED=true", portal_config_text)
+        self.assertIn("RAG_RERANK_ENABLED=true", portal_config_text)
+        self.assertIn("SPL_QUERY_RAG_ENABLED=true", portal_config_text)
+        self.assertIn("CLOSED_TICKET_RAG_ENABLED=true", portal_config_text)
+        self.assertIn("CASE_QA_CLOSED_TICKET_ENABLED=true", portal_config_text)
         self.assertIn("CASE_POSTGRES_DSN=postgresql://notable_portal@", portal_config_text)
         self.assertIn("PORTAL_PROXY_SECRET=<generate-a-random-shared-secret>", portal_config_text)
         self.assertIn("PORTAL_CHAT_MAX_CONCURRENCY=18", portal_config_text)
@@ -566,6 +576,7 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("CAPABILITY_PROFILES.md", ops_index)
         for profile in (
             "core",
+            "markdown_reports",
             "html_reports",
             "rag",
             "spl_readonly",

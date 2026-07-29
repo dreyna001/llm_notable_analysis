@@ -74,6 +74,7 @@ class TestOnpremMainInvestigation(unittest.TestCase):
                 PROCESSED_DIR=processed,
                 QUARANTINE_DIR=quarantine,
                 REPORT_DIR=reports,
+                MARKDOWN_REPORT_ENABLED=True,
                 INVESTIGATION_QUERY_EXECUTION_ENABLED=True,
             )
             llm_client = MagicMock()
@@ -122,6 +123,7 @@ class TestOnpremMainInvestigation(unittest.TestCase):
                 PROCESSED_DIR=processed,
                 QUARANTINE_DIR=quarantine,
                 REPORT_DIR=reports,
+                MARKDOWN_REPORT_ENABLED=True,
                 INVESTIGATION_QUERY_EXECUTION_ENABLED=True,
                 INVESTIGATION_QUERY_BACKEND="elasticsearch",
                 ELASTICSEARCH_BASE_URL="https://elastic.internal:9200",
@@ -175,6 +177,7 @@ class TestOnpremMainInvestigation(unittest.TestCase):
                 PROCESSED_DIR=processed,
                 QUARANTINE_DIR=quarantine,
                 REPORT_DIR=reports,
+                MARKDOWN_REPORT_ENABLED=True,
                 INVESTIGATION_QUERY_EXECUTION_ENABLED=True,
                 QUERY_RESULT_INTERPRETATION_ENABLED=True,
             )
@@ -239,6 +242,7 @@ class TestOnpremMainInvestigation(unittest.TestCase):
                 PROCESSED_DIR=processed,
                 QUARANTINE_DIR=quarantine,
                 REPORT_DIR=reports,
+                MARKDOWN_REPORT_ENABLED=True,
                 INVESTIGATION_QUERY_EXECUTION_ENABLED=True,
                 QUERY_RESULT_INTERPRETATION_ENABLED=True,
             )
@@ -301,6 +305,7 @@ class TestOnpremMainInvestigation(unittest.TestCase):
                 PROCESSED_DIR=processed,
                 QUARANTINE_DIR=quarantine,
                 REPORT_DIR=reports,
+                MARKDOWN_REPORT_ENABLED=True,
                 INVESTIGATION_QUERY_EXECUTION_ENABLED=False,
             )
             llm_client = MagicMock()
@@ -339,6 +344,7 @@ class TestOnpremMainInvestigation(unittest.TestCase):
                 PROCESSED_DIR=processed,
                 QUARANTINE_DIR=quarantine,
                 REPORT_DIR=reports,
+                MARKDOWN_REPORT_ENABLED=True,
                 CASE_ARCHIVE_ENABLED=True,
             )
             llm_client = MagicMock()
@@ -346,7 +352,7 @@ class TestOnpremMainInvestigation(unittest.TestCase):
             logger = logging.getLogger("test_onprem_main_archive")
 
             with patch(
-                "llm_notable_analysis_onprem_systemd.onprem_service.onprem_main.archive_case_for_portal",
+                "llm_notable_analysis_onprem_systemd.onprem_service.notable_output_sinks.archive_case_for_portal",
                 return_value=True,
             ) as archive_write:
                 ok = process_notable(notable_file, config, llm_client, logger)
@@ -378,6 +384,7 @@ class TestOnpremMainInvestigation(unittest.TestCase):
                 PROCESSED_DIR=processed,
                 QUARANTINE_DIR=quarantine,
                 REPORT_DIR=reports,
+                MARKDOWN_REPORT_ENABLED=True,
                 CASE_ARCHIVE_ENABLED=True,
             )
             llm_client = MagicMock()
@@ -385,7 +392,7 @@ class TestOnpremMainInvestigation(unittest.TestCase):
             logger = logging.getLogger("test_onprem_main_archive_failure")
 
             with patch(
-                "llm_notable_analysis_onprem_systemd.onprem_service.onprem_main.archive_case_for_portal",
+                "llm_notable_analysis_onprem_systemd.onprem_service.notable_output_sinks.archive_case_for_portal",
                 return_value=False,
             ) as archive_write:
                 ok = process_notable(notable_file, config, llm_client, logger)
@@ -412,6 +419,7 @@ class TestOnpremMainInvestigation(unittest.TestCase):
                 PROCESSED_DIR=processed,
                 QUARANTINE_DIR=quarantine,
                 REPORT_DIR=reports,
+                MARKDOWN_REPORT_ENABLED=True,
                 CASE_ARCHIVE_ENABLED=True,
             )
             llm_client = MagicMock()
@@ -419,7 +427,7 @@ class TestOnpremMainInvestigation(unittest.TestCase):
             logger = logging.getLogger("test_onprem_main_archive_chunk_failure")
 
             with patch(
-                "llm_notable_analysis_onprem_systemd.onprem_service.onprem_main.archive_case_for_portal",
+                "llm_notable_analysis_onprem_systemd.onprem_service.notable_output_sinks.archive_case_for_portal",
                 return_value=False,
             ) as archive_write:
                 ok = process_notable(notable_file, config, llm_client, logger)
@@ -446,6 +454,7 @@ class TestOnpremMainInvestigation(unittest.TestCase):
                 PROCESSED_DIR=processed,
                 QUARANTINE_DIR=quarantine,
                 REPORT_DIR=reports,
+                MARKDOWN_REPORT_ENABLED=True,
                 CASE_ARCHIVE_ENABLED=True,
             )
             llm_client = MagicMock()
@@ -453,7 +462,7 @@ class TestOnpremMainInvestigation(unittest.TestCase):
             logger = logging.getLogger("test_onprem_main_nonsdk_archive")
 
             with patch(
-                "llm_notable_analysis_onprem_systemd.onprem_service.onprem_main_nonsdk.archive_case_for_portal",
+                "llm_notable_analysis_onprem_systemd.onprem_service.notable_output_sinks.archive_case_for_portal",
                 return_value=True,
             ) as archive_write:
                 ok = process_notable_nonsdk(notable_file, config, llm_client, logger)
@@ -481,6 +490,7 @@ class TestOnpremMainInvestigation(unittest.TestCase):
                 PROCESSED_DIR=processed,
                 QUARANTINE_DIR=quarantine,
                 REPORT_DIR=reports,
+                MARKDOWN_REPORT_ENABLED=True,
                 HTML_REPORT_ENABLED=True,
             )
             llm_client = MagicMock()
@@ -514,6 +524,7 @@ class TestOnpremMainInvestigation(unittest.TestCase):
                 PROCESSED_DIR=processed,
                 QUARANTINE_DIR=quarantine,
                 REPORT_DIR=reports,
+                MARKDOWN_REPORT_ENABLED=True,
                 HTML_REPORT_ENABLED=False,
             )
             llm_client = MagicMock()

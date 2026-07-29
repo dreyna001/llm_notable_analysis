@@ -3,7 +3,7 @@
 
 Runs as a long-lived systemd service, polling INCOMING_DIR for new notables,
 analyzing them via local LLM (vLLM + gemma-4-31B-it), validating TTPs, and
-writing markdown reports.
+writing optional report artifacts and archiving cases for the analyst portal.
 
 Supports optional bounded concurrency via ThreadPoolExecutor (disabled by default).
 """
@@ -33,11 +33,8 @@ from .ingest import (
     read_notable_text,
     NotableReadError,
 )
-from .sinks import write_html_to_file, write_markdown_to_file, update_splunk_notable
-from .markdown_generator import generate_markdown_report
-from .html_generator import generate_html_report
+from .notable_output_sinks import persist_notable_outputs
 from .query_result_enrichment import enrich_analysis_with_query_results
-from .case_archive_flow import archive_case_for_portal
 from .servicenow import (
     build_servicenow_incident_draft,
     create_servicenow_incident,
@@ -289,38 +286,18 @@ def process_notable(
                 llm_response["servicenow_section"]["create"]["status"],
             )
 
-        # Generate markdown report
-        markdown = generate_markdown_report(alert_text, llm_response, scored_ttps)
-
-        # Write to filesystem
-        report_path = write_markdown_to_file(notable_id, markdown, config)
-        logger.info(f"Wrote report: {report_path}")
-
-        html_report_path: Path | None = None
-        if bool(getattr(config, "HTML_REPORT_ENABLED", False)):
-            html = generate_html_report(alert_text, llm_response, scored_ttps)
-            html_report_path = write_html_to_file(notable_id, html, config)
-            logger.info("Wrote HTML report: %s", html_report_path)
-
-        if bool(getattr(config, "CASE_ARCHIVE_ENABLED", False)):
-            archive_fn = archive_case or archive_case_for_portal
-            archive_fn(
-                config=config,
-                logger=logger,
-                finding_id=finding_id,
-                source_filename=file_path.name,
-                alert_payload=alert_payload,
-                analysis=llm_response,
-                report_md_path=report_path,
-                report_html_path=html_report_path,
-            )
-
-        # Optional: Update Splunk notable via REST API
-        if config.SPLUNK_SINK_ENABLED:
-            splunk_result = update_splunk_notable(
-                notable_id, markdown, finding_id, config
-            )
-            logger.info(f"Splunk update result: {splunk_result.get('status')}")
+        persist_notable_outputs(
+            config=config,
+            logger=logger,
+            notable_id=notable_id,
+            alert_text=alert_text,
+            llm_response=llm_response,
+            scored_ttps=scored_ttps,
+            finding_id=finding_id,
+            file_path=file_path,
+            alert_payload=alert_payload,
+            archive_case=archive_case,
+        )
 
         # Move to processed
         move_to_processed(file_path, config)

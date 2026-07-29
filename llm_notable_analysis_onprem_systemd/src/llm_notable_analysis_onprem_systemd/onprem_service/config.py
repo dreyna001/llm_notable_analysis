@@ -19,6 +19,7 @@ _POSTGRES_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _CAPABILITY_PROFILE_FLAGS: dict[str, dict[str, Any]] = {
     "core": {},
     "html_reports": {"HTML_REPORT_ENABLED": True},
+    "markdown_reports": {"MARKDOWN_REPORT_ENABLED": True},
     "rag": {"RAG_ENABLED": True},
     "spl_readonly": {
         "SPL_QUERY_GENERATION_ENABLED": True,
@@ -303,6 +304,7 @@ class Config:
         LLM_MAX_TOKENS: Per-request generation token cap.
         LLM_TIMEOUT: Request timeout in seconds.
         HTML_REPORT_ENABLED: Enables generated static HTML dashboard reports.
+        MARKDOWN_REPORT_ENABLED: Writes markdown reports under REPORT_DIR.
         RAG_ENABLED: Enables retrieval-augmented prompt grounding.
         RAG_BACKEND: Retrieval backend (`sqlite_faiss` or `postgres`).
         RAG_FAIL_CLOSED: Raises analysis errors when configured RAG is unavailable.
@@ -477,6 +479,7 @@ class Config:
     LLM_MAX_TOKENS: int = 4096
     LLM_TIMEOUT: int = 240  # seconds
     HTML_REPORT_ENABLED: bool = False
+    MARKDOWN_REPORT_ENABLED: bool = False
 
     # Optional retrieval grounding (RAG)
     RAG_ENABLED: bool = False
@@ -862,6 +865,9 @@ def load_config() -> Config:
         LLM_TIMEOUT=int(os.getenv("LLM_TIMEOUT", "240")),
         HTML_REPORT_ENABLED=_profile_bool(
             "HTML_REPORT_ENABLED", False, profile_flags
+        ),
+        MARKDOWN_REPORT_ENABLED=_profile_bool(
+            "MARKDOWN_REPORT_ENABLED", False, profile_flags
         ),
         RAG_ENABLED=_profile_bool("RAG_ENABLED", False, profile_flags),
         RAG_BACKEND=os.getenv("RAG_BACKEND", "postgres").strip().lower()

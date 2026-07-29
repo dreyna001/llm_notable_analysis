@@ -9,10 +9,10 @@ the package root).
 ## What This Controls
 
 The analyzer watches `INCOMING_DIR`, discovers top-level `*.json` and `*.txt`
-files (non-recursive), processes them oldest-first, writes reports to
-`REPORT_DIR`, then moves inputs to `PROCESSED_DIR` or `QUARANTINE_DIR`. Reports
-are markdown by default; when the `html_reports` profile is selected, a static
-`.html` dashboard is written next to the `.md` report.
+files (non-recursive), processes them oldest-first, optionally writes reports to
+`REPORT_DIR` when the `markdown_reports` or `html_reports` profile is selected,
+then moves inputs to `PROCESSED_DIR` or `QUARANTINE_DIR`. Markdown and HTML are
+opt-in; portal-first deployments archive analysis JSON to Postgres instead.
 
 Retention is two-stage (`retention.py`):
 

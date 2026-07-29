@@ -65,6 +65,7 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertEqual(config.SPLUNK_SEARCH_TIMEOUT_SECONDS, 30)
         self.assertEqual(config.CAPABILITY_PROFILES, "core")
         self.assertFalse(config.HTML_REPORT_ENABLED)
+        self.assertFalse(config.MARKDOWN_REPORT_ENABLED)
         self.assertFalse(config.RAG_ENABLED)
         self.assertFalse(config.SPL_QUERY_GENERATION_ENABLED)
         self.assertFalse(config.ELASTIC_QUERY_GENERATION_ENABLED)
@@ -157,6 +158,18 @@ class TestConfigRuntimeContract(unittest.TestCase):
         self.assertFalse(config.SPLUNK_SINK_ENABLED)
         self.assertFalse(config.SERVICENOW_CREATE_ENABLED)
         self.assertFalse(config.INVESTIGATION_QUERY_EXECUTION_ENABLED)
+        self.assertFalse(config.MARKDOWN_REPORT_ENABLED)
+
+    def test_markdown_reports_profile_enables_markdown_sink(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"CAPABILITY_PROFILES": "markdown_reports"},
+            clear=True,
+        ):
+            config = load_config()
+
+        self.assertEqual(config.CAPABILITY_PROFILES, "core,markdown_reports")
+        self.assertTrue(config.MARKDOWN_REPORT_ENABLED)
 
     def test_elastic_readonly_profile_enables_elastic_backend(self) -> None:
         """Elastic profile should mirror spl_readonly without enabling Splunk queries."""

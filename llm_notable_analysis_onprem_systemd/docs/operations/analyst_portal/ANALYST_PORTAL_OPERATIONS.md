@@ -25,6 +25,10 @@ Recommended enablement (full reference:
 
 ```bash
 CAPABILITY_PROFILES=core,analyst_portal
+CASE_QA_CHAT_HISTORY_ENABLED=true
+CASE_QA_CHAT_HISTORY_RETENTION_DAYS=30
+CASE_QA_MAX_SESSIONS_PER_USER=10
+CASE_QA_MAX_MESSAGES_PER_SESSION=30
 CASE_POSTGRES_DSN=postgresql://notable_portal@127.0.0.1:5432/notable_rag
 CASE_POSTGRES_SCHEMA=notable_cases
 CASE_POSTGRES_STATEMENT_TIMEOUT_MS=5000
@@ -45,10 +49,14 @@ LLM_TIMEOUT=240
 
 The `analyst_portal` profile sets `CASE_ARCHIVE_ENABLED`, `PORTAL_ENABLED`, and
 `CASE_QA_ENABLED`. Portal chat requires a pinned case (`selected_case_id`). It
-does not enable `HTML_REPORT_ENABLED` or `CASE_QA_CHAT_HISTORY_ENABLED`; enable
-`CASE_QA_CHAT_HISTORY_ENABLED=true` only when bounded transcript persistence is
-required, and add `html_reports` separately if static HTML artifacts are still
-required.
+does not enable `HTML_REPORT_ENABLED`; add `html_reports` separately if static
+HTML artifacts are still required.
+
+`CASE_QA_CHAT_HISTORY_ENABLED` is a separate flag (shown `true` above for
+production portal deployments). Set it on **both** `/etc/notable-analyzer/config.env`
+and `/etc/notable-analyzer/portal.env` with matching
+`CASE_QA_CHAT_HISTORY_RETENTION_DAYS`. The portal persists sessions/messages;
+the analyzer retention job deletes expired sessions.
 
 Rollback options:
 

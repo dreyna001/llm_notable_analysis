@@ -16,7 +16,8 @@ capability off.
 
 | Profile | Operator intent | Risk class |
 |---------|-----------------|------------|
-| `core` | File-drop ingest, base LLM analysis, markdown reports, processed/quarantine movement. Sets no feature flags. | Local read/process/write of runtime files. |
+| `core` | File-drop ingest, base LLM analysis, processed/quarantine movement. Sets no feature flags. | Local read/process/write of runtime files. |
+| `markdown_reports` | Markdown reports under `REPORT_DIR`. | Local report artifact only. |
 | `html_reports` | Static HTML reports next to markdown reports. | Local report artifact only. |
 | `rag` | General SOC RAG context in the main analysis prompt. | Read-only retrieval/advisory context. |
 | `spl_readonly` | SPL query generation and bounded read-only Splunk investigation execution. | Read-only external queries. |
@@ -31,6 +32,8 @@ profile names and rejects selecting both `spl_readonly` and `elastic_readonly`.
 
 ```bash
 CAPABILITY_PROFILES=core
+CAPABILITY_PROFILES=core,analyst_portal
+CAPABILITY_PROFILES=core,markdown_reports
 CAPABILITY_PROFILES=core,html_reports,rag
 CAPABILITY_PROFILES=core,rag,spl_readonly
 CAPABILITY_PROFILES=core,rag,elastic_readonly
@@ -47,6 +50,7 @@ and backend selection in `_profile_flag_defaults`):
 | Profile | Flags set to `true` | Derived settings |
 |---------|---------------------|------------------|
 | `core` | _(none)_ | — |
+| `markdown_reports` | `MARKDOWN_REPORT_ENABLED` | — |
 | `html_reports` | `HTML_REPORT_ENABLED` | — |
 | `rag` | `RAG_ENABLED` | — |
 | `spl_readonly` | `SPL_QUERY_GENERATION_ENABLED`, `INVESTIGATION_QUERY_EXECUTION_ENABLED` | `INVESTIGATION_QUERY_BACKEND=splunk` |
@@ -82,6 +86,13 @@ Flags not controlled by any profile (legacy/lab only unless noted):
 
 Baseline service behavior. No profile flags are set. Requires file-drop paths,
 LLM endpoint settings, and MITRE data path from `config.env.example`.
+
+### `markdown_reports`
+
+Filesystem markdown reports under `REPORT_DIR`. Omit when the analyst portal is
+the primary review surface; portal cases store analysis JSON in Postgres.
+
+Primary follow-up values: `REPORT_DIR`, report/archive retention settings.
 
 ### `html_reports`
 
@@ -171,7 +182,8 @@ Primary follow-up values: `CASE_POSTGRES_DSN`, `CASE_POSTGRES_SCHEMA`,
 ## Advanced Overrides
 
 Use low-level flags only when the capability is not controlled by a selected
-profile. Profile-controlled flags (see mapping table): `HTML_REPORT_ENABLED`,
+profile. Profile-controlled flags (see mapping table): `MARKDOWN_REPORT_ENABLED`,
+`HTML_REPORT_ENABLED`,
 `RAG_ENABLED`, `SPL_QUERY_GENERATION_ENABLED`,
 `INVESTIGATION_QUERY_EXECUTION_ENABLED`, `INVESTIGATION_QUERY_BACKEND`,
 `ELASTIC_QUERY_GENERATION_ENABLED`, `SERVICENOW_DRAFT_ENABLED`,
