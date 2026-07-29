@@ -402,6 +402,48 @@ def build_chunk_rows(
     return rows
 
 
+class PreviewCaseStore:
+    """Mutable in-memory case archive used by the preview API and file drop."""
+
+    def __init__(self, records: Sequence[CaseArchiveRecord], config: Config) -> None:
+        self._config = config
+        self._lock = threading.Lock()
+        self.summary_rows = [summary_row(record) for record in records]
+        self.details_by_case_id = {
+            record.case_id: detail_row(record) for record in records
+        }
+        self.chunk_rows = build_chunk_rows(records, config)
+        self.sessions: dict[str, tuple[Any, ...]] = {}
+        self.messages: list[tuple[Any, ...]] = []
+
+    def upsert(self, record: CaseArchiveRecord) -> None:
+        """Insert or replace one case and its retrieval chunks atomically."""
+        new_summary = summary_row(record)
+        new_detail = detail_row(record)
+        new_chunks = build_chunk_rows([record], self._config)
+        with self._lock:
+            self.summary_rows[:] = [
+                row for row in self.summary_rows if row[0] != record.case_id
+            ]
+            self.summary_rows.append(new_summary)
+            self.details_by_case_id[record.case_id] = new_detail
+            self.chunk_rows[:] = [
+                row for row in self.chunk_rows if row[1] != record.case_id
+            ]
+            self.chunk_rows.extend(new_chunks)
+
+    def connect(self, _dsn: str) -> PreviewFakeConnection:
+        """Return a fake connection backed by the shared mutable store."""
+        del _dsn
+        return PreviewFakeConnection(
+            summary_rows=self.summary_rows,
+            details_by_case_id=self.details_by_case_id,
+            chunk_rows=self.chunk_rows,
+            sessions=self.sessions,
+            messages=self.messages,
+        )
+
+
 def build_preview_connect_factory(
     records: Sequence[CaseArchiveRecord],
     config: Config,
@@ -411,20 +453,4 @@ def build_preview_connect_factory(
     Session and message state is shared across every ``connect()`` call so chat
     history persists between portal HTTP requests (each opens its own connection).
     """
-    summary_rows = [summary_row(record) for record in records]
-    details_by_case_id = {record.case_id: detail_row(record) for record in records}
-    chunk_rows = build_chunk_rows(records, config)
-    shared_sessions: dict[str, tuple[Any, ...]] = {}
-    shared_messages: list[tuple[Any, ...]] = []
-
-    def connect(_dsn: str) -> PreviewFakeConnection:
-        del _dsn
-        return PreviewFakeConnection(
-            summary_rows=summary_rows,
-            details_by_case_id=details_by_case_id,
-            chunk_rows=chunk_rows,
-            sessions=shared_sessions,
-            messages=shared_messages,
-        )
-
-    return connect
+    return PreviewCaseStore(records, config).connect

@@ -15,6 +15,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from preview_portal_ui import (  # noqa: E402
+    build_preview_app,
     load_optional_preview_env,
     preview_chat_mode_label,
     resolve_openai_preview_llm,
@@ -22,6 +23,36 @@ from preview_portal_ui import (  # noqa: E402
 
 
 class PreviewPortalUiOpenAiConfigTests(unittest.TestCase):
+    def test_bedrock_preview_configures_file_drop_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {
+                "PORTAL_LLM_PROVIDER": "bedrock",
+                "PORTAL_PREVIEW_BEDROCK_MODEL_ID": "test-model",
+                "PORTAL_PREVIEW_FILE_DROP_ROOT": temp_dir,
+            },
+            clear=True,
+        ):
+            app = build_preview_app()
+
+        runtime = app.state.preview_file_drop_runtime
+        self.assertIsNotNone(runtime)
+        self.assertEqual(runtime.config.INCOMING_DIR, Path(temp_dir) / "incoming")
+
+    def test_bedrock_file_drop_can_be_disabled(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "PORTAL_LLM_PROVIDER": "bedrock",
+                "PORTAL_PREVIEW_BEDROCK_MODEL_ID": "test-model",
+                "PORTAL_PREVIEW_FILE_DROP_ENABLED": "false",
+            },
+            clear=True,
+        ):
+            app = build_preview_app()
+
+        self.assertIsNone(app.state.preview_file_drop_runtime)
+
     def test_resolve_openai_preview_llm_returns_none_without_key(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             self.assertIsNone(resolve_openai_preview_llm())

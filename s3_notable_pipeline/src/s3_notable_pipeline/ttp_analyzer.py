@@ -1112,11 +1112,18 @@ class BedrockAnalyzer:
     LLM API, and validating returned TTPs against the MITRE ATT&CK framework.
     """
     
-    def __init__(self, model_id: str = "amazon.nova-pro-v1:0"):
+    def __init__(
+        self,
+        model_id: str = "amazon.nova-pro-v1:0",
+        *,
+        bedrock_client: Any | None = None,
+    ):
         """Initialize the analyzer with Bedrock client.
         
         Args:
             model_id: The Bedrock model ID to use (default: amazon.nova-pro-v1:0).
+            bedrock_client: Optional preconfigured Bedrock Runtime client. Preview
+                mode uses this to honor its AWS profile and region settings.
         """
         # Bedrock calls can be long-running; set explicit client timeouts so we don't
         # hang until an outer runtime limit (e.g., Lambda timeout) kills the task.
@@ -1134,7 +1141,7 @@ class BedrockAnalyzer:
         read_timeout_s = max(30, min(read_timeout_s, 900))
         connect_timeout_s = max(1, min(connect_timeout_s, 60))
 
-        self.bedrock_client = boto3.client(
+        self.bedrock_client = bedrock_client or boto3.client(
             "bedrock-runtime",
             config=Config(
                 read_timeout=read_timeout_s,

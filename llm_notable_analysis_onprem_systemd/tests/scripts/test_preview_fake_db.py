@@ -21,6 +21,7 @@ from llm_notable_analysis_onprem_systemd.onprem_service.case_store import (  # n
 from llm_notable_analysis_onprem_systemd.onprem_service.config import Config  # noqa: E402
 from preview_fake_db import (  # noqa: E402
     PREVIEW_FAKE_VECTOR_DIMENSIONS,
+    PreviewCaseStore,
     PreviewFakeConnection,
     PreviewFakeEmbeddingModel,
     build_chunk_rows,
@@ -132,6 +133,28 @@ class PreviewFakeDbTests(unittest.TestCase):
 
         self.assertGreaterEqual(len(rows), 1)
         self.assertEqual(rows[0][1], "case-42")
+
+    def test_mutable_case_store_publishes_new_case_and_chunks(self) -> None:
+        config = Config()
+        store = PreviewCaseStore(
+            [_minimal_record(case_id="case-1", config=config)],
+            config,
+        )
+        store.upsert(_minimal_record(case_id="case-live", config=config))
+
+        connection = store.connect("preview://fake")
+        detail = connection.execute(
+            "SELECT * FROM cases WHERE case_id = %s",
+            ("case-live",),
+        ).fetchone()
+        chunks = connection.execute(
+            "SELECT * FROM case_chunks ch WHERE ch.case_id = %s LIMIT %s",
+            ("case-live", 100),
+        ).fetchall()
+
+        self.assertIsNotNone(detail)
+        self.assertEqual(detail[0], "case-live")
+        self.assertGreaterEqual(len(chunks), 1)
 
     def test_preview_connect_factory_indexes_pipeline_backed_cases(self) -> None:
         ensure_preview_bundles_present()

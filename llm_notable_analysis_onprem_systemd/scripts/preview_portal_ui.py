@@ -21,6 +21,9 @@ Optional live chat synthesis for UI testing (via ``config.portal-preview.env``):
 - Bedrock: set ``PORTAL_LLM_PROVIDER=bedrock`` and a model id
 - OpenAI: set ``OPENAI_API_KEY`` or ``PORTAL_PREVIEW_OPENAI_API_KEY``
 - Otherwise chat returns stub preview text
+
+When Bedrock preview settings are present, the same process also watches
+``wsl-notable-data/incoming`` and publishes real analyses into the case view.
 """
 
 from __future__ import annotations
@@ -57,8 +60,14 @@ from preview_bedrock_llm import (  # noqa: E402
     resolve_bedrock_preview_settings,
 )
 from preview_fake_db import (  # noqa: E402
+    PreviewCaseStore,
     PreviewFakeEmbeddingModel,
-    build_preview_connect_factory,
+)
+from preview_file_drop import (  # noqa: E402
+    PreviewFileDropRuntime,
+    build_preview_file_drop_config,
+    preview_file_drop_enabled,
+    preview_file_drop_root,
 )
 from preview_knowledge_base import build_preview_knowledge_base_provider  # noqa: E402
 
@@ -379,6 +388,7 @@ def build_preview_app(*, inject_loopback_auth: bool | None = None):
         inject_loopback_auth = preview_inject_auth_enabled()
     config = _preview_config()
     records = _build_preview_records(config)
+    case_store = PreviewCaseStore(records, config)
     openai_llm = resolve_openai_preview_llm()
     bedrock_settings = resolve_bedrock_preview_settings()
     chat_text_complete = None
@@ -404,7 +414,7 @@ def build_preview_app(*, inject_loopback_auth: bool | None = None):
         llm_gateway_ready = True
     app = build_portal_app(
         config,
-        connect=build_preview_connect_factory(records, config),
+        connect=case_store.connect,
         chat_embedding_model=PreviewFakeEmbeddingModel(),
         chat_synthesizer=synthesizer,
         chat_general_synthesizer=general_synthesizer,
@@ -412,6 +422,21 @@ def build_preview_app(*, inject_loopback_auth: bool | None = None):
         chat_knowledge_base_provider=build_preview_knowledge_base_provider(),
         chat_llm_gateway_ready=llm_gateway_ready,
     )
+    file_drop_runtime = None
+    if preview_file_drop_enabled(bedrock_settings):
+        if bedrock_settings is None:
+            raise RuntimeError(
+                "PORTAL_PREVIEW_FILE_DROP_ENABLED requires Bedrock preview settings"
+            )
+        file_drop_runtime = PreviewFileDropRuntime(
+            config=build_preview_file_drop_config(config),
+            case_store=case_store,
+            bedrock_settings=bedrock_settings,
+        )
+        app.add_event_handler("startup", file_drop_runtime.start)
+        app.add_event_handler("shutdown", file_drop_runtime.stop)
+    app.state.preview_case_store = case_store
+    app.state.preview_file_drop_runtime = file_drop_runtime
 
     if inject_loopback_auth:
 
@@ -493,6 +518,11 @@ def main(argv: list[str] | None = None) -> None:
     print("Alert Analysis Portal UI preview (fake data, loopback only)")
     print(f"Open in your browser: {url}")
     print(f"Chat synthesis: {preview_chat_mode_label()}")
+    bedrock_settings = resolve_bedrock_preview_settings()
+    if preview_file_drop_enabled(bedrock_settings):
+        print(f"Bedrock file drop: {preview_file_drop_root() / 'incoming'}")
+    else:
+        print("Bedrock file drop: off (configure Bedrock preview settings to enable)")
     print(f"Loopback auth injection: {'on' if inject_auth else 'off'}")
     if not inject_auth:
         print(

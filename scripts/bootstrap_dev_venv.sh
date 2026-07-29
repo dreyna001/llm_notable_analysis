@@ -174,6 +174,7 @@ fi
     -e "$REPO_ROOT/onprem-llm-sdk" \
     -e "$REPO_ROOT/onprem_rag_notable_analysis" \
     -e "$REPO_ROOT/llm_notable_analysis_onprem_systemd" \
+    -e "$REPO_ROOT/s3_notable_pipeline" \
     pytest \
     nodeenv \
     boto3==1.37.38

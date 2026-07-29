@@ -44,8 +44,10 @@ Commit `bundles/` so teammates get the same preview data without calling the ana
 ## Preview runtime
 
 Opening the portal **only reads** `bundles/`. Cases 1-5 do not call the analyzer LLM.
-
-The only live LLM in preview is **chatbot** synthesis (Bedrock/OpenAI/stub via `config.portal-preview.env`).
+When Bedrock preview settings are configured, newly dropped files under
+`wsl-notable-data/incoming/` do call the shared Bedrock analyzer and are added
+to the live preview case store. Chatbot synthesis also uses the configured
+Bedrock/OpenAI/stub provider.
 
 ## Scenario map
 

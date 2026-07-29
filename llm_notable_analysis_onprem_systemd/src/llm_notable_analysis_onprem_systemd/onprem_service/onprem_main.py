@@ -17,7 +17,7 @@ import concurrent.futures
 from datetime import datetime, timezone
 from pathlib import Path
 from types import FrameType
-from typing import Any, List, Optional, Set
+from typing import Any, Callable, List, Optional, Protocol, Set
 
 from .config import load_config, Config
 from .logging_utils import setup_logging, get_logger, set_correlation_id
@@ -56,6 +56,20 @@ _shutdown_requested = False
 _RECOVERABLE_LOOP_EXCEPTIONS = (OSError, ValueError, RuntimeError, TimeoutError)
 
 
+class AnalysisClient(Protocol):
+    """LLM analysis contract used by file-drop processing."""
+
+    def analyze_alert(self, alert_text: str, alert_time: str) -> dict[str, Any]:
+        """Analyze one normalized alert."""
+
+    def interpret_query_results(
+        self,
+        alert_text: str,
+        analysis_result: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Optionally interpret investigation query results."""
+
+
 def signal_handler(signum: int, frame: FrameType | None) -> None:
     """Handle SIGTERM/SIGINT for graceful shutdown.
 
@@ -70,7 +84,12 @@ def signal_handler(signum: int, frame: FrameType | None) -> None:
 
 
 def process_notable(
-    file_path: Path, config: Config, llm_client: LocalLLMClient, logger: logging.Logger
+    file_path: Path,
+    config: Config,
+    llm_client: AnalysisClient,
+    logger: logging.Logger,
+    *,
+    archive_case: Callable[..., bool] | None = None,
 ) -> bool:
     """Process a single notable file.
 
@@ -284,7 +303,8 @@ def process_notable(
             logger.info("Wrote HTML report: %s", html_report_path)
 
         if bool(getattr(config, "CASE_ARCHIVE_ENABLED", False)):
-            archive_case_for_portal(
+            archive_fn = archive_case or archive_case_for_portal
+            archive_fn(
                 config=config,
                 logger=logger,
                 finding_id=finding_id,

@@ -4,8 +4,9 @@ Raw alerts live in ``data/preview_scenarios/alerts/``. Analysis JSON is generate
 offline by ``scripts/generate_preview_scenarios.py`` (real ``analyze_alert`` prompt
 path) and stored in ``data/preview_scenarios/bundles/``.
 
-Opening the preview portal only reads those bundles. The only live LLM calls in
-preview are chatbot synthesis (Bedrock/OpenAI/stub), not case analysis.
+Opening the preview portal only reads those bundles for cases 1-5. With Bedrock
+preview settings, newly dropped files under ``wsl-notable-data/incoming/`` are
+analyzed live and added to the preview case store. Chat uses Bedrock/OpenAI/stub.
 """
 
 from __future__ import annotations

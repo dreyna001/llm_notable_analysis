@@ -2,9 +2,12 @@
 
 Run the analyst portal UI on a developer workstation **without** production
 Postgres, nginx, or the on-prem analyzer LLM. Preview uses in-memory fake data
-for cases 6-55 and **stored analyzer bundles** for cases 1-5.
+for cases 6-55 and **stored analyzer bundles** for cases 1-5. When Bedrock is
+configured, it also accepts local file drops and publishes their real analysis
+to the live preview case store.
 
-Only the **chatbot** may call a live LLM (Bedrock, OpenAI, or stub text).
+Bedrock preview mode uses direct Bedrock calls for both newly dropped alerts and
+chatbot synthesis. OpenAI and stub modes support chatbot synthesis only.
 
 Production portal deployment is documented in
 [`ANALYST_PORTAL_OPERATIONS.md`](ANALYST_PORTAL_OPERATIONS.md). Shared dev
@@ -20,6 +23,7 @@ Case investigation question flows for preview scenarios are in
 |-----------|------------------|
 | Cases 1-5 | Stored alert + analysis from `data/preview_scenarios/bundles/`; loaded via `preview_synthetic_pipeline` (normalization + archive record build; no analyzer LLM) |
 | Cases 6-55 | Lightweight in-memory list fillers (pagination; 55 total, page size 50) |
+| Local file drop | With Bedrock configured, watches `wsl-notable-data/incoming/` for top-level `.json` and `.txt`; completed cases appear in the live case list |
 | Case analysis on page load | Read from bundles only; no analyzer LLM |
 | Chatbot | Live Bedrock / OpenAI / stub via `config.portal-preview.env`; Bedrock uses production prompt assembly via `chat_text_complete` |
 | Chat history / sessions | Enabled in preview by default (`CASE_QA_CHAT_HISTORY_ENABLED=true`); multi-turn chat with persisted sessions on the in-memory fake Postgres connection |
@@ -43,7 +47,8 @@ Preview scripts live under `scripts/` at the **monorepo root**:
 Python preview modules live in `llm_notable_analysis_onprem_systemd/scripts/`:
 
 - `preview_portal_ui.py` — preview API (port 8765)
-- `preview_bedrock_llm.py` — Bedrock Converse chat (preview only)
+- `preview_bedrock_llm.py` — preview Bedrock credentials and Converse transport
+- `preview_file_drop.py` — local polling plus the shared Bedrock analyzer
 - `preview_env.py` — loads `config.portal-preview.env`
 - `preview_synthetic_pipeline.py` — loads stored bundles for cases 1-5
 - `preview_knowledge_base.py` — synthetic KB fixtures for preview chat
@@ -54,7 +59,8 @@ Fixture layout: [`data/preview_scenarios/README.md`](../../../data/preview_scena
 
 **Preview demo KB posture:** use the committed fixture docs above for Knowledge
 Base demos. Do **not** provision Amazon Bedrock Knowledge Base, S3 Vectors, or
-OpenSearch for local preview. Bedrock in preview is for **chat synthesis only**.
+OpenSearch for local preview. Bedrock provides alert analysis and chat
+synthesis; preview KB grounding still comes from committed fixtures.
 AWS production KB setup is documented in
 [`s3_notable_pipeline/docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md`](../../../../s3_notable_pipeline/docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md).
 
@@ -112,7 +118,7 @@ Notes:
 - You do **not** need `config.portal.env` for preview.
 - Override path with env var `PORTAL_PREVIEW_ENV` if needed.
 
-### 3. AWS SSO login (Bedrock chat only)
+### 3. AWS SSO login (Bedrock analysis and chat)
 
 ```powershell
 aws sso login --profile your-sso-profile-name
@@ -155,6 +161,23 @@ if Vite is bound to `127.0.0.1` only.
 
 The Vite dev server proxies `/api`, `/health`, and `/ready` to port 8765 and
 injects dev proxy auth headers.
+
+### Drop a new alert for real Bedrock analysis
+
+With the Bedrock settings above configured, copy a top-level `.json` or `.txt`
+file into:
+
+```text
+llm_notable_analysis_onprem_systemd/wsl-notable-data/incoming/
+```
+
+The preview API polls every two seconds by default. A successful input moves to
+`processed/`, its markdown report is written to `reports/`, and its case appears
+in the portal. Invalid input or analysis failures move to `quarantine/`.
+
+Override the root with `PORTAL_PREVIEW_FILE_DROP_ROOT`, change polling with
+`PORTAL_PREVIEW_FILE_DROP_POLL_INTERVAL`, or disable the worker with
+`PORTAL_PREVIEW_FILE_DROP_ENABLED=false`.
 
 ## What to exercise
 
