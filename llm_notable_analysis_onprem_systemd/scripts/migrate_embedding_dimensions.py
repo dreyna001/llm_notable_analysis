@@ -14,7 +14,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 DEFAULT_GRANITE_TARGET_DIMENSION = 768
@@ -338,6 +338,14 @@ def rebuild_commands(config: dict[str, str]) -> list[str]:
     ]
 
 
+def database_from_dsn(dsn: str) -> str:
+    parsed = urlparse(dsn)
+    database = unquote((parsed.path or "").lstrip("/"))
+    if not database:
+        raise ValueError(f"DSN missing database name: {mask_dsn(dsn)}")
+    return database
+
+
 def default_execute(dsn: str, sql: str) -> tuple[int, str, str]:
     completed = subprocess.run(
         ["psql", dsn, "-v", "ON_ERROR_STOP=1", "-At", "-c", sql],
@@ -346,6 +354,41 @@ def default_execute(dsn: str, sql: str) -> tuple[int, str, str]:
         text=True,
     )
     return completed.returncode, completed.stdout, completed.stderr
+
+
+def build_postgres_admin_execute(admin_user: str) -> ExecuteFn:
+    """Run psql as PostgreSQL admin (peer auth) for index DDL owned by postgres."""
+
+    def execute(dsn: str, sql: str) -> tuple[int, str, str]:
+        database = database_from_dsn(dsn)
+        completed = subprocess.run(
+            [
+                "sudo",
+                "-n",
+                "-u",
+                admin_user,
+                "psql",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-At",
+                "-d",
+                database,
+                "-c",
+                sql,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return completed.returncode, completed.stdout, completed.stderr
+
+    return execute
+
+
+def resolve_execute_fn(postgres_admin_user: str | None) -> ExecuteFn:
+    if postgres_admin_user:
+        return build_postgres_admin_execute(postgres_admin_user)
+    return default_execute
 
 
 def run_migration(
@@ -425,6 +468,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print planned SQL without modifying databases",
     )
+    parser.add_argument(
+        "--postgres-admin-user",
+        default="",
+        help=(
+            "Run psql as this PostgreSQL admin user via sudo (default from shell: postgres). "
+            "Required when schema indexes are owned by postgres."
+        ),
+    )
     return parser
 
 
@@ -437,6 +488,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     portal_env = Path(args.portal_env) if args.portal_env else None
     target_dim = args.target_dim if args.target_dim is not None else DEFAULT_GRANITE_TARGET_DIMENSION
+    postgres_admin_user = (args.postgres_admin_user or "").strip() or None
 
     try:
         return run_migration(
@@ -444,6 +496,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             portal_env=portal_env,
             target_dim=target_dim,
             dry_run=bool(args.dry_run),
+            execute=resolve_execute_fn(postgres_admin_user),
         )
     except (ValueError, RuntimeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

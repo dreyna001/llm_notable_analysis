@@ -8,6 +8,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 CONFIG_ENV="${CONFIG_ENV:-/etc/notable-analyzer/config.env}"
 PORTAL_ENV="${PORTAL_ENV:-}"
+POSTGRES_ADMIN_USER="${POSTGRES_ADMIN_USER:-postgres}"
+USE_POSTGRES_ADMIN="${USE_POSTGRES_ADMIN:-true}"
 TARGET_DIM=""
 DRY_RUN=false
 
@@ -23,6 +25,8 @@ Options:
   --config-env PATH   Analyzer config.env (default: /etc/notable-analyzer/config.env)
   --portal-env PATH   Optional portal.env for supplemental config keys
   --target-dim N      Target vector dimension (default: 768 for Granite migration)
+  --postgres-admin-user USER  PostgreSQL admin for index DDL (default: postgres)
+  --no-postgres-admin Use RAG/CASE DSN role only (may fail on postgres-owned indexes)
   --dry-run           Print planned SQL without modifying databases
   -h, --help          Show this help
 
@@ -61,6 +65,16 @@ while [[ $# -gt 0 ]]; do
             TARGET_DIM="$2"
             shift 2
             ;;
+        --postgres-admin-user)
+            require_arg_value "$1" "${2:-}"
+            POSTGRES_ADMIN_USER="$2"
+            USE_POSTGRES_ADMIN=true
+            shift 2
+            ;;
+        --no-postgres-admin)
+            USE_POSTGRES_ADMIN=false
+            shift
+            ;;
         --dry-run)
             DRY_RUN=true
             shift
@@ -78,6 +92,9 @@ done
 [[ -f "$CONFIG_ENV" ]] || err "Missing config file: $CONFIG_ENV"
 command -v python3 >/dev/null 2>&1 || err "Missing required command: python3"
 command -v psql >/dev/null 2>&1 || err "Missing required command: psql"
+if [[ "$USE_POSTGRES_ADMIN" == "true" ]]; then
+    command -v sudo >/dev/null 2>&1 || err "Missing required command: sudo (needed for postgres admin migration)"
+fi
 
 args=(python3 "$SCRIPT_DIR/migrate_embedding_dimensions.py" --config-env "$CONFIG_ENV")
 if [[ -n "$PORTAL_ENV" ]]; then
@@ -85,6 +102,9 @@ if [[ -n "$PORTAL_ENV" ]]; then
 fi
 if [[ -n "$TARGET_DIM" ]]; then
     args+=(--target-dim "$TARGET_DIM")
+fi
+if [[ "$USE_POSTGRES_ADMIN" == "true" ]]; then
+    args+=(--postgres-admin-user "$POSTGRES_ADMIN_USER")
 fi
 if [[ "$DRY_RUN" == "true" ]]; then
     args+=(--dry-run)
