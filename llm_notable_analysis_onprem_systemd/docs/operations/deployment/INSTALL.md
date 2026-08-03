@@ -87,6 +87,23 @@ sudo bash scripts/install.sh
 
 See the installer summary at the end of `scripts/install.sh` for the full flag list.
 
+## Two-T4 llama.cpp Demo Install
+
+For the constrained two-NVIDIA-T4 demo build, use the dedicated installer
+instead of the default 31B BF16/vLLM path:
+
+```bash
+sudo bash scripts/install_t4x2_llamacpp_demo.sh
+```
+
+It installs the base application, builds a pinned CUDA llama.cpp server,
+downloads and verifies the official Gemma 4 26B-A4B QAT Q4_0 GGUF and image
+projector, applies conservative 16K/single-request settings, and smoke-tests
+the chain. A working NVIDIA driver and CUDA toolkit are prerequisites.
+
+See the complete sizing, flags, validation, quality caveats, and rollback guide:
+[`deployment_profiles/t4x2-llamacpp-gemma4-demo.md`](deployment_profiles/t4x2-llamacpp-gemma4-demo.md).
+
 ## Non-Default Mini/Qwen CPU Client-Mode Install
 
 Lab/CPU alternate path, not the default production deployment. Use the main

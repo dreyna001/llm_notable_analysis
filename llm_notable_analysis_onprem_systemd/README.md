@@ -30,6 +30,7 @@ integration detail live under [`docs/`](docs/).
 | Executive build summary | [`docs/delivery_package/EXECUTIVE_ONPREM_BUILD_WRITEUP.md`](docs/delivery_package/EXECUTIVE_ONPREM_BUILD_WRITEUP.md) |
 | End-to-end behavior | [`docs/delivery_package/EXECUTIVE_ONPREM_WORKFLOW.md`](docs/delivery_package/EXECUTIVE_ONPREM_WORKFLOW.md) |
 | Install on a host | [`docs/operations/deployment/INSTALL.md`](docs/operations/deployment/INSTALL.md) |
+| Two-T4 llama.cpp demo build | [`docs/operations/deployment/deployment_profiles/t4x2-llamacpp-gemma4-demo.md`](docs/operations/deployment/deployment_profiles/t4x2-llamacpp-gemma4-demo.md) |
 | Offline / air-gapped prep | [`docs/operations/deployment/OFFLINE_PRESTAGE_GUIDE.md`](docs/operations/deployment/OFFLINE_PRESTAGE_GUIDE.md), [`AIRGAPPED_DEPLOYMENT.md`](docs/operations/deployment/AIRGAPPED_DEPLOYMENT.md) |
 | Capability profiles | [`docs/operations/platform/CAPABILITY_PROFILES.md`](docs/operations/platform/CAPABILITY_PROFILES.md) |
 | Customer tuning by area | [`docs/operations/README.md`](docs/operations/README.md) |

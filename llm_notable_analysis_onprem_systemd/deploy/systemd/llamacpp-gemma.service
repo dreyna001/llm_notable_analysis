@@ -1,0 +1,61 @@
+[Unit]
+Description=llama.cpp Gemma 4 inference server (2x NVIDIA T4 demo)
+Documentation=https://github.com/ggml-org/llama.cpp
+After=network.target
+
+[Service]
+Type=simple
+User=llamacpp
+Group=llamacpp
+WorkingDirectory=/opt/llamacpp-gemma
+Environment="HOME=/var/lib/llamacpp"
+EnvironmentFile=/etc/notable-analyzer/llamacpp-gemma.env
+ExecStart=/opt/llamacpp-gemma/src/build-t4-sm75/bin/llama-server \
+    --model /opt/llamacpp-gemma/models/gemma-4-26B_q4_0-it.gguf \
+    --mmproj /opt/llamacpp-gemma/models/gemma-4-26B-it-mmproj.gguf \
+    --alias gemma-4-26B-A4B-it \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --ctx-size ${LLAMACPP_CONTEXT_SIZE} \
+    --parallel ${LLAMACPP_PARALLEL} \
+    --gpu-layers all \
+    --split-mode layer \
+    --tensor-split ${LLAMACPP_TENSOR_SPLIT} \
+    --cache-type-k q8_0 \
+    --cache-type-v q8_0 \
+    --threads ${LLAMACPP_THREADS} \
+    --threads-batch ${LLAMACPP_THREADS_BATCH} \
+    --batch-size ${LLAMACPP_BATCH_SIZE} \
+    --ubatch-size ${LLAMACPP_UBATCH_SIZE} \
+    --reasoning off \
+    --jinja \
+    --metrics \
+    --no-webui \
+    --cont-batching
+
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=1200
+TimeoutStopSec=60
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=no
+StateDirectory=llamacpp
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=yes
+RestrictSUIDSGID=yes
+UMask=0077
+
+LimitNOFILE=65535
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=llamacpp-gemma
+
+[Install]
+WantedBy=multi-user.target

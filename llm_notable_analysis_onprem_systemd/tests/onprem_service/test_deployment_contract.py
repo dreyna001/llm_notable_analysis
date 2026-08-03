@@ -106,6 +106,101 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertIn("not restarted", apply_script)
         self.assertNotIn('source "$CONFIG_ENV"', apply_script)
 
+    def test_t4x2_llamacpp_demo_profile_is_pinned_and_bounded(self) -> None:
+        """Two-T4 assets should agree on model identity and demo capacity."""
+        install_text = (
+            PROJECT_ROOT / "scripts" / "install_t4x2_llamacpp_demo.sh"
+        ).read_text(encoding="utf-8")
+        apply_text = (
+            PROJECT_ROOT / "scripts" / "apply_t4x2_llamacpp_demo_profile.sh"
+        ).read_text(encoding="utf-8")
+        service_text = (
+            PROJECT_ROOT / "deploy" / "systemd" / "llamacpp-gemma.service"
+        ).read_text(encoding="utf-8")
+        runtime_text = (
+            PROJECT_ROOT / "deploy" / "llamacpp" / "t4x2-gemma4.env.example"
+        ).read_text(encoding="utf-8")
+        litellm_text = (
+            PROJECT_ROOT
+            / "deploy"
+            / "litellm"
+            / "config.t4x2-llamacpp-demo.yaml.example"
+        ).read_text(encoding="utf-8")
+        drop_in_text = (
+            PROJECT_ROOT
+            / "deploy"
+            / "systemd"
+            / "litellm.t4x2-llamacpp.drop-in.example"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            'readonly LLAMACPP_REVISION="dbadb68eecdfb3ab0e86872d011738fc937f0364"',
+            install_text,
+        )
+        self.assertIn(
+            'readonly MODEL_REVISION="d1c082be9cf3c8a514acf63b8761f4b41935842e"',
+            install_text,
+        )
+        self.assertIn(
+            "3eca3b8f6d7baf218a7dd6bba5fb59a56ee25fe2d567b6f5f589b4f697eca51d",
+            install_text,
+        )
+        self.assertIn(
+            "a359953a076b877db30c31dbbb4c6d93b4a6e017ee5db5784247e4d4c0dd4f3b",
+            install_text,
+        )
+        self.assertIn("VLLM_SKIP_INSTALL=true", install_text)
+        self.assertIn("systemctl disable --now vllm.service", install_text)
+        self.assertIn("-DCMAKE_CUDA_ARCHITECTURES=75", install_text)
+        self.assertIn("sha256sum --check --status", install_text)
+        self.assertIn("Running the same smoke test through LiteLLM", install_text)
+        self.assertIn("read_env_value", install_text)
+        self.assertNotIn('source /etc/notable-analyzer/config.env', install_text)
+
+        for text in (apply_text, service_text, litellm_text):
+            self.assertIn("gemma-4-26B-A4B-it", text)
+        self.assertIn('"CASE_QA_MODEL_CONTEXT_TOKENS": "16384"', apply_text)
+        self.assertIn('"PORTAL_CHAT_MAX_CONCURRENCY": "1"', apply_text)
+        self.assertIn("LLAMACPP_CONTEXT_SIZE=16384", runtime_text)
+        self.assertIn("LLAMACPP_PARALLEL=1", runtime_text)
+        self.assertIn("CUDA_VISIBLE_DEVICES=0,1", runtime_text)
+
+        for expected in (
+            "--host 127.0.0.1",
+            "--gpu-layers all",
+            "--split-mode layer",
+            "--tensor-split ${LLAMACPP_TENSOR_SPLIT}",
+            "--cache-type-k q8_0",
+            "--cache-type-v q8_0",
+            "--reasoning off",
+            "StateDirectory=llamacpp",
+        ):
+            self.assertIn(expected, service_text)
+        self.assertIn("After=network.target llamacpp-gemma.service", drop_in_text)
+        self.assertIn("Wants=llamacpp-gemma.service", drop_in_text)
+        self.assertNotIn("vllm.service", drop_in_text)
+
+    def test_t4x2_demo_profile_has_one_command_and_rollback_docs(self) -> None:
+        """The constrained demo path should be operable without tribal knowledge."""
+        profile_text = (
+            PROJECT_ROOT
+            / "docs"
+            / "operations"
+            / "deployment"
+            / "deployment_profiles"
+            / "t4x2-llamacpp-gemma4-demo.md"
+        ).read_text(encoding="utf-8")
+        install_doc_text = (
+            PROJECT_ROOT / "docs" / "operations" / "deployment" / "INSTALL.md"
+        ).read_text(encoding="utf-8")
+
+        command = "sudo bash scripts/install_t4x2_llamacpp_demo.sh"
+        self.assertIn(command, profile_text)
+        self.assertIn(command, install_doc_text)
+        self.assertIn("Customer-Facing Quality Statement", profile_text)
+        self.assertIn("## Reapply, Backups, and Rollback", profile_text)
+        self.assertIn("one active request", profile_text)
+
     def test_litellm_service_is_loopback_only(self) -> None:
         """LiteLLM should bind only to loopback in the default unit."""
         service_text = (

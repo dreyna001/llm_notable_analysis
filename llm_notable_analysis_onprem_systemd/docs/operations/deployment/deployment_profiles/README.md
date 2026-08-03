@@ -1,7 +1,7 @@
 # Deployment Hardware Profiles
 
 Hardware profiles are **operator tuning sheets** for `llm_notable_analysis_onprem_systemd`.
-They recommend vLLM and `config.env` starting values for a specific CPU/GPU build.
+They recommend inference-server and `config.env` starting values for a specific CPU/GPU build.
 
 These profiles are separate from **capability profiles** (`core`, `rag`, `spl_readonly`,
 and so on). Capability profiles control product features. Deployment profiles control
@@ -18,6 +18,9 @@ how a particular host should run the same features.
    - **Dual GPU (`h100x2-intel-tbd`):** no packaged unit; edit `vllm.service` or add a
      systemd drop-in with `--tensor-parallel-size 2` and profile env vars. Validate NCCL
      on the host before copying single-GPU loopback settings.
+   - **Two-T4 demo (`t4x2-llamacpp-gemma4-demo`):** use the dedicated one-command
+     llama.cpp installer. It replaces the inference backend only and preserves the
+     standard LiteLLM/application boundary.
 3. Merge profile analyzer values into `/etc/notable-analyzer/config.env`. Start from
    [`config.env.example`](../../../../config.env.example) (generic template with A6000-tuned
    LLM defaults), then apply the profile's concurrency, Splunk, and RAG overrides.
@@ -66,9 +69,11 @@ Raise analyzer and portal concurrency only after representative load testing.
 |------------|----------|-----------|--------|
 | [`a6000-96gb-ultra9-285k.md`](a6000-96gb-ultra9-285k.md) | 1x NVIDIA RTX PRO 6000 (96 GB) + Intel Core Ultra 9 285K (24 cores / 24 threads) | Packaged [`vllm.service`](../../../../deploy/systemd/vllm.service) | Active baseline |
 | [`h100x2-intel-tbd.md`](h100x2-intel-tbd.md) | 2x NVIDIA H100 (80 GB) + Intel CPU (model TBD) | Manual override required | Draft / load-test required |
+| [`t4x2-llamacpp-gemma4-demo.md`](t4x2-llamacpp-gemma4-demo.md) | 2x NVIDIA T4 (16 GB each) | Packaged `llamacpp-gemma.service` via dedicated installer | Demo / workload validation required |
 
 Shared analyzer contract across profiles: `LLM_API_URL=http://127.0.0.1:4000/v1/chat/completions`,
-`LLM_MODEL_NAME=gemma-4-31B-it`, start with `CONCURRENCY_ENABLED=false` and `MAX_WORKERS=1`.
+start with `CONCURRENCY_ENABLED=false` and `MAX_WORKERS=1`. Model names are
+profile-specific and must match the LiteLLM alias.
 
 ## Measured Benchmark Reports
 

@@ -1,0 +1,8 @@
+[Unit]
+# Replace the packaged vLLM ordering with the llama.cpp backend used by this
+# profile. Empty assignments reset the original dependency lists.
+After=
+After=network.target llamacpp-gemma.service
+Wants=
+Wants=llamacpp-gemma.service
+

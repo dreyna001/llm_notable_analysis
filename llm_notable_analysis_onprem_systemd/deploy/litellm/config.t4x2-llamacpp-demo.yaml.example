@@ -1,0 +1,8 @@
+# LiteLLM route for the two-T4 llama.cpp demo profile.
+# llama-server exposes an OpenAI-compatible endpoint on loopback port 8000.
+model_list:
+  - model_name: gemma-4-26B-A4B-it
+    litellm_params:
+      model: hosted_vllm/gemma-4-26B-A4B-it
+      api_base: http://127.0.0.1:8000/v1
+
