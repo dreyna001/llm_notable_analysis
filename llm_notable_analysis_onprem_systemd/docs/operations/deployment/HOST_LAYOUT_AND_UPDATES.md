@@ -126,6 +126,38 @@ diff -u <(env_lines /etc/notable-analyzer/config.env) <(env_lines "$ONPREM_DIR/c
 diff -u <(env_lines /etc/notable-analyzer/portal.env) <(env_lines "$ONPREM_DIR/config.portal.env.example")
 ```
 
+## Granite + image-ingest upgrade (existing Mixedbread hosts)
+
+After `git pull` and `install.sh` when application code changed, run the upgrade
+orchestrator from the checkout (not from `/opt/notable-analyzer`):
+
+```bash
+cd "$ONPREM_DIR"
+export BUNDLE="$MONOREPO_ROOT/offline-bundles/image-ingest-YYYYMMDD"   # when bundle was built
+
+sudo bash scripts/upgrade_granite_image_ingest.sh \
+  --bundle-dir "$BUNDLE" \
+  --config-env /etc/notable-analyzer/config.env \
+  --portal-env /etc/notable-analyzer/portal.env \
+  --analyzer-venv /opt/notable-analyzer/venv
+```
+
+That script runs, in order: optional prerequisite install from the offline
+bundle, pgvector migration to 768 (clears chunk rows), Granite env defaults, and
+verification. It does **not** rebuild indexes or restart services.
+
+When prerequisites are already installed (as on auroraaihost after manual steps):
+
+```bash
+sudo bash scripts/upgrade_granite_image_ingest.sh \
+  --skip-prereq-install \
+  --config-env /etc/notable-analyzer/config.env \
+  --portal-env /etc/notable-analyzer/portal.env
+```
+
+Then rebuild KB, case, and closed-ticket indexes and restart analyzer/portal.
+See [`../rag/IMAGE_INGEST_PREREQUISITES.md`](../rag/IMAGE_INGEST_PREREQUISITES.md).
+
 Customer default bundle and hardware profile baselines:
 [`CUSTOMER_DEFAULT_DEPLOYMENT.md`](CUSTOMER_DEFAULT_DEPLOYMENT.md),
 [`deployment_profiles/README.md`](deployment_profiles/README.md).

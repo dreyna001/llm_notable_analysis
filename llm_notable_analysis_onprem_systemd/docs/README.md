@@ -21,6 +21,8 @@ Use this page to pick **where to start** without reading the whole root [`README
 
 Optional deep dives:
 
+- **SCIF localhost-first rollout:** `delivery_package/SCIF_ROLLOUT.md` — Local
+  preview now, real loopback analyzer next, and production DNS/TLS/auth deferred.
 - **[Developer maintainer guide](internal/DEVELOPER_MAINTAINER_GUIDE.md)** — Code boundaries, extension patterns, structured output, new capabilities.
 - **[Feature enhancements technical spec](technical_specs/feature_enhancements_technical_spec.md)** — Normative contract for SPL, Splunk investigation, ServiceNow, and related shipped behavior.
 - **[Analyst portal technical spec](technical_specs/analyst_portal_case_archive_technical_spec.md)** — Normative contract for the shipped Postgres-backed portal, case archive, and retrieval-bound chat.

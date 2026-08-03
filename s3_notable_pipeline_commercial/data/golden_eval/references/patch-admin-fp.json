@@ -1,0 +1,43 @@
+{
+  "alert_reconciliation": {
+    "verdict": "likely_benign",
+    "confidence": "0.84",
+    "one_sentence_summary": "SCCM Windows Update activity during approved maintenance window CHG-88421 matches expected patch deployment.",
+    "decision_drivers": [
+      "process_name=wuauclt.exe with parent services.exe",
+      "change_ticket=CHG-88421",
+      "maintenance_window=true"
+    ],
+    "recommended_actions": [
+      "Confirm CHG-88421 completion in ITSM; no isolation unless update failed."
+    ]
+  },
+  "competing_hypotheses": [
+    {"hypothesis_type": "benign", "hypothesis": "Approved SCCM patch", "evidence_support": ["CHG-88421"], "evidence_gaps": [], "best_pivots": []},
+    {"hypothesis_type": "benign", "hypothesis": "Routine Windows Update", "evidence_support": ["wuauclt.exe"], "evidence_gaps": [], "best_pivots": []},
+    {"hypothesis_type": "benign", "hypothesis": "Scheduled maintenance", "evidence_support": ["maintenance_window"], "evidence_gaps": [], "best_pivots": []},
+    {"hypothesis_type": "adversary", "hypothesis": "Disguised malware update", "evidence_support": [], "evidence_gaps": ["Ticket and SCCM context present"], "best_pivots": []},
+    {"hypothesis_type": "adversary", "hypothesis": "Living-off-the-land abuse", "evidence_support": [], "evidence_gaps": ["SYSTEM context expected for patching"], "best_pivots": []},
+    {"hypothesis_type": "adversary", "hypothesis": "Unauthorized software push", "evidence_support": [], "evidence_gaps": ["Documented change ticket"], "best_pivots": []}
+  ],
+  "evidence_vs_inference": {
+    "evidence": [
+      "process_name=wuauclt.exe",
+      "change_ticket=CHG-88421",
+      "maintenance_window=true"
+    ],
+    "inferences": ["Patch tooling and ticket align with benign administrative activity."]
+  },
+  "ioc_extraction": {
+    "ip_addresses": ["10.44.8.19"],
+    "domains": [],
+    "user_accounts": ["NT AUTHORITY\\SYSTEM"],
+    "hostnames": ["workstation-09.corp.local"],
+    "process_names": ["wuauclt.exe"],
+    "file_paths": [],
+    "file_hashes": [],
+    "event_ids": [],
+    "urls": []
+  },
+  "ttp_analysis": []
+}

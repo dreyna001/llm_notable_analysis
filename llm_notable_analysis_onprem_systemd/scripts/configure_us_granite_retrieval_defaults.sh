@@ -198,9 +198,9 @@ cat <<EOF >&2
 
 Granite env defaults applied. Before enabling retrieval or portal Q&A:
   1. Rebuild KB lanes: scripts/setup_postgres_rag.sh --config-env $CONFIG_ENV
-  2. Rebuild case chunks: python3 scripts/rebuild_case_chunks.py --all --config-env $CONFIG_ENV
+  2. Rebuild case chunks: /opt/notable-analyzer/venv/bin/python scripts/rebuild_case_chunks.py --all --config-env $CONFIG_ENV
   3. Rebuild closed-ticket chunks when enabled:
-     python3 scripts/rebuild_closed_ticket_chunks.py --all --config-env $CONFIG_ENV
+     /opt/notable-analyzer/venv/bin/python scripts/rebuild_closed_ticket_chunks.py --all --config-env $CONFIG_ENV
   4. Restart services: sudo systemctl restart notable-analyzer notable-portal
 
 EOF

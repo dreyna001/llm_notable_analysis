@@ -1,0 +1,41 @@
+{
+  "alert_reconciliation": {
+    "verdict": "unknown",
+    "confidence": "0.35",
+    "one_sentence_summary": "A single DNS query to an uncommon domain is insufficient to choose malicious or benign without corroborating host or network events.",
+    "decision_drivers": [
+      "event_count=1 with no auth or endpoint corroboration",
+      "insufficient direct evidence for a true-positive or false-positive call"
+    ],
+    "recommended_actions": [
+      "Collect additional DNS, proxy, and endpoint telemetry for laptop-41 before disposition."
+    ]
+  },
+  "competing_hypotheses": [
+    {"hypothesis_type": "benign", "hypothesis": "CDN or vendor lookup", "evidence_support": [], "evidence_gaps": ["Only one event in alert"], "best_pivots": []},
+    {"hypothesis_type": "benign", "hypothesis": "Background software check", "evidence_support": [], "evidence_gaps": ["No process context"], "best_pivots": []},
+    {"hypothesis_type": "benign", "hypothesis": "Transient resolver noise", "evidence_support": [], "evidence_gaps": ["Domain not clearly malicious"], "best_pivots": []},
+    {"hypothesis_type": "adversary", "hypothesis": "Early-stage C2 lookup", "evidence_support": [], "evidence_gaps": ["Single event only"], "best_pivots": []},
+    {"hypothesis_type": "adversary", "hypothesis": "Low-volume exfil staging", "evidence_support": [], "evidence_gaps": ["No volume or follow-on activity"], "best_pivots": []},
+    {"hypothesis_type": "adversary", "hypothesis": "Phishing prep DNS", "evidence_support": [], "evidence_gaps": ["Insufficient context"], "best_pivots": []}
+  ],
+  "evidence_vs_inference": {
+    "evidence": [
+      "event_count=1",
+      "dest_domain=cdn-static-akamai.example"
+    ],
+    "inferences": ["Single low-signal DNS event cannot support a confident disposition."]
+  },
+  "ioc_extraction": {
+    "ip_addresses": [],
+    "domains": ["cdn-static-akamai.example"],
+    "user_accounts": [],
+    "hostnames": ["laptop-41.corp.local"],
+    "process_names": [],
+    "file_paths": [],
+    "file_hashes": [],
+    "event_ids": [],
+    "urls": []
+  },
+  "ttp_analysis": []
+}

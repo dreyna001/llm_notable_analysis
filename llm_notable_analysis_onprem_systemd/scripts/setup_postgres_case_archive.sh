@@ -94,7 +94,7 @@ cleanup() {
 trap cleanup EXIT
 
 generate_sql() {
-    python3 - "$CONFIG_ENV" "$PORTAL_ENV" "$tmpdir/admin.sql" "$tmpdir/grants.sql" "$tmpdir/meta.env" <<'PY'
+    python3 - "$CONFIG_ENV" "$PORTAL_ENV" "$tmpdir/admin.sql" "$tmpdir/grants.sql" "$tmpdir/index_ownership.sql" "$tmpdir/meta.env" <<'PY'
 import re
 import shlex
 import sys
@@ -105,7 +105,8 @@ config_path = Path(sys.argv[1])
 portal_path = Path(sys.argv[2])
 admin_sql_path = Path(sys.argv[3])
 grants_sql_path = Path(sys.argv[4])
-meta_path = Path(sys.argv[5])
+index_ownership_sql_path = Path(sys.argv[5])
+meta_path = Path(sys.argv[6])
 
 
 def parse_env(path: Path) -> dict[str, str]:
@@ -234,6 +235,12 @@ admin_statements.extend(
     ]
 )
 
+closed_schema = require_simple_identifier(
+    config.get("CLOSED_TICKET_POSTGRES_SCHEMA", "notable_closed_tickets"),
+    "CLOSED_TICKET_POSTGRES_SCHEMA",
+)
+closed_schema_ident = quote_ident(closed_schema)
+
 grant_statements = [
     f"GRANT USAGE ON SCHEMA {schema_ident} TO {portal_ident};",
     f"GRANT SELECT ON ALL TABLES IN SCHEMA {schema_ident} TO {portal_ident};",
@@ -243,15 +250,26 @@ grant_statements = [
     f"GRANT SELECT ON TABLES TO {portal_ident};",
 ]
 
+index_ownership_statements = [
+    f"ALTER INDEX IF EXISTS {schema_ident}.case_chunks_embedding_hnsw_idx OWNER TO {analyzer_ident};",
+    f"ALTER INDEX IF EXISTS {schema_ident}.case_chunks_search_vector_gin_idx OWNER TO {analyzer_ident};",
+    f"ALTER INDEX IF EXISTS {closed_schema_ident}.ticket_chunks_embedding_hnsw_idx OWNER TO {analyzer_ident};",
+    f"ALTER INDEX IF EXISTS {closed_schema_ident}.ticket_chunks_search_vector_gin_idx OWNER TO {analyzer_ident};",
+]
+
 admin_sql_path.write_text("\n".join(admin_statements) + "\n", encoding="utf-8")
 grants_sql_path.write_text("\n".join(grant_statements) + "\n", encoding="utf-8")
+index_ownership_sql_path.write_text(
+    "\n".join(index_ownership_statements) + "\n",
+    encoding="utf-8",
+)
 meta_path.write_text(
     f"CASE_DATABASE={shlex.quote(database)}\n"
     f"ANALYZER_ROLE={shlex.quote(analyzer_role)}\n"
     f"PORTAL_ROLE={shlex.quote(portal_role)}\n",
     encoding="utf-8",
 )
-for path in (admin_sql_path, grants_sql_path, meta_path):
+for path in (admin_sql_path, grants_sql_path, index_ownership_sql_path, meta_path):
     path.chmod(0o600)
 PY
 }
@@ -329,6 +347,9 @@ run_psql_as_admin "$CASE_DATABASE" "$closed_ticket_portal_grants_sql"
 
 info "Granting read-only portal role access to case archive tables"
 run_psql_as_admin "$CASE_DATABASE" "$tmpdir/grants.sql"
+
+info "Transferring case/closed-ticket index ownership to analyzer role"
+run_psql_as_admin "$CASE_DATABASE" "$tmpdir/index_ownership.sql"
 
 info "PostgreSQL case archive setup complete"
 

@@ -321,6 +321,9 @@ def build_table_migration_sql(spec: ChunkTableSpec, target_dim: int) -> str:
 
 def rebuild_commands(config: dict[str, str]) -> list[str]:
     config_env = config.get("_CONFIG_ENV_PATH", "/etc/notable-analyzer/config.env")
+    analyzer_python = config.get(
+        "_ANALYZER_PYTHON", "/opt/notable-analyzer/venv/bin/python"
+    )
     return [
         f"scripts/setup_postgres_rag.sh --config-env {config_env}",
         (
@@ -328,10 +331,11 @@ def rebuild_commands(config: dict[str, str]) -> list[str]:
             "--spl-query-rag"
         ),
         (
-            f"python3 scripts/rebuild_case_chunks.py --all --config-env {config_env}"
+            f"{analyzer_python} scripts/rebuild_case_chunks.py --all "
+            f"--config-env {config_env}"
         ),
         (
-            f"python3 scripts/rebuild_closed_ticket_chunks.py --all "
+            f"{analyzer_python} scripts/rebuild_closed_ticket_chunks.py --all "
             f"--config-env {config_env}"
         ),
         "sudo systemctl restart notable-analyzer notable-portal",

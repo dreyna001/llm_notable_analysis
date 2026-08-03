@@ -1,0 +1,20 @@
+{
+  "Records": [
+    {
+      "eventVersion": "2.1",
+      "eventSource": "aws:s3",
+      "awsRegion": "us-east-1",
+      "eventTime": "2026-05-30T00:00:00.000Z",
+      "eventName": "ObjectCreated:Put",
+      "s3": {
+        "bucket": {
+          "name": "notable-local-input"
+        },
+        "object": {
+          "key": "incoming/.keep",
+          "size": 0
+        }
+      }
+    }
+  ]
+}

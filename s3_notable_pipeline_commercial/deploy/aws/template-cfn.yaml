@@ -1,0 +1,2743 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Commercial AWS S3 notable analysis pipeline using customer-approved Bedrock models (pure CloudFormation)
+Metadata:
+  cfn-lint:
+    config:
+      # The optional portal override ARN is empty unless its matching condition is true.
+      ignore_checks:
+        - W1030
+
+Parameters:
+  InputBucketName:
+    Type: String
+    Description: Name for the input S3 bucket (notables will be uploaded here)
+    Default: notable-input-bucket
+
+  OutputBucketName:
+    Type: String
+    Description: Name for the output S3 bucket (markdown + Bedrock JSON reports for s3 and notable_rest modes)
+    Default: notable-output-bucket
+
+  DeploymentPartition:
+    Type: String
+    Default: aws
+    AllowedValues:
+      - aws
+    Description: CloudFormation partition for the deployment boundary.
+
+  DeploymentRegion:
+    Type: String
+    Default: us-east-1
+    AllowedValues:
+      - us-east-1
+    Description: Commercial AWS region for this deployment. Must match AWS::Region.
+
+  EcrRepositoryUri:
+    Type: String
+    Description: Full customer commercial AWS ECR repository URI in us-east-1 without a tag or digest.
+    AllowedPattern: '^([0-9]{12})\.dkr\.ecr\.us-east-1\.amazonaws\.com/[a-zA-Z0-9._/-]+$'
+
+  ImageDigest:
+    Type: String
+    Description: Immutable Lambda image digest in sha256 format.
+    AllowedPattern: '^sha256:[a-f0-9]{64}$'
+
+  BedrockAnalysisModelId:
+    Type: String
+    Description: Customer-approved commercial AWS Bedrock model or inference-profile ID for analysis.
+    Default: ''
+
+  BedrockAnalysisModelArn:
+    Type: String
+    Description: Exact ARN corresponding to BedrockAnalysisModelId for least-privilege IAM.
+    AllowedPattern: '^arn:aws:bedrock:us-east-1:([0-9]{12})?:(foundation-model|inference-profile)/.+$'
+
+  SplunkSinkMode:
+    Type: String
+    Description: Output sink mode
+    Default: s3
+    AllowedValues:
+      - s3
+      - notable_rest
+
+  CapabilityProfiles:
+    Type: String
+    Description: Comma-separated capability profiles for the Lambda runtime.
+    Default: core
+
+  AllowPrivateOutboundEndpoints:
+    Type: String
+    Description: Explicitly allow outbound HTTPS integrations to private or local IP ranges.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  HtmlReportEnabled:
+    Type: String
+    Description: Enables optional HTML companion reports.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  RagEnabled:
+    Type: String
+    Description: Enables general SOC advisory retrieval from the private OpenSearch domain.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  RagMaxSnippets:
+    Type: Number
+    Description: Maximum OpenSearch snippets for general SOC RAG.
+    Default: 4
+    MinValue: 1
+    MaxValue: 20
+
+  RagContextBudgetChars:
+    Type: Number
+    Description: Character budget for rendered general SOC RAG context.
+    Default: 1600
+    MinValue: 1
+    MaxValue: 10000
+
+  RagFailureMode:
+    Type: String
+    Description: RAG failure behavior. Use suppress for default fail-soft behavior.
+    Default: suppress
+    AllowedValues:
+      - suppress
+      - fail_closed
+
+  SplQueryRagEnabled:
+    Type: String
+    Description: Enables Splunk data-dictionary grounding from OpenSearch.
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+
+  InvestigationQueryExecutor:
+    Type: String
+    Description: Read-only Splunk investigation executor.
+    Default: rest
+    AllowedValues:
+      - rest
+      - mcp
+
+  SplunkSearchAllowedIndexes:
+    Type: String
+    Description: Comma-separated Splunk indexes allowed for read-only investigation queries.
+    Default: main,notable,risk
+
+  SplunkSearchAllowedCommands:
+    Type: String
+    Description: Comma-separated SPL commands allowed for read-only investigation queries.
+    Default: search,stats,table,fields,where,head
+
+  SplunkSearchDeniedCommands:
+    Type: String
+    Description: Comma-separated SPL commands explicitly denied for read-only investigation queries.
+    Default: delete,collect,outputlookup,sendemail,map,rest,script,dbxquery,inputlookup
+
+  SplunkSearchAllowedFields:
+    Type: String
+    Description: Optional comma-separated Splunk result fields retained in samples. _raw is always dropped.
+    Default: ''
+
+  SplunkSearchMaxTimeRange:
+    Type: String
+    Description: Maximum lookback window for one read-only Splunk investigation query.
+    Default: 24h
+
+  SplunkSearchMaxRows:
+    Type: Number
+    Description: Maximum rows returned by one read-only Splunk investigation query.
+    Default: 100
+    MinValue: 1
+    MaxValue: 1000
+
+  SplunkSearchTimeoutSeconds:
+    Type: Number
+    Description: Timeout in seconds for one read-only Splunk investigation query.
+    Default: 30
+    MinValue: 1
+    MaxValue: 300
+
+  InvestigationMaxQueriesPerAlert:
+    Type: Number
+    Description: Maximum read-only investigation queries per notable.
+    Default: 6
+    MinValue: 1
+    MaxValue: 24
+
+  InvestigationMaxConcurrentQueries:
+    Type: Number
+    Description: Maximum concurrent read-only investigation queries per notable.
+    Default: 6
+    MinValue: 1
+    MaxValue: 8
+
+  SplunkMcpEndpoint:
+    Type: String
+    Description: Optional HTTPS MCP bridge endpoint for read-only Splunk investigation.
+    Default: ''
+
+  SplunkMcpAuthSecretArn:
+    Type: String
+    Default: '*'
+    AllowedPattern: '^\*$|^arn:aws:secretsmanager:us-east-1:[0-9]{12}:secret:.+$'
+    ConstraintDescription: Must be * or a valid Secrets Manager secret ARN.
+    Description: Optional bearer token secret ARN for Splunk MCP-over-HTTPS.
+
+  ServiceNowBaseUrl:
+    Type: String
+    Description: ServiceNow instance base URL for approved incident create.
+    Default: https://your-instance.service-now.com
+
+  ServiceNowApiTokenSecretArn:
+    Type: String
+    Default: '*'
+    AllowedPattern: '^\*$|^arn:aws:secretsmanager:us-east-1:[0-9]{12}:secret:.+$'
+    ConstraintDescription: Must be * or a valid Secrets Manager secret ARN.
+    Description: Optional ServiceNow API bearer token secret ARN.
+
+  ServiceNowApprovalHmacSecretArn:
+    Type: String
+    Default: '*'
+    AllowedPattern: '^\*$|^arn:aws:secretsmanager:us-east-1:[0-9]{12}:secret:.+$'
+    ConstraintDescription: Must be * or a valid Secrets Manager secret ARN.
+    Description: HMAC key secret ARN used to validate ServiceNow create approvals.
+
+  ServiceNowAssignmentGroup:
+    Type: String
+    Description: ServiceNow assignment group used for incident drafts.
+    Default: ''
+
+  ServiceNowTimeoutSeconds:
+    Type: Number
+    Description: Timeout in seconds for ServiceNow create calls.
+    Default: 15
+    MinValue: 1
+    MaxValue: 300
+
+  ServiceNowDispositionSyncEnabled:
+    Type: String
+    Description: Enables scheduled read-only ServiceNow closed disposition sync.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  ServiceNowDispositionSyncTokenSecretArn:
+    Type: String
+    Description: Secrets Manager ARN for read-only ServiceNow disposition sync bearer token.
+    Default: '*'
+    AllowedPattern: '^\*$|^arn:aws:secretsmanager:us-east-1:[0-9]{12}:secret:.+$'
+    ConstraintDescription: Must be * or a commercial us-east-1 Secrets Manager secret ARN.
+
+  ServiceNowDispositionFieldMap:
+    Type: String
+    Description: Path to ServiceNow disposition field map JSON inside the Lambda package.
+    Default: '/var/task/deploy/servicenow/disposition_field_map.example.json'
+
+  ServiceNowDispositionCodeMap:
+    Type: String
+    Description: Path to ServiceNow disposition code map JSON inside the Lambda package.
+    Default: '/var/task/deploy/servicenow/disposition_code_map.example.json'
+
+  ServiceNowDispositionBackfillDays:
+    Type: Number
+    Description: First-run closed_at lookback window for disposition sync.
+    Default: 90
+    MinValue: 1
+    MaxValue: 3650
+
+  DispositionRetentionDays:
+    Type: Number
+    Description: Retention in days for synced ServiceNow disposition rows.
+    Default: 365
+    MinValue: 1
+    MaxValue: 3650
+
+  DispositionSyncLambdaName:
+    Type: String
+    Description: Lambda function name for ServiceNow closed disposition sync.
+    Default: notable-disposition-sync
+
+  SideEffectIdempotencyTableName:
+    Type: String
+    Description: DynamoDB table for external side-effect idempotency markers.
+    Default: notable-side-effect-idempotency
+
+  SideEffectIdempotencyRetentionDays:
+    Type: Number
+    Description: Best-effort DynamoDB TTL retention for side-effect idempotency rows.
+    Default: 30
+    MinValue: 1
+    MaxValue: 3650
+
+  SideEffectIdempotencyLockSeconds:
+    Type: Number
+    Description: Stale-lock timeout for in-progress side-effect idempotency reservations.
+    Default: 900
+    MinValue: 1
+    MaxValue: 86400
+
+  CaseArchiveEnabled:
+    Type: String
+    Description: Enables S3 case envelope archiving when set directly or through analyst_portal.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  CaseArchiveFailureMode:
+    Type: String
+    Description: Case archive failure behavior.
+    Default: suppress
+    AllowedValues:
+      - suppress
+      - fail_closed
+
+  CaseArchiveBucketName:
+    Type: String
+    Description: Optional archive bucket override. Defaults to OutputBucketName when blank.
+    Default: ''
+
+  CaseArchivePrefix:
+    Type: String
+    Description: S3 prefix for canonical case envelopes.
+    Default: cases
+
+  CaseArchiveChunksPrefix:
+    Type: String
+    Description: S3 prefix for embedded case chunks.
+    Default: case_chunks
+
+  CaseEmbedLambdaName:
+    Type: String
+    Description: Lambda function name for post-archive case chunk embedding.
+    Default: notable-case-embed
+
+  CaseIndexTableName:
+    Type: String
+    Description: DynamoDB CaseIndex table name. Leave blank to avoid creating Wave 2 portal resources.
+    Default: ''
+
+  CaseRetentionDays:
+    Type: Number
+    Description: Retention in days for case envelopes, chunks, and index rows.
+    Default: 30
+    MinValue: 1
+    MaxValue: 3650
+
+  CaseSchemaVersion:
+    Type: Number
+    Description: Canonical case envelope schema version.
+    Default: 1
+    MinValue: 1
+    MaxValue: 1000
+
+  CaseAnalysisSchemaVersion:
+    Type: Number
+    Description: Canonical case analysis payload schema version.
+    Default: 1
+    MinValue: 1
+    MaxValue: 1000
+
+  CaseArchiveMaxAlertBytes:
+    Type: Number
+    Description: Maximum alert bytes stored in one case envelope.
+    Default: 262144
+    MinValue: 1
+    MaxValue: 10485760
+
+  CaseArchiveMaxAnalysisBytes:
+    Type: Number
+    Description: Maximum analysis bytes stored in one case envelope.
+    Default: 524288
+    MinValue: 1
+    MaxValue: 20971520
+
+  PortalEnabled:
+    Type: String
+    Description: Enables the read-only analyst portal API when set directly or through analyst_portal.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  PortalApiLambdaName:
+    Type: String
+    Description: Lambda function name for the read-only analyst portal API.
+    Default: notable-portal-api
+
+  PortalAuthMode:
+    Type: String
+    Description: Portal authentication mode.
+    Default: jwt
+    AllowedValues:
+      - jwt
+      - iam
+
+  PortalPageSize:
+    Type: Number
+    Description: Default case list page size.
+    Default: 50
+    MinValue: 1
+    MaxValue: 100
+
+  PortalMaxDetailBytes:
+    Type: Number
+    Description: Maximum bytes returned for case detail/raw reads.
+    Default: 262144
+    MinValue: 1
+    MaxValue: 10485760
+
+  PortalJwtIssuer:
+    Type: String
+    Description: JWT issuer required when PortalAuthMode=jwt and the portal is enabled.
+    Default: ''
+
+  PortalJwtAudience:
+    Type: String
+    Description: JWT audience required when PortalAuthMode=jwt and the portal is enabled.
+    Default: ''
+
+  PortalCorsAllowedOrigins:
+    Type: String
+    Description: Comma-separated browser origins allowed to call the portal API.
+    Default: ''
+
+  PortalRequiredAnalystRole:
+    Type: String
+    Default: ''
+
+  PortalRequiredAnalystScope:
+    Type: String
+    Default: ''
+
+  PortalChatTimeoutSec:
+    Type: Number
+    Description: Portal chat timeout in seconds, bounded below the HTTP API integration timeout.
+    Default: 29
+    MinValue: 1
+    MaxValue: 29
+
+  PortalChatMaxConcurrency:
+    Type: Number
+    Description: In-handler portal chat concurrency cap per Lambda execution environment.
+    Default: 18
+    MinValue: 1
+    MaxValue: 64
+
+  PortalChatBedrockModelId:
+    Type: String
+    Description: Optional Bedrock model override for portal answer synthesis.
+    Default: ''
+
+  PortalChatBedrockModelArn:
+    Type: String
+    Description: Exact ARN for PortalChatBedrockModelId when set; otherwise portal chat uses BedrockAnalysisModelArn.
+    Default: ''
+    AllowedPattern: '^$|^arn:aws:bedrock:us-east-1:([0-9]{12})?:(foundation-model|inference-profile)/.+$'
+
+  PortalUiBucketName:
+    Type: String
+    Description: Optional S3 bucket name for the analyst portal static SPA. Leave blank to skip static hosting resources.
+    Default: ''
+
+  CaseQaEnabled:
+    Type: String
+    Description: Enables retrieval-bound pinned-case Q&A when set directly or through analyst_portal.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  CaseQaGeneralKnowledgeEnabled:
+    Type: String
+    Description: Enables advisory general-knowledge fallback for Case Q&A.
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  CaseQaMaxIndexChunksPerCase:
+    Type: Number
+    Description: Maximum embedded chunks indexed for one case.
+    Default: 200
+    MinValue: 1
+    MaxValue: 10000
+
+  CaseQaMaxChunksPerLane:
+    Type: Number
+    Description: Maximum chunks returned from one retrieval lane.
+    Default: 6
+    MinValue: 1
+    MaxValue: 50
+
+  CaseQaMaxTotalChunks:
+    Type: Number
+    Description: Maximum chunks included across all retrieval lanes.
+    Default: 18
+    MinValue: 1
+    MaxValue: 100
+
+  CaseQaLexicalTopK:
+    Type: Number
+    Description: Lexical retrieval candidate count.
+    Default: 30
+    MinValue: 1
+    MaxValue: 100
+
+  CaseQaVectorTopK:
+    Type: Number
+    Description: Vector retrieval candidate count.
+    Default: 30
+    MinValue: 1
+    MaxValue: 100
+
+  CaseQaRrfK:
+    Type: Number
+    Description: Reciprocal-rank-fusion K value.
+    Default: 60
+    MinValue: 1
+    MaxValue: 1000
+
+  CaseQaContextBudgetChars:
+    Type: Number
+    Description: Character budget for Case Q&A context.
+    Default: 12000
+    MinValue: 1
+    MaxValue: 50000
+
+  CaseQaMaxQuestionChars:
+    Type: Number
+    Description: Maximum user question length for Case Q&A.
+    Default: 2000
+    MinValue: 1
+    MaxValue: 8000
+
+  CaseQaMaxAnswerTokens:
+    Type: Number
+    Description: Maximum answer tokens for portal Case Q&A synthesis.
+    Default: 800
+    MinValue: 1
+    MaxValue: 4096
+
+  CaseQaEmbeddingModel:
+    Type: String
+    Description: Embedding model used for case chunk vectors.
+    Default: amazon.titan-embed-text-v2:0
+
+  CaseQaVectorDimensions:
+    Type: Number
+    Description: Embedding vector dimensions. Locked to 1024 for Titan V2 in v1.
+    Default: 1024
+    MinValue: 1
+    MaxValue: 100000
+
+  CaseQaEmbedNormalize:
+    Type: String
+    Description: Normalize Case Q&A embeddings before persistence/search.
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  CaseQaChatHistoryEnabled:
+    Type: String
+    Description: Enables bounded DynamoDB-backed portal chat history.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  CaseQaChatHistoryRetentionDays:
+    Type: Number
+    Description: Retention in days for persisted portal chat history.
+    Default: 30
+    MinValue: 1
+    MaxValue: 3650
+
+  CaseQaMaxSessionsPerUser:
+    Type: Number
+    Description: Maximum persisted chat sessions per user.
+    Default: 10
+    MinValue: 1
+    MaxValue: 100
+
+  CaseQaMaxMessagesPerSession:
+    Type: Number
+    Description: Maximum persisted messages per chat session.
+    Default: 30
+    MinValue: 1
+    MaxValue: 200
+
+  CaseQaMaxStoredMessageBytes:
+    Type: Number
+    Description: Maximum bytes stored for one chat message.
+    Default: 4000
+    MinValue: 1
+    MaxValue: 65536
+
+  ChatSessionsTableName:
+    Type: String
+    Description: DynamoDB chat sessions table required when CaseQaChatHistoryEnabled=true.
+    Default: ''
+
+  ChatMessagesTableName:
+    Type: String
+    Description: DynamoDB chat messages table required when CaseQaChatHistoryEnabled=true.
+    Default: ''
+
+  RagRerankEnabled:
+    Type: String
+    Description: Enables optional reranking for retrieval workflows.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  RagRerankModel:
+    Type: String
+    Description: Primary rerank model ID.
+    Default: cohere.rerank-v3-5:0
+
+  RagRerankModelFallback:
+    Type: String
+    Description: Fallback rerank model ID for regions without the primary model.
+    Default: amazon.rerank-v1:0
+
+  ElasticsearchBaseUrl:
+    Type: String
+    Description: HTTPS Elasticsearch base URL for read-only investigation.
+    Default: ''
+
+  ElasticsearchApiKeySecretArn:
+    Type: String
+    Default: '*'
+    AllowedPattern: '^\*$|^arn:aws:secretsmanager:us-east-1:[0-9]{12}:secret:.+$'
+    ConstraintDescription: Must be * or a valid Secrets Manager secret ARN.
+    Description: Optional Elasticsearch API key secret ARN.
+
+  ElasticsearchIndexAllowlist:
+    Type: String
+    Description: Comma-separated Elasticsearch index patterns allowed for read-only investigation.
+    Default: ''
+
+  ElasticsearchAllowWildcardIndexes:
+    Type: String
+    Description: Allow wildcard index patterns in Elasticsearch read-only investigation.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  ElasticsearchTimestampField:
+    Type: String
+    Description: Timestamp field required in generated Elasticsearch range filters.
+    Default: '@timestamp'
+
+  ElasticsearchAllowedFields:
+    Type: String
+    Description: Comma-separated fields allowed in generated Elasticsearch queries and returned samples.
+    Default: ''
+
+  ElasticsearchMaxTimeRange:
+    Type: String
+    Description: Maximum time range for generated Elasticsearch queries.
+    Default: 24h
+
+  ElasticsearchMaxRows:
+    Type: Number
+    Description: Maximum Elasticsearch rows returned by one read-only investigation query.
+    Default: 100
+    MinValue: 1
+    MaxValue: 1000
+
+  ElasticsearchTimeoutSeconds:
+    Type: Number
+    Description: Timeout in seconds for one Elasticsearch _search call.
+    Default: 30
+    MinValue: 1
+    MaxValue: 300
+
+  ElasticsearchGroundingEnabled:
+    Type: String
+    Description: Enables Elasticsearch data-dictionary grounding from OpenSearch.
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+
+  SplunkBaseUrl:
+    Type: String
+    Default: ''
+    Description: >-
+      Required when SplunkSinkMode=notable_rest. Base URL for Splunk REST
+      (e.g., https://splunk.example.com:8089).
+
+  SplunkApiTokenSecretArn:
+    Type: String
+    Default: '*'
+    AllowedPattern: '^\*$|^arn:aws:secretsmanager:us-east-1:[0-9]{12}:secret:.+$'
+    ConstraintDescription: Must be the s3-mode placeholder * or a valid Secrets Manager secret ARN for notable_rest mode.
+    Description: >-
+      Required when SplunkSinkMode=notable_rest. Secrets Manager ARN containing
+      the Splunk API token (plain string secret or JSON object). Leave the
+      default * only for s3 mode.
+
+  SplunkApiTokenSecretField:
+    Type: String
+    Default: token
+    Description: >-
+      Optional JSON field name in SplunkApiTokenSecretArn when the secret is a
+      JSON object. Ignored for plain-string secrets.
+
+  SplunkNotableUpdatePath:
+    Type: String
+    Default: /services/notable_update
+    Description: Optional Splunk notable update path used by notable_rest mode.
+
+  SplunkRequirePayloadFindingId:
+    Type: String
+    Description: Require a payload finding_id/notable_id/sid that matches the S3 object key for Splunk writeback.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  InputRetentionDays:
+    Type: Number
+    Description: Number of days to retain input notables before automatic deletion
+    Default: 2
+    MinValue: 1
+    MaxValue: 365
+
+  OutputRetentionDays:
+    Type: Number
+    Description: Number of days to retain output reports before automatic deletion
+    Default: 7
+    MinValue: 1
+    MaxValue: 365
+
+  MaxDecompressedInputBytes:
+    Type: Number
+    Description: Maximum decompressed bytes allowed for one gzip notable input
+    Default: 1048576
+    MinValue: 1
+
+  LambdaTimeoutSeconds:
+    Type: Number
+    Description: Lambda timeout in seconds. Keep 360 for core; use 900 as the starting point for heavier parity profiles.
+    Default: 360
+    MinValue: 1
+    MaxValue: 900
+
+  LambdaMemorySize:
+    Type: Number
+    Description: Lambda memory in MB. Keep 512 for core; use 1024 as the starting point for heavier parity profiles.
+    Default: 512
+    MinValue: 128
+    MaxValue: 10240
+
+  LambdaEphemeralStorageMb:
+    Type: Number
+    Description: Lambda ephemeral storage in MB.
+    Default: 512
+    MinValue: 512
+    MaxValue: 10240
+
+  LambdaReservedConcurrentExecutions:
+    Type: Number
+    Description: Reserved concurrency cap to limit downstream Bedrock/SIEM/Elastic fan-out.
+    Default: 5
+    MinValue: 1
+    MaxValue: 100
+
+  AnalyzerQueueName:
+    Type: String
+    Default: notable-analyzer-queue
+
+  AnalyzerDlqName:
+    Type: String
+    Default: notable-analyzer-dlq
+
+  AnalyzerMaximumConcurrency:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 1000
+
+  EmbedQueueName:
+    Type: String
+    Default: notable-embed-queue
+
+  EmbedDlqName:
+    Type: String
+    Default: notable-embed-dlq
+
+  EmbedMaximumConcurrency:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 1000
+
+  RagIngestionEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+
+  RagIngestionQueueName:
+    Type: String
+    Default: notable-rag-ingestion-queue
+
+  RagIngestionDlqName:
+    Type: String
+    Default: notable-rag-ingestion-dlq
+
+  RagIngestionMaximumConcurrency:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 1000
+
+  RagIngestionLambdaName:
+    Type: String
+    Default: notable-rag-ingestion
+
+  RagSourceBucketName:
+    Type: String
+    Default: ''
+
+  RagSourcePrefix:
+    Type: String
+    Default: rag-sources/
+
+  RagManifestPrefix:
+    Type: String
+    Default: rag-sources/manifests/
+    Description: Prefix whose versioned manifest objects publish ingestion jobs.
+
+  OpenSearchEndpoint:
+    Type: String
+    Default: ''
+
+  OpenSearchRegion:
+    Type: String
+    Default: us-east-1
+    AllowedValues:
+      - us-east-1
+
+  OpenSearchService:
+    Type: String
+    Default: es
+
+  OpenSearchCaseIndex:
+    Type: String
+    Default: case_chunks
+
+  OpenSearchSocIndex:
+    Type: String
+    Default: soc_knowledge
+
+  OpenSearchSplunkIndex:
+    Type: String
+    Default: splunk_dictionary
+
+  OpenSearchElasticIndex:
+    Type: String
+    Default: elastic_dictionary
+
+  OpenSearchDomainArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws:es:us-east-1:[0-9]{12}:domain/.+$'
+    Description: ARN of the customer-managed VPC-only OpenSearch domain.
+
+  RagTenantId:
+    Type: String
+    Default: ''
+    Description: Customer deployment or tenant identifier applied to every OpenSearch document and query.
+
+  CustomerVpcSubnetIds:
+    Type: String
+    Default: ''
+    Description: Comma-separated private subnet IDs for Lambda VpcConfig.
+
+  CustomerSecurityGroupIds:
+    Type: String
+    Default: ''
+    Description: Comma-separated security group IDs for Lambda VpcConfig.
+
+  CustomerKmsKeyArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws:kms:us-east-1:[0-9]{12}:key/[a-f0-9-]+$'
+    Description: Optional customer-managed CMK ARN for supported data-plane resources.
+
+  CustomerKmsKeyAdminRoleArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws:iam::[0-9]{12}:role/.+$'
+    Description: Optional customer key-administration role ARN for deployment records and key policy alignment.
+
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    MinValue: 1
+    MaxValue: 3653
+
+  QueueVisibilityTimeoutSeconds:
+    Type: Number
+    Default: 960
+    MinValue: 1
+    MaxValue: 43200
+
+  QueueMessageRetentionSeconds:
+    Type: Number
+    Default: 345600
+    MinValue: 60
+    MaxValue: 1209600
+
+  DlqMessageRetentionSeconds:
+    Type: Number
+    Default: 1209600
+    MinValue: 60
+    MaxValue: 1209600
+
+  AlarmNotificationTopicArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws:sns:us-east-1:[0-9]{12}:.+$'
+
+  PortalApiThrottleBurstLimit:
+    Type: Number
+    Default: 50
+    MinValue: 1
+    MaxValue: 10000
+
+  PortalApiThrottleRateLimit:
+    Type: Number
+    Default: 100
+    MinValue: 1
+    MaxValue: 10000
+
+  AwsAccountId:
+    Type: String
+    AllowedPattern: '^[0-9]{12}$'
+    Description: >-
+      Customer account identifier retained for deployment validation and model access checks.
+
+Rules:
+  RequireNotableRestConfig:
+    RuleCondition: !Equals [!Ref SplunkSinkMode, notable_rest]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref SplunkBaseUrl, '']]
+        AssertDescription: SplunkBaseUrl is required when SplunkSinkMode=notable_rest.
+      - Assert: !Not [!Equals [!Ref SplunkApiTokenSecretArn, '']]
+        AssertDescription: SplunkApiTokenSecretArn is required when SplunkSinkMode=notable_rest.
+      - Assert: !Not [!Equals [!Ref SplunkApiTokenSecretArn, '*']]
+        AssertDescription: SplunkApiTokenSecretArn must be a real Secrets Manager ARN when SplunkSinkMode=notable_rest.
+  RequireCommercialAwsBoundary:
+    Assertions:
+      - Assert: !Equals [!Ref DeploymentPartition, !Ref AWS::Partition]
+        AssertDescription: DeploymentPartition must match the CloudFormation partition.
+      - Assert: !Equals [!Ref DeploymentRegion, !Ref AWS::Region]
+        AssertDescription: DeploymentRegion must match AWS::Region and be us-east-1.
+      - Assert: !Equals [!Ref AwsAccountId, !Ref AWS::AccountId]
+        AssertDescription: AwsAccountId must match the deployment account.
+      - Assert: !Not [!Equals [!Ref BedrockAnalysisModelId, '']]
+        AssertDescription: BedrockAnalysisModelId must be selected for the customer deployment.
+      - Assert: !Not [!Equals [!Ref BedrockAnalysisModelArn, '']]
+        AssertDescription: BedrockAnalysisModelArn is required for least-privilege model invocation.
+  RequireOpenSearchForVectorCapabilities:
+    RuleCondition: !Or
+      - !Equals [!Ref RagEnabled, 'true']
+      - !Equals [!Ref SplQueryRagEnabled, 'true']
+      - !Equals [!Ref ElasticsearchGroundingEnabled, 'true']
+      - !Equals [!Ref CaseQaEnabled, 'true']
+      - !Equals [!Ref RagIngestionEnabled, 'true']
+    Assertions:
+      - Assert: !Not [!Equals [!Ref OpenSearchEndpoint, '']]
+        AssertDescription: OpenSearchEndpoint is required for enabled vector retrieval or ingestion.
+      - Assert: !Not [!Equals [!Ref OpenSearchDomainArn, '']]
+        AssertDescription: OpenSearchDomainArn is required for least-privilege data-plane IAM.
+      - Assert: !Not [!Equals [!Ref RagTenantId, '']]
+        AssertDescription: RagTenantId is required for tenant-scoped OpenSearch access.
+      - Assert: !Not [!Equals [!Ref CustomerVpcSubnetIds, '']]
+        AssertDescription: Private subnet IDs are required for the VPC-only OpenSearch path.
+      - Assert: !Not [!Equals [!Ref CustomerSecurityGroupIds, '']]
+        AssertDescription: Lambda security group IDs are required for the VPC-only OpenSearch path.
+  RequirePortalJwtConfiguration:
+    RuleCondition: !And
+      - !Equals [!Ref PortalEnabled, 'true']
+      - !Equals [!Ref PortalAuthMode, jwt]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref PortalJwtIssuer, '']]
+        AssertDescription: PortalJwtIssuer is required for the JWT portal.
+      - Assert: !Not [!Equals [!Ref PortalJwtAudience, '']]
+        AssertDescription: PortalJwtAudience is required for the JWT portal.
+      - Assert: !Or
+          - !Not [!Equals [!Ref PortalRequiredAnalystRole, '']]
+          - !Not [!Equals [!Ref PortalRequiredAnalystScope, '']]
+        AssertDescription: Set a customer analyst role or scope for the JWT portal.
+  RequireCaseIndexForPortalFeatures:
+    RuleCondition: !Or
+      - !Equals [!Ref PortalEnabled, 'true']
+      - !Equals [!Ref CaseQaEnabled, 'true']
+    Assertions:
+      - Assert: !Not [!Equals [!Ref CaseIndexTableName, '']]
+        AssertDescription: CaseIndexTableName is required when portal or Case Q&A is enabled.
+  RequireCaseArchiveForPortal:
+    RuleCondition: !Equals [!Ref PortalEnabled, 'true']
+    Assertions:
+      - Assert: !Equals [!Ref CaseArchiveEnabled, 'true']
+        AssertDescription: CaseArchiveEnabled must be true when PortalEnabled is true.
+  RequireChatHistoryPrerequisites:
+    RuleCondition: !Equals [!Ref CaseQaChatHistoryEnabled, 'true']
+    Assertions:
+      - Assert: !Equals [!Ref PortalEnabled, 'true']
+        AssertDescription: PortalEnabled is required when chat history is enabled.
+      - Assert: !Equals [!Ref CaseQaEnabled, 'true']
+        AssertDescription: CaseQaEnabled is required when chat history is enabled.
+      - Assert: !Not [!Equals [!Ref CaseIndexTableName, '']]
+        AssertDescription: CaseIndexTableName is required when chat history is enabled.
+  RequirePortalChatBedrockModelArn:
+    RuleCondition: !Not [!Equals [!Ref PortalChatBedrockModelId, '']]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref PortalChatBedrockModelArn, '']]
+        AssertDescription: PortalChatBedrockModelArn is required when PortalChatBedrockModelId is set.
+
+Conditions:
+  IsNotableRest: !Equals [!Ref SplunkSinkMode, notable_rest]
+  HasSplunkMcpSecret: !Not [!Equals [!Ref SplunkMcpAuthSecretArn, '*']]
+  HasServiceNowSecret: !Not [!Equals [!Ref ServiceNowApiTokenSecretArn, '*']]
+  HasServiceNowApprovalSecret: !Not [!Equals [!Ref ServiceNowApprovalHmacSecretArn, '*']]
+  HasServiceNowDispositionSyncSecret: !Not [!Equals [!Ref ServiceNowDispositionSyncTokenSecretArn, '*']]
+  HasElasticsearchSecret: !Not [!Equals [!Ref ElasticsearchApiKeySecretArn, '*']]
+  HasCaseArchiveBucketName: !Not [!Equals [!Ref CaseArchiveBucketName, '']]
+  HasCaseIndexTable: !Not [!Equals [!Ref CaseIndexTableName, '']]
+  HasCaseQa: !And [!Condition HasCaseIndexTable, !Equals [!Ref CaseQaEnabled, 'true']]
+  HasPortal: !Equals [!Ref PortalEnabled, 'true']
+  HasPortalApi: !And [!Condition HasPortal, !Condition HasCaseIndexTable]
+  HasPortalUiBucketName: !Not [!Equals [!Ref PortalUiBucketName, '']]
+  HasPortalUiDeployment: !And [!Condition HasPortal, !Condition HasCaseIndexTable, !Condition HasPortalUiBucketName]
+  HasPortalCorsOrigins: !Not [!Equals [!Ref PortalCorsAllowedOrigins, '']]
+  IsPortalIamAuth: !Equals [!Ref PortalAuthMode, iam]
+  HasPortalJwtAuthorizer: !And
+    - !Condition HasPortal
+    - !Condition HasCaseIndexTable
+    - !Equals [!Ref PortalAuthMode, jwt]
+    - !Not [!Equals [!Ref PortalJwtIssuer, '']]
+    - !Not [!Equals [!Ref PortalJwtAudience, '']]
+  HasChatHistory: !Equals [!Ref CaseQaChatHistoryEnabled, 'true']
+  HasManagedChatSessionsTable: !And
+    - !Condition HasChatHistory
+    - !Equals [!Ref ChatSessionsTableName, '']
+  HasManagedChatMessagesTable: !And
+    - !Condition HasChatHistory
+    - !Equals [!Ref ChatMessagesTableName, '']
+  HasCustomerVpc: !And
+    - !Not [!Equals [!Ref CustomerVpcSubnetIds, '']]
+    - !Not [!Equals [!Ref CustomerSecurityGroupIds, '']]
+  HasCustomerKmsKey: !Not [!Equals [!Ref CustomerKmsKeyArn, '']]
+  HasCustomerKmsAdminRole: !Not [!Equals [!Ref CustomerKmsKeyAdminRoleArn, '']]
+  HasAlarmTopic: !Not [!Equals [!Ref AlarmNotificationTopicArn, '']]
+  HasRagIngestion: !Equals [!Ref RagIngestionEnabled, 'true']
+  HasRagSource: !Not [!Equals [!Ref RagSourceBucketName, '']]
+  HasOpenSearch: !Not [!Equals [!Ref OpenSearchDomainArn, '']]
+  HasPortalChatBedrockModelOverride: !Not [!Equals [!Ref PortalChatBedrockModelId, '']]
+
+Resources:
+  CustomerKmsReadPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: HasCustomerKmsKey
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+            Resource: !Ref CustomerKmsKeyArn
+
+  CustomerKmsWritePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: HasCustomerKmsKey
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:GenerateDataKey
+            Resource: !Ref CustomerKmsKeyArn
+
+  LambdaVpcEniPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: HasCustomerVpc
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - ec2:CreateNetworkInterface
+              - ec2:DescribeNetworkInterfaces
+              - ec2:DeleteNetworkInterface
+              - ec2:AssignPrivateIpAddresses
+              - ec2:UnassignPrivateIpAddresses
+            Resource: '*'
+
+  AnalyzerDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref AnalyzerDlqName
+      MessageRetentionPeriod: !Ref DlqMessageRetentionSeconds
+      KmsMasterKeyId: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+
+  AnalyzerQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref AnalyzerQueueName
+      VisibilityTimeout: !Ref QueueVisibilityTimeoutSeconds
+      MessageRetentionPeriod: !Ref QueueMessageRetentionSeconds
+      KmsMasterKeyId: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt AnalyzerDeadLetterQueue.Arn
+        maxReceiveCount: 3
+
+  AnalyzerQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref AnalyzerQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowInputBucketSend
+            Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt AnalyzerQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:s3:::${InputBucketName}'
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+  EmbedDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Condition: HasCaseQa
+    Properties:
+      QueueName: !Ref EmbedDlqName
+      MessageRetentionPeriod: !Ref DlqMessageRetentionSeconds
+      KmsMasterKeyId: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+
+  EmbedQueue:
+    Type: AWS::SQS::Queue
+    Condition: HasCaseQa
+    Properties:
+      QueueName: !Ref EmbedQueueName
+      VisibilityTimeout: !Ref QueueVisibilityTimeoutSeconds
+      MessageRetentionPeriod: !Ref QueueMessageRetentionSeconds
+      KmsMasterKeyId: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt EmbedDeadLetterQueue.Arn
+        maxReceiveCount: 3
+
+  RagIngestionDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Condition: HasRagIngestion
+    Properties:
+      QueueName: !Ref RagIngestionDlqName
+      MessageRetentionPeriod: !Ref DlqMessageRetentionSeconds
+      KmsMasterKeyId: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+
+  RagIngestionQueue:
+    Type: AWS::SQS::Queue
+    Condition: HasRagIngestion
+    Properties:
+      QueueName: !Ref RagIngestionQueueName
+      VisibilityTimeout: !Ref QueueVisibilityTimeoutSeconds
+      MessageRetentionPeriod: !Ref QueueMessageRetentionSeconds
+      KmsMasterKeyId: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt RagIngestionDeadLetterQueue.Arn
+        maxReceiveCount: 3
+
+  RagIngestionQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Condition: HasRagIngestion
+    Properties:
+      Queues:
+        - !Ref RagIngestionQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowInputBucketSend
+            Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt RagIngestionQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:s3:::${InputBucketName}'
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+  InputBucket:
+    Type: AWS::S3::Bucket
+    DependsOn:
+      - AnalyzerQueuePolicy
+    Properties:
+      BucketName: !Ref InputBucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: !If [HasCustomerKmsKey, aws:kms, AES256]
+              KMSMasterKeyID: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+      VersioningConfiguration:
+        Status: Enabled
+      NotificationConfiguration:
+        QueueConfigurations:
+          - Event: s3:ObjectCreated:*
+            Queue: !GetAtt AnalyzerQueue.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: incoming/
+          - !If
+            - HasRagIngestion
+            - Event: s3:ObjectCreated:*
+              Queue: !GetAtt RagIngestionQueue.Arn
+              Filter:
+                S3Key:
+                  Rules:
+                    - Name: prefix
+                      Value: !Ref RagManifestPrefix
+            - !Ref AWS::NoValue
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteIncomingNotablesAfterRetention
+            Status: Enabled
+            Prefix: incoming/
+            ExpirationInDays: !Ref InputRetentionDays
+
+  OutputBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref OutputBucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: !If [HasCustomerKmsKey, aws:kms, AES256]
+              KMSMasterKeyID: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOutputReportsAfterRetention
+            Status: Enabled
+            Prefix: reports/
+            ExpirationInDays: !Ref OutputRetentionDays
+          - !If
+            - HasCaseIndexTable
+            - Id: DeleteCaseArchiveAfterRetention
+              Status: Enabled
+              Prefix: !Sub '${CaseArchivePrefix}/'
+              ExpirationInDays: !Ref CaseRetentionDays
+            - !Ref AWS::NoValue
+          - !If
+            - HasCaseIndexTable
+            - Id: DeleteCaseChunksAfterRetention
+              Status: Enabled
+              Prefix: !Sub '${CaseArchiveChunksPrefix}/'
+              ExpirationInDays: !Ref CaseRetentionDays
+            - !Ref AWS::NoValue
+
+  SideEffectIdempotencyTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref SideEffectIdempotencyTableName
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification: !If
+        - HasCustomerKmsKey
+        - SSEEnabled: true
+          SSEType: KMS
+          KMSMasterKeyId: !Ref CustomerKmsKeyArn
+        - SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+
+  CaseIndexTable:
+    Type: AWS::DynamoDB::Table
+    Condition: HasCaseIndexTable
+    Properties:
+      TableName: !Ref CaseIndexTableName
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification: !If
+        - HasCustomerKmsKey
+        - SSEEnabled: true
+          SSEType: KMS
+          KMSMasterKeyId: !Ref CustomerKmsKeyArn
+        - SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: case_id
+          AttributeType: S
+        - AttributeName: archive_partition
+          AttributeType: S
+        - AttributeName: processed_at_case_id
+          AttributeType: S
+        - AttributeName: correlation_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: case_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: ProcessedAtIndex
+          KeySchema:
+            - AttributeName: archive_partition
+              KeyType: HASH
+            - AttributeName: processed_at_case_id
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: CorrelationIdIndex
+          KeySchema:
+            - AttributeName: correlation_id
+              KeyType: HASH
+            - AttributeName: processed_at_case_id
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: expires_at_epoch
+        Enabled: true
+
+  DispositionTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-servicenow-dispositions'
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification: !If
+        - HasCustomerKmsKey
+        - SSEEnabled: true
+          SSEType: KMS
+          KMSMasterKeyId: !Ref CustomerKmsKeyArn
+        - SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: snow_sys_id
+          AttributeType: S
+        - AttributeName: correlation_id
+          AttributeType: S
+        - AttributeName: sys_updated_on
+          AttributeType: S
+        - AttributeName: case_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: snow_sys_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: CorrelationIdIndex
+          KeySchema:
+            - AttributeName: correlation_id
+              KeyType: HASH
+            - AttributeName: sys_updated_on
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: CaseIdIndex
+          KeySchema:
+            - AttributeName: case_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: expires_at_epoch
+        Enabled: true
+
+  DispositionSyncStateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-disposition-sync-state'
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification: !If
+        - HasCustomerKmsKey
+        - SSEEnabled: true
+          SSEType: KMS
+          KMSMasterKeyId: !Ref CustomerKmsKeyArn
+        - SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: job_name
+          AttributeType: S
+      KeySchema:
+        - AttributeName: job_name
+          KeyType: HASH
+
+  ChatSessionsTable:
+    Type: AWS::DynamoDB::Table
+    Condition: HasManagedChatSessionsTable
+    Properties:
+      TableName: !Sub '${AWS::StackName}-chat-sessions'
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification: !If
+        - HasCustomerKmsKey
+        - SSEEnabled: true
+          SSEType: KMS
+          KMSMasterKeyId: !Ref CustomerKmsKeyArn
+        - SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: session_id
+          AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: updated_at_session_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: session_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: UserUpdatedIndex
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: updated_at_session_id
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: expires_at_epoch
+        Enabled: true
+
+  ChatMessagesTable:
+    Type: AWS::DynamoDB::Table
+    Condition: HasManagedChatMessagesTable
+    Properties:
+      TableName: !Sub '${AWS::StackName}-chat-messages'
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification: !If
+        - HasCustomerKmsKey
+        - SSEEnabled: true
+          SSEType: KMS
+          KMSMasterKeyId: !Ref CustomerKmsKeyArn
+        - SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: session_id
+          AttributeType: S
+        - AttributeName: created_at_message_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: session_id
+          KeyType: HASH
+        - AttributeName: created_at_message_id
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: expires_at_epoch
+        Enabled: true
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: NotableAnalyzerLambdaRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+        - !If [HasCustomerVpc, !Ref LambdaVpcEniPolicy, !Ref AWS::NoValue]
+        - !If [HasCustomerKmsKey, !Ref CustomerKmsWritePolicy, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:s3:::${InputBucketName}'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${InputBucketName}/*'
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:s3:::${OutputBucketName}/*'
+              - !If
+                - HasCaseArchiveBucketName
+                - Effect: Allow
+                  Action:
+                    - s3:PutObject
+                  Resource:
+                    - !Sub 'arn:${AWS::Partition}:s3:::${CaseArchiveBucketName}/${CaseArchivePrefix}/*'
+                - !Ref AWS::NoValue
+              - !If
+                - IsNotableRest
+                - Effect: Allow
+                  Action:
+                    - secretsmanager:GetSecretValue
+                  Resource:
+                    - !Ref SplunkApiTokenSecretArn
+                - !Ref AWS::NoValue
+        - PolicyName: BedrockInvokePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - !Ref BedrockAnalysisModelArn
+              - !If
+                - HasSplunkMcpSecret
+                - Effect: Allow
+                  Action:
+                    - secretsmanager:GetSecretValue
+                  Resource:
+                    - !Ref SplunkMcpAuthSecretArn
+                - !Ref AWS::NoValue
+              - !If
+                - HasServiceNowSecret
+                - Effect: Allow
+                  Action:
+                    - secretsmanager:GetSecretValue
+                  Resource:
+                    - !Ref ServiceNowApiTokenSecretArn
+                - !Ref AWS::NoValue
+              - !If
+                - HasServiceNowApprovalSecret
+                - Effect: Allow
+                  Action:
+                    - secretsmanager:GetSecretValue
+                  Resource:
+                    - !Ref ServiceNowApprovalHmacSecretArn
+                - !Ref AWS::NoValue
+              - !If
+                - HasElasticsearchSecret
+                - Effect: Allow
+                  Action:
+                    - secretsmanager:GetSecretValue
+                  Resource:
+                    - !Ref ElasticsearchApiKeySecretArn
+                - !Ref AWS::NoValue
+        - PolicyName: SideEffectIdempotencyPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource: !GetAtt SideEffectIdempotencyTable.Arn
+        - PolicyName: AnalyzerQueueConsumePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt AnalyzerQueue.Arn
+        - !If
+          - HasCaseIndexTable
+          - PolicyName: CaseIndexWriterPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - dynamodb:PutItem
+                    - dynamodb:GetItem
+                    - dynamodb:UpdateItem
+                  Resource: !GetAtt CaseIndexTable.Arn
+          - !Ref AWS::NoValue
+        - !If
+          - HasCaseQa
+          - PolicyName: CaseEmbedQueuePublishPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - sqs:SendMessage
+                  Resource: !GetAtt EmbedQueue.Arn
+          - !Ref AWS::NoValue
+        - !If
+          - HasOpenSearch
+          - PolicyName: AnalyzerOpenSearchReadPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - es:ESHttpGet
+                    - es:ESHttpPost
+                  Resource: !Sub '${OpenSearchDomainArn}/*'
+          - !Ref AWS::NoValue
+        - PolicyName: CloudWatchLogsPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/notable-analyzer-s3:*'
+
+  NotableAnalyzerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: notable-analyzer-s3
+      PackageType: Image
+      Code:
+        ImageUri: !Sub '${EcrRepositoryUri}@${ImageDigest}'
+      ImageConfig:
+        Command:
+          - s3_notable_pipeline.lambda_handler.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: !Ref LambdaTimeoutSeconds
+      MemorySize: !Ref LambdaMemorySize
+      ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
+      EphemeralStorage:
+        Size: !Ref LambdaEphemeralStorageMb
+      VpcConfig: !If
+        - HasCustomerVpc
+        - SubnetIds: !Split [',', !Ref CustomerVpcSubnetIds]
+          SecurityGroupIds: !Split [',', !Ref CustomerSecurityGroupIds]
+        - !Ref AWS::NoValue
+      Environment:
+        Variables:
+          AWS_PARTITION: !Ref DeploymentPartition
+          ANALYZER_QUEUE_URL: !Ref AnalyzerQueue
+          CASE_EMBED_QUEUE_URL: !If [HasCaseQa, !Ref EmbedQueue, '']
+          RAG_INGEST_QUEUE_URL: !If [HasRagIngestion, !Ref RagIngestionQueue, '']
+          CUSTOMER_KMS_KEY_ARN: !Ref CustomerKmsKeyArn
+          CUSTOMER_VPC_SUBNET_IDS: !Ref CustomerVpcSubnetIds
+          CUSTOMER_SECURITY_GROUP_IDS: !Ref CustomerSecurityGroupIds
+          CAPABILITY_PROFILES: !Ref CapabilityProfiles
+          ALLOW_PRIVATE_OUTBOUND_ENDPOINTS: !Ref AllowPrivateOutboundEndpoints
+          HTML_REPORT_ENABLED: !Ref HtmlReportEnabled
+          RAG_ENABLED: !Ref RagEnabled
+          RAG_MAX_SNIPPETS: !Ref RagMaxSnippets
+          RAG_CONTEXT_BUDGET_CHARS: !Ref RagContextBudgetChars
+          RAG_FAILURE_MODE: !Ref RagFailureMode
+          BEDROCK_MODEL_ID: !Ref BedrockAnalysisModelId
+          RAG_TENANT_ID: !Ref RagTenantId
+          RAG_RETRIEVAL_BACKEND: opensearch
+          OPENSEARCH_ENDPOINT: !Ref OpenSearchEndpoint
+          OPENSEARCH_REGION: !Ref OpenSearchRegion
+          OPENSEARCH_SERVICE: !Ref OpenSearchService
+          OPENSEARCH_CASE_INDEX: !Ref OpenSearchCaseIndex
+          OPENSEARCH_SOC_INDEX: !Ref OpenSearchSocIndex
+          OPENSEARCH_SPLUNK_INDEX: !Ref OpenSearchSplunkIndex
+          OPENSEARCH_ELASTIC_INDEX: !Ref OpenSearchElasticIndex
+          SPLUNK_SINK_MODE: !Ref SplunkSinkMode
+          SPLUNK_BASE_URL: !Ref SplunkBaseUrl
+          SPLUNK_API_TOKEN_SECRET_ARN: !Ref SplunkApiTokenSecretArn
+          SPLUNK_API_TOKEN_SECRET_FIELD: !Ref SplunkApiTokenSecretField
+          SPLUNK_NOTABLE_UPDATE_PATH: !Ref SplunkNotableUpdatePath
+          SPLUNK_REQUIRE_PAYLOAD_FINDING_ID: !Ref SplunkRequirePayloadFindingId
+          SPL_QUERY_RAG_ENABLED: !Ref SplQueryRagEnabled
+          INVESTIGATION_QUERY_EXECUTOR: !Ref InvestigationQueryExecutor
+          INVESTIGATION_MAX_QUERIES_PER_ALERT: !Ref InvestigationMaxQueriesPerAlert
+          INVESTIGATION_MAX_CONCURRENT_QUERIES: !Ref InvestigationMaxConcurrentQueries
+          SPLUNK_SEARCH_ALLOWED_INDEXES: !Ref SplunkSearchAllowedIndexes
+          SPLUNK_SEARCH_ALLOWED_COMMANDS: !Ref SplunkSearchAllowedCommands
+          SPLUNK_SEARCH_DENIED_COMMANDS: !Ref SplunkSearchDeniedCommands
+          SPLUNK_SEARCH_ALLOWED_FIELDS: !Ref SplunkSearchAllowedFields
+          SPLUNK_SEARCH_MAX_TIME_RANGE: !Ref SplunkSearchMaxTimeRange
+          SPLUNK_SEARCH_MAX_ROWS: !Ref SplunkSearchMaxRows
+          SPLUNK_SEARCH_TIMEOUT_SECONDS: !Ref SplunkSearchTimeoutSeconds
+          SPLUNK_MCP_ENDPOINT: !Ref SplunkMcpEndpoint
+          SPLUNK_MCP_AUTH_SECRET_ARN: !Ref SplunkMcpAuthSecretArn
+          SERVICENOW_BASE_URL: !Ref ServiceNowBaseUrl
+          SERVICENOW_API_TOKEN_SECRET_ARN: !Ref ServiceNowApiTokenSecretArn
+          SERVICENOW_APPROVAL_HMAC_SECRET_ARN: !Ref ServiceNowApprovalHmacSecretArn
+          SERVICENOW_ASSIGNMENT_GROUP: !Ref ServiceNowAssignmentGroup
+          SERVICENOW_TIMEOUT_SECONDS: !Ref ServiceNowTimeoutSeconds
+          SIDE_EFFECT_IDEMPOTENCY_TABLE: !Ref SideEffectIdempotencyTableName
+          SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS: !Ref SideEffectIdempotencyRetentionDays
+          SIDE_EFFECT_IDEMPOTENCY_LOCK_SECONDS: !Ref SideEffectIdempotencyLockSeconds
+          CASE_ARCHIVE_ENABLED: !Ref CaseArchiveEnabled
+          CASE_ARCHIVE_FAILURE_MODE: !Ref CaseArchiveFailureMode
+          CASE_ARCHIVE_BUCKET: !If [HasCaseArchiveBucketName, !Ref CaseArchiveBucketName, !Ref OutputBucketName]
+          CASE_ARCHIVE_PREFIX: !Ref CaseArchivePrefix
+          CASE_ARCHIVE_CHUNKS_PREFIX: !Ref CaseArchiveChunksPrefix
+          CASE_INDEX_TABLE: !Ref CaseIndexTableName
+          CASE_RETENTION_DAYS: !Ref CaseRetentionDays
+          CASE_SCHEMA_VERSION: !Ref CaseSchemaVersion
+          CASE_ANALYSIS_SCHEMA_VERSION: !Ref CaseAnalysisSchemaVersion
+          CASE_ARCHIVE_MAX_ALERT_BYTES: !Ref CaseArchiveMaxAlertBytes
+          CASE_ARCHIVE_MAX_ANALYSIS_BYTES: !Ref CaseArchiveMaxAnalysisBytes
+          PORTAL_ENABLED: !Ref PortalEnabled
+          PORTAL_AUTH_MODE: !Ref PortalAuthMode
+          PORTAL_PAGE_SIZE: !Ref PortalPageSize
+          PORTAL_MAX_DETAIL_BYTES: !Ref PortalMaxDetailBytes
+          PORTAL_JWT_ISSUER: !Ref PortalJwtIssuer
+          PORTAL_JWT_AUDIENCE: !Ref PortalJwtAudience
+          PORTAL_CORS_ALLOWED_ORIGINS: !Ref PortalCorsAllowedOrigins
+          PORTAL_REQUIRED_ANALYST_ROLE: !Ref PortalRequiredAnalystRole
+          PORTAL_REQUIRED_ANALYST_SCOPE: !Ref PortalRequiredAnalystScope
+          PORTAL_CHAT_TIMEOUT_SEC: !Ref PortalChatTimeoutSec
+          PORTAL_CHAT_MAX_CONCURRENCY: !Ref PortalChatMaxConcurrency
+          PORTAL_CHAT_BEDROCK_MODEL_ID: !Ref PortalChatBedrockModelId
+          CASE_QA_ENABLED: !Ref CaseQaEnabled
+          CASE_QA_GENERAL_KNOWLEDGE_ENABLED: !Ref CaseQaGeneralKnowledgeEnabled
+          CASE_QA_MAX_INDEX_CHUNKS_PER_CASE: !Ref CaseQaMaxIndexChunksPerCase
+          CASE_QA_MAX_CHUNKS_PER_LANE: !Ref CaseQaMaxChunksPerLane
+          CASE_QA_MAX_TOTAL_CHUNKS: !Ref CaseQaMaxTotalChunks
+          CASE_QA_LEXICAL_TOP_K: !Ref CaseQaLexicalTopK
+          CASE_QA_VECTOR_TOP_K: !Ref CaseQaVectorTopK
+          CASE_QA_RRF_K: !Ref CaseQaRrfK
+          CASE_QA_CONTEXT_BUDGET_CHARS: !Ref CaseQaContextBudgetChars
+          CASE_QA_MAX_QUESTION_CHARS: !Ref CaseQaMaxQuestionChars
+          CASE_QA_MAX_ANSWER_TOKENS: !Ref CaseQaMaxAnswerTokens
+          CASE_QA_EMBEDDING_MODEL: !Ref CaseQaEmbeddingModel
+          CASE_QA_VECTOR_DIMENSIONS: !Ref CaseQaVectorDimensions
+          CASE_QA_EMBED_NORMALIZE: !Ref CaseQaEmbedNormalize
+          CASE_QA_CHAT_HISTORY_ENABLED: !Ref CaseQaChatHistoryEnabled
+          CASE_QA_CHAT_HISTORY_RETENTION_DAYS: !Ref CaseQaChatHistoryRetentionDays
+          CASE_QA_MAX_SESSIONS_PER_USER: !Ref CaseQaMaxSessionsPerUser
+          CASE_QA_MAX_MESSAGES_PER_SESSION: !Ref CaseQaMaxMessagesPerSession
+          CASE_QA_MAX_STORED_MESSAGE_BYTES: !Ref CaseQaMaxStoredMessageBytes
+          CHAT_SESSIONS_TABLE: !Ref ChatSessionsTableName
+          CHAT_MESSAGES_TABLE: !Ref ChatMessagesTableName
+          RAG_RERANK_ENABLED: !Ref RagRerankEnabled
+          RAG_RERANK_MODEL: !Ref RagRerankModel
+          RAG_RERANK_MODEL_FALLBACK: !Ref RagRerankModelFallback
+          ELASTICSEARCH_BASE_URL: !Ref ElasticsearchBaseUrl
+          ELASTICSEARCH_API_KEY_SECRET_ARN: !Ref ElasticsearchApiKeySecretArn
+          ELASTICSEARCH_INDEX_ALLOWLIST: !Ref ElasticsearchIndexAllowlist
+          ELASTICSEARCH_ALLOW_WILDCARD_INDEXES: !Ref ElasticsearchAllowWildcardIndexes
+          ELASTICSEARCH_TIMESTAMP_FIELD: !Ref ElasticsearchTimestampField
+          ELASTICSEARCH_ALLOWED_FIELDS: !Ref ElasticsearchAllowedFields
+          ELASTICSEARCH_MAX_TIME_RANGE: !Ref ElasticsearchMaxTimeRange
+          ELASTICSEARCH_MAX_ROWS: !Ref ElasticsearchMaxRows
+          ELASTICSEARCH_TIMEOUT_SECONDS: !Ref ElasticsearchTimeoutSeconds
+          ELASTICSEARCH_GROUNDING_ENABLED: !Ref ElasticsearchGroundingEnabled
+          INPUT_BUCKET_NAME: !Ref InputBucketName
+          OUTPUT_BUCKET_NAME: !Ref OutputBucketName
+          OUTPUT_PREFIX: reports
+          MAX_DECOMPRESSED_INPUT_BYTES: !Ref MaxDecompressedInputBytes
+
+  AnalyzerQueueEventSource:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt AnalyzerQueue.Arn
+      FunctionName: !GetAtt NotableAnalyzerFunction.Arn
+      BatchSize: 10
+      FunctionResponseTypes:
+        - ReportBatchItemFailures
+      ScalingConfig:
+        MaximumConcurrency: !Ref AnalyzerMaximumConcurrency
+
+  CaseEmbedLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: HasCaseQa
+    Properties:
+      RoleName: NotableCaseEmbedLambdaRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+        - !If [HasCustomerVpc, !Ref LambdaVpcEniPolicy, !Ref AWS::NoValue]
+        - !If [HasCustomerKmsKey, !Ref CustomerKmsWritePolicy, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: CaseChunkS3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:s3:::${OutputBucketName}'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${OutputBucketName}/${CaseArchivePrefix}/*'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${OutputBucketName}/${CaseArchiveChunksPrefix}/*'
+              - !If
+                - HasCaseArchiveBucketName
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                    - s3:PutObject
+                    - s3:DeleteObject
+                    - s3:ListBucket
+                  Resource:
+                    - !Sub 'arn:${AWS::Partition}:s3:::${CaseArchiveBucketName}'
+                    - !Sub 'arn:${AWS::Partition}:s3:::${CaseArchiveBucketName}/${CaseArchivePrefix}/*'
+                    - !Sub 'arn:${AWS::Partition}:s3:::${CaseArchiveBucketName}/${CaseArchiveChunksPrefix}/*'
+                - !Ref AWS::NoValue
+        - PolicyName: CaseIndexStatusPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt CaseIndexTable.Arn
+        - PolicyName: BedrockEmbeddingPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${CaseQaEmbeddingModel}'
+        - PolicyName: EmbedQueueConsumePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt EmbedQueue.Arn
+        - !If
+          - HasOpenSearch
+          - PolicyName: CaseEmbedOpenSearchWritePolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - es:ESHttpGet
+                    - es:ESHttpPost
+                    - es:ESHttpPut
+                    - es:ESHttpDelete
+                  Resource: !Sub '${OpenSearchDomainArn}/*'
+          - !Ref AWS::NoValue
+
+  CaseEmbedFunction:
+    Type: AWS::Lambda::Function
+    Condition: HasCaseQa
+    Properties:
+      FunctionName: !Ref CaseEmbedLambdaName
+      PackageType: Image
+      Code:
+        ImageUri: !Sub '${EcrRepositoryUri}@${ImageDigest}'
+      ImageConfig:
+        Command:
+          - s3_notable_pipeline.embed_handler.handler
+      Role: !GetAtt CaseEmbedLambdaRole.Arn
+      Timeout: 900
+      MemorySize: !Ref LambdaMemorySize
+      EphemeralStorage:
+        Size: !Ref LambdaEphemeralStorageMb
+      VpcConfig: !If
+        - HasCustomerVpc
+        - SubnetIds: !Split [',', !Ref CustomerVpcSubnetIds]
+          SecurityGroupIds: !Split [',', !Ref CustomerSecurityGroupIds]
+        - !Ref AWS::NoValue
+      Environment:
+        Variables:
+          AWS_PARTITION: !Ref DeploymentPartition
+          CASE_EMBED_QUEUE_URL: !Ref EmbedQueue
+          RAG_TENANT_ID: !Ref RagTenantId
+          RAG_RETRIEVAL_BACKEND: opensearch
+          OPENSEARCH_ENDPOINT: !Ref OpenSearchEndpoint
+          OPENSEARCH_REGION: !Ref OpenSearchRegion
+          OPENSEARCH_SERVICE: !Ref OpenSearchService
+          OPENSEARCH_CASE_INDEX: !Ref OpenSearchCaseIndex
+          CUSTOMER_KMS_KEY_ARN: !Ref CustomerKmsKeyArn
+          CUSTOMER_VPC_SUBNET_IDS: !Ref CustomerVpcSubnetIds
+          CUSTOMER_SECURITY_GROUP_IDS: !Ref CustomerSecurityGroupIds
+          CAPABILITY_PROFILES: core
+          CASE_ARCHIVE_BUCKET: !If [HasCaseArchiveBucketName, !Ref CaseArchiveBucketName, !Ref OutputBucketName]
+          CASE_ARCHIVE_CHUNKS_PREFIX: !Ref CaseArchiveChunksPrefix
+          CASE_INDEX_TABLE: !Ref CaseIndexTableName
+          CASE_QA_MAX_INDEX_CHUNKS_PER_CASE: !Ref CaseQaMaxIndexChunksPerCase
+          CASE_QA_EMBEDDING_MODEL: !Ref CaseQaEmbeddingModel
+          CASE_QA_VECTOR_DIMENSIONS: !Ref CaseQaVectorDimensions
+          CASE_QA_EMBED_NORMALIZE: !Ref CaseQaEmbedNormalize
+
+  EmbedQueueEventSource:
+    Type: AWS::Lambda::EventSourceMapping
+    Condition: HasCaseQa
+    Properties:
+      EventSourceArn: !GetAtt EmbedQueue.Arn
+      FunctionName: !GetAtt CaseEmbedFunction.Arn
+      BatchSize: 5
+      FunctionResponseTypes:
+        - ReportBatchItemFailures
+      ScalingConfig:
+        MaximumConcurrency: !Ref EmbedMaximumConcurrency
+
+  DispositionSyncLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: NotableDispositionSyncLambdaRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+        - !If [HasCustomerVpc, !Ref LambdaVpcEniPolicy, !Ref AWS::NoValue]
+        - !If [HasCustomerKmsKey, !Ref CustomerKmsReadPolicy, !Ref AWS::NoValue]
+      Policies:
+        - !If
+          - HasServiceNowDispositionSyncSecret
+          - PolicyName: ServiceNowDispositionSyncSecretPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - secretsmanager:GetSecretValue
+                  Resource: !Ref ServiceNowDispositionSyncTokenSecretArn
+          - !Ref AWS::NoValue
+        - PolicyName: DispositionTablePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt DispositionTable.Arn
+                  - !Sub '${DispositionTable.Arn}/index/*'
+                  - !GetAtt DispositionSyncStateTable.Arn
+        - !If
+          - HasCaseIndexTable
+          - PolicyName: CaseIndexLinkPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - dynamodb:Query
+                    - dynamodb:Scan
+                  Resource:
+                    - !GetAtt CaseIndexTable.Arn
+                    - !Sub '${CaseIndexTable.Arn}/index/*'
+          - !Ref AWS::NoValue
+        - PolicyName: CaseArchiveReadForLinkPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:s3:::${OutputBucketName}/${CaseArchivePrefix}/*'
+              - !If
+                - HasCaseArchiveBucketName
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                  Resource:
+                    - !Sub 'arn:${AWS::Partition}:s3:::${CaseArchiveBucketName}/${CaseArchivePrefix}/*'
+                - !Ref AWS::NoValue
+
+  RagIngestionLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: HasRagIngestion
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-rag-ingestion-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+        - !If [HasCustomerVpc, !Ref LambdaVpcEniPolicy, !Ref AWS::NoValue]
+        - !If [HasCustomerKmsKey, !Ref CustomerKmsReadPolicy, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: RagIngestionQueueConsumePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt RagIngestionQueue.Arn
+        - PolicyName: RagIngestionSourceReadPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !If
+                  - HasRagSource
+                  - !Sub 'arn:${AWS::Partition}:s3:::${RagSourceBucketName}/${RagSourcePrefix}*'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${InputBucketName}/${RagSourcePrefix}*'
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !If
+                  - HasRagSource
+                  - !Sub 'arn:${AWS::Partition}:s3:::${RagSourceBucketName}'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${InputBucketName}'
+                Condition:
+                  StringLike:
+                    s3:prefix:
+                      - !Ref RagSourcePrefix
+                      - !Sub '${RagSourcePrefix}*'
+        - PolicyName: RagEmbeddingPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${CaseQaEmbeddingModel}'
+        - !If
+          - HasOpenSearch
+          - PolicyName: RagOpenSearchHttpPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - es:ESHttpGet
+                    - es:ESHttpPost
+                    - es:ESHttpPut
+                    - es:ESHttpDelete
+                  Resource: !Sub '${OpenSearchDomainArn}/*'
+          - !Ref AWS::NoValue
+
+  RagIngestionFunction:
+    Type: AWS::Lambda::Function
+    Condition: HasRagIngestion
+    Properties:
+      FunctionName: !Ref RagIngestionLambdaName
+      PackageType: Image
+      Code:
+        ImageUri: !Sub '${EcrRepositoryUri}@${ImageDigest}'
+      ImageConfig:
+        Command:
+          - s3_notable_pipeline.rag_ingest_handler.handler
+      Role: !GetAtt RagIngestionLambdaRole.Arn
+      Timeout: !Ref LambdaTimeoutSeconds
+      MemorySize: !Ref LambdaMemorySize
+      ReservedConcurrentExecutions: !Ref RagIngestionMaximumConcurrency
+      VpcConfig: !If
+        - HasCustomerVpc
+        - SubnetIds: !Split [',', !Ref CustomerVpcSubnetIds]
+          SecurityGroupIds: !Split [',', !Ref CustomerSecurityGroupIds]
+        - !Ref AWS::NoValue
+      Environment:
+        Variables:
+          AWS_PARTITION: !Ref DeploymentPartition
+          RAG_INGEST_QUEUE_URL: !Ref RagIngestionQueue
+          RAG_SOURCE_BUCKET: !If [HasRagSource, !Ref RagSourceBucketName, !Ref InputBucketName]
+          RAG_SOURCE_PREFIX: !Ref RagSourcePrefix
+          RAG_TENANT_ID: !Ref RagTenantId
+          OPENSEARCH_ENDPOINT: !Ref OpenSearchEndpoint
+          OPENSEARCH_REGION: !Ref OpenSearchRegion
+          OPENSEARCH_SERVICE: !Ref OpenSearchService
+          OPENSEARCH_CASE_INDEX: !Ref OpenSearchCaseIndex
+          OPENSEARCH_SOC_INDEX: !Ref OpenSearchSocIndex
+          OPENSEARCH_SPLUNK_INDEX: !Ref OpenSearchSplunkIndex
+          OPENSEARCH_ELASTIC_INDEX: !Ref OpenSearchElasticIndex
+          RAG_RETRIEVAL_BACKEND: opensearch
+          CASE_QA_EMBEDDING_MODEL: !Ref CaseQaEmbeddingModel
+          CUSTOMER_KMS_KEY_ARN: !Ref CustomerKmsKeyArn
+          CUSTOMER_VPC_SUBNET_IDS: !Ref CustomerVpcSubnetIds
+          CUSTOMER_SECURITY_GROUP_IDS: !Ref CustomerSecurityGroupIds
+
+  RagIngestionEventSource:
+    Type: AWS::Lambda::EventSourceMapping
+    Condition: HasRagIngestion
+    Properties:
+      EventSourceArn: !GetAtt RagIngestionQueue.Arn
+      FunctionName: !GetAtt RagIngestionFunction.Arn
+      BatchSize: 5
+      FunctionResponseTypes:
+        - ReportBatchItemFailures
+      ScalingConfig:
+        MaximumConcurrency: !Ref RagIngestionMaximumConcurrency
+
+  DispositionSyncFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref DispositionSyncLambdaName
+      PackageType: Image
+      Code:
+        ImageUri: !Sub '${EcrRepositoryUri}@${ImageDigest}'
+      ImageConfig:
+        Command:
+          - s3_notable_pipeline.disposition_sync_handler.handler
+      Role: !GetAtt DispositionSyncLambdaRole.Arn
+      Timeout: 900
+      MemorySize: !Ref LambdaMemorySize
+      EphemeralStorage:
+        Size: !Ref LambdaEphemeralStorageMb
+      VpcConfig: !If
+        - HasCustomerVpc
+        - SubnetIds: !Split [',', !Ref CustomerVpcSubnetIds]
+          SecurityGroupIds: !Split [',', !Ref CustomerSecurityGroupIds]
+        - !Ref AWS::NoValue
+      Environment:
+        Variables:
+          AWS_PARTITION: !Ref DeploymentPartition
+          CUSTOMER_KMS_KEY_ARN: !Ref CustomerKmsKeyArn
+          CUSTOMER_VPC_SUBNET_IDS: !Ref CustomerVpcSubnetIds
+          CUSTOMER_SECURITY_GROUP_IDS: !Ref CustomerSecurityGroupIds
+          CAPABILITY_PROFILES: core
+          ALLOW_PRIVATE_OUTBOUND_ENDPOINTS: !Ref AllowPrivateOutboundEndpoints
+          SERVICENOW_BASE_URL: !Ref ServiceNowBaseUrl
+          SERVICENOW_TIMEOUT_SECONDS: !Ref ServiceNowTimeoutSeconds
+          SERVICENOW_DISPOSITION_SYNC_ENABLED: !Ref ServiceNowDispositionSyncEnabled
+          SERVICENOW_DISPOSITION_SYNC_TOKEN_SECRET_ARN: !Ref ServiceNowDispositionSyncTokenSecretArn
+          SERVICENOW_DISPOSITION_FIELD_MAP: !Ref ServiceNowDispositionFieldMap
+          SERVICENOW_DISPOSITION_CODE_MAP: !Ref ServiceNowDispositionCodeMap
+          SERVICENOW_DISPOSITION_BACKFILL_DAYS: !Ref ServiceNowDispositionBackfillDays
+          DISPOSITION_RETENTION_DAYS: !Ref DispositionRetentionDays
+          DISPOSITION_TABLE: !Ref DispositionTable
+          DISPOSITION_SYNC_STATE_TABLE: !Ref DispositionSyncStateTable
+          CASE_ARCHIVE_BUCKET: !If [HasCaseArchiveBucketName, !Ref CaseArchiveBucketName, !Ref OutputBucketName]
+          CASE_ARCHIVE_PREFIX: !Ref CaseArchivePrefix
+          CASE_INDEX_TABLE: !Ref CaseIndexTableName
+
+  DispositionSyncSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Daily ServiceNow closed disposition sync
+      ScheduleExpression: rate(1 day)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt DispositionSyncFunction.Arn
+          Id: DispositionSyncTarget
+
+  DispositionSyncSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DispositionSyncFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt DispositionSyncSchedule.Arn
+
+  PortalApiLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: HasPortalApi
+    Properties:
+      RoleName: NotablePortalApiLambdaRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+        - !If [HasCustomerVpc, !Ref LambdaVpcEniPolicy, !Ref AWS::NoValue]
+        - !If [HasCustomerKmsKey, !Ref CustomerKmsReadPolicy, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: CaseIndexReadPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:GetItem
+                  - dynamodb:DescribeTable
+                Resource:
+                  - !GetAtt CaseIndexTable.Arn
+                  - !Sub '${CaseIndexTable.Arn}/index/ProcessedAtIndex'
+        - PolicyName: CaseArchiveReadPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:s3:::${OutputBucketName}/${CaseArchivePrefix}/*'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${OutputBucketName}/${CaseArchiveChunksPrefix}/*'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${OutputBucketName}/reports/*'
+              - !If
+                - HasCaseArchiveBucketName
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                  Resource:
+                    - !Sub 'arn:${AWS::Partition}:s3:::${CaseArchiveBucketName}/${CaseArchivePrefix}/*'
+                    - !Sub 'arn:${AWS::Partition}:s3:::${CaseArchiveBucketName}/${CaseArchiveChunksPrefix}/*'
+                - !Ref AWS::NoValue
+        - !If
+          - HasPortalUiDeployment
+          - PolicyName: PortalUiReadPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - s3:GetObject
+                  Resource: !Sub '${PortalUiBucket.Arn}/*'
+          - !Ref AWS::NoValue
+        - PolicyName: PortalBedrockPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - !If
+                    - HasPortalChatBedrockModelOverride
+                    - !Ref PortalChatBedrockModelArn
+                    - !Ref BedrockAnalysisModelArn
+        - !If
+          - HasOpenSearch
+          - PolicyName: PortalOpenSearchReadPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - es:ESHttpGet
+                    - es:ESHttpPost
+                  Resource: !Sub '${OpenSearchDomainArn}/*'
+          - !Ref AWS::NoValue
+        - !If
+          - HasChatHistory
+          - PolicyName: PortalChatHistoryPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - dynamodb:Query
+                    - dynamodb:GetItem
+                    - dynamodb:PutItem
+                    - dynamodb:UpdateItem
+                    - dynamodb:DeleteItem
+                  Resource:
+                    - !If
+                      - HasManagedChatSessionsTable
+                      - !GetAtt ChatSessionsTable.Arn
+                      - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChatSessionsTableName}'
+                    - !If
+                      - HasManagedChatSessionsTable
+                      - !Sub '${ChatSessionsTable.Arn}/index/*'
+                      - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChatSessionsTableName}/index/*'
+                    - !If
+                      - HasManagedChatMessagesTable
+                      - !GetAtt ChatMessagesTable.Arn
+                      - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChatMessagesTableName}'
+          - !Ref AWS::NoValue
+
+  PortalApiFunction:
+    Type: AWS::Lambda::Function
+    Condition: HasPortalApi
+    Properties:
+      FunctionName: !Ref PortalApiLambdaName
+      PackageType: Image
+      Code:
+        ImageUri: !Sub '${EcrRepositoryUri}@${ImageDigest}'
+      ImageConfig:
+        Command:
+          - s3_notable_pipeline.portal_handler.handler
+      Role: !GetAtt PortalApiLambdaRole.Arn
+      Timeout: !Ref PortalChatTimeoutSec
+      MemorySize: !Ref LambdaMemorySize
+      EphemeralStorage:
+        Size: !Ref LambdaEphemeralStorageMb
+      ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
+      VpcConfig: !If
+        - HasCustomerVpc
+        - SubnetIds: !Split [',', !Ref CustomerVpcSubnetIds]
+          SecurityGroupIds: !Split [',', !Ref CustomerSecurityGroupIds]
+        - !Ref AWS::NoValue
+      Environment:
+        Variables:
+          AWS_PARTITION: !Ref DeploymentPartition
+          CUSTOMER_KMS_KEY_ARN: !Ref CustomerKmsKeyArn
+          CUSTOMER_VPC_SUBNET_IDS: !Ref CustomerVpcSubnetIds
+          CUSTOMER_SECURITY_GROUP_IDS: !Ref CustomerSecurityGroupIds
+          CAPABILITY_PROFILES: !Ref CapabilityProfiles
+          BEDROCK_MODEL_ID: !Ref BedrockAnalysisModelId
+          RAG_TENANT_ID: !Ref RagTenantId
+          RAG_RETRIEVAL_BACKEND: opensearch
+          OPENSEARCH_ENDPOINT: !Ref OpenSearchEndpoint
+          OPENSEARCH_REGION: !Ref OpenSearchRegion
+          OPENSEARCH_SERVICE: !Ref OpenSearchService
+          OPENSEARCH_CASE_INDEX: !Ref OpenSearchCaseIndex
+          OPENSEARCH_SOC_INDEX: !Ref OpenSearchSocIndex
+          OPENSEARCH_SPLUNK_INDEX: !Ref OpenSearchSplunkIndex
+          OPENSEARCH_ELASTIC_INDEX: !Ref OpenSearchElasticIndex
+          CASE_ARCHIVE_BUCKET: !If [HasCaseArchiveBucketName, !Ref CaseArchiveBucketName, !Ref OutputBucketName]
+          CASE_ARCHIVE_CHUNKS_PREFIX: !Ref CaseArchiveChunksPrefix
+          CASE_EMBED_QUEUE_URL: !If [HasCaseQa, !Ref EmbedQueue, '']
+          CASE_INDEX_TABLE: !Ref CaseIndexTableName
+          CASE_RETENTION_DAYS: !Ref CaseRetentionDays
+          PORTAL_ENABLED: !Ref PortalEnabled
+          PORTAL_AUTH_MODE: !Ref PortalAuthMode
+          PORTAL_PAGE_SIZE: !Ref PortalPageSize
+          PORTAL_MAX_DETAIL_BYTES: !Ref PortalMaxDetailBytes
+          PORTAL_JWT_ISSUER: !Ref PortalJwtIssuer
+          PORTAL_JWT_AUDIENCE: !Ref PortalJwtAudience
+          PORTAL_CORS_ALLOWED_ORIGINS: !Ref PortalCorsAllowedOrigins
+          PORTAL_REQUIRED_ANALYST_ROLE: !Ref PortalRequiredAnalystRole
+          PORTAL_REQUIRED_ANALYST_SCOPE: !Ref PortalRequiredAnalystScope
+          PORTAL_UI_BUCKET: !If [HasPortalUiDeployment, !Ref PortalUiBucket, '']
+          PORTAL_CHAT_TIMEOUT_SEC: !Ref PortalChatTimeoutSec
+          PORTAL_CHAT_MAX_CONCURRENCY: !Ref PortalChatMaxConcurrency
+          PORTAL_CHAT_BEDROCK_MODEL_ID: !Ref PortalChatBedrockModelId
+          CASE_QA_ENABLED: !Ref CaseQaEnabled
+          CASE_QA_GENERAL_KNOWLEDGE_ENABLED: !Ref CaseQaGeneralKnowledgeEnabled
+          CASE_QA_MAX_QUESTION_CHARS: !Ref CaseQaMaxQuestionChars
+          CASE_QA_MAX_ANSWER_TOKENS: !Ref CaseQaMaxAnswerTokens
+          CASE_QA_CHAT_HISTORY_ENABLED: !Ref CaseQaChatHistoryEnabled
+          CASE_QA_CHAT_HISTORY_RETENTION_DAYS: !Ref CaseQaChatHistoryRetentionDays
+          CASE_QA_MAX_SESSIONS_PER_USER: !Ref CaseQaMaxSessionsPerUser
+          CASE_QA_MAX_MESSAGES_PER_SESSION: !Ref CaseQaMaxMessagesPerSession
+          CASE_QA_MAX_STORED_MESSAGE_BYTES: !Ref CaseQaMaxStoredMessageBytes
+          CHAT_SESSIONS_TABLE: !If
+            - HasChatHistory
+            - !If
+              - HasManagedChatSessionsTable
+              - !Ref ChatSessionsTable
+              - !Ref ChatSessionsTableName
+            - ''
+          CHAT_MESSAGES_TABLE: !If
+            - HasChatHistory
+            - !If
+              - HasManagedChatMessagesTable
+              - !Ref ChatMessagesTable
+              - !Ref ChatMessagesTableName
+            - ''
+
+  PortalHttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Condition: HasPortalApi
+    Properties:
+      Name: !Sub '${AWS::StackName}-portal-api'
+      ProtocolType: HTTP
+      CorsConfiguration: !If
+        - HasPortalCorsOrigins
+        - AllowCredentials: true
+          AllowHeaders:
+            - authorization
+            - content-type
+          AllowMethods:
+            - GET
+            - POST
+            - DELETE
+            - OPTIONS
+          AllowOrigins: !Split
+            - ','
+            - !Ref PortalCorsAllowedOrigins
+        - !Ref AWS::NoValue
+
+  PortalHttpApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Condition: HasPortalApi
+    Properties:
+      ApiId: !Ref PortalHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PortalApiFunction.Arn}/invocations'
+      PayloadFormatVersion: '2.0'
+      TimeoutInMillis: 29000
+
+  PortalHttpApiAuthorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Condition: HasPortalJwtAuthorizer
+    Properties:
+      ApiId: !Ref PortalHttpApi
+      AuthorizerType: JWT
+      IdentitySource:
+        - $request.header.Authorization
+      JwtConfiguration:
+        Audience:
+          - !Ref PortalJwtAudience
+        Issuer: !Ref PortalJwtIssuer
+      Name: portal-jwt
+
+  PortalHttpApiHealthRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HasPortalApi
+    Properties:
+      ApiId: !Ref PortalHttpApi
+      RouteKey: GET /health
+      AuthorizationType: NONE
+      Target: !Sub 'integrations/${PortalHttpApiIntegration}'
+
+  PortalHttpApiReadyRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HasPortalApi
+    Properties:
+      ApiId: !Ref PortalHttpApi
+      RouteKey: GET /ready
+      AuthorizationType: NONE
+      Target: !Sub 'integrations/${PortalHttpApiIntegration}'
+
+  PortalHttpApiDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HasPortalApi
+    Properties:
+      ApiId: !Ref PortalHttpApi
+      RouteKey: 'ANY /api/{proxy+}'
+      AuthorizationType: !If [HasPortalJwtAuthorizer, JWT, !If [IsPortalIamAuth, AWS_IAM, NONE]]
+      AuthorizerId: !If [HasPortalJwtAuthorizer, !Ref PortalHttpApiAuthorizer, !Ref AWS::NoValue]
+      Target: !Sub 'integrations/${PortalHttpApiIntegration}'
+
+  PortalHttpApiApiRootRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HasPortalApi
+    Properties:
+      ApiId: !Ref PortalHttpApi
+      RouteKey: 'ANY /api'
+      AuthorizationType: !If [HasPortalJwtAuthorizer, JWT, !If [IsPortalIamAuth, AWS_IAM, NONE]]
+      AuthorizerId: !If [HasPortalJwtAuthorizer, !Ref PortalHttpApiAuthorizer, !Ref AWS::NoValue]
+      Target: !Sub 'integrations/${PortalHttpApiIntegration}'
+
+  PortalHttpApiStaticRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HasPortalUiDeployment
+    Properties:
+      ApiId: !Ref PortalHttpApi
+      RouteKey: 'GET /{proxy+}'
+      AuthorizationType: NONE
+      Target: !Sub 'integrations/${PortalHttpApiIntegration}'
+
+  PortalHttpApiStaticRootRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HasPortalUiDeployment
+    Properties:
+      ApiId: !Ref PortalHttpApi
+      RouteKey: 'GET /'
+      AuthorizationType: NONE
+      Target: !Sub 'integrations/${PortalHttpApiIntegration}'
+
+  PortalHttpApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Condition: HasPortalApi
+    Properties:
+      ApiId: !Ref PortalHttpApi
+      StageName: $default
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: !Ref PortalApiThrottleBurstLimit
+        ThrottlingRateLimit: !Ref PortalApiThrottleRateLimit
+
+  PortalHttpApiInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: HasPortalApi
+    Properties:
+      FunctionName: !Ref PortalApiFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${PortalHttpApi}/*'
+
+  PortalUiBucket:
+    Type: AWS::S3::Bucket
+    Condition: HasPortalUiDeployment
+    Properties:
+      BucketName: !Ref PortalUiBucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: !If [HasCustomerKmsKey, aws:kms, AES256]
+              KMSMasterKeyID: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+      VersioningConfiguration:
+        Status: Enabled
+
+  NotableAnalyzerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/notable-analyzer-s3
+      RetentionInDays: !Ref LogRetentionDays
+      KmsKeyId: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+
+  RagIngestionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: HasRagIngestion
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${RagIngestionLambdaName}'
+      RetentionInDays: !Ref LogRetentionDays
+      KmsKeyId: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+
+  CaseEmbedLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: HasCaseQa
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${CaseEmbedLambdaName}'
+      RetentionInDays: !Ref LogRetentionDays
+      KmsKeyId: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+
+  PortalApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: HasPortalApi
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${PortalApiLambdaName}'
+      RetentionInDays: !Ref LogRetentionDays
+      KmsKeyId: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+
+  DispositionSyncLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${DispositionSyncLambdaName}'
+      RetentionInDays: !Ref LogRetentionDays
+      KmsKeyId: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+
+  AnalyzerQueueDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt AnalyzerQueue.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmNotificationTopicArn], !Ref AWS::NoValue]
+
+  AnalyzerDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt AnalyzerDeadLetterQueue.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmNotificationTopicArn], !Ref AWS::NoValue]
+
+  AnalyzerOldestMessageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: AWS/SQS
+      MetricName: ApproximateAgeOfOldestMessage
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt AnalyzerQueue.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 300
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmNotificationTopicArn], !Ref AWS::NoValue]
+
+  AnalyzerErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref NotableAnalyzerFunction
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmNotificationTopicArn], !Ref AWS::NoValue]
+
+  EmbedDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasCaseQa
+    Properties:
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt EmbedDeadLetterQueue.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmNotificationTopicArn], !Ref AWS::NoValue]
+
+  EmbedErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasCaseQa
+    Properties:
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref CaseEmbedFunction
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmNotificationTopicArn], !Ref AWS::NoValue]
+
+  RagIngestionOldestMessageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasRagIngestion
+    Properties:
+      Namespace: AWS/SQS
+      MetricName: ApproximateAgeOfOldestMessage
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt RagIngestionQueue.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 300
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmNotificationTopicArn], !Ref AWS::NoValue]
+
+  PortalErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasPortalApi
+    Properties:
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref PortalApiFunction
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmNotificationTopicArn], !Ref AWS::NoValue]
+
+  RagIngestionDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasRagIngestion
+    Properties:
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt RagIngestionDeadLetterQueue.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmNotificationTopicArn], !Ref AWS::NoValue]
+
+  RagIngestionErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasRagIngestion
+    Properties:
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref RagIngestionFunction
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmNotificationTopicArn], !Ref AWS::NoValue]
+
+Outputs:
+  CustomerKmsKeyAdminRoleArn:
+    Condition: HasCustomerKmsAdminRole
+    Description: Customer role recorded for KMS key-administration alignment.
+    Value: !Ref CustomerKmsKeyAdminRoleArn
+
+  FunctionArn:
+    Description: Lambda Function ARN
+    Value: !GetAtt NotableAnalyzerFunction.Arn
+
+  InputBucketName:
+    Description: Input S3 bucket name
+    Value: !Ref InputBucket
+
+  OutputBucketName:
+    Description: Output S3 bucket name
+    Value: !Ref OutputBucket
+
+  TestCommand:
+    Description: Command to upload a test notable
+    Value: !Sub 'aws s3 cp data/test-notable.txt s3://${InputBucket}/incoming/test-notable.txt'
+
+  PortalUiBucketName:
+    Condition: HasPortalUiDeployment
+    Description: Analyst portal static SPA bucket name
+    Value: !Ref PortalUiBucket
+
+  PortalApiUrl:
+    Condition: HasPortalApi
+    Description: HTTPS invoke URL for the read-only portal API (API Gateway HTTP API)
+    Value: !Sub 'https://${PortalHttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+
+  DispositionTableName:
+    Description: DynamoDB table for synced ServiceNow closed dispositions
+    Value: !Ref DispositionTable
+
+  DispositionSyncFunctionName:
+    Description: Lambda function name for ServiceNow disposition sync
+    Value: !Ref DispositionSyncFunction
+
+  PortalBrowserApiBaseUrl:
+    Condition: HasPortalApi
+    Description: Recommended browser API base URL for the SPA (no trailing slash)
+    Value: !Sub 'https://${PortalHttpApi}.execute-api.${AWS::Region}.amazonaws.com'

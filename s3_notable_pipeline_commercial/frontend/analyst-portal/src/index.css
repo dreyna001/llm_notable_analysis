@@ -1,0 +1,187 @@
+@import url("https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500;600&display=swap");
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-link: var(--link);
+  --font-sans: "Public Sans", "Source Sans Pro", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Roboto Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/*
+ * "Federal SOC Dark" theme — see docs/operations/analyst_portal/ANALYST_PORTAL_THEME.md.
+ * SOC dark-console palette with USWDS-style square edges (2px radius)
+ * and USWDS fonts (Public Sans UI text, Roboto Mono for identifiers).
+ * Dark-only: :root and .dark carry identical values.
+ */
+:root {
+  color-scheme: dark;
+  --radius: 0.125rem;
+  --background: #0d1117;
+  --foreground: #e6edf3;
+  --card: #161b22;
+  --card-foreground: #e6edf3;
+  --popover: #161b22;
+  --popover-foreground: #e6edf3;
+  /* #1f6feb passes WCAG AA (4.6:1) with white text; #2f81f7 fails at 3.7:1 */
+  --primary: #1f6feb;
+  --primary-foreground: #ffffff;
+  --secondary: #1c2129;
+  --secondary-foreground: #e6edf3;
+  --muted: #1c2129;
+  --muted-foreground: #8b949e;
+  --accent: #1c2129;
+  --accent-foreground: #e6edf3;
+  --destructive: #f85149;
+  --destructive-foreground: #ffffff;
+  --border: #30363d;
+  --input: #30363d;
+  --ring: #1f6feb;
+  /* Brighter blue for text/borders on dark; #1f6feb is fill-only */
+  --link: #58a6ff;
+  --sidebar: #10141a;
+  --sidebar-foreground: #e6edf3;
+  --sidebar-border: #30363d;
+  --sidebar-accent: #1c2129;
+  --sidebar-accent-foreground: #e6edf3;
+}
+
+.dark {
+  color-scheme: dark;
+  --radius: 0.125rem;
+  --background: #0d1117;
+  --foreground: #e6edf3;
+  --card: #161b22;
+  --card-foreground: #e6edf3;
+  --popover: #161b22;
+  --popover-foreground: #e6edf3;
+  /* #1f6feb passes WCAG AA (4.6:1) with white text; #2f81f7 fails at 3.7:1 */
+  --primary: #1f6feb;
+  --primary-foreground: #ffffff;
+  --secondary: #1c2129;
+  --secondary-foreground: #e6edf3;
+  --muted: #1c2129;
+  --muted-foreground: #8b949e;
+  --accent: #1c2129;
+  --accent-foreground: #e6edf3;
+  --destructive: #f85149;
+  --destructive-foreground: #ffffff;
+  --border: #30363d;
+  --input: #30363d;
+  --ring: #1f6feb;
+  /* Brighter blue for text/borders on dark; #1f6feb is fill-only */
+  --link: #58a6ff;
+  --sidebar: #10141a;
+  --sidebar-foreground: #e6edf3;
+  --sidebar-border: #30363d;
+  --sidebar-accent: #1c2129;
+  --sidebar-accent-foreground: #e6edf3;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased font-sans;
+    font-size: 14px;
+  }
+
+  a {
+    @apply text-foreground/80 hover:text-foreground;
+  }
+}
+
+@keyframes chat-typing-bounce {
+  0%,
+  80%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+
+  40% {
+    opacity: 1;
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes chat-stream-cursor-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
+}
+
+@layer utilities {
+  .chat-scrollbar {
+    scrollbar-color: oklch(0.42 0 0 / 70%) transparent;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+  }
+
+  .chat-scrollbar::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+
+  .chat-scrollbar::-webkit-scrollbar-button {
+    display: none;
+    height: 0;
+    width: 0;
+  }
+
+  .chat-scrollbar::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  .chat-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .chat-scrollbar::-webkit-scrollbar-thumb {
+    background-clip: padding-box;
+    background-color: oklch(0.42 0 0 / 70%);
+    border: 2px solid transparent;
+    border-radius: 9999px;
+  }
+
+  .chat-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: oklch(0.52 0 0 / 85%);
+  }
+}
