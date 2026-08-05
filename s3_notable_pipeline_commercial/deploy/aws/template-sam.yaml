@@ -426,6 +426,13 @@ Parameters:
     MinValue: 1
     MaxValue: 29
 
+  PortalReadinessTimeoutSeconds:
+    Type: Number
+    Description: Per-call timeout for portal dependency readiness probes.
+    Default: 2
+    MinValue: 1
+    MaxValue: 10
+
   PortalChatMaxConcurrency:
     Type: Number
     Description: In-handler portal chat concurrency cap per Lambda execution environment.
@@ -729,6 +736,13 @@ Parameters:
     Default: 1048576
     MinValue: 1
 
+  MaxCompressedInputBytes:
+    Type: Number
+    Description: Maximum compressed bytes read for one gzip notable input.
+    Default: 2097152
+    MinValue: 1
+    MaxValue: 20971520
+
   LambdaTimeoutSeconds:
     Type: Number
     Description: Lambda timeout in seconds. Keep 360 for core; use 900 as the starting point for heavier parity profiles.
@@ -804,6 +818,36 @@ Parameters:
     MinValue: 1
     MaxValue: 1000
 
+  RagIngestMaxDocumentBytes:
+    Type: Number
+    Default: 5242880
+    MinValue: 1
+    MaxValue: 20971520
+
+  RagIngestMaxManifestBytes:
+    Type: Number
+    Default: 262144
+    MinValue: 1
+    MaxValue: 2097152
+
+  RagIngestMaxDocumentsPerManifest:
+    Type: Number
+    Default: 100
+    MinValue: 1
+    MaxValue: 10000
+
+  RagIngestMaxTotalSourceBytes:
+    Type: Number
+    Default: 52428800
+    MinValue: 1
+    MaxValue: 1073741824
+
+  RagIngestMaxEmbeddingsPerManifest:
+    Type: Number
+    Default: 2000
+    MinValue: 1
+    MaxValue: 100000
+
   RagIngestionLambdaName:
     Type: String
     Default: notable-rag-ingestion
@@ -811,6 +855,7 @@ Parameters:
   RagSourceBucketName:
     Type: String
     Default: ''
+    Description: Existing source bucket. When set, configure its manifest notifications to the RagIngestionQueueArn output.
 
   RagSourcePrefix:
     Type: String
@@ -933,6 +978,12 @@ Parameters:
     # Intentionally no Default: must be supplied per environment.
 
 Rules:
+  RequireDistinctExternalRagSourceBucket:
+    Assertions:
+      - Assert: !Or
+          - !Equals [!Ref RagSourceBucketName, '']
+          - !Not [!Equals [!Ref RagSourceBucketName, !Ref InputBucketName]]
+        AssertDescription: Leave RagSourceBucketName blank to use the input bucket; an external source must have a distinct name.
   RequireNotableRestConfig:
     RuleCondition: !Equals [!Ref SplunkSinkMode, notable_rest]
     Assertions:
@@ -1049,6 +1100,9 @@ Conditions:
   HasAlarmTopic: !Not [!Equals [!Ref AlarmNotificationTopicArn, '']]
   HasRagIngestion: !Equals [!Ref RagIngestionEnabled, 'true']
   HasRagSource: !Not [!Equals [!Ref RagSourceBucketName, '']]
+  RagIngestionUsesInputBucket: !And
+    - !Condition HasRagIngestion
+    - !Not [!Condition HasRagSource]
   HasOpenSearch: !Not [!Equals [!Ref OpenSearchDomainArn, '']]
   HasPortalChatBedrockModelOverride: !Not [!Equals [!Ref PortalChatBedrockModelId, '']]
 
@@ -1119,6 +1173,7 @@ Resources:
     Properties:
       Queues:
         - !Ref AnalyzerQueue
+        - !If [HasRagIngestion, !Ref RagIngestionQueue, !Ref AWS::NoValue]
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -1133,6 +1188,23 @@ Resources:
                 aws:SourceArn: !Sub 'arn:${AWS::Partition}:s3:::${InputBucketName}'
               StringEquals:
                 aws:SourceAccount: !Ref AWS::AccountId
+          - !If
+            - HasRagIngestion
+            - Sid: AllowRagSourceBucketSend
+              Effect: Allow
+              Principal:
+                Service: s3.amazonaws.com
+              Action: sqs:SendMessage
+              Resource: !GetAtt RagIngestionQueue.Arn
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: !If
+                    - HasRagSource
+                    - !Sub 'arn:${AWS::Partition}:s3:::${RagSourceBucketName}'
+                    - !Sub 'arn:${AWS::Partition}:s3:::${InputBucketName}'
+                StringEquals:
+                  aws:SourceAccount: !Ref AWS::AccountId
+            - !Ref AWS::NoValue
 
   EmbedDeadLetterQueue:
     Type: AWS::SQS::Queue
@@ -1174,27 +1246,6 @@ Resources:
         deadLetterTargetArn: !GetAtt RagIngestionDeadLetterQueue.Arn
         maxReceiveCount: 3
 
-  RagIngestionQueuePolicy:
-    Type: AWS::SQS::QueuePolicy
-    Condition: HasRagIngestion
-    Properties:
-      Queues:
-        - !Ref RagIngestionQueue
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: AllowInputBucketSend
-            Effect: Allow
-            Principal:
-              Service: s3.amazonaws.com
-            Action: sqs:SendMessage
-            Resource: !GetAtt RagIngestionQueue.Arn
-            Condition:
-              ArnEquals:
-                aws:SourceArn: !Sub 'arn:${AWS::Partition}:s3:::${InputBucketName}'
-              StringEquals:
-                aws:SourceAccount: !Ref AWS::AccountId
-
   InputBucket:
     Type: AWS::S3::Bucket
     DependsOn:
@@ -1223,7 +1274,7 @@ Resources:
                   - Name: prefix
                     Value: incoming/
           - !If
-            - HasRagIngestion
+            - RagIngestionUsesInputBucket
             - Event: s3:ObjectCreated:*
               Queue: !GetAtt RagIngestionQueue.Arn
               Filter:
@@ -1592,6 +1643,7 @@ Resources:
           OUTPUT_BUCKET_NAME: !Ref OutputBucketName
           OUTPUT_PREFIX: reports
           MAX_DECOMPRESSED_INPUT_BYTES: !Ref MaxDecompressedInputBytes
+          MAX_COMPRESSED_INPUT_BYTES: !Ref MaxCompressedInputBytes
       Policies:
         - !If [HasCustomerKmsKey, !Ref CustomerKmsWritePolicy, !Ref AWS::NoValue]
         - !If [HasCustomerVpc, !Ref LambdaVpcEniPolicy, !Ref AWS::NoValue]
@@ -1754,6 +1806,7 @@ Resources:
           CUSTOMER_SECURITY_GROUP_IDS: !Ref CustomerSecurityGroupIds
           CAPABILITY_PROFILES: core
           CASE_ARCHIVE_BUCKET: !If [HasCaseArchiveBucketName, !Ref CaseArchiveBucketName, !Ref OutputBucketName]
+          CASE_ARCHIVE_PREFIX: !Ref CaseArchivePrefix
           CASE_ARCHIVE_CHUNKS_PREFIX: !Ref CaseArchiveChunksPrefix
           CASE_INDEX_TABLE: !Ref CaseIndexTableName
           CASE_QA_MAX_INDEX_CHUNKS_PER_CASE: !Ref CaseQaMaxIndexChunksPerCase
@@ -1859,6 +1912,11 @@ Resources:
         Variables:
           AWS_PARTITION: !Ref DeploymentPartition
           RAG_INGEST_QUEUE_URL: !Ref RagIngestionQueue
+          RAG_INGEST_MAX_DOCUMENT_BYTES: !Ref RagIngestMaxDocumentBytes
+          RAG_INGEST_MAX_MANIFEST_BYTES: !Ref RagIngestMaxManifestBytes
+          RAG_INGEST_MAX_DOCUMENTS_PER_MANIFEST: !Ref RagIngestMaxDocumentsPerManifest
+          RAG_INGEST_MAX_TOTAL_SOURCE_BYTES: !Ref RagIngestMaxTotalSourceBytes
+          RAG_INGEST_MAX_EMBEDDINGS_PER_MANIFEST: !Ref RagIngestMaxEmbeddingsPerManifest
           RAG_SOURCE_BUCKET: !If [HasRagSource, !Ref RagSourceBucketName, !Ref InputBucketName]
           RAG_SOURCE_PREFIX: !Ref RagSourcePrefix
           RAG_TENANT_ID: !Ref RagTenantId
@@ -1976,6 +2034,7 @@ Resources:
             Schedule: rate(1 day)
             Enabled: true
       Policies:
+        - !If [HasCustomerKmsKey, !Ref CustomerKmsReadPolicy, !Ref AWS::NoValue]
         - !If [HasCustomerVpc, !Ref LambdaVpcEniPolicy, !Ref AWS::NoValue]
         - !If
           - HasServiceNowDispositionSyncSecret
@@ -2035,6 +2094,11 @@ Resources:
   PortalApiFunction:
     Type: AWS::Serverless::Function
     Condition: HasPortalApi
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - W3037  # Current bundled cfn-lint omits valid DynamoDB TransactWriteItems.
     Properties:
       FunctionName: !Ref PortalApiLambdaName
       PackageType: Image
@@ -2069,6 +2133,7 @@ Resources:
           OPENSEARCH_SPLUNK_INDEX: !Ref OpenSearchSplunkIndex
           OPENSEARCH_ELASTIC_INDEX: !Ref OpenSearchElasticIndex
           CASE_ARCHIVE_BUCKET: !If [HasCaseArchiveBucketName, !Ref CaseArchiveBucketName, !Ref OutputBucketName]
+          CASE_ARCHIVE_PREFIX: !Ref CaseArchivePrefix
           CASE_ARCHIVE_CHUNKS_PREFIX: !Ref CaseArchiveChunksPrefix
           CASE_EMBED_QUEUE_URL: !If [HasCaseQa, !Ref EmbedQueue, '']
           CASE_INDEX_TABLE: !Ref CaseIndexTableName
@@ -2084,6 +2149,7 @@ Resources:
           PORTAL_REQUIRED_ANALYST_SCOPE: !Ref PortalRequiredAnalystScope
           PORTAL_UI_BUCKET: !If [HasPortalUiDeployment, !Ref PortalUiBucket, '']
           PORTAL_CHAT_TIMEOUT_SEC: !Ref PortalChatTimeoutSec
+          PORTAL_READINESS_TIMEOUT_SECONDS: !Ref PortalReadinessTimeoutSeconds
           PORTAL_CHAT_MAX_CONCURRENCY: !Ref PortalChatMaxConcurrency
           PORTAL_CHAT_BEDROCK_MODEL_ID: !Ref PortalChatBedrockModelId
           CASE_QA_ENABLED: !Ref CaseQaEnabled
@@ -2137,6 +2203,16 @@ Resources:
                 - !Sub 'arn:${AWS::Partition}:s3:::${OutputBucketName}/${CaseArchivePrefix}/*'
                 - !Sub 'arn:${AWS::Partition}:s3:::${OutputBucketName}/${CaseArchiveChunksPrefix}/*'
                 - !Sub 'arn:${AWS::Partition}:s3:::${OutputBucketName}/reports/*'
+            - Effect: Allow
+              Action:
+                - s3:ListBucket
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:s3:::${OutputBucketName}'
+              Condition:
+                StringLike:
+                  s3:prefix:
+                    - !Ref CaseArchivePrefix
+                    - !Sub '${CaseArchivePrefix}/*'
         - !If
           - HasCaseArchiveBucketName
           - Statement:
@@ -2146,11 +2222,22 @@ Resources:
                 Resource:
                   - !Sub 'arn:${AWS::Partition}:s3:::${CaseArchiveBucketName}/${CaseArchivePrefix}/*'
                   - !Sub 'arn:${AWS::Partition}:s3:::${CaseArchiveBucketName}/${CaseArchiveChunksPrefix}/*'
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:s3:::${CaseArchiveBucketName}'
+                Condition:
+                  StringLike:
+                    s3:prefix:
+                      - !Ref CaseArchivePrefix
+                      - !Sub '${CaseArchivePrefix}/*'
           - !Ref AWS::NoValue
         - Statement:
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
+                - bedrock:CountTokens
               Resource:
                 - !If
                   - HasPortalChatBedrockModelOverride
@@ -2172,6 +2259,7 @@ Resources:
                 Action:
                   - dynamodb:Query
                   - dynamodb:GetItem
+                  - dynamodb:DescribeTable
                   - dynamodb:PutItem
                   - dynamodb:UpdateItem
                   - dynamodb:DeleteItem
@@ -2184,6 +2272,18 @@ Resources:
                     - HasManagedChatSessionsTable
                     - !Sub '${ChatSessionsTable.Arn}/index/*'
                     - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChatSessionsTableName}/index/*'
+                  - !If
+                    - HasManagedChatMessagesTable
+                    - !GetAtt ChatMessagesTable.Arn
+                    - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChatMessagesTableName}'
+              - Effect: Allow
+                Action:
+                  - dynamodb:TransactWriteItems
+                Resource:
+                  - !If
+                    - HasManagedChatSessionsTable
+                    - !GetAtt ChatSessionsTable.Arn
+                    - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChatSessionsTableName}'
                   - !If
                     - HasManagedChatMessagesTable
                     - !GetAtt ChatMessagesTable.Arn
@@ -2559,6 +2659,11 @@ Outputs:
   OutputBucketName:
     Description: Output S3 bucket name
     Value: !Ref OutputBucket
+
+  RagIngestionQueueArn:
+    Condition: HasRagIngestion
+    Description: Queue ARN for RAG manifest notifications; external source buckets must notify this queue.
+    Value: !GetAtt RagIngestionQueue.Arn
 
   TestCommand:
     Description: Command to upload a test notable

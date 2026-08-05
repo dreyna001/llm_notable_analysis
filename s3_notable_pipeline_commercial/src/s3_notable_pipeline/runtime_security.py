@@ -10,6 +10,40 @@ from urllib.parse import urlparse
 from .aws_clients import secretsmanager_client
 
 
+def read_bounded_bytes(body: Any, *, max_bytes: int, setting_name: str) -> bytes:
+    """Read a streaming or in-memory body without accepting more than the limit."""
+
+    if max_bytes < 1:
+        raise ValueError(f"{setting_name} must be greater than 0")
+    if isinstance(body, str):
+        data = body.encode("utf-8")
+    elif isinstance(body, (bytes, bytearray)):
+        data = bytes(body)
+    elif hasattr(body, "read"):
+        chunks: list[bytes] = []
+        remaining = max_bytes + 1
+        while remaining > 0:
+            try:
+                chunk = body.read(min(64 * 1024, remaining))
+            except TypeError as exc:
+                raise ValueError("body stream must support bounded reads") from exc
+            if not chunk:
+                break
+            if isinstance(chunk, str):
+                chunk = chunk.encode("utf-8")
+            if not isinstance(chunk, (bytes, bytearray)):
+                raise ValueError("body stream must return bytes or text")
+            value = bytes(chunk)
+            chunks.append(value)
+            remaining -= len(value)
+        data = b"".join(chunks)
+    else:
+        raise ValueError("body must be bytes, text, or a readable stream")
+    if len(data) > max_bytes:
+        raise ValueError(f"body exceeds {setting_name} ({max_bytes})")
+    return data
+
+
 def validate_https_url(
     value: str,
     *,

@@ -56,6 +56,18 @@ class AwsClientTests(unittest.TestCase):
 
         mock_client.assert_called_once_with("lambda")
 
+    def test_client_rejects_non_loopback_or_deceptive_localstack_endpoints(self) -> None:
+        for endpoint in (
+            "http://localhost.attacker.example:4566",
+            "http://127.0.0.1.attacker.example:4566",
+            "http://169.254.169.254:4566",
+            "http://localhost:9000",
+        ):
+            with self.subTest(endpoint=endpoint), patch.dict(
+                "os.environ", {"AWS_ENDPOINT_URL": endpoint}, clear=True
+            ), self.assertRaisesRegex(ValueError, "loopback LocalStack"):
+                aws_clients.aws_client("s3")
+
 
 if __name__ == "__main__":
     unittest.main()

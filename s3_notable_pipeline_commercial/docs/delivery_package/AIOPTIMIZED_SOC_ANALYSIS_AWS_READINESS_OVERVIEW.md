@@ -24,7 +24,7 @@ docs for these profiles:
 
 - `core` — S3 ingest, Bedrock analysis, markdown + JSON reports (always included)
 - `html_reports` — static HTML reports in S3
-- `rag` — advisory SOC context from a Bedrock Knowledge Base
+- `rag` — advisory SOC context from the deployment's tenant-scoped OpenSearch corpus
 - `spl_readonly` — generated SPL and bounded read-only Splunk REST or MCP investigation
 - `elastic_readonly` — generated Query DSL and bounded read-only Elasticsearch `_search`
 - `ticket_draft` — ServiceNow incident drafts in JSON reports (no POST)
@@ -37,8 +37,8 @@ Default deploy posture: `CAPABILITY_PROFILES=core` with `SplunkSinkMode=s3`.
 - `analyst_portal` — S3 case archive, DynamoDB CaseIndex, post-archive embedding,
   read-only portal API Lambda, static React SPA, and pinned-case Q&A
 
-Stack-managed when enabled: API Gateway HTTP API, optional chat Function URL,
-optional CloudFront UI routing when `PortalUiBucketName` is set. See
+Stack-managed when enabled: regional API Gateway HTTP API and an optional
+private UI bucket served through the portal Lambda when `PortalUiBucketName` is set. See
 [`../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md).
 
 ### Operator-led (not evidenced in repo)
@@ -59,11 +59,11 @@ resolving major unknowns.
 An organization is broadly ready when it can answer these questions:
 
 1. **Environment**: Target AWS account, region, initial capability profile set, and output sink mode (`s3` vs `notable_rest`)?
-2. **Approvals and access**: Platform access, security approval, and policy changes for Bedrock, optional Knowledge Bases, and optional external HTTPS endpoints?
+2. **Approvals and access**: Platform access, security approval, and policy changes for Bedrock, private OpenSearch, and optional external HTTPS endpoints?
 3. **Delivery path**: How the Lambda image is built, published to ECR, and deployed?
-4. **Integration inputs**: Upstream input source (SIEM/SOAR), and for each enabled profile, endpoints, Knowledge Base IDs, allowlists, and secret ARNs?
+4. **Integration inputs**: Upstream input source (SIEM/SOAR), and for each enabled profile, OpenSearch indexes/corpora, endpoints, allowlists, and secret ARNs?
 5. **Ownership and support**: Who maintains the application and each optional integration (Splunk, Elasticsearch, ServiceNow)?
-6. **Portal front door (Wave 2 only)**: If `analyst_portal` is enabled, JWT issuer/audience, browser CORS origins, and whether the SPA uses stack CloudFront (`PortalBrowserApiBaseUrl`) or a split API hostname?
+6. **Portal front door (Wave 2 only)**: If `analyst_portal` is enabled, what are the JWT issuer/audience, browser CORS origins, SPA upload owner, and approved regional API Gateway hostname/access controls?
 
 If those six buckets are not understood, this is not yet a low-friction deployment.
 

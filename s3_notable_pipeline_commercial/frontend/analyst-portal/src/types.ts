@@ -63,8 +63,9 @@ export type ChatMode = "selected_case";
 export type ChatRequest = {
   mode: ChatMode;
   question: string;
-  selected_case_id?: string;
+  selected_case_id: string;
   session_id?: string | null;
+  client_request_id?: string;
 };
 
 export type ChatContextUsageSegment = {

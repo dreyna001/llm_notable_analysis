@@ -54,6 +54,8 @@ class OpenSearchClient:
             raise ValueError("OPENSEARCH_ENDPOINT cannot contain credentials or query data")
         self.endpoint = endpoint.rstrip("/")
         self.region = region.strip()
+        if self.region != "us-east-1":
+            raise ValueError("OPENSEARCH_REGION must be us-east-1 for commercial AWS")
         self.service = service.strip() or "es"
         self.timeout_seconds = max(1, int(timeout_seconds))
         self.credentials = credentials
@@ -71,7 +73,7 @@ class OpenSearchClient:
             or os.getenv("OPENSEARCH_REGION")
             or os.getenv("AWS_REGION")
             or os.getenv("AWS_DEFAULT_REGION")
-            or "us-gov-east-1"
+            or "us-east-1"
         )
         service = str(
             getattr(config, "OPENSEARCH_SERVICE", "")

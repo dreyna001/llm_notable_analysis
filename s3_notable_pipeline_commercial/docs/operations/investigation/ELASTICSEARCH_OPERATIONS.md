@@ -161,10 +161,9 @@ environment variables are the runtime representation of those parameters.
 Unit test commands (from repository root):
 
 ```bash
-python -m unittest discover -s s3_notable_pipeline/tests -p "test_elastic_query_generation.py" -v
-python -m unittest discover -s s3_notable_pipeline/tests -p "test_elasticsearch_investigation.py" -v
-python -m unittest discover -s s3_notable_pipeline/tests -p "test_config.py" -v
-python -m unittest discover -s s3_notable_pipeline/tests -p "test_lambda_handler.py" -v
+.venv/bin/python -m pytest tests/test_elastic_query_generation.py -q -s
+.venv/bin/python -m pytest tests/test_elasticsearch_investigation.py -q -s
+.venv/bin/python -m pytest tests/test_config.py tests/test_lambda_handler.py -q -s
 ```
 
 See [`../../testing/TESTING.md`](../../testing/TESTING.md) for stack-level

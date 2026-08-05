@@ -1,8 +1,9 @@
-# GovCloud RAG Corpus Operations
+# Commercial AWS RAG Corpus Operations
 
 This runbook covers source-document, ingestion, vector-index, and retrieval
-operations for the `us-gov-east-1` deployment. The GovCloud production path
-does not depend on Amazon Bedrock Knowledge Bases or S3 Vectors.
+operations for the `us-east-1` deployment. Commercial v1 deliberately uses
+application-managed OpenSearch retrieval rather than S3 Vectors. Bedrock
+Knowledge Bases remain an optional compatibility backend, not the production default.
 
 ## Architecture
 
@@ -41,6 +42,11 @@ stores transactional case/import status but is not a vector store.
 Use the customer-configured RAG source bucket and prefix. Keep one approved
 corpus lane per sub-prefix and enable S3 versioning.
 
+When `RagSourceBucketName` is set, configure that existing bucket to send
+`s3:ObjectCreated:*` events under `RagManifestPrefix` to the stack's
+`RagIngestionQueueArn` output. Leave the parameter blank to have the stack wire
+manifest notifications from its managed input bucket automatically.
+
 ```text
 rag-sources/
   soc/
@@ -67,7 +73,7 @@ the ingestion DLQ after bounded handling.
 1. Validate the queue job and source-object identity.
 2. Read the exact S3 version named by the job.
 3. Parse and create bounded deterministic chunks.
-4. Generate embeddings with the configured GovCloud Bedrock embedding model.
+4. Generate embeddings with the configured commercial Bedrock embedding model.
 5. Ensure the corpus index has the required k-NN mapping.
 6. Tombstone prior active chunks for each source key.
 7. Bulk-index deterministic replacement documents with source provenance.
@@ -123,7 +129,7 @@ Do not repair individual vectors manually in OpenSearch.
 Collect source ownership, approval workflow, source prefix, retention, embedding
 model, OpenSearch capacity, KMS keys, VPC resources, and alarm destinations per
 customer. See
-[`../deployment/GOVCLOUD_CUSTOMER_CONFIGURATION.md`](../deployment/GOVCLOUD_CUSTOMER_CONFIGURATION.md).
+[`../deployment/COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](../deployment/COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md).
 
 ## Validation
 

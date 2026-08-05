@@ -142,11 +142,32 @@ def ingestion_config(**overrides):
 
 
 class OpenSearchRetrievalTests(unittest.TestCase):
+    def test_client_config_defaults_to_commercial_region(self):
+        config = SimpleNamespace(
+            OPENSEARCH_ENDPOINT="https://search.example.test",
+            OPENSEARCH_REGION="",
+            OPENSEARCH_SERVICE="es",
+            OPENSEARCH_TIMEOUT_SECONDS=30,
+        )
+
+        with patch.dict("os.environ", {}, clear=True):
+            client = OpenSearchClient.from_config(config)
+
+        self.assertEqual(client.region, "us-east-1")
+
+    def test_client_rejects_noncommercial_region(self):
+        with self.assertRaisesRegex(ValueError, "OPENSEARCH_REGION must be us-east-1"):
+            OpenSearchClient(
+                endpoint="https://search.example.test",
+                region="us-west-2",
+                credentials=Credentials("access", "secret"),
+            )
+
     def test_sigv4_adapter_signs_and_formats_bulk_requests(self):
         session = FakeSession()
         client = OpenSearchClient(
-            endpoint="https://search.example.gov",
-            region="us-gov-east-1",
+            endpoint="https://search.example.test",
+            region="us-east-1",
             credentials=Credentials("access", "secret"),
             session=session,
         )
@@ -163,7 +184,7 @@ class OpenSearchRetrievalTests(unittest.TestCase):
         )
 
         args, kwargs = session.requests[0]
-        self.assertEqual(args[:2], ("POST", "https://search.example.gov/_bulk"))
+        self.assertEqual(args[:2], ("POST", "https://search.example.test/_bulk"))
         self.assertTrue(kwargs["headers"]["Authorization"].startswith("AWS4-HMAC-SHA256"))
         data = kwargs["data"].decode("utf-8")
         self.assertIn('{"update":{"_index":"soc-knowledge","_id":"doc-1"}}\n', data)
@@ -179,8 +200,8 @@ class OpenSearchRetrievalTests(unittest.TestCase):
 
         session.request = request
         client = OpenSearchClient(
-            endpoint="https://search.example.gov",
-            region="us-gov-east-1",
+            endpoint="https://search.example.test",
+            region="us-east-1",
             credentials=Credentials("access", "secret"),
             session=session,
         )
@@ -234,6 +255,32 @@ class OpenSearchRetrievalTests(unittest.TestCase):
 
 
 class RagIngestionTests(unittest.TestCase):
+    def test_ingestion_rejects_manifest_document_count_before_source_reads(self):
+        manifest = {
+            "manifest_schema_version": 1,
+            "manifest_id": "manifest-many",
+            "manifest_version": "v1",
+            "tenant_id": "tenant-a",
+            "corpus_id": "soc",
+            "documents": [
+                {"bucket": "docs", "key": f"rag-sources/{index}.md", "etag": f"e{index}"}
+                for index in range(2)
+            ],
+        }
+        s3 = FakeIngestionS3(manifest)
+        with self.assertRaisesRegex(ValueError, "document count limit"):
+            ingest_manifest(
+                manifest_bucket="docs",
+                manifest_key="rag-sources/manifest.json",
+                manifest_version_id="manifest-v1",
+                manifest_etag="",
+                config=ingestion_config(RAG_INGEST_MAX_DOCUMENTS_PER_MANIFEST=1),
+                s3_client=s3,
+                bedrock_client=FakeBedrockClient(),
+                adapter=FakeIngestionAdapter(),
+            )
+        self.assertEqual(len(s3.calls), 1)
+
     def test_manifest_ingestion_reads_exact_versions_and_indexes_scoped_chunks(self):
         manifest = {
             "manifest_schema_version": 1,

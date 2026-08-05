@@ -160,6 +160,7 @@ class Config:
     OUTPUT_BUCKET_NAME: str = ""
     OUTPUT_PREFIX: str = "reports"
     MAX_DECOMPRESSED_INPUT_BYTES: int = 1_048_576
+    MAX_COMPRESSED_INPUT_BYTES: int = 2_097_152
     ALLOW_PRIVATE_OUTBOUND_ENDPOINTS: bool = False
 
     HTML_REPORT_ENABLED: bool = False
@@ -169,11 +170,11 @@ class Config:
     RAG_CONTEXT_BUDGET_CHARS: int = 1600
     RAG_FAILURE_MODE: str = "suppress"
     # Direct Config construction is used by isolated unit tests. load_config()
-    # selects the GovCloud production default (`opensearch`) explicitly.
+    # selects the commercial AWS production default (`opensearch`) explicitly.
     RAG_RETRIEVAL_BACKEND: str = "legacy"
     RAG_TENANT_ID: str = ""
     OPENSEARCH_ENDPOINT: str = ""
-    OPENSEARCH_REGION: str = "us-gov-east-1"
+    OPENSEARCH_REGION: str = "us-east-1"
     OPENSEARCH_SERVICE: str = "es"
     OPENSEARCH_TIMEOUT_SECONDS: int = 30
     OPENSEARCH_CASE_INDEX: str = "notable-case-chunks"
@@ -184,6 +185,10 @@ class Config:
     RAG_SOURCE_PREFIX: str = "rag-sources"
     RAG_INGEST_QUEUE_URL: str = ""
     RAG_INGEST_MAX_DOCUMENT_BYTES: int = 5_242_880
+    RAG_INGEST_MAX_MANIFEST_BYTES: int = 262_144
+    RAG_INGEST_MAX_DOCUMENTS_PER_MANIFEST: int = 100
+    RAG_INGEST_MAX_TOTAL_SOURCE_BYTES: int = 52_428_800
+    RAG_INGEST_MAX_EMBEDDINGS_PER_MANIFEST: int = 2_000
 
     SPLUNK_BASE_URL: str = ""
     SPLUNK_API_TOKEN_SECRET_ARN: str = ""
@@ -293,6 +298,7 @@ class Config:
     PORTAL_CHAT_FUNCTION_URL_ENABLED: bool = True
     PORTAL_CHAT_MAX_CONCURRENCY: int = 18
     PORTAL_CHAT_BEDROCK_MODEL_ID: str = ""
+    PORTAL_READINESS_TIMEOUT_SECONDS: int = 2
 
     CASE_QA_ENABLED: bool = False
     CASE_QA_GENERAL_KNOWLEDGE_ENABLED: bool = True
@@ -329,6 +335,19 @@ class Config:
         profile_flags = _profile_flag_defaults(profiles)
         for name, value in profile_flags.items():
             setattr(self, name, value)
+        bounded_positive = (
+            "MAX_DECOMPRESSED_INPUT_BYTES",
+            "MAX_COMPRESSED_INPUT_BYTES",
+            "RAG_INGEST_MAX_DOCUMENT_BYTES",
+            "RAG_INGEST_MAX_MANIFEST_BYTES",
+            "RAG_INGEST_MAX_DOCUMENTS_PER_MANIFEST",
+            "RAG_INGEST_MAX_TOTAL_SOURCE_BYTES",
+            "RAG_INGEST_MAX_EMBEDDINGS_PER_MANIFEST",
+            "PORTAL_READINESS_TIMEOUT_SECONDS",
+        )
+        for setting_name in bounded_positive:
+            if int(getattr(self, setting_name)) < 1:
+                raise ValueError(f"{setting_name} must be greater than 0")
         self.SPLUNK_SINK_MODE = (self.SPLUNK_SINK_MODE or "s3").strip().lower()
         if self.SPLUNK_SINK_MODE not in {"s3", "notable_rest"}:
             raise ValueError("SPLUNK_SINK_MODE must be s3 or notable_rest")
@@ -340,7 +359,9 @@ class Config:
                 "RAG_RETRIEVAL_BACKEND must be opensearch, bedrock_kb, or legacy"
             )
         self.OPENSEARCH_ENDPOINT = self.OPENSEARCH_ENDPOINT.strip()
-        self.OPENSEARCH_REGION = self.OPENSEARCH_REGION.strip() or "us-gov-east-1"
+        self.OPENSEARCH_REGION = self.OPENSEARCH_REGION.strip() or "us-east-1"
+        if self.OPENSEARCH_REGION != "us-east-1":
+            raise ValueError("OPENSEARCH_REGION must be us-east-1 for commercial AWS")
         self.OPENSEARCH_SERVICE = self.OPENSEARCH_SERVICE.strip() or "es"
         self.RAG_TENANT_ID = self.RAG_TENANT_ID.strip()
         self.INVESTIGATION_QUERY_BACKEND = (
@@ -481,7 +502,7 @@ class Config:
         if uses_vector_rag and self.RAG_RETRIEVAL_BACKEND == "opensearch":
             if not self.OPENSEARCH_ENDPOINT:
                 raise ValueError(
-                    "OPENSEARCH_ENDPOINT is required for enabled GovCloud RAG capabilities"
+                    "OPENSEARCH_ENDPOINT is required for enabled RAG capabilities"
                 )
             self.OPENSEARCH_ENDPOINT = validate_https_url(
                 self.OPENSEARCH_ENDPOINT,
@@ -490,7 +511,7 @@ class Config:
             )
             if not self.RAG_TENANT_ID:
                 raise ValueError(
-                    "RAG_TENANT_ID is required for enabled GovCloud RAG capabilities"
+                    "RAG_TENANT_ID is required for enabled RAG capabilities"
                 )
         if self.CASE_QA_VECTOR_DIMENSIONS != 1024:
             raise ValueError("CASE_QA_VECTOR_DIMENSIONS must be 1024 for Titan V2")
@@ -542,6 +563,9 @@ def load_config() -> Config:
         MAX_DECOMPRESSED_INPUT_BYTES=_positive_int_env(
             "MAX_DECOMPRESSED_INPUT_BYTES", 1_048_576
         ),
+        MAX_COMPRESSED_INPUT_BYTES=_positive_int_env(
+            "MAX_COMPRESSED_INPUT_BYTES", 2_097_152, max_value=20_971_520
+        ),
         ALLOW_PRIVATE_OUTBOUND_ENDPOINTS=_bool_env("ALLOW_PRIVATE_OUTBOUND_ENDPOINTS", False),
         HTML_REPORT_ENABLED=_profile_bool("HTML_REPORT_ENABLED", False, profile_flags),
         RAG_ENABLED=_profile_bool("RAG_ENABLED", False, profile_flags),
@@ -563,7 +587,7 @@ def load_config() -> Config:
             os.getenv("OPENSEARCH_REGION")
             or os.getenv("AWS_REGION")
             or os.getenv("AWS_DEFAULT_REGION")
-            or "us-gov-east-1"
+            or "us-east-1"
         ),
         OPENSEARCH_SERVICE=os.getenv("OPENSEARCH_SERVICE", "es"),
         OPENSEARCH_TIMEOUT_SECONDS=_positive_int_env(
@@ -586,6 +610,18 @@ def load_config() -> Config:
         RAG_INGEST_QUEUE_URL=os.getenv("RAG_INGEST_QUEUE_URL", ""),
         RAG_INGEST_MAX_DOCUMENT_BYTES=_positive_int_env(
             "RAG_INGEST_MAX_DOCUMENT_BYTES", 5_242_880, max_value=20_971_520
+        ),
+        RAG_INGEST_MAX_MANIFEST_BYTES=_positive_int_env(
+            "RAG_INGEST_MAX_MANIFEST_BYTES", 262_144, max_value=2_097_152
+        ),
+        RAG_INGEST_MAX_DOCUMENTS_PER_MANIFEST=_positive_int_env(
+            "RAG_INGEST_MAX_DOCUMENTS_PER_MANIFEST", 100, max_value=10_000
+        ),
+        RAG_INGEST_MAX_TOTAL_SOURCE_BYTES=_positive_int_env(
+            "RAG_INGEST_MAX_TOTAL_SOURCE_BYTES", 52_428_800, max_value=1_073_741_824
+        ),
+        RAG_INGEST_MAX_EMBEDDINGS_PER_MANIFEST=_positive_int_env(
+            "RAG_INGEST_MAX_EMBEDDINGS_PER_MANIFEST", 2_000, max_value=100_000
         ),
         SPLUNK_BASE_URL=os.getenv("SPLUNK_BASE_URL", ""),
         SPLUNK_API_TOKEN_SECRET_ARN=os.getenv("SPLUNK_API_TOKEN_SECRET_ARN", ""),
@@ -822,6 +858,9 @@ def load_config() -> Config:
         ),
         PORTAL_CHAT_BEDROCK_MODEL_ID=_optional_str_env(
             "PORTAL_CHAT_BEDROCK_MODEL_ID"
+        ),
+        PORTAL_READINESS_TIMEOUT_SECONDS=_positive_int_env(
+            "PORTAL_READINESS_TIMEOUT_SECONDS", 2, max_value=10
         ),
         CASE_QA_ENABLED=_profile_bool("CASE_QA_ENABLED", False, profile_flags),
         CASE_QA_GENERAL_KNOWLEDGE_ENABLED=_bool_env(

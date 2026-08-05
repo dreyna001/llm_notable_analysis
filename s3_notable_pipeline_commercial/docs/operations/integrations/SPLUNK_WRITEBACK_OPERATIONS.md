@@ -144,7 +144,7 @@ ServiceNow create uses the same table with a different operation key; see
 5. Document token rotation, endpoint ownership, and rollback (`SplunkSinkMode=s3`)
    before production promotion.
 
-Unit tests from `s3_notable_pipeline/`:
+Unit tests from the commercial project root:
 
 ```bash
 python -m pytest tests/test_idempotency.py tests/test_lambda_handler.py -v

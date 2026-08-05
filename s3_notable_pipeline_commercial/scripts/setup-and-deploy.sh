@@ -2,7 +2,7 @@
 # Setup and Deploy Script for Notable Analyzer Pipeline
 # Prerequisites: AWS CLI, SAM CLI, Docker must be installed
 #
-# Readiness: publish the image to GovCloud ECR and capture its immutable digest first.
+# Readiness: publish the image to commercial us-east-1 ECR and capture its immutable digest first.
 
 set -u
 
@@ -49,20 +49,63 @@ if [ "${#missing[@]}" -gt 0 ]; then
   exit 1
 fi
 
+region="us-east-1"
+
 echo
-echo "Checking AWS credentials..."
-if identity="$(aws sts get-caller-identity 2>&1)"; then
-  echo "  AWS credentials configured"
-  echo "$identity"
-else
-  echo "  AWS credentials not configured"
-  echo "  Run: aws configure"
+echo "Checking commercial AWS deployment boundary..."
+if [ -n "${AWS_REGION:-}" ] && [ -n "${AWS_DEFAULT_REGION:-}" ] && [ "$AWS_REGION" != "$AWS_DEFAULT_REGION" ]; then
+  echo "  AWS_REGION and AWS_DEFAULT_REGION disagree; both must be $region."
   exit 1
 fi
 
+configured_region="${AWS_REGION:-${AWS_DEFAULT_REGION:-}}"
+if [ -z "$configured_region" ]; then
+  configured_region="$(aws configure get region 2>/dev/null || true)"
+fi
+if [ "$configured_region" != "$region" ]; then
+  echo "  Configured AWS region must be $region; found: ${configured_region:-<unset>}"
+  exit 1
+fi
+
+expected_account_id="${COMMERCIAL_AWS_ACCOUNT_ID:-}"
+if [[ ! "$expected_account_id" =~ ^[0-9]{12}$ ]]; then
+  echo "  Set COMMERCIAL_AWS_ACCOUNT_ID to the approved 12-digit commercial AWS account."
+  exit 1
+fi
+
+if ! caller_account="$(aws sts get-caller-identity --region "$region" --query Account --output text 2>/dev/null)"; then
+  echo "  AWS credentials are unavailable or STS caller identity failed."
+  exit 1
+fi
+if ! caller_arn="$(aws sts get-caller-identity --region "$region" --query Arn --output text 2>/dev/null)"; then
+  echo "  Unable to resolve the AWS caller ARN."
+  exit 1
+fi
+if [[ ! "$caller_account" =~ ^[0-9]{12}$ ]]; then
+  echo "  STS returned an invalid AWS account ID."
+  exit 1
+fi
+if [ "$caller_account" != "$expected_account_id" ]; then
+  echo "  AWS caller account $caller_account does not match approved account $expected_account_id."
+  exit 1
+fi
+case "$caller_arn" in
+  arn:aws:*) ;;
+  *)
+    echo "  AWS caller ARN is not in the commercial aws partition: $caller_arn"
+    exit 1
+    ;;
+esac
+
+credential_source="${AWS_PROFILE:-default credential chain}"
+echo "  Account: $caller_account"
+echo "  Caller: $caller_arn"
+echo "  Partition: aws"
+echo "  Region: $region"
+echo "  Credential source: $credential_source"
+
 echo
 echo "Checking Bedrock access..."
-region="us-gov-east-1"
 nova_models=""
 claude_profiles=""
 nova_available=0
@@ -94,7 +137,7 @@ else
 fi
 
 echo
-echo "Before deploy: ensure EcrRepositoryUri and ImageDigest identify the approved image in us-gov-east-1."
+echo "Before deploy: ensure EcrRepositoryUri and ImageDigest identify the approved image in us-east-1."
 echo
 echo "=== Step 1: Building application ==="
 echo "Running: sam build -t $SAM_TEMPLATE"
@@ -107,25 +150,25 @@ echo
 echo "=== Step 2: Deploying to AWS ==="
 if [ -f "samconfig.toml" ]; then
   echo "Found samconfig.toml - using existing configuration"
-  echo "Running: sam deploy --template-file $SAM_BUILT_TEMPLATE"
-  if ! sam deploy --template-file "$SAM_BUILT_TEMPLATE"; then
+  echo "Running: sam deploy --region $region --template-file $SAM_BUILT_TEMPLATE"
+  if ! sam deploy --region "$region" --template-file "$SAM_BUILT_TEMPLATE"; then
     echo "Deployment failed"
     exit 1
   fi
 else
   echo "No samconfig.toml found - running guided deployment"
-  echo "Running: sam deploy --guided --template-file $SAM_BUILT_TEMPLATE"
+  echo "Running: sam deploy --guided --region $region --template-file $SAM_BUILT_TEMPLATE"
   echo
   echo "You'll be prompted for:"
   echo "  - Stack name (e.g., notable-analyzer-stack)"
-  echo "  - AWS Region (us-gov-east-1)"
+  echo "  - AWS Region (us-east-1)"
   echo "  - Input bucket name (must be globally unique)"
   echo "  - Output bucket name (must be globally unique)"
   echo "  - Splunk sink mode ('s3' or 'notable_rest'; use 's3' for testing)"
   echo "  - AwsAccountId, EcrRepositoryUri, ImageDigest, and BedrockAnalysisModelId"
   echo "  - If notable_rest: SplunkBaseUrl + SplunkApiTokenSecretArn (Secrets Manager ARN)"
   echo "  - Optional: SplunkApiTokenSecretField (default 'token') and SplunkNotableUpdatePath"
-  if ! sam deploy --guided --template-file "$SAM_BUILT_TEMPLATE"; then
+  if ! sam deploy --guided --region "$region" --template-file "$SAM_BUILT_TEMPLATE"; then
     echo "Deployment failed"
     exit 1
   fi

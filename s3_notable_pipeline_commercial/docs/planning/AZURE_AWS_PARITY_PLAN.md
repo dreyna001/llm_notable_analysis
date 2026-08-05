@@ -54,7 +54,7 @@ Optional capability profiles (`core`, `html_reports`, `rag`, `spl_readonly`, `el
 
 ## Behavior-first reuse and Azure-native boundaries (mandatory)
 
-The AWS codebase in `s3_notable_pipeline/` is **production-tested**. Reuse its cloud-neutral business logic, prompts, schemas, validators, policy checks, fixtures, and golden evaluations. Cloud integration code must use Azure-native SDKs and native Azure request/response models; source-code similarity is not a parity requirement.
+The commercial AWS codebase in this project is the behavioral baseline. Reuse its cloud-neutral business logic, prompts, schemas, validators, policy checks, fixtures, and golden evaluations. Cloud integration code must use Azure-native SDKs and native Azure request/response models; source-code similarity is not a parity requirement.
 
 ### Default workflow for every file
 
@@ -238,7 +238,7 @@ After Azure v1 ships, apply shared behavioral fixes to both deployments and reus
 | Cloud | **Azure Commercial** | Mirror AWS commercial default; Gov parity is a separate customer decision |
 | Primary region | **`eastus`** (default) | Bicep `Location` parameter; operator-overridable at deploy time and must match the qualified Foundry Claude and Azure OpenAI deployment regions |
 | IaC | **Bicep** (with generated ARM if required by customer) | Closest maintainable equivalent to SAM/CloudFormation |
-| Package layout | New sibling **`azure_notable_pipeline/`** at repo root | Matches `s3_notable_pipeline/` vs `llm_notable_analysis_onprem_systemd/` split |
+| Package layout | Independent **`azure_notable_pipeline/`** project | Keeps Azure deployment ownership separate from this commercial AWS product |
 | Python runtime | **3.12** | Match AWS Lambda base |
 | Container registry | **Azure Container Registry (ACR)** | Mirror ECR one-image / multi-entrypoint pattern |
 
@@ -246,7 +246,15 @@ If the customer requires **Azure Government**, use Azure Gov regions and Azure G
 
 ---
 
-## AWS behavioral/resource baseline (must be mapped)
+## Historical Azure comparison baseline
+
+> Planning-only record: CloudFront and Lambda Function URL mappings below
+> describe an earlier proposed edge design for the independent Azure product.
+> They are not current commercial AWS product decisions. The commercial AWS v1
+> baseline is regional API Gateway for all portal routes, a private SPA bucket
+> read through the portal Lambda, and a 29-second synchronous chat boundary.
+> Any future Azure implementation must reconcile this section with that current
+> contract before work begins.
 
 ### Compute (4 functions, 1 container image)
 
@@ -565,9 +573,9 @@ The polling Blob trigger has a separate failure domain. If native Blob-trigger p
 
 **Decision:** Deploy the qualified Foundry Claude deployment and Azure OpenAI in the **same region** as Functions and Storage. Bicep parameter `Location` defaults to `eastus`, and the Foundry deployment plus `AzureOpenAiResourceRegion` must equal `Location` in v1. Deployment scripts may read the location from an operator environment variable and pass it to Bicep. Do not implement cross-region model calls.
 
-### 10. GovCloud partition ARNs
+### 10. Commercial AWS partition ARNs
 
-**AWS:** Production target may be AWS GovCloud (`aws-us-gov` partition).
+**AWS:** This product's production target is commercial AWS (`aws` partition) in `us-east-1`.
 
 **Azure:** Azure Government is a separate cloud with distinct endpoints.
 
@@ -1184,6 +1192,8 @@ The Azure instance is **parity-complete** when all are true:
 
 ## Implementation tracker
 
-Create [`azure_notable_pipeline/docs/planning/AZURE_IMPLEMENTATION_TRACKER.md`](../../azure_notable_pipeline/docs/planning/AZURE_IMPLEMENTATION_TRACKER.md) when Phase 0 starts. Track each phase, Bicep module, native boundary, and test port with owner and status.
+Create `azure_notable_pipeline/docs/planning/AZURE_IMPLEMENTATION_TRACKER.md`
+in the independent Azure project when Phase 0 starts. Track each phase, Bicep
+module, native boundary, and test port with owner and status.
 
 Update [`TODOS.md`](TODOS.md) when work begins.

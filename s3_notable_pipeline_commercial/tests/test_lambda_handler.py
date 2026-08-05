@@ -567,8 +567,11 @@ class CompressedInputTests(unittest.TestCase):
             def __init__(self, value: bytes) -> None:
                 self.value = value
 
-            def read(self) -> bytes:
-                return self.value
+            def read(self, size: int = -1) -> bytes:
+                if size < 0:
+                    return self.value
+                value, self.value = self.value[:size], self.value[size:]
+                return value
 
         def get_object(**kwargs):
             calls.append(kwargs)

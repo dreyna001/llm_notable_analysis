@@ -114,7 +114,7 @@ Secrets Manager. The search uses the configured max time range as `earliest_time
 `latest_time=now`, and the configured row cap. Denied or invalid queries return
 `status=denied` locally with no outbound call.
 
-Implementation: `s3_notable_pipeline/src/s3_notable_pipeline/splunk_investigation.py`
+Implementation: `src/s3_notable_pipeline/splunk_investigation.py`
 (`execute_splunk_rest_query`).
 
 ### MCP over HTTPS (`INVESTIGATION_QUERY_EXECUTOR=mcp`)
@@ -173,7 +173,7 @@ reports.
 7. Confirm returned sample rows omit `_raw` and retain only approved fields when
    `SPLUNK_SEARCH_ALLOWED_FIELDS` is set.
 
-Unit test commands (from `s3_notable_pipeline/`):
+Unit test commands (from the commercial project root):
 
 ```bash
 python -m pytest tests/test_spl_query_generation.py tests/test_splunk_investigation.py tests/test_lambda_handler.py -v

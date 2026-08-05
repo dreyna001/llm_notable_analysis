@@ -91,6 +91,53 @@ describe("ChatPanel session scope recovery", () => {
   });
 });
 
+describe("ChatPanel durable request idempotency", () => {
+  beforeEach(() => {
+    postChat.mockReset();
+  });
+
+  it("reuses one request id across automatic stale-session recovery", async () => {
+    postChat
+      .mockRejectedValueOnce(new ApiError(410, "session_id has expired."))
+      .mockResolvedValueOnce({ answer: "Recovered.", answer_status: "answered" });
+    render(
+      <ChatPanel chatHistoryEnabled mode="selected_case" selectedCaseId="case-1"
+        initialSessionId="expired" />,
+    );
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Question" } });
+    fireEvent.click(screen.getByRole("button", { name: /send/i }));
+    expect(await screen.findByText("Recovered.")).toBeInTheDocument();
+    expect(postChat.mock.calls[0]?.[0].client_request_id).toBeTruthy();
+    expect(postChat.mock.calls[1]?.[0].client_request_id).toBe(
+      postChat.mock.calls[0]?.[0].client_request_id,
+    );
+  });
+
+  it("omits the idempotency key when durable history is disabled", async () => {
+    postChat.mockResolvedValueOnce({ answer: "Done.", answer_status: "answered" });
+    render(<ChatPanel mode="selected_case" selectedCaseId="case-1" />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Question" } });
+    fireEvent.click(screen.getByRole("button", { name: /send/i }));
+    expect(await screen.findByText("Done.")).toBeInTheDocument();
+    expect(postChat.mock.calls[0]?.[0].client_request_id).toBeUndefined();
+  });
+
+  it("reuses the request id when an unchanged failed question is sent again", async () => {
+    postChat
+      .mockRejectedValueOnce(new ApiError(503, "unavailable"))
+      .mockResolvedValueOnce({ answer: "Done.", answer_status: "answered" });
+    render(<ChatPanel chatHistoryEnabled mode="selected_case" selectedCaseId="case-1" />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Question" } });
+    fireEvent.click(screen.getByRole("button", { name: /send/i }));
+    expect(await screen.findByText(/temporarily unavailable/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /send/i }));
+    expect(await screen.findByText("Done.")).toBeInTheDocument();
+    expect(postChat.mock.calls[1]?.[0].client_request_id).toBe(
+      postChat.mock.calls[0]?.[0].client_request_id,
+    );
+  });
+});
+
 describe("ChatPanel session instance key", () => {
   it("remounts when the parent changes its React key", () => {
     const firstTurn = {

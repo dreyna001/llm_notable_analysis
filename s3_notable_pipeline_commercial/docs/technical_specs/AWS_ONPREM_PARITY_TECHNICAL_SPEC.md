@@ -43,8 +43,8 @@ Testing: [`../testing/TESTING.md`](../testing/TESTING.md).
 
 ## Deployment Target (v1)
 
-**Locked deployment target:** Production deployments target **AWS GovCloud
-`us-gov-east-1`**. Templates derive `arn:aws-us-gov:...` with
+**Locked deployment target:** Production deployments target **commercial AWS
+`us-east-1`**. Templates derive `arn:aws:...` with
 `AWS::Partition`; customer-specific account, identity, network, key, model, and
 retention values are deployment inputs rather than product forks.
 
@@ -113,9 +113,9 @@ Unit tests must mock clients and must not require AWS credentials. Local
 integration tests, if added later, must use `AWS_ENDPOINT_URL` and local test
 credentials.
 
-## GovCloud RAG Retrieval Contract
+## Commercial AWS RAG Retrieval Contract
 
-The `us-gov-east-1` deployment performs application-managed RAG over one
+The `us-east-1` deployment performs application-managed RAG over one
 VPC-only Amazon OpenSearch Service domain. S3 holds approved, versioned source
 documents and manifests; OpenSearch holds generated chunks, Titan embeddings,
 retrieval metadata, and source provenance.
@@ -141,8 +141,9 @@ Separate indexes isolate current-case chunks, general SOC operational
 knowledge, Splunk/SIEM dictionaries, and optional Elasticsearch dictionaries.
 The SIEM dictionary grounds SPL generation with approved indexes, sourcetypes,
 fields, CIM models, macros, lookups, and examples; it is not direct case
-evidence. Bedrock Knowledge Bases and S3 Vectors are not runtime dependencies
-for the GovCloud East profile.
+evidence. Application-managed OpenSearch is the commercial production default.
+Bedrock Knowledge Bases remain an optional compatibility backend, while S3
+Vectors are not a v1 runtime dependency.
 
 ## HTML Report Output Contract
 
@@ -337,9 +338,10 @@ customer overrides `BEDROCK_MODEL_ID`.
 
 ### Portal Hosting Contract (Decisions 2, 9, 19, 31, 34)
 
-- Regional API Gateway is the only browser/API front door and uses WAF plus JWT
-  or Lambda authorization. GovCloud deployments do not create Lambda Function
-  URLs or CloudFront distributions.
+- Regional API Gateway is the only browser/API front door and uses JWT or
+  Lambda authorization. Commercial v1 does not create Lambda Function URLs or
+  CloudFront distributions; adding either requires a separate edge-architecture
+  and security review.
 - The private portal S3 bucket is exposed only through a scoped API Gateway AWS
   service integration for deployed SPA objects.
 - Recommended v1 bundle: `CAPABILITY_PROFILES=core,analyst_portal` (Decision 34).

@@ -52,6 +52,7 @@ type ChatPanelProps = {
   disabledReason?: string;
   composerDisabled?: boolean;
   serverSyncError?: string | null;
+  chatHistoryEnabled?: boolean;
   onStateChange?: (state: ChatPanelState) => void;
   onChatCancelled?: (state: ChatPanelState) => void;
   onOrphanedChatResponse?: (payload: OrphanedChatResponse) => void;
@@ -82,6 +83,7 @@ export function ChatPanel({
   disabledReason,
   composerDisabled = false,
   serverSyncError,
+  chatHistoryEnabled = false,
   onStateChange,
   onChatCancelled,
   onOrphanedChatResponse,
@@ -96,6 +98,7 @@ export function ChatPanel({
   const chatAbortRef = useRef<AbortController | null>(null);
   const chatRequestGenRef = useRef(0);
   const pendingQuestionRef = useRef<string | null>(null);
+  const retryRequestRef = useRef<{ question: string; id: string } | null>(null);
 
   const buildPanelState = useCallback(
     (nextTurns: ChatTurn[]): ChatPanelState => ({
@@ -170,6 +173,7 @@ export function ChatPanel({
 
     const restoreRef = { text: pendingQuestionRef.current };
     pendingQuestionRef.current = null;
+    retryRequestRef.current = null;
 
     let nextTurns: ChatTurn[] = [];
     setTurns((value) => {
@@ -204,12 +208,25 @@ export function ChatPanel({
       }
       return;
     }
+    if (!selectedCaseId) {
+      setError("Attach or open a case to chat.");
+      return;
+    }
     if (maxQuestionChars != null && trimmed.length > maxQuestionChars) {
       setError(`Question must be ${maxQuestionChars} characters or fewer.`);
       return;
     }
 
     const turnId = newTurnId();
+    const existingRetry = retryRequestRef.current;
+    const clientRequestId = chatHistoryEnabled
+      ? existingRetry?.question === trimmed
+        ? existingRetry.id
+        : newTurnId()
+      : undefined;
+    retryRequestRef.current = clientRequestId
+      ? { question: trimmed, id: clientRequestId }
+      : null;
     const requestGen = chatRequestGenRef.current + 1;
     chatRequestGenRef.current = requestGen;
     const abortController = new AbortController();
@@ -241,9 +258,9 @@ export function ChatPanel({
           {
             mode,
             question: trimmed,
-            selected_case_id:
-              mode === "selected_case" ? selectedCaseId : undefined,
+            selected_case_id: selectedCaseId,
             session_id: activeSessionId,
+            client_request_id: clientRequestId,
           },
           { signal: abortController.signal },
         );
@@ -294,6 +311,7 @@ export function ChatPanel({
             : turn,
         ),
       );
+      retryRequestRef.current = null;
     } catch (err: unknown) {
       if (
         abortController.signal.aborted ||

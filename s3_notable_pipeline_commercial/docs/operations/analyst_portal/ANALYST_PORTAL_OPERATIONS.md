@@ -1,11 +1,11 @@
 # Analyst Portal Operations
 
-Operator guide for the GovCloud analyst portal, immutable case runs, and
+Operator guide for the commercial AWS analyst portal, immutable case runs, and
 retrieval-bound case chat.
 
 ## Architecture
 
-The production path is contained in `us-gov-east-1`:
+The production path is contained in `us-east-1`:
 
 ```text
 Browser -> Regional API Gateway HTTP API -> Portal Lambda
@@ -16,8 +16,8 @@ Browser -> Regional API Gateway HTTP API -> Portal Lambda
                                       `-> Bedrock chat synthesis
 ```
 
-CloudFront and Lambda Function URLs are not part of the GovCloud architecture.
-API Gateway routes both `/api/*` and static SPA requests to the portal Lambda.
+Commercial v1 intentionally uses neither CloudFront nor Lambda Function URLs.
+Regional API Gateway routes both `/api/*` and static SPA requests to the portal Lambda.
 The Lambda performs bounded, read-only static-object fetches from the private UI
 bucket; the UI bucket is separate from case data and blocks public access.
 
@@ -40,7 +40,7 @@ JWT mode uses an API Gateway JWT authorizer and repeats issuer, audience,
 tenant, and analyst grant validation in the Lambda. A valid token without the
 configured analyst role or scope receives `403`. IAM mode requires a SigV4
 authenticated API Gateway request and remains subject to application tenant
-checks. `/api/health` and `/api/ready` are unauthenticated; case and chat routes
+checks. `/health` and `/ready` are unauthenticated; case and chat routes
 are never public.
 
 Static SPA routes are unauthenticated because they contain no customer data or
@@ -63,7 +63,7 @@ separate product change, not a timeout override.
 
 ## Readiness
 
-`GET /api/ready` performs bounded, non-mutating probes for enabled dependencies:
+`GET /ready` performs bounded, non-mutating probes for enabled dependencies:
 
 - DynamoDB case index and optional chat tables
 - S3 archive access
@@ -109,13 +109,13 @@ npm test -- --run
 npm run build
 ```
 
-Real GovCloud staging must additionally validate API Gateway JWT behavior,
+Real commercial staging must additionally validate API Gateway JWT behavior,
 IAM, KMS, VPC DNS/routing, OpenSearch SigV4 access, Bedrock model access, quotas,
 alarms, and end-to-end latency.
 
 ## Related Docs
 
-- [`../deployment/GOVCLOUD_CUSTOMER_CONFIGURATION.md`](../deployment/GOVCLOUD_CUSTOMER_CONFIGURATION.md)
+- [`../deployment/COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](../deployment/COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md)
 - [`../rag/RAG_OPERATIONS.md`](../rag/RAG_OPERATIONS.md)
 - [`../security/SECURITY_OPERATIONS.md`](../security/SECURITY_OPERATIONS.md)
 - [`../../testing/TESTING.md`](../../testing/TESTING.md)

@@ -298,7 +298,7 @@ class CaseArchiveTests(unittest.TestCase):
             config=archive_config(
                 PORTAL_ENABLED=True,
                 CASE_QA_ENABLED=True,
-                CASE_EMBED_QUEUE_URL="https://sqs.us-gov-east-1.amazonaws.com/123/embed",
+                CASE_EMBED_QUEUE_URL="https://sqs.us-east-1.amazonaws.com/123/embed",
                 PORTAL_JWT_ISSUER="https://issuer.example.test",
                 PORTAL_JWT_AUDIENCE="portal",
             ),
@@ -314,7 +314,7 @@ class CaseArchiveTests(unittest.TestCase):
         self.assertEqual(len(sqs.messages), 1)
         self.assertEqual(
             sqs.messages[0]["QueueUrl"],
-            "https://sqs.us-gov-east-1.amazonaws.com/123/embed",
+            "https://sqs.us-east-1.amazonaws.com/123/embed",
         )
         payload = json.loads(sqs.messages[0]["MessageBody"])
         self.assertEqual(payload["case_id"], result.case_id)
@@ -449,7 +449,7 @@ class CaseArchiveTests(unittest.TestCase):
             config=archive_config(
                 PORTAL_ENABLED=True,
                 CASE_QA_ENABLED=True,
-                CASE_EMBED_QUEUE_URL="https://sqs.us-gov-east-1.amazonaws.com/123/embed",
+                CASE_EMBED_QUEUE_URL="https://sqs.us-east-1.amazonaws.com/123/embed",
                 PORTAL_JWT_ISSUER="https://issuer.example.test",
                 PORTAL_JWT_AUDIENCE="portal",
             ),
@@ -501,7 +501,7 @@ class CaseArchiveTests(unittest.TestCase):
             config=archive_config(
                 PORTAL_ENABLED=True,
                 CASE_QA_ENABLED=True,
-                CASE_EMBED_QUEUE_URL="https://sqs.us-gov-east-1.amazonaws.com/123/embed",
+                CASE_EMBED_QUEUE_URL="https://sqs.us-east-1.amazonaws.com/123/embed",
                 PORTAL_JWT_ISSUER="https://issuer.example.test",
                 PORTAL_JWT_AUDIENCE="portal",
             ),

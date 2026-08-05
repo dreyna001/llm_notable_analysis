@@ -984,6 +984,7 @@ export function HomeChatWorkspace({
           />
         ) : null}
         <ChatPanel
+          chatHistoryEnabled={serverHistoryEnabled}
           key={panelInstanceKey}
           initialSessionId={activeSession.serverSessionId}
           initialTurns={initialPanelTurns}

@@ -11,6 +11,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from botocore.exceptions import ClientError
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
@@ -82,6 +84,9 @@ class FakeBedrockClient:
                 }
             }
         }
+
+    def count_tokens(self, **_kwargs):
+        return {"inputTokens": 1}
 
 
 def ddb_case_item():
@@ -297,8 +302,13 @@ class PortalHandlerTests(unittest.TestCase):
         )
         with (
             patch.object(portal_handler, "load_config", return_value=config),
-            patch.object(portal_handler, "dynamodb_client", return_value=FakeDynamoDbClient()),
-            patch.object(portal_handler, "bedrock_runtime_client", return_value=object()),
+            patch.object(
+                portal_handler,
+                "_bounded_aws_client",
+                side_effect=lambda _config, service: (
+                    FakeBedrockClient() if service == "bedrock-runtime" else FakeDynamoDbClient()
+                ),
+            ),
         ):
             response = portal_handler.handler(event("/api/capabilities"), None)
 
@@ -315,8 +325,13 @@ class PortalHandlerTests(unittest.TestCase):
         )
         with (
             patch.object(portal_handler, "load_config", return_value=config),
-            patch.object(portal_handler, "dynamodb_client", return_value=FakeDynamoDbClient()),
-            patch.object(portal_handler, "bedrock_runtime_client", return_value=object()),
+            patch.object(
+                portal_handler,
+                "_bounded_aws_client",
+                side_effect=lambda _config, service: (
+                    FakeBedrockClient() if service == "bedrock-runtime" else FakeDynamoDbClient()
+                ),
+            ),
         ):
             response = portal_handler.handler(
                 event("/api/diagnostics/chat-readiness"),
@@ -325,6 +340,57 @@ class PortalHandlerTests(unittest.TestCase):
 
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(json.loads(response["body"]), {"status": "ready"})
+
+    def test_chat_readiness_falls_back_when_count_tokens_is_unsupported(self) -> None:
+        bedrock = FakeBedrockClient()
+        unsupported = ClientError(
+            {
+                "Error": {
+                    "Code": "ValidationException",
+                    "Message": "CountTokens is not supported for this inference profile",
+                }
+            },
+            "CountTokens",
+        )
+        with (
+            patch.object(bedrock, "count_tokens", side_effect=unsupported),
+            patch.object(
+                portal_handler,
+                "_bounded_aws_client",
+                side_effect=lambda _config, service: (
+                    bedrock if service == "bedrock-runtime" else FakeDynamoDbClient()
+                ),
+            ),
+        ):
+            status = portal_handler._probe_chat_dependencies(
+                portal_config(CASE_QA_ENABLED=True, CASE_EMBED_LAMBDA_NAME="embed")
+            )
+
+        self.assertEqual(status["llm_gateway"], "ready")
+
+    def test_chat_readiness_does_not_invoke_model_after_access_denied(self) -> None:
+        bedrock = FakeBedrockClient()
+        denied = ClientError(
+            {"Error": {"Code": "AccessDeniedException", "Message": "denied"}},
+            "CountTokens",
+        )
+        with (
+            patch.object(bedrock, "count_tokens", side_effect=denied),
+            patch.object(bedrock, "converse", wraps=bedrock.converse) as converse,
+            patch.object(
+                portal_handler,
+                "_bounded_aws_client",
+                side_effect=lambda _config, service: (
+                    bedrock if service == "bedrock-runtime" else FakeDynamoDbClient()
+                ),
+            ),
+        ):
+            status = portal_handler._probe_chat_dependencies(
+                portal_config(CASE_QA_ENABLED=True, CASE_EMBED_LAMBDA_NAME="embed")
+            )
+
+        self.assertEqual(status["llm_gateway"], "unavailable")
+        converse.assert_not_called()
 
     def test_chat_readiness_returns_503_when_dependencies_unavailable(self) -> None:
         config = portal_config(
@@ -353,7 +419,42 @@ class PortalHandlerTests(unittest.TestCase):
         body = json.loads(response["body"])
         self.assertEqual(response["statusCode"], 503)
         self.assertEqual(body["status"], "not_ready")
-        self.assertEqual(body["dependencies"]["embeddings"], "unavailable")
+
+    def test_ready_uses_bounded_archive_prefix_probe(self) -> None:
+        s3 = FakeS3Client()
+        with (
+            patch.object(portal_handler, "load_config", return_value=portal_config()),
+            patch.object(
+                portal_handler,
+                "_bounded_aws_client",
+                side_effect=lambda _config, service: (
+                    FakeDynamoDbClient() if service == "dynamodb" else s3
+                ),
+            ),
+            patch.object(s3, "list_objects_v2", wraps=s3.list_objects_v2) as list_probe,
+        ):
+            response = portal_handler.handler(event("/ready"), None)
+
+        self.assertEqual(response["statusCode"], 200)
+        list_probe.assert_called_once_with(Bucket="case-bucket", Prefix="cases/", MaxKeys=1)
+
+    def test_ready_fails_closed_when_chat_client_construction_fails(self) -> None:
+        config = portal_config(
+            CASE_QA_ENABLED=True,
+            CASE_QA_CHAT_HISTORY_ENABLED=True,
+            CASE_EMBED_LAMBDA_NAME="embed",
+            CHAT_SESSIONS_TABLE="chat-sessions",
+            CHAT_MESSAGES_TABLE="chat-messages",
+        )
+        with patch.object(
+            portal_handler,
+            "_bounded_aws_client",
+            side_effect=RuntimeError("client construction failed"),
+        ):
+            status = portal_handler._probe_portal_dependencies(config)
+
+        self.assertEqual(status["chat_sessions"], "unavailable")
+        self.assertEqual(status["chat_messages"], "unavailable")
 
     def test_chat_concurrency_limit_returns_429(self) -> None:
         semaphore = threading.BoundedSemaphore(1)

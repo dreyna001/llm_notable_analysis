@@ -43,7 +43,7 @@ from .servicenow import (
     create_servicenow_incident,
     extract_servicenow_create_approval,
 )
-from .runtime_security import resolve_secret_string, validate_https_url
+from .runtime_security import read_bounded_bytes, resolve_secret_string, validate_https_url
 from .spl_query_grounding import retrieve_spl_query_grounding
 from .splunk_investigation import HttpSplunkMcpClient, execute_hypothesis_queries
 from .ttp_analyzer import BedrockAnalyzer
@@ -65,6 +65,7 @@ _sqs_client: Any | None = None
 # Placeholder filenames to skip (case-insensitive basename match)
 PLACEHOLDER_FILENAMES = frozenset({'.keep', '.gitkeep', '_success', '.placeholder'})
 DEFAULT_MAX_DECOMPRESSED_INPUT_BYTES = 1_048_576
+DEFAULT_MAX_COMPRESSED_INPUT_BYTES = 2_097_152
 GZIP_CONTENT_ENCODINGS = frozenset({'gzip', 'x-gzip'})
 FINDING_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
@@ -324,6 +325,23 @@ def get_max_decompressed_input_bytes(config: Config | None = None) -> int:
         raise ValueError("MAX_DECOMPRESSED_INPUT_BYTES must be an integer") from exc
     if limit < 1:
         raise ValueError("MAX_DECOMPRESSED_INPUT_BYTES must be greater than 0")
+    return limit
+
+
+def get_max_compressed_input_bytes(config: Config | None = None) -> int:
+    """Return the maximum number of compressed bytes read from one S3 object."""
+
+    raw_limit = (
+        str(config.MAX_COMPRESSED_INPUT_BYTES)
+        if config is not None
+        else os.environ.get('MAX_COMPRESSED_INPUT_BYTES', str(DEFAULT_MAX_COMPRESSED_INPUT_BYTES))
+    )
+    try:
+        limit = int(raw_limit)
+    except ValueError as exc:
+        raise ValueError("MAX_COMPRESSED_INPUT_BYTES must be an integer") from exc
+    if limit < 1:
+        raise ValueError("MAX_COMPRESSED_INPUT_BYTES must be greater than 0")
     return limit
 
 
@@ -978,17 +996,28 @@ def handler(event, context):
             processing_identity = _processing_identity(record, response, bucket, key)
             content_encoding = response.get('ContentEncoding')
             max_input_bytes = get_max_decompressed_input_bytes(config)
+            compressed = is_gzip_input(key, content_encoding)
+            read_limit = get_max_compressed_input_bytes(config) if compressed else max_input_bytes
+            response_size = response.get("ContentLength")
+            if response_size is not None and int(response_size) > read_limit:
+                raise ValueError(f"S3 object {key!r} exceeds configured input byte limit ({read_limit})")
             if (
                 isinstance(size, int)
                 and size > max_input_bytes
-                and not is_gzip_input(key, content_encoding)
+                and not compressed
             ):
                 raise ValueError(
                     f"S3 object {key!r} exceeds MAX_DECOMPRESSED_INPUT_BYTES ({max_input_bytes})"
                 )
             decoded_notable = decode_s3_notable_object(
                 key,
-                response['Body'].read(),
+                read_bounded_bytes(
+                    response['Body'],
+                    max_bytes=read_limit,
+                    setting_name=(
+                        "MAX_COMPRESSED_INPUT_BYTES" if compressed else "MAX_DECOMPRESSED_INPUT_BYTES"
+                    ),
+                ),
                 content_encoding,
                 config,
             )

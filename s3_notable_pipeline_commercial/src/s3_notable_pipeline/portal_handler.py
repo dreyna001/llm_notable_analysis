@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import base64
 import json
 import os
@@ -10,6 +11,7 @@ import threading
 from typing import Any
 
 from botocore.config import Config as BotoConfig
+from botocore.exceptions import ClientError
 
 from .aws_clients import aws_client, bedrock_runtime_client, dynamodb_client, s3_client
 from .case_chat import answer_selected_case_question
@@ -512,13 +514,38 @@ def _probe_chat_dependencies(config: Config) -> dict[str, str]:
         "llm_gateway": "unavailable",
     }
     try:
-        dynamodb_client().describe_table(TableName=config.CASE_INDEX_TABLE)
+        _bounded_aws_client(config, "dynamodb").describe_table(TableName=config.CASE_INDEX_TABLE)
         status["archive_retrieval"] = "ready"
     except Exception:
         status["archive_retrieval"] = "unavailable"
-    if (config.PORTAL_CHAT_BEDROCK_MODEL_ID or config.BEDROCK_MODEL_ID).strip():
+    model_id = (config.PORTAL_CHAT_BEDROCK_MODEL_ID or config.BEDROCK_MODEL_ID).strip()
+    if model_id:
         try:
-            bedrock_runtime_client()
+            client = _bounded_aws_client(config, "bedrock-runtime")
+            try:
+                client.count_tokens(
+                    modelId=model_id,
+                    input={
+                        "converse": {
+                            "messages": [
+                                {"role": "user", "content": [{"text": "readiness"}]}
+                            ]
+                        }
+                    },
+                )
+            except ClientError as exc:
+                error = exc.response.get("Error", {})
+                message = str(error.get("Message", "")).lower()
+                if error.get("Code") != "ValidationException" or not any(
+                    marker in message
+                    for marker in ("not supported", "does not support", "unsupported")
+                ):
+                    raise
+                client.converse(
+                    modelId=model_id,
+                    messages=[{"role": "user", "content": [{"text": "readiness"}]}],
+                    inferenceConfig={"maxTokens": 1, "temperature": 0},
+                )
             status["llm_gateway"] = "ready"
         except Exception:
             status["llm_gateway"] = "unavailable"
@@ -534,10 +561,14 @@ def _probe_portal_dependencies(config: Config) -> dict[str, str]:
     }
     if config.CASE_QA_ENABLED:
         status["opensearch"] = "unavailable"
+    if config.CASE_QA_CHAT_HISTORY_ENABLED:
+        status["chat_sessions"] = "unavailable"
+        status["chat_messages"] = "unavailable"
     try:
         if not str(getattr(config, "CASE_INDEX_TABLE", "")).strip():
             raise ValueError("CASE_INDEX_TABLE is not configured")
-        dynamodb_client().describe_table(TableName=config.CASE_INDEX_TABLE)
+        ddb = _bounded_aws_client(config, "dynamodb")
+        ddb.describe_table(TableName=config.CASE_INDEX_TABLE)
         status["case_index"] = "ready"
     except Exception:  # noqa: BLE001 - readiness must fail closed on probe errors.
         status["case_index"] = "unavailable"
@@ -546,17 +577,36 @@ def _probe_portal_dependencies(config: Config) -> dict[str, str]:
         bucket = str(getattr(config, "CASE_ARCHIVE_BUCKET", "")).strip()
         if not bucket:
             raise ValueError("CASE_ARCHIVE_BUCKET is not configured")
-        s3_client().head_bucket(Bucket=bucket)
+        prefix = str(getattr(config, "CASE_ARCHIVE_PREFIX", "cases")).strip("/")
+        _bounded_aws_client(config, "s3").list_objects_v2(
+            Bucket=bucket,
+            Prefix=f"{prefix}/" if prefix else "",
+            MaxKeys=1,
+        )
         status["archive"] = "ready"
     except Exception:  # noqa: BLE001 - readiness must fail closed on probe errors.
         status["archive"] = "unavailable"
 
     if config.CASE_QA_ENABLED and str(getattr(config, "OPENSEARCH_ENDPOINT", "")).strip():
         try:
-            adapter_for(config).request("GET", "/_cluster/health")
+            probe_config = copy.copy(config)
+            probe_config.OPENSEARCH_TIMEOUT_SECONDS = _readiness_timeout(config)
+            adapter_for(probe_config).request("GET", "/_cluster/health")
             status["opensearch"] = "ready"
         except Exception:  # noqa: BLE001 - readiness must fail closed on probe errors.
             status["opensearch"] = "unavailable"
+    if config.CASE_QA_CHAT_HISTORY_ENABLED:
+        for status_key, table_name in (
+            ("chat_sessions", config.CHAT_SESSIONS_TABLE),
+            ("chat_messages", config.CHAT_MESSAGES_TABLE),
+        ):
+            try:
+                if not str(table_name).strip():
+                    raise ValueError(f"{status_key} table is not configured")
+                _bounded_aws_client(config, "dynamodb").describe_table(TableName=table_name)
+                status[status_key] = "ready"
+            except Exception:  # noqa: BLE001 - readiness must fail closed on probe errors.
+                status[status_key] = "unavailable"
     return status
 
 

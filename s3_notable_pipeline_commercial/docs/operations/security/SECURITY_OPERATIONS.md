@@ -110,8 +110,8 @@ All Splunk, Elasticsearch, ServiceNow, and MCP base URLs pass through
 Outbound HTTP clients use `verify=True` (system trust store). There is no
 `SPLUNK_CA_BUNDLE` or custom CA path in the AWS runtime today.
 
-The portal uses a regional API Gateway HTTPS endpoint. CloudFront and Lambda
-Function URLs are not part of the GovCloud path. The private SPA bucket blocks
+The portal uses a regional API Gateway HTTPS endpoint. Commercial v1
+intentionally excludes CloudFront and Lambda Function URLs. The private SPA bucket blocks
 public access and is read through the portal Lambda with a scoped object-read
 permission.
 

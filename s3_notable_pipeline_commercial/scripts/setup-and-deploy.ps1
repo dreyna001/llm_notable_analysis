@@ -1,7 +1,7 @@
 # Setup and Deploy Script for Notable Analyzer Pipeline
 # Prerequisites: AWS CLI, SAM CLI, Docker must be installed
 #
-# Readiness: publish the image to GovCloud ECR and capture its immutable digest first.
+# Readiness: publish the image to commercial us-east-1 ECR and capture its immutable digest first.
 
 Write-Host "=== Notable Analyzer Pipeline - Setup and Deploy ===" -ForegroundColor Cyan
 
@@ -47,28 +47,70 @@ if ($missing.Count -gt 0) {
     exit 1
 }
 
-# Check AWS credentials
-Write-Host "`nChecking AWS credentials..." -ForegroundColor Yellow
-try {
-    $identity = aws sts get-caller-identity 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "  AWS credentials configured" -ForegroundColor Green
-        Write-Host $identity
-    } else {
-        Write-Host "  AWS credentials not configured" -ForegroundColor Red
-        Write-Host "  Run: aws configure" -ForegroundColor Yellow
-        exit 1
-    }
-} catch {
-    Write-Host "  Error checking AWS credentials" -ForegroundColor Red
+$region = "us-east-1"
+
+# Check the commercial AWS deployment boundary
+Write-Host "`nChecking commercial AWS deployment boundary..." -ForegroundColor Yellow
+if (
+    -not [string]::IsNullOrWhiteSpace($env:AWS_REGION) -and
+    -not [string]::IsNullOrWhiteSpace($env:AWS_DEFAULT_REGION) -and
+    $env:AWS_REGION -ne $env:AWS_DEFAULT_REGION
+) {
+    Write-Host "  AWS_REGION and AWS_DEFAULT_REGION disagree; both must be $region." -ForegroundColor Red
     exit 1
 }
+
+$configuredRegion = $env:AWS_REGION
+if ([string]::IsNullOrWhiteSpace($configuredRegion)) {
+    $configuredRegion = $env:AWS_DEFAULT_REGION
+}
+if ([string]::IsNullOrWhiteSpace($configuredRegion)) {
+    $configuredRegionOutput = aws configure get region 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        $configuredRegion = ($configuredRegionOutput | Out-String).Trim()
+    }
+}
+if ($configuredRegion -ne $region) {
+    $reportedRegion = if ([string]::IsNullOrWhiteSpace($configuredRegion)) { "<unset>" } else { $configuredRegion }
+    Write-Host "  Configured AWS region must be $region; found: $reportedRegion" -ForegroundColor Red
+    exit 1
+}
+
+$expectedAccountId = $env:COMMERCIAL_AWS_ACCOUNT_ID
+if ($expectedAccountId -notmatch '^[0-9]{12}$') {
+    Write-Host "  Set COMMERCIAL_AWS_ACCOUNT_ID to the approved 12-digit commercial AWS account." -ForegroundColor Red
+    exit 1
+}
+
+$callerAccountOutput = aws sts get-caller-identity --region $region --query Account --output text 2>$null
+$callerAccountExitCode = $LASTEXITCODE
+$callerAccount = ($callerAccountOutput | Out-String).Trim()
+if ($callerAccountExitCode -ne 0 -or $callerAccount -notmatch '^[0-9]{12}$') {
+    Write-Host "  AWS credentials are unavailable or STS returned an invalid account ID." -ForegroundColor Red
+    exit 1
+}
+$callerArnOutput = aws sts get-caller-identity --region $region --query Arn --output text 2>$null
+$callerArnExitCode = $LASTEXITCODE
+$callerArn = ($callerArnOutput | Out-String).Trim()
+if ($callerArnExitCode -ne 0 -or -not $callerArn.StartsWith("arn:aws:", [System.StringComparison]::Ordinal)) {
+    Write-Host "  AWS caller ARN is not in the commercial aws partition: $callerArn" -ForegroundColor Red
+    exit 1
+}
+if ($callerAccount -ne $expectedAccountId) {
+    Write-Host "  AWS caller account $callerAccount does not match approved account $expectedAccountId." -ForegroundColor Red
+    exit 1
+}
+
+$credentialSource = if ([string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) { "default credential chain" } else { $env:AWS_PROFILE }
+Write-Host "  Account: $callerAccount" -ForegroundColor Green
+Write-Host "  Caller: $callerArn" -ForegroundColor Green
+Write-Host "  Partition: aws" -ForegroundColor Green
+Write-Host "  Region: $region" -ForegroundColor Green
+Write-Host "  Credential source: $credentialSource" -ForegroundColor Green
 
 # Check Bedrock access
 Write-Host "`nChecking Bedrock access..." -ForegroundColor Yellow
 try {
-    $region = "us-gov-east-1"
-
     $novaModels = aws bedrock list-foundation-models --region $region --query "modelSummaries[?contains(modelId, 'nova-pro')].modelId" --output text 2>$null
     $novaAvailable = $LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($novaModels) -and $novaModels -ne "None"
 
@@ -92,7 +134,7 @@ try {
 }
 
 # Build
-Write-Host "`nBefore deploy: ensure EcrRepositoryUri and ImageDigest identify the approved image in us-gov-east-1." -ForegroundColor Yellow
+Write-Host "`nBefore deploy: ensure EcrRepositoryUri and ImageDigest identify the approved image in us-east-1." -ForegroundColor Yellow
 Write-Host "`n=== Step 1: Building application ===" -ForegroundColor Cyan
 Write-Host "Running: sam build -t $samTemplate" -ForegroundColor Gray
 sam build -t $samTemplate
@@ -135,14 +177,14 @@ Write-Host "`n=== Step 2: Deploying to AWS ===" -ForegroundColor Cyan
 if (Test-Path "samconfig.toml") {
     Write-Host "Found samconfig.toml - using existing configuration" -ForegroundColor Gray
     Write-Host "Review parameter_overrides for Wave 1 settings before deploy (see reference above)." -ForegroundColor Gray
-    Write-Host "Running: sam deploy --template-file $samBuiltTemplate" -ForegroundColor Gray
-    sam deploy --template-file $samBuiltTemplate
+    Write-Host "Running: sam deploy --region $region --template-file $samBuiltTemplate" -ForegroundColor Gray
+    sam deploy --region $region --template-file $samBuiltTemplate
 } else {
     Write-Host "No samconfig.toml found - running guided deployment" -ForegroundColor Gray
-    Write-Host "Running: sam deploy --guided --template-file $samBuiltTemplate" -ForegroundColor Gray
+    Write-Host "Running: sam deploy --guided --region $region --template-file $samBuiltTemplate" -ForegroundColor Gray
     Write-Host "`nYou'll be prompted for:" -ForegroundColor Yellow
     Write-Host "  - Stack name (e.g., notable-analyzer-stack)" -ForegroundColor Gray
-    Write-Host "  - AWS Region (us-gov-east-1)" -ForegroundColor Gray
+    Write-Host "  - AWS Region (us-east-1)" -ForegroundColor Gray
     Write-Host "  - Input bucket name (must be globally unique)" -ForegroundColor Gray
     Write-Host "  - Output bucket name (must be globally unique)" -ForegroundColor Gray
     Write-Host "  - SplunkSinkMode ('s3' or 'notable_rest'; use 's3' for testing)" -ForegroundColor Gray
@@ -156,7 +198,7 @@ if (Test-Path "samconfig.toml") {
     Write-Host "  - AwsAccountId, EcrRepositoryUri, ImageDigest, and BedrockAnalysisModelId" -ForegroundColor Gray
     Write-Host "  - If notable_rest: SplunkBaseUrl + SplunkApiTokenSecretArn (Secrets Manager ARN)" -ForegroundColor Gray
     Write-Host "  - Optional: SplunkApiTokenSecretField (default 'token') and SplunkNotableUpdatePath" -ForegroundColor Gray
-    sam deploy --guided --template-file $samBuiltTemplate
+    sam deploy --guided --region $region --template-file $samBuiltTemplate
 }
 
 if ($LASTEXITCODE -ne 0) {

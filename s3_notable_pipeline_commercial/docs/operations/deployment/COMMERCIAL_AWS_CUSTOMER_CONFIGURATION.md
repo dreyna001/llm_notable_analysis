@@ -1,4 +1,4 @@
-# GovCloud Customer Configuration
+# Commercial AWS Customer Configuration
 
 This runbook defines the values collected for each customer deployment. The
 application, templates, queues, indexes, validation, and operational controls
@@ -7,8 +7,8 @@ and capacity values change.
 
 ## Deployment Boundary
 
-- Region: `us-gov-east-1`
-- Partition: `aws-us-gov`
+- Region: `us-east-1`
+- Partition: `aws`
 - One deployment and data boundary per customer
 - One immutable ECR image digest per release
 - No cross-region data flow in the initial release
@@ -16,14 +16,18 @@ and capacity values change.
 
 ## Required Customer Values
 
+These values operationalize the product but do not alter the approved product
+differences recorded in
+[`../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md`](../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md).
+
 | Area | Values collected during operationalization |
 | --- | --- |
-| Account | GovCloud account ID, deployment role, stack name, ECR repository |
+| Account | Commercial AWS account ID, deployment role, stack name, ECR repository |
 | Identity | OIDC issuer, audience, analyst application role and/or delegated scope |
 | Deployment scope | Stable deployment/tenant identifier used on every OpenSearch document and query |
 | Network | VPC, private subnets, Lambda security groups, private DNS, VPN or Direct Connect routes |
 | Encryption | Customer-managed KMS keys and key-administration roles |
-| Models | Approved Bedrock analysis, chat, and embedding model IDs available in `us-gov-east-1` |
+| Models | Approved Bedrock analysis, chat, and embedding model IDs available in `us-east-1` |
 | Integrations | Private Splunk, ServiceNow, or Elasticsearch endpoints and Secrets Manager ARNs |
 | Browser edge | CORS origins, API throttles, reserved concurrency, user quotas, and customer network access controls |
 | Retention | Input, report, case, chat, log, queue, DLQ, and OpenSearch retention values |

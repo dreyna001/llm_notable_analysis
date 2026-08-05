@@ -48,7 +48,7 @@ flowchart TB
     MD[Report assembly:<br/>markdown + JSON + optional HTML]
     OUT[("Output bucket<br/>reports/{stem}.*")]
     ARCH{{Optional case archive:<br/>S3 envelope + CaseIndex<br/>analyst_portal profile}}
-    PAPI{{Optional analyst portal:<br/>API Gateway + portal Lambda<br/>+ SPA via CloudFront}}
+    PAPI{{Optional analyst portal:<br/>API Gateway + portal Lambda<br/>+ private SPA bucket}}
     SPLK{{Splunk REST<br/>notable comment?}}
     SN{{ServiceNow<br/>incident create?}}
     DDB[(DynamoDB<br/>side-effect idempotency)]
@@ -107,7 +107,7 @@ flowchart TB
 
 **Operations note:** S3 event notifications can **retry** Lambda; customers should expect **at-least-once** delivery semantics and treat **object key** as the natural idempotency boundary for a single analysis run. External side effects such as Splunk writeback and ServiceNow create use DynamoDB reservations when action-gated idempotency is enabled.
 
-**Network:** Lambda calls **Bedrock** and optional **Bedrock Knowledge Bases** via AWS service APIs. Read-only investigation and writeback features use **HTTPS** to customer-configured Splunk, MCP, Elasticsearch, or ServiceNow endpoints from the analyzer execution environment. With `analyst_portal`, analysts reach the portal API through **API Gateway** (and optional **CloudFront**); portal Case Q&A may also use a dedicated **Lambda Function URL** when enabled.
+**Network:** Lambda calls **Bedrock** and, only in explicit compatibility configurations, optional **Bedrock Knowledge Bases** through AWS service APIs. The commercial production retrieval path uses VPC-only OpenSearch. Read-only investigation and writeback features use **HTTPS** to customer-configured Splunk, MCP, Elasticsearch, or ServiceNow endpoints from the analyzer execution environment. With `analyst_portal`, analysts reach all portal and chat routes through the regional **API Gateway**; the portal Lambda serves bounded reads from the private SPA bucket.
 
 ---
 
@@ -154,7 +154,7 @@ flowchart LR
 
 ## 3. AWS runtime architecture (what the stack provisions)
 
-Aligned with `../../../deploy/aws/template-sam.yaml`: S3 input and output buckets, container Lambda (`notable-analyzer-s3`), `incoming/` notifications, Amazon Bedrock inference, CloudWatch Logs, and optional Secrets Manager, DynamoDB side-effect idempotency, read-only investigation HTTPS egress, and Wave 2 portal resources when `analyst_portal` is enabled (CaseIndex, case archive, embed Lambda, portal API Lambda, API Gateway HTTP API, optional CloudFront SPA). **Pick the AWS region** that fits policy and Bedrock access; if you change it, keep **Bedrock inference ARNs, IAM, and ECR** in `../../../deploy/aws/template-sam.yaml` **in that region** (`../../operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`).
+Aligned with `../../../deploy/aws/template-sam.yaml`: S3 input and output buckets, container Lambda (`notable-analyzer-s3`), `incoming/` notifications, Amazon Bedrock inference, CloudWatch Logs, and optional Secrets Manager, DynamoDB side-effect idempotency, read-only investigation HTTPS egress, and Wave 2 portal resources when `analyst_portal` is enabled (CaseIndex, case archive, embed Lambda, portal API Lambda, regional API Gateway HTTP API, and private SPA bucket). The commercial boundary is fixed to **`us-east-1`**; Bedrock ARNs, IAM inputs, ECR, OpenSearch, KMS, Secrets Manager, and SNS resources must remain in that boundary (`../../operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`).
 
 ```mermaid
 flowchart TB
@@ -171,7 +171,7 @@ flowchart TB
 
     subgraph AI["Model + Retrieval"]
       BR[Amazon Bedrock<br/>inference in target region<br/>Claude Sonnet 4.6 or comparable]
-      KB[Bedrock Knowledge Bases<br/>SOC, SPL, Elastic context]
+      KB[VPC-only OpenSearch<br/>SOC, SPL, Elastic, case context]
     end
 
     subgraph Secret["Optional integrations"]
@@ -185,7 +185,7 @@ flowchart TB
       PEMB[Lambda: notable-case-embed]
       PLAM[Lambda: notable-portal-api]
       APIGW[API Gateway HTTP API]
-      CF[CloudFront + SPA bucket<br/>optional]
+      UI[Private SPA bucket<br/>optional]
     end
 
     subgraph Ops["Operations"]
@@ -197,7 +197,7 @@ flowchart TB
     FN -->|GetObject| BIN
     FN -->|PutObject reports/*| BOUT
     FN -->|bounded prompt + toolSpec| BR
-    FN -. optional retrieve .-> KB
+    FN -. optional tenant-scoped retrieve .-> KB
     FN -. optional GetSecretValue .-> SM
     FN -. optional idempotency .-> DDB
     FN -. optional HTTPS .-> SPL[Splunk REST / MCP]
@@ -212,7 +212,7 @@ flowchart TB
     PLAM -->|read| CARC
     PLAM -. pinned-case Q&A .-> BR
     APIGW --> PLAM
-    CF -. /api/* .-> APIGW
+    PLAM -->|bounded static reads| UI
     FN --> CW
     CFN -. provisions .-> BIN
     CFN -. provisions .-> BOUT

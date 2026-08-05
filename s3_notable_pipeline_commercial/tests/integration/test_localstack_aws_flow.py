@@ -23,6 +23,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from s3_notable_pipeline.config import Config
+from s3_notable_pipeline.aws_clients import validate_local_aws_endpoint
 from s3_notable_pipeline.idempotency import begin_side_effect, complete_side_effect_success
 from s3_notable_pipeline.lambda_handler import write_to_s3_sink
 from s3_notable_pipeline.runtime_security import resolve_secret_string
@@ -36,9 +37,10 @@ def _localstack_endpoint() -> str:
         pytest.skip("Set RUN_LOCALSTACK_INTEGRATION=true to run LocalStack tests")
     if not endpoint:
         pytest.skip("Set AWS_ENDPOINT_URL to the LocalStack edge endpoint")
-    if "localhost" not in endpoint and "127.0.0.1" not in endpoint:
-        pytest.skip("Refusing to run integration tests outside a local endpoint")
-    return endpoint
+    try:
+        return validate_local_aws_endpoint(endpoint)
+    except ValueError as exc:
+        pytest.skip(f"Refusing unsafe LocalStack endpoint: {exc}")
 
 
 def _client(service_name: str, endpoint_url: str):

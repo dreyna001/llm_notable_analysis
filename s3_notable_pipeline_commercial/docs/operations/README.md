@@ -19,7 +19,7 @@ omitted. Then open the category that matches your task.
 
 ## Deployment
 
-- [`deployment/GOVCLOUD_CUSTOMER_CONFIGURATION.md`](deployment/GOVCLOUD_CUSTOMER_CONFIGURATION.md) — reusable product boundary and per-customer operationalization inputs for `us-gov-east-1`.
+- [`deployment/COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](deployment/COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md) — reusable product boundary and per-customer operationalization inputs for commercial `us-east-1`.
 
 Lambda container image, ECR, and SAM deploy flow.
 

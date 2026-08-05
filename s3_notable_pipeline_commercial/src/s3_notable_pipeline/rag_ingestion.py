@@ -11,6 +11,7 @@ from typing import Any, Iterable, Mapping
 
 from .case_embed import embed_text
 from .opensearch_retrieval import config_value
+from .runtime_security import read_bounded_bytes
 
 MANIFEST_SCHEMA_VERSION = 1
 _SAFE_CORPUS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
@@ -111,6 +112,7 @@ def load_manifest(
     s3_client: Any,
     version_id: str = "",
     etag: str = "",
+    max_bytes: int = 262_144,
 ) -> RagManifest:
     """Load and validate one manifest object from S3."""
 
@@ -121,7 +123,10 @@ def load_manifest(
         version_id=version_id,
         etag=etag,
     )
-    payload = _json_body(response.get("Body"))
+    content_length = response.get("ContentLength")
+    if content_length is not None and int(content_length) > max_bytes:
+        raise ValueError("RAG manifest exceeds configured size limit")
+    payload = _json_body(response.get("Body"), max_bytes=max_bytes)
     return validate_manifest(payload)
 
 
@@ -146,18 +151,11 @@ def parse_s3_document(
     content_length = response.get("ContentLength")
     if max_bytes is not None and content_length is not None and int(content_length) > max_bytes:
         raise ValueError(f"RAG document exceeds configured size limit: {key}")
-    body = response.get("Body")
-    raw = body.read() if hasattr(body, "read") else body
-    if isinstance(raw, str):
-        if max_bytes is not None and len(raw.encode("utf-8")) > max_bytes:
-            raise ValueError(f"RAG document exceeds configured size limit: {key}")
-        text = raw
-    elif isinstance(raw, bytes):
-        if max_bytes is not None and len(raw) > max_bytes:
-            raise ValueError(f"RAG document exceeds configured size limit: {key}")
-        text = raw.decode("utf-8")
-    else:
-        raise ValueError("S3 document body must be bytes or text")
+    limit = max_bytes if max_bytes is not None else 20_971_520
+    raw = read_bounded_bytes(
+        response.get("Body"), max_bytes=limit, setting_name="RAG_INGEST_MAX_DOCUMENT_BYTES"
+    )
+    text = raw.decode("utf-8")
     suffix = key.rsplit("/", 1)[-1].lower().rsplit(".", 1)[-1] if "." in key else ""
     if suffix == "json":
         try:
@@ -416,7 +414,11 @@ def ingest_manifest(
         s3_client=s3_client,
         version_id=manifest_version_id,
         etag=manifest_etag,
+        max_bytes=int(config_value(config, "RAG_INGEST_MAX_MANIFEST_BYTES", 262_144)),
     )
+    max_documents = int(config_value(config, "RAG_INGEST_MAX_DOCUMENTS_PER_MANIFEST", 100))
+    if len(manifest.documents) > max_documents:
+        raise ValueError("RAG manifest exceeds configured document count limit")
     if manifest.tenant_id != configured_tenant:
         raise ValueError("RAG manifest tenant does not match configured tenant")
     index = _index_for_corpus(manifest.corpus_id, config)
@@ -429,6 +431,14 @@ def ingest_manifest(
     batch_size = int(config_value(config, "OPENSEARCH_BULK_BATCH_SIZE", 100))
     indexed_count = 0
     tombstoned_count = 0
+    total_source_bytes = 0
+    total_embeddings = 0
+    max_total_source_bytes = int(
+        config_value(config, "RAG_INGEST_MAX_TOTAL_SOURCE_BYTES", 52_428_800)
+    )
+    max_embeddings = int(
+        config_value(config, "RAG_INGEST_MAX_EMBEDDINGS_PER_MANIFEST", 2_000)
+    )
     for source in manifest.documents:
         if source.bucket != configured_bucket:
             raise ValueError(f"RAG source bucket is outside configured bucket: {source.key}")
@@ -451,6 +461,15 @@ def ingest_manifest(
             etag=source.etag,
             max_bytes=max_bytes,
         )
+        total_source_bytes += len(text.encode("utf-8"))
+        if total_source_bytes > max_total_source_bytes:
+            raise ValueError("RAG manifest exceeds configured total source byte limit")
+        chunk_count = len(
+            chunk_text(text, max_chars=int(config_value(config, "RAG_CHUNK_MAX_CHARS", 2500)))
+        )
+        total_embeddings += chunk_count
+        if total_embeddings > max_embeddings:
+            raise ValueError("RAG manifest exceeds configured embedding count limit")
         documents = build_rag_documents(
             manifest=manifest,
             source=source,
@@ -600,9 +619,11 @@ def _is_key_in_prefix(key: str, prefix: str) -> bool:
     return key == prefix or key.startswith(prefix + "/")
 
 
-def _json_body(body: Any) -> dict[str, Any]:
-    raw = body.read() if hasattr(body, "read") else body
-    parsed = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
+def _json_body(body: Any, *, max_bytes: int) -> dict[str, Any]:
+    raw = read_bounded_bytes(
+        body, max_bytes=max_bytes, setting_name="RAG_INGEST_MAX_MANIFEST_BYTES"
+    )
+    parsed = json.loads(raw.decode("utf-8"))
     if not isinstance(parsed, dict):
         raise ValueError("RAG manifest must be a JSON object")
     return parsed

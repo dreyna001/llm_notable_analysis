@@ -2,6 +2,13 @@
 set -euo pipefail
 
 export AWS_ENDPOINT_URL="${AWS_ENDPOINT_URL:-http://localhost:4566}"
+case "$AWS_ENDPOINT_URL" in
+  http://localhost:4566|http://localhost:4566/|http://127.0.0.1:4566|http://127.0.0.1:4566/) ;;
+  *) printf 'AWS_ENDPOINT_URL must be a loopback LocalStack URL on port 4566\n' >&2; exit 2 ;;
+esac
+export AWS_ACCESS_KEY_ID=test
+export AWS_SECRET_ACCESS_KEY=test
+unset AWS_SESSION_TOKEN AWS_PROFILE
 export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-test}"
 export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-test}"
 export AWS_REGION="${AWS_REGION:-us-east-1}"

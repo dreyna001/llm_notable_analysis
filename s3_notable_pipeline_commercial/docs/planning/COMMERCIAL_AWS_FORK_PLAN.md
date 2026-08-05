@@ -6,6 +6,10 @@
 - Fork baseline tests: complete
 - Commercial AWS implementation: in progress
 - Diff 1 commercial deployment boundary: implemented; focused tests pass, SAM lint pending local CLI availability
+- Diff 2 runtime and deployment defaults: implemented; focused tests and local script validation pass
+- Diff 3 commercial product identity and documentation: implemented; document contract, link, and full backend tests pass
+- Diff 4 local behavioral parity: implemented; backend, frontend, build, compile, contract, and difference-review checks pass; SAM, container, and LocalStack checks await local tooling
+- Diff 5 isolated commercial staging: blocked at the mandatory identity/deployment gate; see `COMMERCIAL_AWS_DIFF5_STAGING_APPROVAL.md`
 - Live AWS deployment: not authorized
 - Target: commercial AWS partition `aws`, region `us-east-1`
 
@@ -183,6 +187,15 @@ Acceptance:
 - The commercial template validates.
 - No application workflow or external contract changed without an approved-difference entry.
 - Frontend dependency findings are assessed and remediated or explicitly accepted before production release.
+
+Implementation evidence (2026-08-03):
+
+- Backend with LocalStack: 276 passed, 1 skipped; the remaining skip is the opt-in live Bedrock golden evaluation.
+- Frontend: 92 tests passed and the production build completed. The existing chunk-size warning remains non-blocking.
+- Python compilation and the focused deployment-template, deployment-script, documentation-contract, and OpenAPI-contract checks passed as part of the backend suite.
+- The baseline-to-commercial review found no unapproved application behavior or external-contract drift. The OpenAPI sync helper was corrected to write only inside this commercial project, and the generated capability schema was refreshed and regression-tested.
+- The production dependency audit was reduced by updating PostCSS and React Router to their latest compatible releases. Two high-severity React Router findings remain because the registry's latest release (`7.18.2`) is still inside the advisory range; production release is blocked until a patched release is installed or the risk is formally accepted.
+- SAM CLI and `cfn-lint` are not installed locally. Docker is unavailable in this WSL environment, so container and LocalStack validation could not run. These are tooling limitations, not passing evidence, and must be completed before production release.
 
 Rollback: Revert the smallest failing diff; do not alter the GovCloud product to make the fork pass.
 

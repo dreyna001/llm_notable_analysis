@@ -80,7 +80,7 @@ End-to-end flow: [`../delivery_package/end_to_end_diagrams/END_TO_END_DIAGRAMS.m
 - Drop any `ttp_id` that is not in the allowed ATT&CK set.
 - Keep `last_llm_response` for reporting/debugging; score and report only validated TTPs.
 - Validate generated Splunk SPL or Elasticsearch Query DSL against deployment allowlists before any read-only execution.
-- Treat Bedrock Knowledge Base snippets (SOC RAG, SPL grounding, Elastic grounding) as advisory context, not observed alert evidence.
+- Treat retrieved OpenSearch corpus snippets (SOC RAG, SPL grounding, Elastic grounding) as advisory context, not observed alert evidence. The same rule applies when the explicit Bedrock Knowledge Base compatibility backend is used.
 
 MITRE refresh workflow: [`../operations/platform/MITRE_TTP_OPERATIONS.md`](../operations/platform/MITRE_TTP_OPERATIONS.md).
 
@@ -95,7 +95,7 @@ MITRE refresh workflow: [`../operations/platform/MITRE_TTP_OPERATIONS.md`](../op
 ## Runtime Flow
 
 1. `src/s3_notable_pipeline/lambda_handler.py` reads and bounds S3 object content.
-2. Optional Bedrock Knowledge Base retrieve injects advisory RAG or query-grounding snippets.
+2. Optional tenant-scoped OpenSearch retrieval injects advisory RAG or query-grounding snippets; explicit compatibility configurations may use Bedrock Knowledge Base retrieval under the same evidence boundary.
 3. `src/s3_notable_pipeline/ttp_analyzer.py` normalizes input and builds the constrained prompt.
 4. Bedrock is called with retries/backoff (tool-use mode with repair fallback).
 5. Optional read-only investigation: generated queries are policy-validated, executed with bounds, and normalized results may feed a follow-on interpretation call.

@@ -46,7 +46,7 @@ Primary SAM parameter: `CapabilityProfiles` (default: `core`).
 
 ## Profile-to-Flag Mapping
 
-Authoritative mapping from `s3_notable_pipeline/src/s3_notable_pipeline/config.py`
+Authoritative mapping from `src/s3_notable_pipeline/config.py`
 (`_CAPABILITY_PROFILE_FLAGS` and backend selection in `_profile_flag_defaults`):
 
 | Profile | Flags set to `true` | Derived settings |

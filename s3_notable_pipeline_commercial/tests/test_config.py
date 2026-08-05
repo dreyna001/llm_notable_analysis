@@ -34,6 +34,7 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(config.PORTAL_ENABLED)
         self.assertFalse(config.CASE_QA_ENABLED)
         self.assertEqual(config.PORTAL_CHAT_MAX_CONCURRENCY, 18)
+        self.assertEqual(config.OPENSEARCH_REGION, "us-east-1")
 
     def test_action_gated_profile_enables_writeback_and_idempotency(self) -> None:
         """`action_gated` should mirror the on-prem external-action posture."""
@@ -61,7 +62,7 @@ class ConfigTests(unittest.TestCase):
                 "CAPABILITY_PROFILES": "core,analyst_portal",
                 "OUTPUT_BUCKET_NAME": "notable-output",
                 "CASE_INDEX_TABLE": "notable-case-index",
-                "CASE_EMBED_QUEUE_URL": "https://sqs.us-gov-east-1.amazonaws.com/123456789012/embed",
+                "CASE_EMBED_QUEUE_URL": "https://sqs.us-east-1.amazonaws.com/123456789012/embed",
                 "PORTAL_JWT_ISSUER": "https://issuer.example.test",
                 "PORTAL_JWT_AUDIENCE": "notable-portal",
                 "PORTAL_REQUIRED_ANALYST_ROLE": "Case.Reader",
@@ -109,6 +110,13 @@ class ConfigTests(unittest.TestCase):
         with (
             patch.dict("os.environ", {"SPLUNK_SINK_MODE": "side_effects"}, clear=True),
             self.assertRaisesRegex(ValueError, "SPLUNK_SINK_MODE"),
+        ):
+            load_config()
+
+    def test_noncommercial_opensearch_region_fails_fast(self) -> None:
+        with (
+            patch.dict("os.environ", {"OPENSEARCH_REGION": "us-west-2"}, clear=True),
+            self.assertRaisesRegex(ValueError, "OPENSEARCH_REGION must be us-east-1"),
         ):
             load_config()
 
@@ -181,7 +189,7 @@ class ConfigTests(unittest.TestCase):
         ):
             load_config()
 
-    def test_enabled_govcloud_rag_requires_opensearch_scope(self) -> None:
+    def test_enabled_rag_requires_opensearch_scope(self) -> None:
         """Application-managed RAG must have a private endpoint and tenant scope."""
         with (
             patch.dict(

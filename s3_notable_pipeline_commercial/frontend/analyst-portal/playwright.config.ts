@@ -15,11 +15,13 @@ export default defineConfig({
   use: {
     baseURL: env.baseURL,
     ignoreHTTPSErrors: true,
-    httpCredentials: {
-      username: env.user,
-      password: env.password,
-    },
-    trace: "retain-on-failure",
+    httpCredentials:
+      env.authMode === "basic"
+        ? { username: env.user, password: env.password }
+        : undefined,
+    extraHTTPHeaders:
+      env.authMode === "jwt" ? { Authorization: `Bearer ${env.jwt}` } : undefined,
+    trace: env.authMode === "jwt" ? "off" : "retain-on-failure",
     screenshot: "only-on-failure",
   },
   projects: [

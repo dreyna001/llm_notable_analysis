@@ -177,7 +177,7 @@ def main() -> int:
     parser.add_argument(
         "--root",
         default=str(default_root),
-        help="Root directory to scan (defaults to s3_notable_pipeline/).",
+        help="Root directory to scan (defaults to the current project root).",
     )
     parser.add_argument(
         "--output",

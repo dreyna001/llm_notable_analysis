@@ -189,6 +189,25 @@ class DeployTemplateTests(unittest.TestCase):
                 self.assertIn("ChatSessionsTable", template["Resources"])
                 self.assertIn("ChatMessagesTable", template["Resources"])
 
+    def test_repaired_commercial_permissions_and_rag_notification_contract(self) -> None:
+        for path in TEMPLATE_PATHS:
+            with self.subTest(path=path):
+                template = load_template(path)
+                source = (PROJECT_ROOT / path).read_text(encoding="utf-8")
+                self.assertIn("RagIngestionQueueArn", template["Outputs"])
+                self.assertIn("RequireDistinctExternalRagSourceBucket", template["Rules"])
+                self.assertIn("RagIngestionUsesInputBucket", template["Conditions"])
+                self.assertIn("dynamodb:TransactWriteItems", source)
+                self.assertIn("s3:prefix", source)
+                for spec in template["Resources"].values():
+                    if spec.get("Type") == "AWS::IAM::Role":
+                        self.assertNotIn("RoleName", spec.get("Properties", {}))
+                if path.endswith("template-sam.yaml"):
+                    disposition = template["Resources"]["DispositionSyncFunction"]
+                else:
+                    disposition = template["Resources"]["DispositionSyncLambdaRole"]
+                self.assertIn("CustomerKmsReadPolicy", str(disposition))
+
     def test_embed_resources_use_has_case_qa_condition(self) -> None:
         for path in TEMPLATE_PATHS:
             with self.subTest(path=path):
@@ -234,6 +253,52 @@ class DeployTemplateTests(unittest.TestCase):
                     depends_on = [depends_on]
                 self.assertEqual(depends_on, ["AnalyzerQueuePolicy"])
                 self.assertNotIn("RagIngestionQueuePolicy", depends_on)
+                self.assertNotIn("RagIngestionQueuePolicy", template["Resources"])
+                self.assertIn(
+                    "AllowRagSourceBucketSend",
+                    str(template["Resources"]["AnalyzerQueuePolicy"]),
+                )
+
+    def test_portal_readiness_configuration_matches_iam(self) -> None:
+        for path in TEMPLATE_PATHS:
+            with self.subTest(path=path):
+                template = load_template(path)
+                portal = template["Resources"]["PortalApiFunction"]
+                variables = portal["Properties"]["Environment"]["Variables"]
+                self.assertEqual(variables["CASE_ARCHIVE_PREFIX"], "CaseArchivePrefix")
+                self.assertEqual(
+                    variables["PORTAL_READINESS_TIMEOUT_SECONDS"],
+                    "PortalReadinessTimeoutSeconds",
+                )
+                source = (PROJECT_ROOT / path).read_text(encoding="utf-8")
+                self.assertIn("dynamodb:DescribeTable", source)
+                self.assertIn("bedrock:CountTokens", source)
+
+    def test_runtime_safety_limits_are_deploy_configurable(self) -> None:
+        expected_parameters = {
+            "MaxCompressedInputBytes",
+            "RagIngestMaxDocumentBytes",
+            "RagIngestMaxManifestBytes",
+            "RagIngestMaxDocumentsPerManifest",
+            "RagIngestMaxTotalSourceBytes",
+            "RagIngestMaxEmbeddingsPerManifest",
+            "PortalReadinessTimeoutSeconds",
+        }
+        for path in TEMPLATE_PATHS:
+            with self.subTest(path=path):
+                template = load_template(path)
+                self.assertTrue(expected_parameters.issubset(template["Parameters"]))
+                source = (PROJECT_ROOT / path).read_text(encoding="utf-8")
+                for setting in (
+                    "MAX_COMPRESSED_INPUT_BYTES",
+                    "RAG_INGEST_MAX_DOCUMENT_BYTES",
+                    "RAG_INGEST_MAX_MANIFEST_BYTES",
+                    "RAG_INGEST_MAX_DOCUMENTS_PER_MANIFEST",
+                    "RAG_INGEST_MAX_TOTAL_SOURCE_BYTES",
+                    "RAG_INGEST_MAX_EMBEDDINGS_PER_MANIFEST",
+                    "PORTAL_READINESS_TIMEOUT_SECONDS",
+                ):
+                    self.assertIn(setting, source)
 
     def test_cfn_container_lambdas_use_code_image_uri(self) -> None:
         template = load_template("deploy/aws/template-cfn.yaml")

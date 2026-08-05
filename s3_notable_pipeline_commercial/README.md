@@ -9,11 +9,12 @@ This service processes security notables uploaded to S3, runs LLM-based ATT&CK a
 
 ## 1) What You Need
 
-- AWS GovCloud account in `us-gov-east-1` with customer-approved Bedrock model access
+- Commercial AWS account in `us-east-1` with customer-approved Bedrock model access
 - AWS CLI configured (`aws configure`)
+- `COMMERCIAL_AWS_ACCOUNT_ID` set to the approved 12-digit account; deployment scripts compare it with the active STS caller
 - AWS SAM CLI
 - Docker running (required for Lambda image build)
-- A Lambda image published to customer GovCloud ECR and its immutable digest. Deployments pass `EcrRepositoryUri` and `ImageDigest` separately.
+- A Lambda image published to customer commercial AWS ECR in `us-east-1` and its immutable digest. Deployments pass `EcrRepositoryUri` and `ImageDigest` separately.
 
 Quick checks:
 
@@ -25,33 +26,37 @@ docker --version
 
 ## 2) Deploy (Fast Path)
 
-**Packaging readiness:** Build with the default Lambda Python 3.12 base for development or override `LAMBDA_BASE_IMAGE` with the customer's approved digest-pinned mirror. Push the result to GovCloud ECR before deployment. See [`docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`](docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md).
+**Packaging readiness:** Build with the default Lambda Python 3.12 base for development or override `LAMBDA_BASE_IMAGE` with the customer's approved digest-pinned mirror. Push the result to commercial ECR in `us-east-1` before deployment. See [`docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`](docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md).
 
 From this directory:
 
 ```powershell
+$env:AWS_REGION = "us-east-1"
+$env:COMMERCIAL_AWS_ACCOUNT_ID = "<approved-12-digit-account>"
 .\scripts\setup-and-deploy.ps1
 ```
 
 ```bash
+export AWS_REGION=us-east-1
+export COMMERCIAL_AWS_ACCOUNT_ID="<approved-12-digit-account>"
 chmod +x ./scripts/setup-and-deploy.sh
 ./scripts/setup-and-deploy.sh
 ```
 
 What it does:
 
-1. Validates local prerequisites (AWS CLI, SAM CLI, Docker, credentials; optional Bedrock list check).
+1. Validates local prerequisites and the approved commercial account, caller partition, and `us-east-1` region; then performs an optional Bedrock list check.
 2. Runs `sam build -t deploy/aws/template-sam.yaml`.
-3. Runs `sam deploy --template-file .aws-sam/build/template.yaml` (or guided mode first time).
+3. Runs `sam deploy --region us-east-1 --template-file .aws-sam/build/template.yaml` (or guided mode first time).
 
 Manual equivalent (same core deploy steps both scripts run):
 
 ```bash
 sam build -t deploy/aws/template-sam.yaml
 # If samconfig.toml exists:
-sam deploy --template-file .aws-sam/build/template.yaml
+sam deploy --region us-east-1 --template-file .aws-sam/build/template.yaml
 # First deploy (no samconfig.toml):
-sam deploy --guided --template-file .aws-sam/build/template.yaml
+sam deploy --guided --region us-east-1 --template-file .aws-sam/build/template.yaml
 ```
 
 If using guided deploy, start with:
@@ -60,7 +65,7 @@ If using guided deploy, start with:
 - `SplunkSinkMode=s3`
 - globally unique values for `InputBucketName` and `OutputBucketName`
 - `AwsAccountId`: your 12-digit AWS account ID (Bedrock inference profile ARN)
-- `EcrRepositoryUri`: customer GovCloud ECR repository URI without a tag or digest
+- `EcrRepositoryUri`: customer commercial `us-east-1` ECR repository URI without a tag or digest
 - `ImageDigest`: immutable `sha256:...` digest returned by ECR
 - `BedrockAnalysisModelId`: customer-approved model or inference-profile ID/ARN
 - `CapabilityProfiles=core` unless you are enabling optional bundles (see section 5)
@@ -164,7 +169,7 @@ Operations: [`docs/operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md`](docs
 - `src/s3_notable_pipeline/config.py` - runtime config and capability profile mapping
 - `src/s3_notable_pipeline/case_archive.py`, `portal_handler.py`, `embed_handler.py` - analyst portal archive, API, and chunk embedding (when `analyst_portal` is enabled)
 - `deploy/docker/Dockerfile` - Lambda image build; `FROM` is not portable until you substitute your approved base registry/image
-- `deploy/aws/template-sam.yaml` - deployable GovCloud SAM infrastructure (durable queues, Lambdas, regional API Gateway, and private S3 portal assets)
+- `deploy/aws/template-sam.yaml` - deployable commercial AWS SAM infrastructure (durable queues, Lambdas, regional API Gateway, and private S3 portal assets)
 - `tests/test_lambda_handler.py` - focused Lambda sink routing tests
 - `scripts/setup-and-deploy.*` - prerequisite checks, `sam build`, `sam deploy`
 - `scripts/test-pipeline.ps1` - core and optional Wave 1 stack smoke checks
@@ -204,7 +209,7 @@ Operations: [`docs/operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md`](docs
 - **No Lambda trigger:** verify object key is under `incoming/`.
 - **No output report:** check `OUTPUT_BUCKET_NAME` and CloudWatch logs for `notable-analyzer-s3`.
 - **Bedrock permission errors:** verify `bedrock:InvokeModel` and model/inference-profile access; confirm `AwsAccountId` matches the deployed account.
-- **Deploy fails on image resolution:** verify `EcrRepositoryUri` is in `us-gov-east-1`, `ImageDigest` exists in that repository, and Lambda can pull it.
+- **Deploy fails on image resolution:** verify `EcrRepositoryUri` is in `us-east-1`, `ImageDigest` exists in that repository, and Lambda can pull it.
 - **Compressed input errors:** only gzip is supported. Verify the object is valid gzip, contains UTF-8 text/JSON after decompression, and does not exceed `MAX_DECOMPRESSED_INPUT_BYTES`.
 - **Secrets access errors in notable_rest:** verify Lambda can call `secretsmanager:GetSecretValue` on `SplunkApiTokenSecretArn`.
 - **Splunk REST update fails:** verify the target endpoint accepts your identifier mapping (`finding_id` vs customer-specific IDs).

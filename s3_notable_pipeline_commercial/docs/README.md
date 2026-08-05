@@ -6,7 +6,7 @@ Use this page to pick **where to start** without reading the whole root [`README
 
 1. **[Executive AWS workflow](delivery_package/EXECUTIVE_AWS_WORKFLOW.md)** — Stakeholder summary: S3 ingest, Lambda, Bedrock analysis, optional profiles, sink modes, and approval gates.
 
-2. **[End-to-end workflow](delivery_package/EXECUTIVE_AWS_WORKFLOW.md)** and **[diagrams](delivery_package/end_to_end_diagrams/END_TO_END_DIAGRAMS.md)** — SOAR or operator upload to S3, optional Bedrock Knowledge Base retrieval, read-only Splunk or Elasticsearch investigation, S3 reports, Splunk writeback, ServiceNow draft/create.
+2. **[End-to-end workflow](delivery_package/EXECUTIVE_AWS_WORKFLOW.md)** and **[diagrams](delivery_package/end_to_end_diagrams/END_TO_END_DIAGRAMS.md)** — SOAR or operator upload to S3, optional tenant-scoped OpenSearch retrieval, read-only Splunk or Elasticsearch investigation, S3 reports, Splunk writeback, ServiceNow draft/create.
 
 3. **[Operations guide index](operations/README.md)** — Customer tuning guides by area (deployment, platform, portal, LLM, RAG, investigation, integrations, security).
 
@@ -14,7 +14,7 @@ Use this page to pick **where to start** without reading the whole root [`README
 
 5. **[Capability profiles](operations/platform/CAPABILITY_PROFILES.md)**, **[SAM template](../deploy/aws/template-sam.yaml)**, and **[runtime env contract](../config.env.example)** — Enable supported bundles with `CapabilityProfiles` / `CAPABILITY_PROFILES`; bucket names, Bedrock model id, secrets ARNs, and tuning map to SAM parameters and Lambda environment variables.
 
-6. **[Knowledge base](operations/rag/KNOWLEDGE_BASE_OPERATIONS.md)** and **[RAG tuning](operations/rag/RAG_OPERATIONS.md)** — Only when the `rag` profile is enabled (Bedrock Knowledge Base retrieve).
+6. **[Knowledge corpus](operations/rag/KNOWLEDGE_BASE_OPERATIONS.md)** and **[RAG tuning](operations/rag/RAG_OPERATIONS.md)** — Only when the `rag` profile is enabled (application-managed S3 ingestion and OpenSearch retrieval).
 
 7. **[Deployment readiness overview](delivery_package/AIOPTIMIZED_SOC_ANALYSIS_AWS_READINESS_OVERVIEW.md)** and **[readiness checklist](delivery_package/AIOPTIMIZED_SOC_ANALYSIS_AWS_READINESS_ASSESSMENT.md)** — Ownership, approvals, Bedrock/KB/SIEM prerequisites before production.
 
@@ -26,7 +26,8 @@ Optional deep dives:
 - **[Analyst portal operations](operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md)** — S3 case archive, DynamoDB CaseIndex, JWT API Gateway, static SPA, pinned-case Q&A.
 - **[SPL operations](operations/investigation/SPL_OPERATIONS.md)** — KB grounding, allowlists, Splunk REST/MCP read-only execution.
 - **[Planning todos](planning/TODOS.md)** — Generated TODO report (may be empty).
-- **[AWS GovCloud readiness plan](planning/AWS_GOVCLOUD_READINESS_PLAN.md)** — Implementation and validation plan for the `us-gov-east-1` target.
+- **[AWS commercial readiness plan](planning/AWS_COMMERCIAL_READINESS_PLAN.md)** — Implementation and validation plan for the commercial `us-east-1` target.
+- **[Commercial approved differences](internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md)** — Internal register of deliberate commercial architecture decisions and non-goals.
 - **[Azure/AWS parity plan](planning/AZURE_AWS_PARITY_PLAN.md)** — Implementation contract for Azure deployment mirroring the SAM stack (planning only).
 
 ## Topic shortcuts

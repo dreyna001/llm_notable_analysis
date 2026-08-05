@@ -33,7 +33,7 @@ Use template defaults unless CloudWatch evidence shows a need to change them.
 
 Additional posture:
 
-- Set the customer-approved GovCloud model or inference-profile ID explicitly;
+- Set the customer-approved commercial AWS model or inference-profile ID explicitly;
   the template has no product-wide model default.
 - Start with `CapabilityProfiles=core` and `SplunkSinkMode=s3` before enabling
   profiles that add extra Bedrock calls.
@@ -50,8 +50,8 @@ Additional posture:
 
 **Lambda env:** `BEDROCK_MODEL_ID`
 
-The GovCloud template copies `BedrockAnalysisModelId` into `BEDROCK_MODEL_ID` in
-`us-gov-east-1`. Select an ID actually enabled in the customer account; do not
+The commercial template copies `BedrockAnalysisModelId` into `BEDROCK_MODEL_ID` in
+`us-east-1`. Select an ID actually enabled in the customer account; do not
 assume commercial-region model or cross-region inference-profile availability.
 Record the selected ID with release evidence and scope IAM to its foundation
 model or inference profile during customer operationalization.
@@ -145,7 +145,7 @@ Portal chat synthesis uses plain Converse text output (no tool schema),
 
 | Parameter | Lambda env | Default | Purpose |
 |-----------|------------|---------|---------|
-| `BedrockAnalysisModelId` | `BEDROCK_MODEL_ID` | required | Customer-approved GovCloud model/profile ID |
+| `BedrockAnalysisModelId` | `BEDROCK_MODEL_ID` | required | Customer-approved commercial model/profile ID |
 | `BedrockAnalysisModelArn` | _(IAM scope)_ | required | Exact model/profile ARN allowed for analysis |
 | `CapabilityProfiles` | `CAPABILITY_PROFILES` | `core` | Feature bundles affecting call count |
 | `LambdaTimeoutSeconds` | _(function Timeout)_ | `360` | `notable-analyzer-s3` max duration |
@@ -173,12 +173,12 @@ for profile-driven Bedrock call counts and
 
 ## Validation And Rollout
 
-1. Run unit tests from `s3_notable_pipeline/`:
+1. Run unit tests from the commercial project root:
    `python -m pytest tests -q`.
 2. Deploy to a non-production account with
    `CapabilityProfiles=core` and confirm the model ID and ARN belong to the
-   target GovCloud partition and region.
-3. Verify the configured model is enabled in `us-gov-east-1` and IAM allows
+   target commercial `aws` partition and region.
+3. Verify the configured model is enabled in `us-east-1` and IAM allows
    `bedrock:InvokeModel` on the deployed model or inference profile.
 4. Upload one representative notable and confirm markdown and JSON under
    `reports/`. Check JSON metadata for `model`, `repair_attempted`, and

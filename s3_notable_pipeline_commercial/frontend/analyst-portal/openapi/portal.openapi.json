@@ -1195,7 +1195,43 @@
             "application/json": {
               "schema": {
                 "additionalProperties": true,
-                "title": "Payload",
+                "properties": {
+                  "client_request_id": {
+                    "description": "Stable idempotency key for one logical durable chat submission.",
+                    "maxLength": 128,
+                    "minLength": 8,
+                    "pattern": "^[A-Za-z0-9._-]+$",
+                    "type": "string"
+                  },
+                  "mode": {
+                    "enum": [
+                      "selected_case"
+                    ],
+                    "type": "string"
+                  },
+                  "question": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "selected_case_id": {
+                    "type": "string"
+                  },
+                  "session_id": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "question",
+                  "selected_case_id"
+                ],
+                "title": "ChatRequest",
                 "type": "object"
               }
             }

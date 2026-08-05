@@ -14,9 +14,12 @@ const PortalCapabilitiesResponse = z.object({
     .union([ChatDependencyStatusResponse, z.null()])
     .optional(),
   chat_history_enabled: z.boolean(),
+  chat_images_enabled: z.boolean().optional().default(false),
   chat_ready: z.boolean(),
   general_knowledge_enabled: z.boolean(),
   max_answer_tokens: z.number().int(),
+  max_chat_image_bytes: z.number().int().optional().default(750000),
+  max_chat_images: z.number().int().optional().default(1),
   max_chat_sessions_per_user: z.number().int(),
   max_question_chars: z.number().int(),
   model_context_tokens: z.number().int(),
@@ -310,7 +313,20 @@ const endpoints = makeApi([
       {
         name: "body",
         type: "Body",
-        schema: z.object({}).partial().passthrough(),
+        schema: z
+          .object({
+            client_request_id: z
+              .string()
+              .min(8)
+              .max(128)
+              .regex(/^[A-Za-z0-9._-]+$/)
+              .optional(),
+            mode: z.literal("selected_case").optional(),
+            question: z.string().min(1),
+            selected_case_id: z.string(),
+            session_id: z.union([z.string(), z.null()]).optional(),
+          })
+          .passthrough(),
       },
     ],
     response: ChatResponseModel,

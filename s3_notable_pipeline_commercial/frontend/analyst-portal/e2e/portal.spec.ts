@@ -46,9 +46,13 @@ test.beforeAll(async ({ request }) => {
 });
 
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
+  await page.addInitScript(({ authMode, jwt }) => {
     localStorage.clear();
-  });
+    sessionStorage.clear();
+    if (authMode === "jwt") {
+      sessionStorage.setItem("notable.portal.jwt", jwt);
+    }
+  }, { authMode: env.authMode, jwt: env.jwt });
 });
 
 test.describe("Analyst portal E2E", () => {

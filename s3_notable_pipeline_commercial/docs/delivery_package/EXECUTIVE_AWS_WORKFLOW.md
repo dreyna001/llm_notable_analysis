@@ -18,7 +18,7 @@ function that reads the payload, calls Amazon Bedrock for structured analysis,
 validates the response, and writes markdown and JSON reports (and optional HTML)
 to an S3 output bucket.
 
-Optional profiles can add Bedrock Knowledge Base context, read-only Splunk or
+Optional profiles can add tenant-scoped OpenSearch context, read-only Splunk or
 Elasticsearch hunt queries, ServiceNow drafts, Splunk notable comment writeback,
 ServiceNow incident create behind approval gates, and a read-only analyst portal
 with case archive. Those steps are additive; the base path is upload in, reports
@@ -144,7 +144,7 @@ Analysts remain accountable for triage, escalation, and closure decisions.
 ```text
 notable upload -> S3 incoming/
   -> Lambda (S3 event)
-  -> Amazon Bedrock (+ optional Knowledge Base retrieve)
+  -> Amazon Bedrock (+ optional VPC OpenSearch retrieve)
   -> validated structured report -> S3 reports/
   -> optional Splunk / ServiceNow / case archive / portal
 ```

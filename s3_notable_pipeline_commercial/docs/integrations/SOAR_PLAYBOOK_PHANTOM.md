@@ -6,7 +6,7 @@ Minimal **container-triggered** playbook pattern for feeding the AWS
 **Delivery path:** SOAR uploads one JSON object per notable to the input S3
 bucket under `incoming/`. This is **not** the on-prem SFTP file-drop path.
 
-Template script (relative to `s3_notable_pipeline/`):
+Template script (relative to the project root):
 
 - [`scripts/soar_playbook/phantom_notable_to_s3.py`](../../scripts/soar_playbook/phantom_notable_to_s3.py)
 

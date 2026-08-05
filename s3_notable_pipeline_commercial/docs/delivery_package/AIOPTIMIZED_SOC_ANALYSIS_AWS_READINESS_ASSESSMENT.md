@@ -19,11 +19,11 @@ An org is genuinely ready for this package when all of this is already true:
 - they have a target AWS account and region chosen for the pipeline
 - they know the initial `CapabilityProfiles` list (recommended start: `core` only) and whether they will use `s3` sink mode or later enable `notable_rest`; new production writeback rollouts should use `action_gated`
 - they have Bedrock access for the exact model or inference profile the package expects, in the exact region they will deploy to
-- if `rag`, `spl_readonly`, or `elastic_readonly` is planned, they have approved Bedrock Knowledge Base IDs and `bedrock:Retrieve` permission for those KBs
+- if `rag`, `spl_readonly`, or `elastic_readonly` is planned, they have an approved VPC-only OpenSearch domain, tenant/index scope, source corpora, embedding model, and private network path
 - they can create and use ECR, S3, Lambda, IAM, CloudWatch Logs, and CloudFormation/SAM in that AWS account
 - if read-only investigation is in scope, Splunk or Elasticsearch owners have approved allowlists, endpoints, and read-only credentials
 - if `action_gated` is in scope, they have Splunk REST or ServiceNow credentials with the minimum required scope, plus DynamoDB for side-effect idempotency
-- their security team is comfortable with S3 receiving notable files, Lambda reading the input bucket and writing the output bucket, Lambda invoking Bedrock, optional KB retrieve, optional HTTPS to customer SIEM/search/ticketing endpoints, and CloudWatch logging
+- their security team is comfortable with S3 receiving notable files, Lambda reading the input bucket and writing the output bucket, Lambda invoking Bedrock, private OpenSearch retrieval, optional HTTPS to customer SIEM/search/ticketing endpoints, and CloudWatch logging
 - their networking model is already decided, whether that is standard internet egress or a private-routing/VPC pattern
 - they have an operator who will own runtime understanding, smoke testing, and maintenance after deploy
 
@@ -41,7 +41,7 @@ They need:
 - permission to create S3 buckets with globally unique names
 - if `action_gated` is enabled, permission to create or reference a DynamoDB idempotency table
 
-This matches the stated fast path in `s3_notable_pipeline/README.md` and `s3_notable_pipeline/scripts/setup-and-deploy.ps1` (or `scripts/setup-and-deploy.sh`).
+This matches the stated fast path in `README.md` and `scripts/setup-and-deploy.ps1` (or `scripts/setup-and-deploy.sh`).
 
 ### 2. Bedrock Readiness
 
@@ -52,10 +52,10 @@ They need:
 - Bedrock enabled in the chosen region
 - access to the exact model or inference profile the stack will call
 - IAM permission for `bedrock:InvokeModel`
-- if `rag` or query-grounding profiles are enabled, IAM permission for `bedrock:Retrieve` on the configured Knowledge Bases
+- if vector retrieval or query-grounding profiles are enabled, IAM/SigV4 access to the configured OpenSearch domain and `bedrock:InvokeModel` for the approved embedding model
 - confirmation that org-level controls like SCPs (AWS Organizations guardrails that can deny actions even when IAM allows them) are not blocking the model or KB access
 
-For this package, Bedrock readiness must be explicit, because `s3_notable_pipeline/deploy/aws/template-sam.yaml` ties Bedrock to a configurable inference profile ARN. If the customer account, region, or approved model differs from what they deploy, deployment may succeed but runtime will fail. Operator tuning is in `docs/operations/llm/LLM_INFERENCE_OPERATIONS.md`.
+For this package, Bedrock readiness must be explicit, because `deploy/aws/template-sam.yaml` ties Bedrock to a configurable inference profile ARN. If the customer account, region, or approved model differs from what they deploy, deployment may succeed but runtime will fail. Operator tuning is in `docs/operations/llm/LLM_INFERENCE_OPERATIONS.md`.
 
 ### 3. Artifact And Packaging Readiness
 
@@ -86,14 +86,14 @@ They should already agree on:
 - if using ServiceNow create, a signed `servicenow_create_approval` object must be present in the incoming payload
 - `spl_readonly` and `elastic_readonly` are mutually exclusive per deployment
 
-Those behaviors are defined in `s3_notable_pipeline/README.md`, `docs/operations/platform/FILE_DROP_AND_RETENTION_OPERATIONS.md`, `docs/operations/platform/CAPABILITY_PROFILES.md`, and `src/s3_notable_pipeline/lambda_handler.py`. If the customer upstream SOAR or Splunk workflow does not match those assumptions, they will hit blockers even if AWS deployment itself works.
+Those behaviors are defined in `README.md`, `docs/operations/platform/FILE_DROP_AND_RETENTION_OPERATIONS.md`, `docs/operations/platform/CAPABILITY_PROFILES.md`, and `src/s3_notable_pipeline/lambda_handler.py`. If the customer upstream SOAR or Splunk workflow does not match those assumptions, they will hit blockers even if AWS deployment itself works.
 
 ### 5. Capability Profile Readiness
 
 Before enabling optional profiles beyond `core`, the org should have profile-specific inputs ready:
 
 - `html_reports` — no additional secrets; acceptance of a third S3 report artifact.
-- `rag` — curated SOC Knowledge Base, `RAG_BEDROCK_KB_ID`, retrieve IAM, advisory-context approval; see `docs/operations/rag/RAG_OPERATIONS.md` and `docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md`.
+- `rag` — curated SOC corpus, private OpenSearch domain/index, `RAG_TENANT_ID`, embedding-model IAM, VPC connectivity, and advisory-context approval; see `docs/operations/rag/RAG_OPERATIONS.md` and `docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md`.
 - `spl_readonly` — Splunk owner approval, executor choice (`rest` or `mcp`), index/command/field allowlists, secrets, optional SPL grounding KB.
 - `elastic_readonly` — Elasticsearch owner approval, HTTPS base URL, API key secret, index allowlist, optional grounding KB.
 - `ticket_draft` — ServiceNow assignment group for draft payloads (no POST).
@@ -158,22 +158,21 @@ Before enabling `analyst_portal`, the org should already have:
 - `PortalJwtIssuer` and `PortalJwtAudience` matching the customer identity provider
 - exact browser CORS origins for the SPA (`PortalCorsAllowedOrigins`)
 - a decision on how analysts reach the portal API (API Gateway HTTP API, corporate reverse proxy, or approved equivalent)
-- a decision on whether chat uses the same API origin or a dedicated Lambda Function URL when longer timeouts are required
-- a static SPA host (optional stack `PortalUiBucketName` plus CloudFront, or customer-managed equivalent)
+- acceptance of the 29-second synchronous chat boundary on the shared regional API Gateway origin
+- a static SPA build uploaded to the optional private `PortalUiBucketName`; the portal Lambda serves bounded SPA reads through API Gateway
 - `VITE_PORTAL_API_BASE_URL` set at SPA build time when UI and API are on different hostnames
 
 What the stack creates automatically:
 
 - analyzer archive writes, embed Lambda, portal API Lambda, CaseIndex table
-- API Gateway HTTP API (`PortalApiUrl`) and optional chat Function URL
-  (`PortalChatFunctionUrl`) when `PortalChatFunctionUrlEnabled=true`
-- optional static UI bucket/CloudFront with API routing when `PortalUiBucketName`
-  is set (`PortalBrowserApiBaseUrl`)
+- API Gateway HTTP API (`PortalApiUrl`) for all portal and chat routes
+- optional private static UI bucket served through the portal Lambda when
+  `PortalUiBucketName` is set (`PortalBrowserApiBaseUrl`)
 
 What remains **customer/environment wiring**:
 
 - JWT issuance to browsers through the customer IdP or approved front door
-- DNS/TLS, WAF, and corporate access controls when custom hostnames are required
+- DNS/TLS, corporate access controls, and any separately approved edge/WAF architecture when custom hostnames are required
 - SPA build/upload and CORS origin alignment with the browser URL analysts use
 
 Operator detail:
@@ -193,7 +192,7 @@ For `s3_notable_pipeline`, an org is in true green status when it can answer the
 5. What are the globally unique input and output bucket names?
 6. What `CapabilityProfiles` are enabled for this release?
 7. Are we using `s3` or `notable_rest` sink mode, and are new production writes using `action_gated`?
-8. For each enabled profile, where do Knowledge Base IDs, secrets, allowlists, and endpoints come from?
+8. For each enabled profile, where do OpenSearch indexes, source corpora, secrets, allowlists, and endpoints come from?
 9. What upstream system is writing files into `incoming/`?
 10. Does that upstream system match the filename, payload, and ServiceNow approval assumptions?
 11. Who owns smoke testing and runtime support after deploy?
@@ -212,7 +211,7 @@ This section does not add new requirements. It reorganizes the same readiness po
 - `AWS CLI`, `SAM CLI`, and `Docker` are available and working on the deployment workstation
 - the deployment team has permission to deploy CloudFormation/SAM stacks, create or reference ECR images, and create globally unique S3 buckets
 - Bedrock is enabled in the chosen region and the exact model or inference profile is approved
-- there is `bedrock:InvokeModel` permission for that target; `bedrock:Retrieve` if RAG or grounding profiles are planned
+- there is `bedrock:InvokeModel` permission for analysis and configured embeddings; enabled retrieval profiles also have scoped OpenSearch HTTP permissions
 - the org has already decided how the Lambda image will be built and published to ECR
 - for each planned optional profile, the team knows required KB IDs, secrets, allowlists, and owner approvals
 - if `action_gated` is in scope, idempotency table and write approval boundaries are understood
@@ -236,7 +235,7 @@ This section does not add new requirements. It reorganizes the same readiness po
 
 - security or platform approval for S3, Lambda, Bedrock, optional KB retrieve, optional HTTPS egress, and CloudWatch use
 - IAM changes or SCP exceptions if Bedrock or other AWS actions are still blocked
-- confirmation that the selected model or inference profile and Knowledge Bases are approved for that account and region
+- confirmation that the selected analysis and embedding models and OpenSearch domain are approved for that account and region
 - final approval of globally unique bucket names and target deployment region
 - secret creation, rotation, and access review for each enabled integration
 - Splunk or Elasticsearch owner confirmation of allowlists and endpoint mapping
@@ -248,10 +247,10 @@ This section does not add new requirements. It reorganizes the same readiness po
 
 For `s3_notable_pipeline` specifically, these are the main sources of deployment friction today:
 
-- `s3_notable_pipeline/deploy/aws/template-sam.yaml` and `deploy/aws/template-cfn.yaml` parameterize account ID, but customers must still align the selected model/profile, region, and optional profile settings with approvals
-- `s3_notable_pipeline/deploy/docker/Dockerfile` uses a placeholder or private-style base image, so many orgs cannot build it unchanged
-- `s3_notable_pipeline/scripts/setup-and-deploy.ps1` checks for either Nova models or Claude Sonnet 4.6 inference profiles, but operators still need to verify the exact deploy-time model/profile and region match template and runtime settings
-- optional profiles add integration surface area (Knowledge Bases, Splunk/MCP, Elasticsearch, ServiceNow, DynamoDB); each requires owner approval and secrets before enablement
+- `deploy/aws/template-sam.yaml` and `deploy/aws/template-cfn.yaml` parameterize account ID, but customers must still align the selected model/profile, region, and optional profile settings with approvals
+- `deploy/docker/Dockerfile` may require the customer's approved digest-pinned base-image mirror
+- `scripts/setup-and-deploy.ps1` checks for either Nova models or Claude Sonnet 4.6 inference profiles, but operators still need to verify the exact deploy-time model/profile and region match template and runtime settings
+- optional profiles add integration surface area (OpenSearch corpora, Splunk/MCP, Elasticsearch, ServiceNow, DynamoDB); each requires owner approval and secrets before enablement
 - Splunk integration has a template-driven `notable_rest` path; new production rollouts should pair it with `action_gated`, and operators still need an approved secret lifecycle and write approval boundaries
 
 ## Security And Scope Boundaries (Wave 1 and Wave 2)

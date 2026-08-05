@@ -13,7 +13,7 @@ or MCP endpoints. Mock AWS clients and HTTP calls, and keep fixtures bounded.
 
 ### Python environment (local or CI)
 
-From `s3_notable_pipeline` with Python **3.12+**:
+From the commercial project root with Python **3.12+**:
 
 ```bash
 python -m venv .venv
@@ -40,7 +40,7 @@ Runtime pins match `requirements.txt` (Lambda image). `boto3` is listed in
 it at deploy time. Test-only packages (`pytest`, `PyYAML`) install via the
 `test` extra.
 
-Run the full Python test suite from `s3_notable_pipeline` (with the venv active):
+Run the full Python test suite from the commercial project root (with the venv active):
 
 ```bash
 python -m pytest tests
@@ -70,7 +70,7 @@ python -m unittest discover -s tests -p "test_case_chat.py" -v
 python -m unittest discover -s tests -p "test_portal_chat.py" -v
 ```
 
-Portal frontend checks do not call real AWS. From `s3_notable_pipeline`:
+Portal frontend checks do not call real AWS. From the commercial project root:
 
 ```bash
 npm ci --prefix frontend/analyst-portal
@@ -101,7 +101,7 @@ AWS credentials.
 The compose file pins the LocalStack image tag because current `latest` images
 require a LocalStack auth token even for local community-style usage.
 
-Start LocalStack from `s3_notable_pipeline`:
+Start LocalStack from the commercial project root:
 
 ```bash
 docker compose up -d
@@ -155,7 +155,7 @@ sam local invoke NotableAnalyzerFunction \
   --env-vars events/sam-local-env.json \
   --parameter-overrides \
     AwsAccountId=000000000000 \
-    EcrRepositoryUri=000000000000.dkr.ecr.us-gov-east-1.amazonaws.com/notable-analyzer-s3 \
+    EcrRepositoryUri=000000000000.dkr.ecr.us-east-1.amazonaws.com/notable-analyzer-s3 \
     ImageDigest=sha256:0000000000000000000000000000000000000000000000000000000000000000
 ```
 
@@ -213,6 +213,14 @@ dev/staging/prod account.
 
 | Profile slice | Deploy prerequisites | Staging validation |
 | --- | --- | --- |
-| **analyst_portal** | `CapabilityProfiles=core,analyst_portal`; `CaseArchiveBucketName`; `CaseIndexTableName`; JWT issuer/audience; portal CORS origin; optional `PortalUiBucketName` | After deploy, record `PortalBrowserApiBaseUrl`, `PortalApiUrl`, and `PortalChatFunctionUrl`; upload a representative notable; confirm archive envelope, chunks, and CaseIndex `retrieval_status=ready`; load `/`, `/cases`, and `/cases/{case_id}` through the SPA; ask a selected-case question and confirm cited answer |
+| **analyst_portal** | `CapabilityProfiles=core,analyst_portal`; `CaseArchiveBucketName`; `CaseIndexTableName`; JWT issuer/audience; portal CORS origin; optional `PortalUiBucketName` | After deploy, record `PortalBrowserApiBaseUrl` and `PortalApiUrl`; upload a representative notable; confirm archive envelope, chunks, and CaseIndex `retrieval_status=ready`; load `/`, `/cases`, and `/cases/{case_id}` through the SPA; ask a selected-case question and confirm cited answer within the regional API timeout |
+
+For the deployed commercial JWT route, set `PORTAL_E2E_BASE_URL` to the
+`PortalBrowserApiBaseUrl` output, set `PORTAL_E2E_AUTH_MODE=jwt`, and provide a
+short-lived token in `PORTAL_E2E_JWT` before running
+`npm --prefix frontend/analyst-portal run test:e2e`. JWT traces are disabled so
+the bearer token is not persisted in Playwright artifacts. The older Basic-auth
+preview remains available with `PORTAL_E2E_AUTH_MODE=basic`; IAM/SigV4 browser
+automation is not claimed by this suite.
 
 See [`../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md).

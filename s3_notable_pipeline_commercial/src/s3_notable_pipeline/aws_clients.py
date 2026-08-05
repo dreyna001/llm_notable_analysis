@@ -5,8 +5,28 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from urllib.parse import urlparse
 
 import boto3
+
+
+def validate_local_aws_endpoint(value: str) -> str:
+    """Accept only an explicit loopback LocalStack edge URL."""
+
+    endpoint = value.strip()
+    parsed = urlparse(endpoint)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or parsed.username
+        or parsed.password
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+        or parsed.hostname not in {"localhost", "127.0.0.1", "::1"}
+        or parsed.port != 4566
+    ):
+        raise ValueError("AWS_ENDPOINT_URL must be a loopback LocalStack URL on port 4566")
+    return endpoint
 
 
 def aws_client(service_name: str, **overrides: Any) -> Any:
@@ -21,11 +41,12 @@ def aws_client(service_name: str, **overrides: Any) -> Any:
     }
 
     if endpoint_url:
+        endpoint_url = validate_local_aws_endpoint(endpoint_url)
         kwargs.update(
             {
                 "endpoint_url": endpoint_url,
-                "aws_access_key_id": os.getenv("AWS_ACCESS_KEY_ID", "test"),
-                "aws_secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY", "test"),
+                "aws_access_key_id": "test",
+                "aws_secret_access_key": "test",
             }
         )
 

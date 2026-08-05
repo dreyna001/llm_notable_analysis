@@ -241,7 +241,7 @@ Runtime environment variables mirror the SAM/CloudFormation parameters above.
    lifecycle rules match `CaseRetentionDays`.
 8. Confirm lifecycle rules match expected retention before production cutover.
 
-Smoke script (from `s3_notable_pipeline/`):
+Smoke script (from the commercial project root):
 
 ```powershell
 .\scripts\test-pipeline.ps1
@@ -249,9 +249,9 @@ Smoke script (from `s3_notable_pipeline/`):
 
 ## Related Docs
 
-- [`../CAPABILITY_PROFILES.md`](../CAPABILITY_PROFILES.md)
+- [`CAPABILITY_PROFILES.md`](CAPABILITY_PROFILES.md)
 - [`../../integrations/SOAR_PLAYBOOK_PHANTOM.md`](../../integrations/SOAR_PLAYBOOK_PHANTOM.md)
-- [`../RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`](../RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md)
-- [`../SECURITY_OPERATIONS.md`](../SECURITY_OPERATIONS.md)
-- [`../DEPLOYMENT_IMAGE_STEPS.md`](../DEPLOYMENT_IMAGE_STEPS.md)
+- [`RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`](RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md)
+- [`../security/SECURITY_OPERATIONS.md`](../security/SECURITY_OPERATIONS.md)
+- [`../deployment/DEPLOYMENT_IMAGE_STEPS.md`](../deployment/DEPLOYMENT_IMAGE_STEPS.md)
 - [`../../testing/TESTING.md`](../../testing/TESTING.md)

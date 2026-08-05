@@ -133,7 +133,7 @@ Create is also skipped when draft generation did not produce a usable
 Unit test command (from repository root):
 
 ```bash
-python -m unittest discover -s s3_notable_pipeline/tests -p "test_servicenow.py" -v
+.venv/bin/python -m pytest tests/test_servicenow.py -q -s
 ```
 
 ## Related Docs

@@ -1,17 +1,17 @@
-# GovCloud Lambda Image Build and Deployment
+# Commercial AWS Lambda Image Build and Deployment
 
 The SAM and CloudFormation templates deploy one image to the analyzer, case
 embedding, RAG ingestion, disposition sync, and portal functions. Handler
 commands are overridden per function. The release image must be stored in the
-customer's `us-gov-east-1` ECR repository and referenced by digest.
+customer's `us-east-1` ECR repository and referenced by digest.
 
 ## Build Contract
 
-Run from `s3_notable_pipeline/`:
+Run from the commercial project root:
 
 ```bash
-export AWS_REGION=us-gov-east-1
-export AWS_ACCOUNT_ID=<govcloud-account-id>
+export AWS_REGION=us-east-1
+export AWS_ACCOUNT_ID=<commercial-account-id>
 export IMAGE_REPO=notable-analyzer-s3
 export IMAGE_TAG=<immutable-release-or-git-sha>
 export ECR_REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$IMAGE_REPO
@@ -63,8 +63,8 @@ Required image parameters:
 | --- | --- |
 | `EcrRepositoryUri` | Repository URI without tag or digest |
 | `ImageDigest` | ECR `sha256:...` digest |
-| `DeploymentRegion` | `us-gov-east-1` |
-| `DeploymentPartition` | `aws-us-gov` |
+| `DeploymentRegion` | `us-east-1` |
+| `DeploymentPartition` | `aws` |
 
 Build and deploy:
 
@@ -73,7 +73,7 @@ sam build -t deploy/aws/template-sam.yaml
 sam deploy \
   --template-file .aws-sam/build/template.yaml \
   --stack-name notable-analyzer-stack \
-  --region us-gov-east-1 \
+  --region us-east-1 \
   --capabilities CAPABILITY_IAM \
   --parameter-overrides \
     AwsAccountId=$AWS_ACCOUNT_ID \
@@ -85,7 +85,7 @@ sam deploy \
 ```
 
 Enabled OpenSearch or portal capabilities additionally require the values in
-[`GOVCLOUD_CUSTOMER_CONFIGURATION.md`](GOVCLOUD_CUSTOMER_CONFIGURATION.md).
+[`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md).
 CloudFormation rules fail deployment when tenant, endpoint, VPC, or JWT grants
 required by an enabled capability are missing.
 

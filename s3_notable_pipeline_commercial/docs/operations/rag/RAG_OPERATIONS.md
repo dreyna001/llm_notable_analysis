@@ -1,4 +1,4 @@
-# GovCloud RAG Retrieval Operations
+# Commercial AWS RAG Retrieval Operations
 
 The `rag` capability adds bounded advisory context from the deployment's private
 OpenSearch SOC corpus before the main alert-analysis Bedrock call.
@@ -21,7 +21,7 @@ general SOC guidance as a separately labeled advisory lane.
 
 ## Runtime Contract
 
-- Backend: `RAG_RETRIEVAL_BACKEND=opensearch` for GovCloud production.
+- Backend: `RAG_RETRIEVAL_BACKEND=opensearch` for commercial production.
 - Scope: `RAG_TENANT_ID` is required and attached to every write and query.
 - Endpoint: `OPENSEARCH_ENDPOINT` is HTTPS, VPC-only, and IAM/SigV4 protected.
 - Indexes: case, SOC, Splunk dictionary, and optional Elastic dictionary are separate.
@@ -29,8 +29,9 @@ general SOC guidance as a separately labeled advisory lane.
 - Retrieval metadata records corpus version, chunk IDs, source versions, scores, and embedding model.
 - Failure defaults to explicit degraded/suppressed behavior for advisory context; core case retrieval reports unavailable rather than inventing an answer.
 
-Legacy `bedrock_kb` selection exists only for explicit non-GovCloud compatibility
-testing. It is not a fallback in `us-gov-east-1`.
+Legacy `bedrock_kb` selection exists only for explicit compatibility testing.
+It is not the production fallback in `us-east-1`; adopting it as the default
+requires a separate security, provenance, cost, and operational review.
 
 ## Rollout
 
