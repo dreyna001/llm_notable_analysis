@@ -36,7 +36,13 @@ operator-owned):
 | Query-result interpretation (optional LLM pass) | Shipped | Shipped |
 | ServiceNow draft / approval-gated create | Shipped | Shipped |
 | Analyst portal, case archive, Case Q&A | Shipped | Shipped |
-| RAG / KB advisory context (`rag`) | Shipped | Shipped (Bedrock KB) |
+| RAG / KB advisory context (`rag`) | Shipped | Shipped (OpenSearch) |
+| Closed-ticket RAG + portal closed-ticket lane | Shipped | **Backlog** |
+| ServiceNow closed-ticket raw sync + attachment vision | Shipped | **Backlog** |
+| KB image/PDF/DOCX corpus ingest | Shipped | **Backlog** |
+| Portal chat image uploads (multimodal) | Shipped | **Backlog** (OpenAPI fields only) |
+| RAG cross-encoder / Bedrock rerank (wired runtime) | Shipped | **Backlog** (config flags only) |
+| Cloud `CUSTOMER_DEFAULT_DEPLOYMENT` preset | Shipped | **Backlog** |
 | Threat-intel enrichment adapters | Backlog | Backlog |
 | SOC SOAR playbook invocation (investigation-time) | Backlog | Backlog |
 | LLM observability / Langfuse-class tracing | Backlog | Backlog |
@@ -45,6 +51,69 @@ operator-owned):
 | Gzip on-prem parity | Backlog | — |
 
 Ops index: [`../operations/README.md`](../operations/README.md).
+
+On-prem normative customer-default bundle:
+[`../operations/deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md`](../operations/deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md)
+(`core,rag,analyst_portal` on the analyzer; closed-ticket and SPL-dictionary flags documented there).
+
+---
+
+## On-prem customer-default cloud parity (AWS GovCloud + Azure)
+
+**Status: backlog.** Neither `s3_notable_pipeline` (AWS GovCloud/commercial fork baseline) nor
+`azure_notable_pipeline` ships the on-prem customer-default capabilities below. Both cloud
+stacks match each other on these gaps; port or reimplement from on-prem before claiming
+customer-default parity.
+
+Reference on-prem implementation:
+
+- Closed tickets:
+  [`CLOSED_TICKET_RAG_PLAN.md`](CLOSED_TICKET_RAG_PLAN.md),
+  [`../operations/integrations/SERVICENOW_CLOSED_TICKET_OPERATIONS.md`](../operations/integrations/SERVICENOW_CLOSED_TICKET_OPERATIONS.md)
+- KB image/PDF ingest:
+  [`../operations/rag/IMAGE_INGEST_PREREQUISITES.md`](../operations/rag/IMAGE_INGEST_PREREQUISITES.md)
+- Portal chat images: `portal_chat_images.py`
+
+### Required parity slices
+
+- [ ] **Closed-ticket ServiceNow sync** — read-only Table API pull of closed security tickets
+  (journals, attachments, cursor/backfill, retention). AWS: scheduled Lambda + durable store;
+  Azure: timer Function + Cosmos/Blob equivalent. Distinct from disposition-only sync already
+  on AWS/Azure.
+- [ ] **Closed-ticket indexing + RAG** — chunk/embed/index closed tickets; advisory retrieval in
+  first-pass analysis when enabled.
+- [ ] **Portal closed-ticket lane** — `CASE_QA_CLOSED_TICKET_*` equivalent in portal chat
+  synthesis with tenant/case boundaries preserved.
+- [ ] **Attachment vision / OCR pipeline** — screenshot/image describe + PDF/page text extract
+  for closed-ticket attachments before indexing. On-prem uses vision LLM + Tesseract; cloud needs
+  an approved Bedrock/Azure multimodal or OCR path.
+- [ ] **KB image/PDF/DOCX ingest** — extend cloud manifest ingestion beyond json/md/txt/csv/log;
+  on-prem `corpus_ingest` / `IMAGE_INGEST_*` behavior with bounded size/page limits.
+- [ ] **Portal chat image uploads** — implement backend validation/storage/synthesis path; OpenAPI
+  fields exist on AWS/Azure but handlers are not wired.
+- [ ] **RAG rerank runtime** — wire optional rerank (`RAG_RERANK_ENABLED`) in cloud retrieval
+  (Bedrock rerank on AWS; Azure Search semantic ranker per parity plan). Config/SAM/Bicep flags
+  exist today without retrieval integration.
+- [ ] **Customer-default operator preset** — cloud counterpart to
+  `CUSTOMER_DEFAULT_DEPLOYMENT.md`: documented `CapabilityProfiles`, SAM/Bicep parameter block,
+  OpenSearch/AI Search index checklist, and staging smoke for `core,rag,analyst_portal` without
+  first-pass SPL generation (`SplQueryRagEnabled` for portal dictionary grounding only).
+
+### Explicitly out of scope for this slice (already on cloud or different product choice)
+
+- First-pass SPL query generation — remain off unless `spl_readonly` is selected.
+- ServiceNow **disposition** sync — already on AWS GovCloud/commercial and Azure (metadata only,
+  not closed-ticket RAG).
+- Gzip notable intake — AWS shipped; on-prem backlog tracked separately above.
+
+Track implementation in:
+
+- AWS GovCloud: [`../../../s3_notable_pipeline/docs/planning/TODOS.md`](../../../s3_notable_pipeline/docs/planning/TODOS.md)
+- AWS commercial fork: [`../../../s3_notable_pipeline_commercial/docs/planning/TODOS.md`](../../../s3_notable_pipeline_commercial/docs/planning/TODOS.md)
+- Azure: [`../../../azure_notable_pipeline/docs/planning/TODOS.md`](../../../azure_notable_pipeline/docs/planning/TODOS.md)
+
+Each cloud port needs a short technical spec delta before implementation (storage, scheduler,
+secrets, retention, and fail-soft boundaries).
 
 ---
 

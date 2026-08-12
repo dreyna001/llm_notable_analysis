@@ -1,6 +1,6 @@
 # s3_notable_pipeline — planning backlog
 
-_Last updated: 2026-07-10. Normative parity contract:
+_Last updated: 2026-08-12. Normative parity contract:
 [`../technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md`](../technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md)._
 
 ## Top Priority Reminder
@@ -32,7 +32,25 @@ _Last updated: 2026-07-10. Normative parity contract:
 - [ ] Real-AWS staging validation for Waves 1–2 profiles — see [TESTING.md](../testing/TESTING.md) staging checklists and [AIOPTIMIZED_SOC_ANALYSIS_AWS_READINESS_ASSESSMENT.md](../delivery_package/AIOPTIMIZED_SOC_ANALYSIS_AWS_READINESS_ASSESSMENT.md).
 - [ ] Customer front-door wiring when `analyst_portal` is enabled (JWT issuer/audience, CORS, optional DNS/WAF).
 
-No further AWS/on-prem parity feature slices are queued in this repo. Product backlog:
+**On-prem customer-default cloud parity (AWS GovCloud + Azure):**
+
+Port or reimplement on-prem customer-default capabilities not yet in this repo. Neither GovCloud
+nor commercial AWS nor Azure ships these today. Normative checklist:
+[`FUTURE_ENHANCEMENTS_ROADMAP.md`](../../../llm_notable_analysis_onprem_systemd/docs/planning/FUTURE_ENHANCEMENTS_ROADMAP.md)
+(section **On-prem customer-default cloud parity**). On-prem reference:
+[`CUSTOMER_DEFAULT_DEPLOYMENT.md`](../../../llm_notable_analysis_onprem_systemd/docs/operations/deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md).
+
+- [ ] Closed-ticket ServiceNow sync (raw tickets, journals, attachments) — not disposition sync
+- [ ] Closed-ticket chunking, embedding, and advisory RAG in analysis
+- [ ] Portal closed-ticket chat lane
+- [ ] Closed-ticket attachment vision/OCR before indexing
+- [ ] KB image/PDF/DOCX manifest ingest (extend `rag_ingestion` beyond text/json)
+- [ ] Portal chat image upload backend (OpenAPI scaffold only today)
+- [ ] Wire `RAG_RERANK_ENABLED` into OpenSearch retrieval (Bedrock rerank)
+- [ ] Publish GovCloud `CUSTOMER_DEFAULT_DEPLOYMENT` SAM parameter preset +
+  `core,rag,analyst_portal` staging smoke (no first-pass SPL; `SplQueryRagEnabled` for portal only)
+
+Broader product backlog:
 [`FUTURE_ENHANCEMENTS_ROADMAP.md`](../../../llm_notable_analysis_onprem_systemd/docs/planning/FUTURE_ENHANCEMENTS_ROADMAP.md).
 
 ## Operations docs

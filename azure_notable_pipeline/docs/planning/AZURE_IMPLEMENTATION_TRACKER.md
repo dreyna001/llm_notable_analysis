@@ -2,6 +2,10 @@
 
 Status values: `not started`, `in progress`, `blocked verification`, `complete`.
 
+On-prem customer-default features not yet on Azure (or AWS GovCloud): see
+[`TODOS.md`](TODOS.md) and
+[`FUTURE_ENHANCEMENTS_ROADMAP.md`](../../../llm_notable_analysis_onprem_systemd/docs/planning/FUTURE_ENHANCEMENTS_ROADMAP.md).
+
 ## Phases
 
 | Phase | Owner | Status | Exit evidence |
