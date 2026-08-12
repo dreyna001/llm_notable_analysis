@@ -10,6 +10,7 @@
 - Diff 3 commercial product identity and documentation: implemented; document contract, link, and full backend tests pass
 - Diff 4 local behavioral parity: implemented; backend, frontend, build, compile, contract, and difference-review checks pass; SAM, container, and LocalStack checks await local tooling
 - Diff 5 isolated commercial staging: blocked at the mandatory identity/deployment gate; see `COMMERCIAL_AWS_DIFF5_STAGING_APPROVAL.md`
+- On-prem customer-default parity: planned — see [`COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md`](COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md)
 - Live AWS deployment: not authorized
 - Target: commercial AWS partition `aws`, region `us-east-1`
 

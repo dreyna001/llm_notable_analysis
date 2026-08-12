@@ -34,8 +34,9 @@ _Last updated: 2026-08-12. Normative parity contract:
 
 **On-prem customer-default cloud parity (AWS commercial + Azure):**
 
-Same gaps as GovCloud; commercial fork does not ship on-prem customer-default features yet.
-Normative checklist:
+Implementation plan:
+[`COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md`](COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md)
+(phases P0–P8). Normative checklist:
 [`FUTURE_ENHANCEMENTS_ROADMAP.md`](../../../llm_notable_analysis_onprem_systemd/docs/planning/FUTURE_ENHANCEMENTS_ROADMAP.md)
 (section **On-prem customer-default cloud parity**). On-prem reference:
 [`CUSTOMER_DEFAULT_DEPLOYMENT.md`](../../../llm_notable_analysis_onprem_systemd/docs/operations/deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md).
