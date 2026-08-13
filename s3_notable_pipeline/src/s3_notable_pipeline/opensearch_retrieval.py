@@ -121,8 +121,17 @@ def retrieve_documents(
     adapter: Any,
     query_embedding: list[float] | None = None,
     case_id: str = "",
+    config: Any | None = None,
+    bedrock_client: Any | None = None,
 ) -> list[RetrievedDocument]:
     """Execute one scoped hybrid query and normalize hits with provenance."""
+
+    rerank_enabled = (
+        config is not None
+        and bool(getattr(config, "RAG_RERANK_ENABLED", False))
+        and int(top_k) > 1
+    )
+    fetch_size = max(int(top_k) * 2, int(top_k)) if rerank_enabled else int(top_k)
 
     query = build_scoped_hybrid_query(
         query_text=query_text,
@@ -130,9 +139,9 @@ def retrieve_documents(
         tenant_id=tenant_id,
         corpus_id=corpus_id,
         case_id=case_id,
-        top_k=top_k,
+        top_k=fetch_size,
     )
-    response = adapter.search(index=index, query=query, size=top_k)
+    response = adapter.search(index=index, query=query, size=fetch_size)
     hits = response.get("hits", {}).get("hits", []) if isinstance(response, dict) else []
     documents: list[RetrievedDocument] = []
     for hit in hits:
@@ -163,7 +172,22 @@ def retrieve_documents(
                 metadata={**metadata, "provenance": provenance},
             )
         )
-    return documents
+
+    if rerank_enabled and len(documents) > 1:
+        from .bedrock_rerank import rerank_documents
+
+        rerank_client = bedrock_client
+        if rerank_client is None:
+            from .aws_clients import bedrock_runtime_client
+
+            rerank_client = bedrock_runtime_client()
+        documents = rerank_documents(
+            query_text,
+            documents,
+            config,
+            rerank_client,
+        )
+    return documents[: int(top_k)]
 
 
 def render_documents(documents: Iterable[RetrievedDocument], *, budget_chars: int, header: str = "") -> str:
