@@ -64,6 +64,13 @@ Unsupported file types, oversized documents, malformed manifests, tenant
 mismatches, and checksum mismatches are terminal validation failures and go to
 the ingestion DLQ after bounded handling.
 
+When `IMAGE_INGEST_ENABLED=true` on the ingestion Lambda, manifests may also
+include bounded PDF, DOCX, PNG, JPEG, GIF, and WebP sources. Text extraction
+uses `pypdf` or `pdfminer.six` for PDFs, `python-docx` or ZIP/XML fallback for
+DOCX, and either Amazon Textract (`IMAGE_INGEST_USE_TEXTRACT=true`) or a bounded
+Pillow metadata placeholder for raster images. Defaults keep image ingest
+disabled until operators explicitly enable it in SAM.
+
 ## Ingestion Behavior
 
 1. Validate the queue job and source-object identity.

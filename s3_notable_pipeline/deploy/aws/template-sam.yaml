@@ -830,6 +830,72 @@ Parameters:
     Type: String
     Default: notable-rag-ingestion
 
+  ImageIngestEnabled:
+    Type: String
+    Description: Enables PDF, DOCX, and image extraction during RAG manifest ingest.
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+
+  ImageIngestUseTextract:
+    Type: String
+    Description: Use Amazon Textract for image OCR during KB ingest when ImageIngestEnabled=true.
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+
+  ImageIngestAllowedMimeTypes:
+    Type: String
+    Description: CSV MIME allowlist for KB image and document ingest.
+    Default: application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/gif,image/jpeg,image/jpg,image/png,image/webp
+
+  ImageIngestMaxBytes:
+    Type: Number
+    Description: Maximum raw bytes per KB image or document ingest payload.
+    Default: 10485760
+    MinValue: 1
+    MaxValue: 52428800
+
+  ImageIngestMaxPixels:
+    Type: Number
+    Description: Maximum decoded pixel count per raster image.
+    Default: 25000000
+    MinValue: 1
+    MaxValue: 200000000
+
+  ImageIngestMaxWidth:
+    Type: Number
+    Description: Maximum decoded image width in pixels.
+    Default: 8192
+    MinValue: 1
+    MaxValue: 16384
+
+  ImageIngestMaxHeight:
+    Type: Number
+    Description: Maximum decoded image height in pixels.
+    Default: 8192
+    MinValue: 1
+    MaxValue: 16384
+
+  ImageIngestMaxPdfPages:
+    Type: Number
+    Description: Maximum PDF pages extracted during ingest.
+    Default: 50
+    MinValue: 1
+    MaxValue: 500
+
+  ImageIngestMaxEmbeddedImages:
+    Type: Number
+    Description: Maximum embedded images noted from DOCX payloads.
+    Default: 20
+    MinValue: 1
+    MaxValue: 200
+
+  ImageIngestMaxOutputChars:
+    Type: Number
+    Description: Maximum combined extracted text per KB document.
+    Default: 12000
+    MinValue: 1
+    MaxValue: 200000
+
   RagSourceBucketName:
     Type: String
     Default: ''
@@ -1068,6 +1134,10 @@ Conditions:
   HasCustomerKmsAdminRole: !Not [!Equals [!Ref CustomerKmsKeyAdminRoleArn, '']]
   HasAlarmTopic: !Not [!Equals [!Ref AlarmNotificationTopicArn, '']]
   HasRagIngestion: !Equals [!Ref RagIngestionEnabled, 'true']
+  HasImageIngestTextract: !And
+    - !Condition HasRagIngestion
+    - !Equals [!Ref ImageIngestEnabled, 'true']
+    - !Equals [!Ref ImageIngestUseTextract, 'true']
   HasRagSource: !Not [!Equals [!Ref RagSourceBucketName, '']]
   HasOpenSearch: !Not [!Equals [!Ref OpenSearchDomainArn, '']]
   HasPortalChatBedrockModelOverride: !Not [!Equals [!Ref PortalChatBedrockModelId, '']]
@@ -1893,6 +1963,16 @@ Resources:
           OPENSEARCH_ELASTIC_INDEX: !Ref OpenSearchElasticIndex
           RAG_RETRIEVAL_BACKEND: opensearch
           CASE_QA_EMBEDDING_MODEL: !Ref CaseQaEmbeddingModel
+          IMAGE_INGEST_ENABLED: !Ref ImageIngestEnabled
+          IMAGE_INGEST_USE_TEXTRACT: !Ref ImageIngestUseTextract
+          IMAGE_INGEST_ALLOWED_MIME_TYPES: !Ref ImageIngestAllowedMimeTypes
+          IMAGE_INGEST_MAX_BYTES: !Ref ImageIngestMaxBytes
+          IMAGE_INGEST_MAX_PIXELS: !Ref ImageIngestMaxPixels
+          IMAGE_INGEST_MAX_WIDTH: !Ref ImageIngestMaxWidth
+          IMAGE_INGEST_MAX_HEIGHT: !Ref ImageIngestMaxHeight
+          IMAGE_INGEST_MAX_PDF_PAGES: !Ref ImageIngestMaxPdfPages
+          IMAGE_INGEST_MAX_EMBEDDED_IMAGES: !Ref ImageIngestMaxEmbeddedImages
+          IMAGE_INGEST_MAX_OUTPUT_CHARS: !Ref ImageIngestMaxOutputChars
           CUSTOMER_KMS_KEY_ARN: !Ref CustomerKmsKeyArn
           CUSTOMER_VPC_SUBNET_IDS: !Ref CustomerVpcSubnetIds
           CUSTOMER_SECURITY_GROUP_IDS: !Ref CustomerSecurityGroupIds
@@ -1941,6 +2021,14 @@ Resources:
                   - es:ESHttpPut
                   - es:ESHttpDelete
                 Resource: !Sub '${OpenSearchDomainArn}/*'
+          - !Ref AWS::NoValue
+        - !If
+          - HasImageIngestTextract
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - textract:DetectDocumentText
+                Resource: '*'
           - !Ref AWS::NoValue
       Events:
         RagIngestionQueueEvent:
