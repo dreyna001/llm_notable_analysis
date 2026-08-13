@@ -31,6 +31,7 @@ from .case_index import get_case_detail, get_case_raw_section, list_cases
 from .config import Config, load_config
 from .opensearch_retrieval import adapter_for
 from .portal_chat import conversation_history_from_config
+from .portal_chat_images import portal_chat_image_capabilities, validate_chat_images
 from .portal_jwt import (
     portal_claims_authorized,
     resolve_portal_jwt_claims,
@@ -338,6 +339,7 @@ def _handle_chat_gate(config: Config, event: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("client_request_id must be 8-128 URL-safe characters")
         if client_request_id and not config.CASE_QA_CHAT_HISTORY_ENABLED:
             raise ValueError("client_request_id requires chat history to be enabled")
+        chat_images = validate_chat_images(request.get("images"), config)
         user_id = resolve_portal_user_id(event, config)
         if config.CASE_QA_CHAT_HISTORY_ENABLED:
             if client_request_id:
@@ -379,6 +381,7 @@ def _handle_chat_gate(config: Config, event: dict[str, Any]) -> dict[str, Any]:
             s3_client=s3_client(),
             bedrock_client=bedrock_runtime_client(),
             conversation_history=conversation_history,
+            images=chat_images,
         )
         response_payload: dict[str, Any] = {
             "answer": answer.answer,
@@ -500,6 +503,7 @@ def _capabilities(config: Config) -> dict[str, Any]:
         "chat_ready": chat_ready,
         "chat_dependency_status": dependency_status,
         "chat_degraded_reason": degraded_reason,
+        **portal_chat_image_capabilities(config),
     }
 
 

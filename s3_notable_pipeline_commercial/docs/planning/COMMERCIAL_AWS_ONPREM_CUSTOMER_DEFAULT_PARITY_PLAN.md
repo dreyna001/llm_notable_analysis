@@ -3,8 +3,9 @@
 ## Status
 
 - Plan created: 2026-08-12
-- P0 operator preset: **shipped** (2026-08-13) — see [`../operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](../operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md)
-- Remaining parity gaps: P1–P8 (closed-ticket RAG, rerank, rich ingest, and related)
+- P0 operator preset: **shipped** (2026-08-13)
+- P1–P8 feature parity: **shipped** on branch `feature/commercial-aws-onprem-parity` (2026-08-13) — rerank, rich KB ingest, closed-ticket vertical slice, portal chat images
+- Remaining: operator staging validation, customer-default preset refresh for optional closed-ticket flags, live AWS smoke
 - Target product: `s3_notable_pipeline_commercial/` only (`aws`, `us-east-1`)
 - Sibling production tree (`../s3_notable_pipeline/`) is out of scope unless explicitly merged later
 
@@ -64,7 +65,7 @@ No new code required for baseline customer-default analysis + portal:
 | P5 | Closed-ticket analysis RAG | `historical_closed_ticket_grounding.py` | Analyzer advisory lane before Bedrock (fail-soft) |
 | P6 | Portal closed-ticket lane | `closed_ticket_retrieval.py`, `case_chat.py` | `portal_chat_kb.py` + case-aware query |
 | P7 | Attachment vision/OCR | vision LLM + Tesseract on-prem | Bedrock multimodal or Textract in sync/index path |
-| P8 | Portal chat image uploads | `portal_chat_images.py` | Portal handler validation + Bedrock multimodal synthesis |
+| P8 | Portal chat image uploads | `portal_chat_images.py` | **Shipped** — portal handler validation + Bedrock multimodal synthesis |
 
 ## Implementation phases
 
@@ -144,6 +145,8 @@ No new code required for baseline customer-default analysis + portal:
 
 ### Phase P3 — Closed-ticket ServiceNow sync
 
+**Status:** shipped 2026-08-13
+
 **Scope**
 
 - Read-only Table API sync of closed security tickets (configurable encoded query)
@@ -170,6 +173,8 @@ No new code required for baseline customer-default analysis + portal:
 ---
 
 ### Phase P4 — Closed-ticket render, chunk, OpenSearch index
+
+**Status:** shipped 2026-08-13
 
 **Scope**
 
@@ -264,6 +269,8 @@ No new code required for baseline customer-default analysis + portal:
 ---
 
 ### Phase P8 — Portal chat image uploads
+
+**Status:** shipped 2026-08-13
 
 **Scope**
 

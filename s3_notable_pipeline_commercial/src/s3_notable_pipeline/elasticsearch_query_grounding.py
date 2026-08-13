@@ -157,6 +157,7 @@ def retrieve_elasticsearch_grounding(
                     config,
                     opensearch_client or (client if hasattr(client, "search") else None),
                 ),
+                config=config,
             )
             context = render_documents(
                 documents,

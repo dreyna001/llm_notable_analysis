@@ -7,14 +7,25 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any, Iterable, Mapping
 
 from .case_embed import embed_text
+from .kb_document_extract import (
+    FAIL_SOFT_STATUSES,
+    extract_kb_document,
+    is_media_suffix,
+)
 from .opensearch_retrieval import config_value
 from .runtime_security import read_bounded_bytes
 
 MANIFEST_SCHEMA_VERSION = 1
 _SAFE_CORPUS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+_DEFAULT_EXTRACT_CONFIG = SimpleNamespace(
+    KB_EXTRACT_MAX_BYTES=10_485_760,
+    KB_EXTRACT_MAX_PDF_PAGES=50,
+    KB_EXTRACT_MAX_OUTPUT_CHARS=12_000,
+)
 
 
 @dataclass(frozen=True)
@@ -42,6 +53,16 @@ class RagManifest:
 
 
 @dataclass(frozen=True)
+class ParsedS3Document:
+    """Parsed manifest source content and optional extraction metadata."""
+
+    text: str
+    extraction_status: str = "extracted"
+    extraction_detail: str = ""
+    source_suffix: str = ""
+
+
+@dataclass(frozen=True)
 class IngestionResult:
     """Summary of one manifest import."""
 
@@ -51,6 +72,7 @@ class IngestionResult:
     indexed_count: int
     source_count: int
     tombstoned_count: int = 0
+    extraction_reports: tuple[dict[str, Any], ...] = ()
 
 
 def validate_manifest(payload: Mapping[str, Any]) -> RagManifest:
@@ -138,8 +160,10 @@ def parse_s3_document(
     version_id: str = "",
     etag: str = "",
     max_bytes: int | None = None,
-) -> str:
-    """Parse bounded text from JSON, Markdown, text, or CSV S3 content."""
+    config: Any | None = None,
+    textract_client: Any | None = None,
+) -> ParsedS3Document:
+    """Parse bounded text from text, JSON, CSV, PDF, DOCX, or image S3 content."""
 
     response = _get_exact_object(
         bucket=bucket,
@@ -155,16 +179,38 @@ def parse_s3_document(
     raw = read_bounded_bytes(
         response.get("Body"), max_bytes=limit, setting_name="RAG_INGEST_MAX_DOCUMENT_BYTES"
     )
-    text = raw.decode("utf-8")
-    suffix = key.rsplit("/", 1)[-1].lower().rsplit(".", 1)[-1] if "." in key else ""
+    suffix = _document_suffix(key)
     if suffix == "json":
+        text = raw.decode("utf-8")
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError as exc:
             raise ValueError(f"invalid JSON document: {key}") from exc
-        return json.dumps(parsed, ensure_ascii=True, sort_keys=True, indent=2)
+        normalized = json.dumps(parsed, ensure_ascii=True, sort_keys=True, indent=2)
+        return ParsedS3Document(text=normalized, source_suffix=suffix)
     if suffix in {"md", "markdown", "txt", "csv", "log"} or suffix == "":
-        return text
+        return ParsedS3Document(text=raw.decode("utf-8"), source_suffix=suffix)
+    if is_media_suffix(suffix):
+        media_limit = limit
+        if config is not None:
+            media_limit = min(
+                media_limit,
+                int(config_value(config, "KB_EXTRACT_MAX_BYTES", 10_485_760)),
+            )
+        if len(raw) > media_limit:
+            raise ValueError(f"RAG media document exceeds configured size limit: {key}")
+        extraction = extract_kb_document(
+            raw,
+            suffix=suffix,
+            config=config or _DEFAULT_EXTRACT_CONFIG,
+            textract_client=textract_client,
+        )
+        return ParsedS3Document(
+            text=extraction.text,
+            extraction_status=extraction.extraction_status,
+            extraction_detail=extraction.extraction_detail,
+            source_suffix=extraction.source_suffix,
+        )
     raise ValueError(f"unsupported RAG document type: {suffix}")
 
 
@@ -190,10 +236,12 @@ def build_rag_documents(
     bedrock_client: Any,
     manifest_bucket: str,
     manifest_key: str,
+    extraction_metadata: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Chunk, embed, and attach complete source provenance to one document."""
 
     chunks = chunk_text(text, max_chars=int(config_value(config, "RAG_CHUNK_MAX_CHARS", 2500)))
+    metadata = dict(extraction_metadata or {})
     documents: list[dict[str, Any]] = []
     for ordinal, chunk in enumerate(chunks):
         document_id = stable_document_id(
@@ -204,29 +252,30 @@ def build_rag_documents(
             source.version_id or source.etag,
             str(ordinal),
         )
-        documents.append(
-            {
-                "document_id": document_id,
-                "text": chunk,
-                "search_text": chunk,
-                "embedding": embed_text(chunk, config, bedrock_client),
-                "tenant_id": manifest.tenant_id,
-                "corpus_id": manifest.corpus_id,
-                "active": True,
-                "source_bucket": source.bucket,
-                "source_key": source.key,
-                "source_version_id": source.version_id,
-                "source_etag": source.etag,
-                "source_file": source.source_file,
-                "manifest_id": manifest.manifest_id,
-                "manifest_version": manifest.manifest_version,
-                "manifest_bucket": manifest_bucket,
-                "manifest_key": manifest_key,
-                "chunk_ordinal": ordinal,
-                "embedding_model": str(getattr(config, "CASE_QA_EMBEDDING_MODEL", "")),
-                "created_at": _utc_now(),
-            }
-        )
+        document = {
+            "document_id": document_id,
+            "text": chunk,
+            "search_text": chunk,
+            "embedding": embed_text(chunk, config, bedrock_client),
+            "tenant_id": manifest.tenant_id,
+            "corpus_id": manifest.corpus_id,
+            "active": True,
+            "source_bucket": source.bucket,
+            "source_key": source.key,
+            "source_version_id": source.version_id,
+            "source_etag": source.etag,
+            "source_file": source.source_file,
+            "manifest_id": manifest.manifest_id,
+            "manifest_version": manifest.manifest_version,
+            "manifest_bucket": manifest_bucket,
+            "manifest_key": manifest_key,
+            "chunk_ordinal": ordinal,
+            "embedding_model": str(getattr(config, "CASE_QA_EMBEDDING_MODEL", "")),
+            "created_at": _utc_now(),
+        }
+        if metadata:
+            document["extraction_metadata"] = metadata
+        documents.append(document)
     return documents
 
 
@@ -379,6 +428,137 @@ def index_case_chunks(
     )
 
 
+def closed_ticket_chunk_document(
+    *,
+    chunk: Any,
+    embedding: list[float],
+    bucket: str,
+    version_key: str,
+    tenant_id: str,
+    content_hash: str | None = None,
+) -> dict[str, Any]:
+    """Convert one closed-ticket chunk into the shared OpenSearch document shape."""
+
+    ticket_id = str(getattr(chunk, "ticket_id", "") or "").strip()
+    chunk_id = str(getattr(chunk, "chunk_id", "") or "").strip()
+    if not ticket_id or not chunk_id or not tenant_id.strip():
+        raise ValueError("closed ticket OpenSearch documents require tenant, ticket, and chunk IDs")
+    metadata = getattr(chunk, "metadata", None)
+    metadata_dict = dict(metadata) if isinstance(metadata, dict) else {}
+    if content_hash:
+        metadata_dict.setdefault("content_hash", content_hash)
+    return {
+        "document_id": chunk_id,
+        "chunk_id": chunk_id,
+        "ticket_id": ticket_id,
+        "tenant_id": tenant_id,
+        "corpus_id": "closed_tickets",
+        "active": True,
+        "text": str(getattr(chunk, "text", "")),
+        "search_text": str(getattr(chunk, "search_text", "")),
+        "embedding": embedding,
+        "embedding_model": str(getattr(chunk, "embedding_model", "")),
+        "source_bucket": bucket,
+        "source_key": version_key,
+        "source_file": metadata_dict.get("ticket_number") or ticket_id,
+        "section": str(getattr(chunk, "section", "")),
+        "field_path": str(getattr(chunk, "field_path", "")),
+        "metadata": metadata_dict,
+        "created_at": _utc_now(),
+    }
+
+
+def index_closed_ticket_chunks(
+    *,
+    index: str,
+    ticket_id: str,
+    tenant_id: str,
+    documents: Iterable[dict[str, Any]],
+    adapter: Any,
+    batch_size: int = 100,
+) -> int:
+    """Replace one ticket's active OpenSearch chunks without leaving duplicate actives."""
+
+    pending_documents = list(documents)
+    if hasattr(adapter, "ensure_vector_index"):
+        dimensions = len(pending_documents[0].get("embedding", [])) if pending_documents else 1
+        adapter.ensure_vector_index(index=index, dimensions=dimensions)
+    previous_document_ids = active_closed_ticket_document_ids(
+        index=index,
+        tenant_id=tenant_id,
+        ticket_id=ticket_id,
+        adapter=adapter,
+    )
+    indexed_count = index_documents(
+        index=index,
+        documents=pending_documents,
+        adapter=adapter,
+        batch_size=batch_size,
+    )
+    current_document_ids = {str(document["document_id"]) for document in pending_documents}
+    tombstone_documents(
+        index=index,
+        document_ids=(
+            document_id
+            for document_id in previous_document_ids
+            if document_id not in current_document_ids
+        ),
+        adapter=adapter,
+    )
+    return indexed_count
+
+
+def tombstone_closed_ticket_chunks(
+    *,
+    index: str,
+    tenant_id: str,
+    ticket_id: str,
+    adapter: Any,
+) -> int:
+    """Tombstone all active chunks for one closed ticket within tenant scope."""
+
+    return tombstone_documents(
+        index=index,
+        document_ids=active_closed_ticket_document_ids(
+            index=index,
+            tenant_id=tenant_id,
+            ticket_id=ticket_id,
+            adapter=adapter,
+        ),
+        adapter=adapter,
+    )
+
+
+def active_closed_ticket_document_ids(
+    *,
+    index: str,
+    tenant_id: str,
+    ticket_id: str,
+    adapter: Any,
+) -> list[str]:
+    """Return active chunk IDs for one closed ticket within its tenant and corpus."""
+
+    response = adapter.search(
+        index=index,
+        query={
+            "query": {
+                "bool": {
+                    "filter": [
+                        {"term": {"tenant_id.keyword": tenant_id}},
+                        {"term": {"corpus_id.keyword": "closed_tickets"}},
+                        {"term": {"ticket_id.keyword": ticket_id}},
+                        {"term": {"active": True}},
+                    ]
+                }
+            },
+            "_source": False,
+        },
+        size=10_000,
+    )
+    hits = response.get("hits", {}).get("hits", []) if isinstance(response, dict) else []
+    return [str(hit.get("_id", "")) for hit in hits if isinstance(hit, dict) and hit.get("_id")]
+
+
 def ingest_manifest(
     *,
     manifest_bucket: str,
@@ -389,10 +569,16 @@ def ingest_manifest(
     s3_client: Any,
     bedrock_client: Any,
     adapter: Any,
+    textract_client: Any | None = None,
 ) -> IngestionResult:
     """Import one exact manifest and tombstone superseded source versions."""
 
     from .opensearch_retrieval import config_value
+
+    if textract_client is None:
+        from .aws_clients import textract_client as _textract_client_factory
+
+        textract_client = _textract_client_factory()
 
     configured_bucket = str(config_value(config, "RAG_SOURCE_BUCKET", "")).strip()
     configured_tenant = str(config_value(config, "RAG_TENANT_ID", "")).strip()
@@ -433,6 +619,7 @@ def ingest_manifest(
     tombstoned_count = 0
     total_source_bytes = 0
     total_embeddings = 0
+    extraction_reports: list[dict[str, Any]] = []
     max_total_source_bytes = int(
         config_value(config, "RAG_INGEST_MAX_TOTAL_SOURCE_BYTES", 52_428_800)
     )
@@ -453,14 +640,38 @@ def ingest_manifest(
                 adapter=adapter,
             )
             continue
-        text = parse_s3_document(
+        parsed = parse_s3_document(
             bucket=source.bucket,
             key=source.key,
             s3_client=s3_client,
             version_id=source.version_id,
             etag=source.etag,
             max_bytes=max_bytes,
+            config=config,
+            textract_client=textract_client,
         )
+        report_entry = {
+            "source_key": source.key,
+            "source_file": source.source_file,
+            "source_suffix": parsed.source_suffix,
+            "extraction_status": parsed.extraction_status,
+            "extraction_detail": parsed.extraction_detail,
+            "indexed": False,
+        }
+        if not parsed.text.strip():
+            if parsed.extraction_status in FAIL_SOFT_STATUSES:
+                extraction_reports.append(report_entry)
+                continue
+            detail = parsed.extraction_detail or parsed.extraction_status
+            raise ValueError(f"RAG document produced no indexable text: {source.key} ({detail})")
+        report_entry["indexed"] = True
+        extraction_reports.append(report_entry)
+        text = parsed.text
+        extraction_metadata = {
+            "extraction_status": parsed.extraction_status,
+            "extraction_detail": parsed.extraction_detail,
+            "source_suffix": parsed.source_suffix,
+        }
         total_source_bytes += len(text.encode("utf-8"))
         if total_source_bytes > max_total_source_bytes:
             raise ValueError("RAG manifest exceeds configured total source byte limit")
@@ -478,6 +689,7 @@ def ingest_manifest(
             bedrock_client=bedrock_client,
             manifest_bucket=manifest_bucket,
             manifest_key=manifest_key,
+            extraction_metadata=extraction_metadata,
         )
         previous_document_ids = active_source_document_ids(
             index=index,
@@ -505,6 +717,7 @@ def ingest_manifest(
         indexed_count=indexed_count,
         source_count=len(manifest.documents),
         tombstoned_count=tombstoned_count,
+        extraction_reports=tuple(extraction_reports),
     )
 
 
@@ -597,6 +810,13 @@ def _get_exact_object(
     return response
 
 
+def _document_suffix(key: str) -> str:
+    filename = key.rsplit("/", 1)[-1].lower()
+    if "." not in filename:
+        return ""
+    return filename.rsplit(".", 1)[-1]
+
+
 def _index_for_corpus(corpus_id: str, config: Any) -> str:
     from .opensearch_retrieval import config_value
 
@@ -610,6 +830,9 @@ def _index_for_corpus(corpus_id: str, config: Any) -> str:
     elif normalized in {"elastic", "elasticsearch", "elastic_dictionary"}:
         name = "OPENSEARCH_ELASTIC_INDEX"
         default = "notable-elastic-dictionary"
+    elif normalized in {"closed_tickets", "closed_ticket"}:
+        name = "OPENSEARCH_CLOSED_TICKET_INDEX"
+        default = "closed_tickets"
     else:
         raise ValueError(f"unsupported RAG corpus_id: {corpus_id}")
     return str(config_value(config, name, default)).strip()

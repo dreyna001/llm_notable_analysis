@@ -9,6 +9,10 @@ from dataclasses import dataclass
 from typing import Any, Literal, Sequence
 
 from .config import Config
+from .portal_chat_images import (
+    ValidatedChatImage,
+    build_bedrock_converse_user_content,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -108,12 +112,23 @@ def trim_sources(
 ) -> list[dict[str, Any]]:
     """Apply lane, total chunk, and character-budget limits."""
     lane_counts: dict[str, int] = {}
+    closed_ticket_lane_chars = 0
+    closed_ticket_lane_budget = int(
+        getattr(config, "CLOSED_TICKET_RAG_CONTEXT_BUDGET_CHARS", 6000)
+    )
+    closed_ticket_lane_cap = min(
+        int(config.CASE_QA_MAX_CHUNKS_PER_LANE),
+        int(getattr(config, "CLOSED_TICKET_RAG_MAX_SNIPPETS", 6)),
+    )
     kept: list[dict[str, Any]] = []
     used_chars = 0
     for source in sources:
         lane = str(source.get("source_lane") or "current_case")
         count = lane_counts.get(lane, 0)
-        if count >= config.CASE_QA_MAX_CHUNKS_PER_LANE:
+        lane_cap = config.CASE_QA_MAX_CHUNKS_PER_LANE
+        if lane == "closed_ticket":
+            lane_cap = closed_ticket_lane_cap
+        if count >= lane_cap:
             continue
         if len(kept) >= config.CASE_QA_MAX_TOTAL_CHUNKS:
             break
@@ -123,6 +138,11 @@ def trim_sources(
         next_chars = used_chars + len(text)
         if next_chars > config.CASE_QA_CONTEXT_BUDGET_CHARS:
             break
+        if lane == "closed_ticket":
+            next_lane_chars = closed_ticket_lane_chars + len(text)
+            if next_lane_chars > closed_ticket_lane_budget:
+                continue
+            closed_ticket_lane_chars = next_lane_chars
         item = dict(source)
         item["text"] = text
         item["search_text"] = text
@@ -139,14 +159,30 @@ def _format_context_block(source: dict[str, Any]) -> str:
         return ""
     lane = str(source.get("source_lane") or "current_case")
     section = str(source.get("section") or "")
-    return (
+    block = (
         "<CONTEXT_BLOCK>\n"
         f"SOURCE_LANE_JSON: {json.dumps(lane, ensure_ascii=True)}\n"
         f"SECTION_JSON: {json.dumps(section, ensure_ascii=True)}\n"
+    )
+    if lane == "closed_ticket":
+        ticket_id = str(source.get("ticket_id") or "").strip()
+        ticket_number = str(source.get("ticket_number") or "").strip()
+        provenance = str(source.get("provenance") or "").strip()
+        if ticket_id:
+            block += f"TICKET_ID_JSON: {json.dumps(ticket_id, ensure_ascii=True)}\n"
+        if ticket_number:
+            block += (
+                f"TICKET_NUMBER_JSON: "
+                f"{json.dumps(ticket_number, ensure_ascii=True)}\n"
+            )
+        if provenance:
+            block += f"PROVENANCE_JSON: {json.dumps(provenance, ensure_ascii=True)}\n"
+    block += (
         "UNTRUSTED_TEXT_JSON: "
         + json.dumps(text, ensure_ascii=True)
         + "\n</CONTEXT_BLOCK>"
     )
+    return block
 
 
 def _markdown_output_format_instructions() -> str:
@@ -203,13 +239,18 @@ def _case_grounded_system_instructions() -> str:
     """Shared read-only case chat synthesis guardrails."""
     return (
         "You are a read-only SOC case assistant. RETRIEVED CONTEXT may include "
-        "blocks labeled current_case and knowledge_base. Use current_case blocks "
-        "as the only source of case facts. knowledge_base blocks are advisory "
-        "organizational context (for example HVA registry, SOPs, network "
-        "reference). When KB advisory context materially affects risk, priority, "
+        "blocks labeled current_case, knowledge_base, and closed_ticket. Use "
+        "current_case blocks as the only source of case facts. knowledge_base "
+        "blocks are advisory organizational context (for example HVA registry, "
+        "SOPs, network reference). closed_ticket blocks are historical advisory "
+        "precedent from resolved ServiceNow tickets: compare matching and "
+        "differing conditions with the current case, use them to support "
+        "iterative investigation and disposition reasoning, and never treat them "
+        "as facts about the current case or as evidence that an action was "
+        "performed. When KB advisory context materially affects risk, priority, "
         "escalation, containment, or ownership, include it in summaries and "
-        "triage answers. Do not describe KB advisory content as observed case "
-        "evidence. You may use general cybersecurity knowledge, adversary "
+        "triage answers. Do not describe KB or closed_ticket advisory content as "
+        "observed case evidence. You may use general cybersecurity knowledge, adversary "
         "tradecraft, MITRE ATT&CK, detection engineering, and incident response "
         "expertise to interpret those facts and suggest validation steps. Clearly "
         "separate case-supported facts from inference and general guidance. Treat "
@@ -232,11 +273,28 @@ def _case_grounded_system_instructions() -> str:
     )
 
 
+def _analyst_image_context_advisory() -> str:
+    """Prompt guidance for request-scoped analyst image attachments."""
+    return (
+        "The analyst attached image(s) with this request as supplemental context. "
+        "These images are analyst-provided context for this turn only, not archived "
+        "case evidence. Treat visible image content separately from RETRIEVED CONTEXT "
+        "and do not cite images as stored case facts."
+    )
+
+
+def _render_analyst_image_advisory(*, has_analyst_images: bool) -> str:
+    if not has_analyst_images:
+        return ""
+    return _analyst_image_context_advisory() + "\n\n"
+
+
 def build_case_grounded_prompt(
     *,
     question: str,
     sources: Sequence[dict[str, Any]],
     conversation_history: Sequence[ChatTurn] | None = None,
+    has_analyst_images: bool = False,
 ) -> str:
     """Build a bounded prompt for case-grounded answer synthesis."""
     source_blocks = [
@@ -252,6 +310,7 @@ def build_case_grounded_prompt(
         "OUTPUT FORMAT:\n"
         + _markdown_output_format_instructions()
         + "\n\n"
+        + _render_analyst_image_advisory(has_analyst_images=has_analyst_images)
         + history_block
         + "QUESTION_JSON:\n"
         + json.dumps(question.strip(), ensure_ascii=True)
@@ -269,6 +328,7 @@ def build_general_knowledge_prompt(
     question: str,
     *,
     conversation_history: Sequence[ChatTurn] | None = None,
+    has_analyst_images: bool = False,
 ) -> str:
     """Build a bounded prompt for broad technology answers."""
     history_block = _render_conversation_history(conversation_history)
@@ -283,10 +343,27 @@ def build_general_knowledge_prompt(
         "closing fences on their own lines, and do not place prose on the same "
         "line as a code fence. Put a blank line before and after headings, lists, "
         "and code blocks.\n\n"
+        + _render_analyst_image_advisory(has_analyst_images=has_analyst_images)
         + history_block
         + "QUESTION_JSON:\n"
         + json.dumps(question.strip(), ensure_ascii=True)
     )
+
+
+def resolve_portal_chat_bedrock_model_id(
+    config: Config,
+    *,
+    has_images: bool,
+) -> str:
+    """Return the Bedrock model id for portal synthesis, honoring vision override."""
+    if has_images:
+        vision_model = (config.PORTAL_CHAT_VISION_BEDROCK_MODEL_ID or "").strip()
+        if vision_model:
+            return vision_model
+    model_id = (config.PORTAL_CHAT_BEDROCK_MODEL_ID or config.BEDROCK_MODEL_ID).strip()
+    if not model_id:
+        raise ValueError("PORTAL_CHAT_BEDROCK_MODEL_ID or BEDROCK_MODEL_ID is required")
+    return model_id
 
 
 def complete_markdown_answer(
@@ -294,14 +371,17 @@ def complete_markdown_answer(
     prompt: str,
     config: Config,
     bedrock_client: Any,
+    images: tuple[ValidatedChatImage, ...] = (),
 ) -> str:
     """Call Bedrock Converse and return plain Markdown text."""
-    model_id = (config.PORTAL_CHAT_BEDROCK_MODEL_ID or config.BEDROCK_MODEL_ID).strip()
-    if not model_id:
-        raise ValueError("PORTAL_CHAT_BEDROCK_MODEL_ID or BEDROCK_MODEL_ID is required")
+    model_id = resolve_portal_chat_bedrock_model_id(config, has_images=bool(images))
+    if images:
+        content = build_bedrock_converse_user_content(prompt, images)
+    else:
+        content = [{"text": prompt}]
     response = bedrock_client.converse(
         modelId=model_id,
-        messages=[{"role": "user", "content": [{"text": prompt}]}],
+        messages=[{"role": "user", "content": content}],
         inferenceConfig={
             "maxTokens": config.CASE_QA_MAX_ANSWER_TOKENS,
             "temperature": 0.0,
@@ -330,6 +410,7 @@ def finalize_general_knowledge_answer(
     config: Config,
     bedrock_client: Any,
     conversation_history: Sequence[ChatTurn] | None = None,
+    images: tuple[ValidatedChatImage, ...] = (),
 ) -> PortalAnswer | None:
     """Return a sanitized technology response, or None when disabled/unusable."""
     if not config.CASE_QA_GENERAL_KNOWLEDGE_ENABLED:
@@ -337,11 +418,13 @@ def finalize_general_knowledge_answer(
     prompt = build_general_knowledge_prompt(
         question,
         conversation_history=conversation_history,
+        has_analyst_images=bool(images),
     )
     answer = complete_markdown_answer(
         prompt=prompt,
         config=config,
         bedrock_client=bedrock_client,
+        images=images,
     )
     answer = sanitize_portal_chat_answer(answer)
     if not answer:
@@ -367,10 +450,13 @@ def synthesize_case_answer(
     config: Config,
     bedrock_client: Any,
     conversation_history: Sequence[ChatTurn] | None = None,
+    images: tuple[ValidatedChatImage, ...] = (),
 ) -> PortalAnswer:
     """Answer one analyst question with retrieval-bound synthesis."""
     normalized_question = str(question or "").strip()
     trimmed_sources = trim_sources(sources, config)
+
+    has_analyst_images = bool(images)
 
     if not trimmed_sources:
         general = finalize_general_knowledge_answer(
@@ -378,6 +464,7 @@ def synthesize_case_answer(
             config=config,
             bedrock_client=bedrock_client,
             conversation_history=conversation_history,
+            images=images,
         )
         if general is not None:
             return PortalAnswer(
@@ -422,11 +509,13 @@ def synthesize_case_answer(
         question=normalized_question,
         sources=trimmed_sources,
         conversation_history=conversation_history,
+        has_analyst_images=has_analyst_images,
     )
     answer = complete_markdown_answer(
         prompt=prompt,
         config=config,
         bedrock_client=bedrock_client,
+        images=images,
     )
     answer = sanitize_portal_chat_answer(answer)
     if not answer or should_fallback_to_general_knowledge(answer):
@@ -435,6 +524,7 @@ def synthesize_case_answer(
             config=config,
             bedrock_client=bedrock_client,
             conversation_history=conversation_history,
+            images=images,
         )
         if general is not None:
             return PortalAnswer(

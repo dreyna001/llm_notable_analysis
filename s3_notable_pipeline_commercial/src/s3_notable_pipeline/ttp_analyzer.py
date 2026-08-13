@@ -17,6 +17,10 @@ import boto3
 from botocore.exceptions import ClientError
 from botocore.config import Config
 
+from .historical_closed_ticket_grounding import (
+    HISTORICAL_CLOSED_TICKET_RULES,
+    format_historical_closed_tickets_prompt_block,
+)
 from .verdicts import ALLOWED_VERDICTS, normalize_verdict
 
 # Configure logging
@@ -1166,6 +1170,7 @@ class BedrockAnalyzer:
         *,
         use_tool: bool,
         advisory_context: Optional[str] = None,
+        historical_closed_tickets_context: Optional[str] = None,
     ) -> str:
         """Assemble the full prompt from modular sections.
 
@@ -1173,6 +1178,8 @@ class BedrockAnalyzer:
             alert_text: Formatted alert text to analyze.
             alert_time: Optional ISO timestamp of the alert.
             use_tool: Whether to use tool-calling mode (affects output schema instructions).
+            advisory_context: Optional SOC operational RAG context block.
+            historical_closed_tickets_context: Optional closed-ticket advisory block.
 
         Returns:
             Complete prompt string for LLM.
@@ -1186,6 +1193,9 @@ class BedrockAnalyzer:
             )
         else:
             soc_context_block = "SOC_OPERATIONAL_CONTEXT\n(none)\n"
+        historical_block = format_historical_closed_tickets_prompt_block(
+            historical_closed_tickets_context or ""
+        )
 
         return f"""You are a cybersecurity expert producing a structured SOC analysis from a single alert.
 
@@ -1219,6 +1229,12 @@ SECURITY ALERT INPUT:
 {soc_context_block}
 
 {SOC_CONTEXT_RULES}
+
+---
+
+{historical_block}
+
+{HISTORICAL_CLOSED_TICKET_RULES}
 
 ---
 
@@ -1403,6 +1419,7 @@ SECURITY ALERT INPUT:
         alert_text: str,
         alert_time: Optional[str] = None,
         advisory_context: Optional[str] = None,
+        historical_closed_tickets_context: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Analyze one alert and return validated scored TTP entries."""
         logger.info("Starting TTP analysis")
@@ -1415,12 +1432,14 @@ SECURITY ALERT INPUT:
             alert_time,
             use_tool=True,
             advisory_context=advisory_context,
+            historical_closed_tickets_context=historical_closed_tickets_context,
         )
         prompt_raw = self._build_prompt(
             alert_text,
             alert_time,
             use_tool=False,
             advisory_context=advisory_context,
+            historical_closed_tickets_context=historical_closed_tickets_context,
         )
 
         if not alert_text or not alert_text.strip():

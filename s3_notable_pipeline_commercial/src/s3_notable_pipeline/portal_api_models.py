@@ -60,6 +60,9 @@ class PortalCapabilitiesResponse(BaseModel):
     max_chat_sessions_per_user: int
     case_retention_days: int
     chat_ready: bool
+    chat_images_enabled: bool = False
+    max_chat_image_bytes: int = 750_000
+    max_chat_images: int = 1
     chat_dependency_status: ChatDependencyStatusResponse | None = None
     chat_degraded_reason: str | None = None
 

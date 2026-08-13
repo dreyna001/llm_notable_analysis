@@ -7,35 +7,36 @@ _Last updated: 2026-08-13. Normative parity contract:
 
 - [ ] Add an explicit AWS analyzer backlog queue: change direct S3 `ObjectCreated` -> Lambda analyzer intake to S3 -> SQS -> Lambda so concurrency caps create queue depth instead of relying on S3/Lambda redelivery as the backlog mechanism.
 
-## Next parity block — closed-ticket RAG + rich KB ingest (on-prem shipped, AWS backlog)
+## Next parity block — closed-ticket RAG + rich KB ingest (shipped on feature branch)
 
-Single implementation epic for on-prem **customer-default** gaps still missing on commercial AWS.
-Phases **P2–P7** in [`COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md`](COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md).
+Implementation epic for on-prem **customer-default** gaps — **P1–P8 code complete** on
+`feature/commercial-aws-onprem-parity`. Phases documented in
+[`COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md`](COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md).
 On-prem reference: [`IMAGE_INGEST_PREREQUISITES.md`](../../../llm_notable_analysis_onprem_systemd/docs/operations/rag/IMAGE_INGEST_PREREQUISITES.md),
 [`CLOSED_TICKET_RAG_PLAN.md`](../../../llm_notable_analysis_onprem_systemd/docs/planning/CLOSED_TICKET_RAG_PLAN.md).
 
-- [ ] **Rich KB ingest (P2)** — PDF, DOCX embedded images, standalone images in RAG manifests.
+- [x] **Rich KB ingest (P2)** — PDF, DOCX embedded images, standalone images in RAG manifests.
   On-prem: `corpus_ingest` + `IMAGE_INGEST_*` (Tesseract, PDFium, optional vision).
-  AWS today: `rag_ingestion.py` accepts json/md/txt/csv/log only.
-- [ ] **Closed-ticket ServiceNow sync (P3)** — raw closed tickets, journals, attachments (not disposition sync).
-- [ ] **Closed-ticket chunk + OpenSearch index (P4)** — render/chunk/embed advisory lane.
-- [ ] **Closed-ticket analysis RAG (P5)** — fail-soft grounding in analyzer before Bedrock.
-- [ ] **Portal closed-ticket chat lane (P6)** — merge with case + KB retrieval in portal chat.
-- [ ] **Closed-ticket attachment vision/OCR (P7)** — on-prem uses Tesseract + loopback vision; AWS target Bedrock multimodal or Textract.
+  AWS: `kb_document_extract.py` + Textract for images; pypdf/python-docx for PDF/DOCX.
+- [x] **Closed-ticket ServiceNow sync (P3)** — raw closed tickets, journals, attachments (not disposition sync).
+- [x] **Closed-ticket chunk + OpenSearch index (P4)** — render/chunk/embed advisory lane.
+- [x] **Closed-ticket analysis RAG (P5)** — fail-soft grounding in analyzer before Bedrock.
+- [x] **Portal closed-ticket chat lane (P6)** — merge with case + KB retrieval in portal chat.
+- [x] **Closed-ticket attachment vision/OCR (P7)** — Textract OCR for PNG/JPEG/PDF during embed when `CLOSED_TICKET_VISION_ENABLED=true`; fail-soft; reuses `KB_EXTRACT_*` limits.
 
 Related (same parity program, separate phases):
 
-- [ ] **RAG rerank wired (P1)** — on-prem Granite reranker shipped; AWS `RAG_RERANK_ENABLED` not wired to OpenSearch retrieval.
-- [ ] **Portal chat image uploads (P8)** — on-prem shipped; AWS OpenAPI scaffold only.
+- [x] **RAG rerank wired (P1)** — Bedrock rerank after OpenSearch hybrid fetch when `RAG_RERANK_ENABLED=true`; fail-soft with `rerank_status` logging.
+- [x] **Portal chat image uploads (P8)** — AWS backend shipped; opt-in via `CaseQaChatImagesEnabled=true` and multimodal Bedrock model.
 
 ## Parity snapshot (on-prem vs this tree)
 
 | Gap | On-prem | Commercial AWS (`s3_notable_pipeline_commercial`) |
 | --- | --- | --- |
-| Rich KB ingest (PDF/DOCX/images) | Shipped (`IMAGE_INGEST_*`) | Backlog P2 |
-| Closed-ticket RAG (sync + analysis + portal) | Shipped | Backlog P3–P7 |
-| Portal chat image uploads | Shipped | Backlog P8 |
-| RAG rerank at runtime | Shipped | Backlog P1 |
+| Rich KB ingest (PDF/DOCX/images) | Shipped (`IMAGE_INGEST_*`) | **Shipped** (P2) |
+| Closed-ticket RAG (sync + analysis + portal) | Shipped | **Shipped** (P3–P7 closed-ticket vertical slice) |
+| Portal chat image uploads | Shipped | **Shipped** (P8; opt-in via `CaseQaChatImagesEnabled`) |
+| RAG rerank at runtime | Shipped | **Shipped** (P1) |
 | Customer-default SAM preset | Shipped (on-prem doc) | **Shipped** (P0) |
 | Gzip notable intake | Planned | Shipped |
 

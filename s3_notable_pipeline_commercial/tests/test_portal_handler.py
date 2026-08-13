@@ -315,6 +315,37 @@ class PortalHandlerTests(unittest.TestCase):
         body = json.loads(response["body"])
         self.assertTrue(body["chat_ready"])
         self.assertEqual(body["chat_dependency_status"]["embeddings"], "ready")
+        self.assertFalse(body["chat_images_enabled"])
+        self.assertEqual(body["max_chat_images"], 1)
+        self.assertEqual(body["max_chat_image_bytes"], 750_000)
+
+    def test_chat_rejects_images_when_feature_disabled(self) -> None:
+        with patch.object(
+            portal_handler,
+            "load_config",
+            return_value=portal_config(
+                CASE_QA_ENABLED=True,
+                CASE_EMBED_LAMBDA_NAME="notable-case-embed",
+            ),
+        ):
+            request = event("/api/chat", "POST")
+            request["body"] = json.dumps(
+                {
+                    "mode": "selected_case",
+                    "selected_case_id": "case-1",
+                    "question": "What is in this screenshot?",
+                    "images": [
+                        {
+                            "media_type": "image/png",
+                            "data_base64": "aGVsbG8=",
+                        }
+                    ],
+                }
+            )
+            response = portal_handler.handler(request, None)
+
+        self.assertEqual(response["statusCode"], 400)
+        self.assertIn("Chat images are not enabled", json.loads(response["body"])["error"])
 
     def test_chat_readiness_returns_ready_when_dependencies_available(self) -> None:
         config = portal_config(

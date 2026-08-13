@@ -181,6 +181,7 @@ class Config:
     OPENSEARCH_SOC_INDEX: str = "notable-soc-knowledge"
     OPENSEARCH_SPLUNK_INDEX: str = "notable-splunk-dictionary"
     OPENSEARCH_ELASTIC_INDEX: str = "notable-elastic-dictionary"
+    OPENSEARCH_CLOSED_TICKET_INDEX: str = "closed_tickets"
     RAG_SOURCE_BUCKET: str = ""
     RAG_SOURCE_PREFIX: str = "rag-sources"
     RAG_INGEST_QUEUE_URL: str = ""
@@ -189,6 +190,9 @@ class Config:
     RAG_INGEST_MAX_DOCUMENTS_PER_MANIFEST: int = 100
     RAG_INGEST_MAX_TOTAL_SOURCE_BYTES: int = 52_428_800
     RAG_INGEST_MAX_EMBEDDINGS_PER_MANIFEST: int = 2_000
+    KB_EXTRACT_MAX_BYTES: int = 10_485_760
+    KB_EXTRACT_MAX_PDF_PAGES: int = 50
+    KB_EXTRACT_MAX_OUTPUT_CHARS: int = 12_000
 
     SPLUNK_BASE_URL: str = ""
     SPLUNK_API_TOKEN_SECRET_ARN: str = ""
@@ -266,6 +270,32 @@ class Config:
     DISPOSITION_TABLE: str = ""
     DISPOSITION_SYNC_STATE_TABLE: str = ""
 
+    SERVICENOW_CLOSED_TICKET_SYNC_ENABLED: bool = False
+    SERVICENOW_CLOSED_TICKET_TOKEN: str = ""
+    SERVICENOW_CLOSED_TICKET_TOKEN_SECRET_ARN: str = ""
+    SERVICENOW_CLOSED_TICKET_TABLE: str = "sn_si_incident"
+    SERVICENOW_CLOSED_TICKET_QUERY: str = ""
+    SERVICENOW_CLOSED_TICKET_BACKFILL_DAYS: int = 30
+    SERVICENOW_CLOSED_TICKET_CURSOR_OVERLAP_HOURS: int = 24
+    SERVICENOW_CLOSED_TICKET_RECONCILE_INTERVAL_DAYS: int = 7
+    SERVICENOW_CLOSED_TICKET_FETCH_JOURNALS: bool = True
+    SERVICENOW_CLOSED_TICKET_FETCH_ATTACHMENTS: bool = True
+    CLOSED_TICKET_RETENTION_DAYS: int = 30
+    CLOSED_TICKET_ATTACHMENT_MAX_BYTES: int = 10 * 1024 * 1024
+    CLOSED_TICKET_RAW_PREFIX: str = "closed_tickets"
+    CLOSED_TICKET_ARCHIVE_BUCKET: str = ""
+    CLOSED_TICKET_SYNC_STATE_TABLE: str = ""
+    CLOSED_TICKET_REGISTRY_TABLE: str = ""
+    CLOSED_TICKET_EMBED_ENABLED: bool = False
+    CLOSED_TICKET_VISION_ENABLED: bool = False
+    CLOSED_TICKET_EMBED_BATCH_SIZE: int = 100
+    CLOSED_TICKET_MAX_INDEX_CHUNKS_PER_TICKET: int = 120
+    CLOSED_TICKET_EMBED_LAMBDA_NAME: str = ""
+    CLOSED_TICKET_RAG_ENABLED: bool = False
+    CLOSED_TICKET_RAG_MAX_SNIPPETS: int = 6
+    CLOSED_TICKET_RAG_MAX_TICKETS: int = 5
+    CLOSED_TICKET_RAG_CONTEXT_BUDGET_CHARS: int = 6000
+
     SIDE_EFFECT_IDEMPOTENCY_ENABLED: bool = False
     SIDE_EFFECT_IDEMPOTENCY_TABLE: str = ""
     SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS: int = 30
@@ -298,6 +328,7 @@ class Config:
     PORTAL_CHAT_FUNCTION_URL_ENABLED: bool = True
     PORTAL_CHAT_MAX_CONCURRENCY: int = 18
     PORTAL_CHAT_BEDROCK_MODEL_ID: str = ""
+    PORTAL_CHAT_VISION_BEDROCK_MODEL_ID: str = ""
     PORTAL_READINESS_TIMEOUT_SECONDS: int = 2
 
     CASE_QA_ENABLED: bool = False
@@ -322,6 +353,13 @@ class Config:
     CASE_QA_MAX_STORED_MESSAGE_BYTES: int = 4_000
     CASE_QA_MAX_CONVERSATION_TURNS: int = 10
     CASE_QA_MAX_CONVERSATION_CHARS: int = 6_000
+    CASE_QA_CHAT_IMAGES_ENABLED: bool = False
+    CASE_QA_MAX_CHAT_IMAGES: int = 1
+    CASE_QA_MAX_CHAT_IMAGE_BYTES: int = 750_000
+    CASE_QA_MAX_CHAT_IMAGE_DIMENSION: int = 4096
+    CASE_QA_MAX_CHAT_IMAGE_PIXELS: int = 16_777_216
+    CASE_QA_CLOSED_TICKET_ENABLED: bool = False
+    CASE_QA_CLOSED_TICKET_MAX_TICKETS: int = 5
     CHAT_SESSIONS_TABLE: str = ""
     CHAT_MESSAGES_TABLE: str = ""
 
@@ -343,6 +381,9 @@ class Config:
             "RAG_INGEST_MAX_DOCUMENTS_PER_MANIFEST",
             "RAG_INGEST_MAX_TOTAL_SOURCE_BYTES",
             "RAG_INGEST_MAX_EMBEDDINGS_PER_MANIFEST",
+            "KB_EXTRACT_MAX_BYTES",
+            "KB_EXTRACT_MAX_PDF_PAGES",
+            "KB_EXTRACT_MAX_OUTPUT_CHARS",
             "PORTAL_READINESS_TIMEOUT_SECONDS",
         )
         for setting_name in bounded_positive:
@@ -411,7 +452,11 @@ class Config:
                 raise ValueError(
                     "ELASTICSEARCH_ALLOWED_FIELDS is required when Elasticsearch execution is enabled"
                 )
-        if self.SERVICENOW_CREATE_ENABLED or self.SERVICENOW_DISPOSITION_SYNC_ENABLED:
+        if (
+            self.SERVICENOW_CREATE_ENABLED
+            or self.SERVICENOW_DISPOSITION_SYNC_ENABLED
+            or self.SERVICENOW_CLOSED_TICKET_SYNC_ENABLED
+        ):
             self.SERVICENOW_BASE_URL = validate_https_url(
                 self.SERVICENOW_BASE_URL,
                 setting_name="SERVICENOW_BASE_URL",
@@ -432,6 +477,56 @@ class Config:
                 self.DISPOSITION_SYNC_STATE_TABLE = _validate_dynamodb_table_name(
                     self.DISPOSITION_SYNC_STATE_TABLE,
                     setting_name="DISPOSITION_SYNC_STATE_TABLE",
+                )
+        if self.SERVICENOW_CLOSED_TICKET_SYNC_ENABLED:
+            if not str(self.SERVICENOW_CLOSED_TICKET_QUERY or "").strip():
+                raise ValueError(
+                    "SERVICENOW_CLOSED_TICKET_QUERY is required when "
+                    "SERVICENOW_CLOSED_TICKET_SYNC_ENABLED=true"
+                )
+            table = str(self.SERVICENOW_CLOSED_TICKET_TABLE or "").strip()
+            if not re.fullmatch(r"^[a-z0-9_]+$", table):
+                raise ValueError("SERVICENOW_CLOSED_TICKET_TABLE must match [a-z0-9_]+")
+            if self.CLOSED_TICKET_RETENTION_DAYS not in {30, 60, 90}:
+                raise ValueError("CLOSED_TICKET_RETENTION_DAYS must be one of 30, 60, or 90")
+            if self.CLOSED_TICKET_SYNC_STATE_TABLE:
+                self.CLOSED_TICKET_SYNC_STATE_TABLE = _validate_dynamodb_table_name(
+                    self.CLOSED_TICKET_SYNC_STATE_TABLE,
+                    setting_name="CLOSED_TICKET_SYNC_STATE_TABLE",
+                )
+            if self.CLOSED_TICKET_REGISTRY_TABLE:
+                self.CLOSED_TICKET_REGISTRY_TABLE = _validate_dynamodb_table_name(
+                    self.CLOSED_TICKET_REGISTRY_TABLE,
+                    setting_name="CLOSED_TICKET_REGISTRY_TABLE",
+                )
+            bucket = (
+                self.CLOSED_TICKET_ARCHIVE_BUCKET.strip() or self.OUTPUT_BUCKET_NAME.strip()
+            )
+            if not bucket:
+                raise ValueError(
+                    "CLOSED_TICKET_ARCHIVE_BUCKET or OUTPUT_BUCKET_NAME is required when "
+                    "SERVICENOW_CLOSED_TICKET_SYNC_ENABLED=true"
+                )
+        if self.CLOSED_TICKET_EMBED_ENABLED:
+            if not self.OPENSEARCH_ENDPOINT.strip():
+                raise ValueError(
+                    "OPENSEARCH_ENDPOINT is required when CLOSED_TICKET_EMBED_ENABLED=true"
+                )
+            if not self.RAG_TENANT_ID.strip():
+                raise ValueError(
+                    "RAG_TENANT_ID is required when CLOSED_TICKET_EMBED_ENABLED=true"
+                )
+            if not self.CLOSED_TICKET_REGISTRY_TABLE.strip():
+                raise ValueError(
+                    "CLOSED_TICKET_REGISTRY_TABLE is required when CLOSED_TICKET_EMBED_ENABLED=true"
+                )
+            embed_bucket = (
+                self.CLOSED_TICKET_ARCHIVE_BUCKET.strip() or self.OUTPUT_BUCKET_NAME.strip()
+            )
+            if not embed_bucket:
+                raise ValueError(
+                    "CLOSED_TICKET_ARCHIVE_BUCKET or OUTPUT_BUCKET_NAME is required when "
+                    "CLOSED_TICKET_EMBED_ENABLED=true"
                 )
         self.CASE_ARCHIVE_FAILURE_MODE = (
             self.CASE_ARCHIVE_FAILURE_MODE or "suppress"
@@ -486,6 +581,9 @@ class Config:
                     "is required when portal JWT auth is enabled"
                 )
         self.PORTAL_CHAT_BEDROCK_MODEL_ID = self.PORTAL_CHAT_BEDROCK_MODEL_ID.strip()
+        self.PORTAL_CHAT_VISION_BEDROCK_MODEL_ID = (
+            self.PORTAL_CHAT_VISION_BEDROCK_MODEL_ID.strip()
+        )
         if self.CASE_QA_ENABLED and not self.PORTAL_ENABLED:
             raise ValueError("CASE_QA_ENABLED=true requires PORTAL_ENABLED=true")
         self.CASE_EMBED_LAMBDA_NAME = self.CASE_EMBED_LAMBDA_NAME.strip()
@@ -498,7 +596,7 @@ class Config:
             )
         uses_vector_rag = self.RAG_ENABLED or self.SPL_QUERY_RAG_ENABLED or (
             self.ELASTICSEARCH_GROUNDING_ENABLED
-        ) or self.CASE_QA_ENABLED
+        ) or self.CASE_QA_ENABLED or self.CLOSED_TICKET_RAG_ENABLED or self.CLOSED_TICKET_RAG_ENABLED
         if uses_vector_rag and self.RAG_RETRIEVAL_BACKEND == "opensearch":
             if not self.OPENSEARCH_ENDPOINT:
                 raise ValueError(
@@ -605,6 +703,9 @@ def load_config() -> Config:
         OPENSEARCH_ELASTIC_INDEX=os.getenv(
             "OPENSEARCH_ELASTIC_INDEX", "notable-elastic-dictionary"
         ),
+        OPENSEARCH_CLOSED_TICKET_INDEX=os.getenv(
+            "OPENSEARCH_CLOSED_TICKET_INDEX", "closed_tickets"
+        ),
         RAG_SOURCE_BUCKET=os.getenv("RAG_SOURCE_BUCKET", ""),
         RAG_SOURCE_PREFIX=os.getenv("RAG_SOURCE_PREFIX", "rag-sources"),
         RAG_INGEST_QUEUE_URL=os.getenv("RAG_INGEST_QUEUE_URL", ""),
@@ -622,6 +723,15 @@ def load_config() -> Config:
         ),
         RAG_INGEST_MAX_EMBEDDINGS_PER_MANIFEST=_positive_int_env(
             "RAG_INGEST_MAX_EMBEDDINGS_PER_MANIFEST", 2_000, max_value=100_000
+        ),
+        KB_EXTRACT_MAX_BYTES=_positive_int_env(
+            "KB_EXTRACT_MAX_BYTES", 10_485_760, max_value=20_971_520
+        ),
+        KB_EXTRACT_MAX_PDF_PAGES=_positive_int_env(
+            "KB_EXTRACT_MAX_PDF_PAGES", 50, max_value=500
+        ),
+        KB_EXTRACT_MAX_OUTPUT_CHARS=_positive_int_env(
+            "KB_EXTRACT_MAX_OUTPUT_CHARS", 12_000, max_value=200_000
         ),
         SPLUNK_BASE_URL=os.getenv("SPLUNK_BASE_URL", ""),
         SPLUNK_API_TOKEN_SECRET_ARN=os.getenv("SPLUNK_API_TOKEN_SECRET_ARN", ""),
@@ -792,6 +902,62 @@ def load_config() -> Config:
         ),
         DISPOSITION_TABLE=os.getenv("DISPOSITION_TABLE", ""),
         DISPOSITION_SYNC_STATE_TABLE=os.getenv("DISPOSITION_SYNC_STATE_TABLE", ""),
+        SERVICENOW_CLOSED_TICKET_SYNC_ENABLED=_bool_env(
+            "SERVICENOW_CLOSED_TICKET_SYNC_ENABLED", False
+        ),
+        SERVICENOW_CLOSED_TICKET_TOKEN=_optional_str_env("SERVICENOW_CLOSED_TICKET_TOKEN"),
+        SERVICENOW_CLOSED_TICKET_TOKEN_SECRET_ARN=os.getenv(
+            "SERVICENOW_CLOSED_TICKET_TOKEN_SECRET_ARN", ""
+        ),
+        SERVICENOW_CLOSED_TICKET_TABLE=os.getenv(
+            "SERVICENOW_CLOSED_TICKET_TABLE", "sn_si_incident"
+        ),
+        SERVICENOW_CLOSED_TICKET_QUERY=os.getenv("SERVICENOW_CLOSED_TICKET_QUERY", "").strip(),
+        SERVICENOW_CLOSED_TICKET_BACKFILL_DAYS=_positive_int_env(
+            "SERVICENOW_CLOSED_TICKET_BACKFILL_DAYS", 30, max_value=3650
+        ),
+        SERVICENOW_CLOSED_TICKET_CURSOR_OVERLAP_HOURS=_positive_int_env(
+            "SERVICENOW_CLOSED_TICKET_CURSOR_OVERLAP_HOURS", 24, max_value=168
+        ),
+        SERVICENOW_CLOSED_TICKET_RECONCILE_INTERVAL_DAYS=_positive_int_env(
+            "SERVICENOW_CLOSED_TICKET_RECONCILE_INTERVAL_DAYS", 7, max_value=365
+        ),
+        SERVICENOW_CLOSED_TICKET_FETCH_JOURNALS=_bool_env(
+            "SERVICENOW_CLOSED_TICKET_FETCH_JOURNALS", True
+        ),
+        SERVICENOW_CLOSED_TICKET_FETCH_ATTACHMENTS=_bool_env(
+            "SERVICENOW_CLOSED_TICKET_FETCH_ATTACHMENTS", True
+        ),
+        CLOSED_TICKET_RETENTION_DAYS=_positive_int_env(
+            "CLOSED_TICKET_RETENTION_DAYS", 30, max_value=90
+        ),
+        CLOSED_TICKET_ATTACHMENT_MAX_BYTES=_positive_int_env(
+            "CLOSED_TICKET_ATTACHMENT_MAX_BYTES", 10 * 1024 * 1024, max_value=52_428_800
+        ),
+        CLOSED_TICKET_RAW_PREFIX=os.getenv("CLOSED_TICKET_RAW_PREFIX", "closed_tickets").strip()
+        or "closed_tickets",
+        CLOSED_TICKET_ARCHIVE_BUCKET=os.getenv("CLOSED_TICKET_ARCHIVE_BUCKET", ""),
+        CLOSED_TICKET_SYNC_STATE_TABLE=os.getenv("CLOSED_TICKET_SYNC_STATE_TABLE", ""),
+        CLOSED_TICKET_REGISTRY_TABLE=os.getenv("CLOSED_TICKET_REGISTRY_TABLE", ""),
+        CLOSED_TICKET_EMBED_ENABLED=_bool_env("CLOSED_TICKET_EMBED_ENABLED", False),
+        CLOSED_TICKET_VISION_ENABLED=_bool_env("CLOSED_TICKET_VISION_ENABLED", False),
+        CLOSED_TICKET_EMBED_BATCH_SIZE=_positive_int_env(
+            "CLOSED_TICKET_EMBED_BATCH_SIZE", 100, max_value=1000
+        ),
+        CLOSED_TICKET_MAX_INDEX_CHUNKS_PER_TICKET=_positive_int_env(
+            "CLOSED_TICKET_MAX_INDEX_CHUNKS_PER_TICKET", 120, max_value=500
+        ),
+        CLOSED_TICKET_EMBED_LAMBDA_NAME=os.getenv("CLOSED_TICKET_EMBED_LAMBDA_NAME", ""),
+        CLOSED_TICKET_RAG_ENABLED=_bool_env("CLOSED_TICKET_RAG_ENABLED", False),
+        CLOSED_TICKET_RAG_MAX_SNIPPETS=_positive_int_env(
+            "CLOSED_TICKET_RAG_MAX_SNIPPETS", 6, max_value=20
+        ),
+        CLOSED_TICKET_RAG_MAX_TICKETS=_positive_int_env(
+            "CLOSED_TICKET_RAG_MAX_TICKETS", 5, max_value=20
+        ),
+        CLOSED_TICKET_RAG_CONTEXT_BUDGET_CHARS=_positive_int_env(
+            "CLOSED_TICKET_RAG_CONTEXT_BUDGET_CHARS", 6000, max_value=50_000
+        ),
         SIDE_EFFECT_IDEMPOTENCY_ENABLED=_profile_bool(
             "SIDE_EFFECT_IDEMPOTENCY_ENABLED", False, profile_flags
         ),
@@ -859,6 +1025,9 @@ def load_config() -> Config:
         PORTAL_CHAT_BEDROCK_MODEL_ID=_optional_str_env(
             "PORTAL_CHAT_BEDROCK_MODEL_ID"
         ),
+        PORTAL_CHAT_VISION_BEDROCK_MODEL_ID=_optional_str_env(
+            "PORTAL_CHAT_VISION_BEDROCK_MODEL_ID"
+        ),
         PORTAL_READINESS_TIMEOUT_SECONDS=_positive_int_env(
             "PORTAL_READINESS_TIMEOUT_SECONDS", 2, max_value=10
         ),
@@ -922,6 +1091,25 @@ def load_config() -> Config:
         ),
         CASE_QA_MAX_CONVERSATION_CHARS=_positive_int_env(
             "CASE_QA_MAX_CONVERSATION_CHARS", 6_000, max_value=65_536
+        ),
+        CASE_QA_CHAT_IMAGES_ENABLED=_bool_env("CASE_QA_CHAT_IMAGES_ENABLED", False),
+        CASE_QA_MAX_CHAT_IMAGES=_positive_int_env(
+            "CASE_QA_MAX_CHAT_IMAGES", 1, max_value=4
+        ),
+        CASE_QA_MAX_CHAT_IMAGE_BYTES=_positive_int_env(
+            "CASE_QA_MAX_CHAT_IMAGE_BYTES", 750_000, max_value=5_000_000
+        ),
+        CASE_QA_MAX_CHAT_IMAGE_DIMENSION=_positive_int_env(
+            "CASE_QA_MAX_CHAT_IMAGE_DIMENSION", 4096, max_value=8192
+        ),
+        CASE_QA_MAX_CHAT_IMAGE_PIXELS=_positive_int_env(
+            "CASE_QA_MAX_CHAT_IMAGE_PIXELS", 16_777_216, max_value=33_554_432
+        ),
+        CASE_QA_CLOSED_TICKET_ENABLED=_bool_env(
+            "CASE_QA_CLOSED_TICKET_ENABLED", False
+        ),
+        CASE_QA_CLOSED_TICKET_MAX_TICKETS=_positive_int_env(
+            "CASE_QA_CLOSED_TICKET_MAX_TICKETS", 5, max_value=20
         ),
         CHAT_SESSIONS_TABLE=os.getenv("CHAT_SESSIONS_TABLE", ""),
         CHAT_MESSAGES_TABLE=os.getenv("CHAT_MESSAGES_TABLE", ""),

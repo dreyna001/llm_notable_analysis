@@ -56,7 +56,7 @@ to enable these.
 | --- | --- | --- |
 | Closed-ticket ServiceNow sync + closed-ticket RAG | Not shipped | [`../../planning/COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md`](../../planning/COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md) P3–P6 |
 | Live Splunk SPL in analysis without `spl_readonly` | Use `spl_readonly` profile or S3-only sink | [`../platform/CAPABILITY_PROFILES.md`](../platform/CAPABILITY_PROFILES.md) |
-| Portal chat image uploads (backend) | Not shipped | [`../../../../PORTAL_CHATBOT_CAPABILITY_GAPS.md`](../../../../PORTAL_CHATBOT_CAPABILITY_GAPS.md) |
+| Portal chat image uploads (backend) | Opt-in (`CaseQaChatImagesEnabled`) | [`portal_chat_images.py`](../../../src/s3_notable_pipeline/portal_chat_images.py); enable multimodal Bedrock model |
 | KB ingest for PDF / DOCX / images | **On-prem shipped** (`IMAGE_INGEST_ENABLED`, Tesseract/PDFium); **AWS backlog** (text/json/md/txt/csv only in `rag_ingestion.py`) | On-prem: [`IMAGE_INGEST_PREREQUISITES.md`](../../../llm_notable_analysis_onprem_systemd/docs/operations/rag/IMAGE_INGEST_PREREQUISITES.md); AWS: parity plan P2, [`../../planning/TODOS.md`](../../planning/TODOS.md) |
 | Bedrock rerank as default retrieval step | `RAG_RERANK_ENABLED` not wired in OpenSearch path | Keep off; see [`../rag/RAG_OPERATIONS.md`](../rag/RAG_OPERATIONS.md) |
 | Backup, restore, RPO/RTO, cross-region DR | Out of initial release | [`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md) deployment boundary |

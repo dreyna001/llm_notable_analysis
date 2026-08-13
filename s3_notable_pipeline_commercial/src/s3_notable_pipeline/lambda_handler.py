@@ -26,6 +26,9 @@ from .aws_clients import dynamodb_client as make_dynamodb_client
 from .aws_clients import lambda_client as make_lambda_client
 from .aws_clients import sqs_client as make_sqs_client
 from .bedrock_kb_retrieval import RetrievalResult, retrieve_soc_context
+from .historical_closed_ticket_grounding import (
+    retrieve_historical_closed_tickets_for_first_pass,
+)
 from .case_archive import SourceContext, archive_case
 from .config import Config, load_config
 from .html_generator import generate_html_report
@@ -1057,12 +1060,20 @@ def handler(event, context):
                 degraded_enrichments,
             )
 
+            closed_ticket_grounding = retrieve_historical_closed_tickets_for_first_pass(
+                config,
+                alert_text,
+            )
+            if closed_ticket_grounding.status == "degraded":
+                degraded_enrichments.append("closed_ticket_rag")
+
             # Run analysis
             start_time = time.time()
             logger.info("Starting TTP analysis")
             scored_ttps = analyzer.analyze_ttp(
                 alert_text,
                 advisory_context=rag_result.context,
+                historical_closed_tickets_context=closed_ticket_grounding.context,
             )
 
             # Get the full LLM response
@@ -1074,6 +1085,7 @@ def handler(event, context):
                     metadata["rag_snippet_count"] = rag_result.snippet_count
                     if rag_result.message:
                         metadata["rag_message"] = rag_result.message
+                    metadata.update(closed_ticket_grounding.metadata)
 
             if (
                 isinstance(llm_response, dict)

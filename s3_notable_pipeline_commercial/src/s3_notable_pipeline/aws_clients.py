@@ -110,3 +110,9 @@ def sqs_client() -> Any:
     """Return an SQS client."""
 
     return aws_client("sqs")
+
+
+def textract_client() -> Any:
+    """Return a Textract client for KB image OCR during RAG ingest."""
+
+    return aws_client("textract")

@@ -166,7 +166,7 @@ class DeployTemplateTests(unittest.TestCase):
                     self.assertEqual(resources[resource]["Type"], expected_type)
 
                 source = (PROJECT_ROOT / path).read_text(encoding="utf-8")
-                for setting in (
+                required_settings = [
                     "RAG_RETRIEVAL_BACKEND",
                     "RAG_TENANT_ID",
                     "OPENSEARCH_CASE_INDEX",
@@ -177,7 +177,15 @@ class DeployTemplateTests(unittest.TestCase):
                     "PORTAL_REQUIRED_ANALYST_ROLE",
                     "PORTAL_REQUIRED_ANALYST_SCOPE",
                     "ReportBatchItemFailures",
-                ):
+                ]
+                if path.endswith("template-sam.yaml"):
+                    required_settings.extend(
+                        (
+                            "OPENSEARCH_CLOSED_TICKET_INDEX",
+                            "CLOSED_TICKET_RAG_ENABLED",
+                        )
+                    )
+                for setting in required_settings:
                     self.assertIn(setting, source)
 
     def test_chat_history_resources_are_present(self) -> None:

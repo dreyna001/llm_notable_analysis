@@ -590,6 +590,53 @@ Parameters:
     MinValue: 1
     MaxValue: 65536
 
+  CaseQaChatImagesEnabled:
+    Type: String
+    Description: Enables request-scoped portal chat image uploads when true.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  CaseQaMaxChatImages:
+    Type: Number
+    Description: Maximum chat images accepted per portal chat request.
+    Default: 1
+    MinValue: 1
+    MaxValue: 4
+
+  CaseQaMaxChatImageBytes:
+    Type: Number
+    Description: Maximum decoded bytes per chat image.
+    Default: 750000
+    MinValue: 1
+    MaxValue: 5000000
+
+  CaseQaMaxChatImageDimension:
+    Type: Number
+    Description: Maximum width or height per chat image.
+    Default: 4096
+    MinValue: 1
+    MaxValue: 8192
+
+  CaseQaMaxChatImagePixels:
+    Type: Number
+    Description: Maximum width*height per chat image.
+    Default: 16777216
+    MinValue: 1
+    MaxValue: 33554432
+
+  PortalChatVisionBedrockModelId:
+    Type: String
+    Description: Optional Bedrock vision model override for portal chat image synthesis.
+    Default: ''
+
+  PortalChatVisionBedrockModelArn:
+    Type: String
+    Description: Exact ARN for PortalChatVisionBedrockModelId when set.
+    Default: ''
+    AllowedPattern: '^$|^arn:aws:bedrock:us-east-1:([0-9]{12})?:(foundation-model|inference-profile)/.+$'
+
   ChatSessionsTableName:
     Type: String
     Description: DynamoDB chat sessions table required when CaseQaChatHistoryEnabled=true.
@@ -895,6 +942,17 @@ Parameters:
     Type: String
     Default: elastic_dictionary
 
+  OpenSearchClosedTicketIndex:
+    Type: String
+    Default: closed_tickets
+
+  ClosedTicketRagEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
   OpenSearchDomainArn:
     Type: String
     Default: ''
@@ -1060,6 +1118,11 @@ Rules:
     Assertions:
       - Assert: !Not [!Equals [!Ref PortalChatBedrockModelArn, '']]
         AssertDescription: PortalChatBedrockModelArn is required when PortalChatBedrockModelId is set.
+  RequirePortalChatVisionBedrockModelArn:
+    RuleCondition: !Not [!Equals [!Ref PortalChatVisionBedrockModelId, '']]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref PortalChatVisionBedrockModelArn, '']]
+        AssertDescription: PortalChatVisionBedrockModelArn is required when PortalChatVisionBedrockModelId is set.
 
 Conditions:
   IsNotableRest: !Equals [!Ref SplunkSinkMode, notable_rest]
@@ -1103,6 +1166,16 @@ Conditions:
     - !Not [!Condition HasRagSource]
   HasOpenSearch: !Not [!Equals [!Ref OpenSearchDomainArn, '']]
   HasPortalChatBedrockModelOverride: !Not [!Equals [!Ref PortalChatBedrockModelId, '']]
+  HasPortalChatVisionBedrockModelOverride: !Not [!Equals [!Ref PortalChatVisionBedrockModelId, '']]
+  HasPortalChatVisionBedrockModelSeparate: !And
+    - !Condition HasPortalChatVisionBedrockModelOverride
+    - !Not
+      - !Equals
+        - !Ref PortalChatVisionBedrockModelArn
+        - !If
+          - HasPortalChatBedrockModelOverride
+          - !Ref PortalChatBedrockModelArn
+          - !Ref BedrockAnalysisModelArn
 
 Resources:
   CustomerKmsReadPolicy:
@@ -1715,6 +1788,8 @@ Resources:
           OPENSEARCH_SOC_INDEX: !Ref OpenSearchSocIndex
           OPENSEARCH_SPLUNK_INDEX: !Ref OpenSearchSplunkIndex
           OPENSEARCH_ELASTIC_INDEX: !Ref OpenSearchElasticIndex
+          OPENSEARCH_CLOSED_TICKET_INDEX: !Ref OpenSearchClosedTicketIndex
+          CLOSED_TICKET_RAG_ENABLED: !Ref ClosedTicketRagEnabled
           SPLUNK_SINK_MODE: !Ref SplunkSinkMode
           SPLUNK_BASE_URL: !Ref SplunkBaseUrl
           SPLUNK_API_TOKEN_SECRET_ARN: !Ref SplunkApiTokenSecretArn
@@ -2315,6 +2390,19 @@ Resources:
                     - !Ref PortalChatBedrockModelArn
                     - !Ref BedrockAnalysisModelArn
         - !If
+          - HasPortalChatVisionBedrockModelSeparate
+          - PolicyName: PortalBedrockVisionPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - bedrock:InvokeModel
+                    - bedrock:CountTokens
+                  Resource:
+                    - !Ref PortalChatVisionBedrockModelArn
+          - !Ref AWS::NoValue
+        - !If
           - HasOpenSearch
           - PolicyName: PortalOpenSearchReadPolicy
             PolicyDocument:
@@ -2426,6 +2514,7 @@ Resources:
           PORTAL_READINESS_TIMEOUT_SECONDS: !Ref PortalReadinessTimeoutSeconds
           PORTAL_CHAT_MAX_CONCURRENCY: !Ref PortalChatMaxConcurrency
           PORTAL_CHAT_BEDROCK_MODEL_ID: !Ref PortalChatBedrockModelId
+          PORTAL_CHAT_VISION_BEDROCK_MODEL_ID: !Ref PortalChatVisionBedrockModelId
           CASE_QA_ENABLED: !Ref CaseQaEnabled
           CASE_QA_GENERAL_KNOWLEDGE_ENABLED: !Ref CaseQaGeneralKnowledgeEnabled
           CASE_QA_MAX_QUESTION_CHARS: !Ref CaseQaMaxQuestionChars
@@ -2435,6 +2524,11 @@ Resources:
           CASE_QA_MAX_SESSIONS_PER_USER: !Ref CaseQaMaxSessionsPerUser
           CASE_QA_MAX_MESSAGES_PER_SESSION: !Ref CaseQaMaxMessagesPerSession
           CASE_QA_MAX_STORED_MESSAGE_BYTES: !Ref CaseQaMaxStoredMessageBytes
+          CASE_QA_CHAT_IMAGES_ENABLED: !Ref CaseQaChatImagesEnabled
+          CASE_QA_MAX_CHAT_IMAGES: !Ref CaseQaMaxChatImages
+          CASE_QA_MAX_CHAT_IMAGE_BYTES: !Ref CaseQaMaxChatImageBytes
+          CASE_QA_MAX_CHAT_IMAGE_DIMENSION: !Ref CaseQaMaxChatImageDimension
+          CASE_QA_MAX_CHAT_IMAGE_PIXELS: !Ref CaseQaMaxChatImagePixels
           CHAT_SESSIONS_TABLE: !If
             - HasChatHistory
             - !If

@@ -1,0 +1,23 @@
+{
+  "ticket_id": "a1b2c3d4e5f6789012345678abcdef01",
+  "ticket_number": "INC001",
+  "source_table": "sn_si_incident",
+  "source_url": "https://example.service-now.com/nav_to.do?uri=sn_si_incident.do%3Fsys_id%3Da1b2c3d4e5f6789012345678abcdef01",
+  "state": "3",
+  "closed_at": "2026-06-01T11:00:00+00:00",
+  "source_updated_at": "2026-06-01T12:00:00+00:00",
+  "expires_at": "2026-07-01T12:00:00+00:00",
+  "content_hash": "abc123def456",
+  "raw_payload": {
+    "number": "INC001",
+    "short_description": "Suspicious PowerShell activity",
+    "description": "Encoded command observed on host srv-01",
+    "priority": "2"
+  },
+  "journals_payload": [
+    {
+      "element": "work_notes",
+      "value": "Closed after containment and remediation."
+    }
+  ]
+}

@@ -72,6 +72,52 @@ class FakeAdapter:
         return {"errors": False}
 
 
+class MultiHitFakeAdapter(FakeAdapter):
+    def search(self, **kwargs):
+        self.searches.append(kwargs)
+        return {
+            "hits": {
+                "hits": [
+                    {
+                        "_id": "chunk-low",
+                        "_score": 1.0,
+                        "_source": {
+                            "tenant_id": "tenant-a",
+                            "corpus_id": "soc",
+                            "text": "General password reset guidance.",
+                            "source_file": "general.md",
+                        },
+                    },
+                    {
+                        "_id": "chunk-high",
+                        "_score": 3.0,
+                        "_source": {
+                            "tenant_id": "tenant-a",
+                            "corpus_id": "soc",
+                            "text": "PowerShell encoded command triage.",
+                            "source_file": "powershell.md",
+                        },
+                    },
+                ]
+            }
+        }
+
+
+class FakeRerankClient:
+    def rerank(self, **kwargs):
+        return {
+            "results": [
+                {"index": 1, "relevanceScore": 0.95},
+                {"index": 0, "relevanceScore": 0.10},
+            ]
+        }
+
+
+class FailingRerankClient:
+    def rerank(self, **_kwargs):
+        raise RuntimeError("rerank unavailable")
+
+
 class FakeResponse:
     status_code = 200
     text = '{"errors": false, "hits": {"hits": []}}'
@@ -252,6 +298,74 @@ class OpenSearchRetrievalTests(unittest.TestCase):
             adapter.searches[0]["query"]["query"]["bool"]["filter"][0],
             {"term": {"tenant_id.keyword": "tenant-a"}},
         )
+
+    def test_retrieval_keeps_hybrid_order_when_rerank_disabled(self):
+        adapter = MultiHitFakeAdapter()
+        config = SimpleNamespace(RAG_RERANK_ENABLED=False)
+
+        documents = retrieve_documents(
+            query_text="powershell encoded command",
+            query_embedding=[0.1],
+            index="soc-knowledge",
+            tenant_id="tenant-a",
+            corpus_id="soc",
+            top_k=2,
+            adapter=adapter,
+            config=config,
+        )
+
+        self.assertEqual(documents[0].document_id, "chunk-low")
+        self.assertEqual(documents[1].document_id, "chunk-high")
+
+    def test_retrieval_applies_bedrock_rerank_when_enabled(self):
+        adapter = MultiHitFakeAdapter()
+        config = SimpleNamespace(
+            RAG_RERANK_ENABLED=True,
+            RAG_RERANK_MODEL="cohere.rerank-v3-5:0",
+            RAG_RERANK_MODEL_FALLBACK="amazon.rerank-v1:0",
+        )
+
+        documents = retrieve_documents(
+            query_text="powershell encoded command",
+            query_embedding=[0.1],
+            index="soc-knowledge",
+            tenant_id="tenant-a",
+            corpus_id="soc",
+            top_k=2,
+            adapter=adapter,
+            config=config,
+            rerank_client=FakeRerankClient(),
+        )
+
+        self.assertEqual(documents[0].document_id, "chunk-high")
+        self.assertEqual(documents[1].document_id, "chunk-low")
+        self.assertEqual(documents[0].metadata["rerank_status"], "success")
+        self.assertAlmostEqual(documents[0].metadata["rerank_score"], 0.95)
+
+    def test_retrieval_keeps_hybrid_order_when_rerank_fails(self):
+        adapter = MultiHitFakeAdapter()
+        config = SimpleNamespace(
+            RAG_RERANK_ENABLED=True,
+            RAG_RERANK_MODEL="cohere.rerank-v3-5:0",
+            RAG_RERANK_MODEL_FALLBACK="amazon.rerank-v1:0",
+        )
+
+        with self.assertLogs("s3_notable_pipeline.bedrock_rerank", level="WARNING") as logs:
+            documents = retrieve_documents(
+                query_text="powershell encoded command",
+                query_embedding=[0.1],
+                index="soc-knowledge",
+                tenant_id="tenant-a",
+                corpus_id="soc",
+                top_k=2,
+                adapter=adapter,
+                config=config,
+                rerank_client=FailingRerankClient(),
+            )
+
+        self.assertEqual(documents[0].document_id, "chunk-low")
+        self.assertEqual(documents[1].document_id, "chunk-high")
+        self.assertTrue(any("rerank_status=failed" in message for message in logs.output))
 
 
 class RagIngestionTests(unittest.TestCase):

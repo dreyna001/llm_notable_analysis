@@ -77,6 +77,7 @@ def build_scoped_hybrid_query(
     tenant_id: str,
     corpus_id: str,
     case_id: str = "",
+    ticket_id: str = "",
     lexical_field: str = "search_text",
     vector_field: str = "embedding",
     top_k: int = 10,
@@ -92,6 +93,8 @@ def build_scoped_hybrid_query(
     ]
     if case_id.strip():
         filters.append({"term": {"case_id.keyword": case_id}})
+    if ticket_id.strip():
+        filters.append({"term": {"ticket_id.keyword": ticket_id}})
     should: list[dict[str, Any]] = []
     if query_text.strip():
         should.append({"match": {lexical_field: {"query": query_text, "operator": "or"}}})
@@ -121,6 +124,9 @@ def retrieve_documents(
     adapter: Any,
     query_embedding: list[float] | None = None,
     case_id: str = "",
+    ticket_id: str = "",
+    config: Any | None = None,
+    rerank_client: Any | None = None,
 ) -> list[RetrievedDocument]:
     """Execute one scoped hybrid query and normalize hits with provenance."""
 
@@ -130,6 +136,7 @@ def retrieve_documents(
         tenant_id=tenant_id,
         corpus_id=corpus_id,
         case_id=case_id,
+        ticket_id=ticket_id,
         top_k=top_k,
     )
     response = adapter.search(index=index, query=query, size=top_k)
@@ -160,10 +167,31 @@ def retrieve_documents(
                 source_etag=str(source.get("source_etag", "")),
                 source_file=str(source.get("source_file", "")),
                 section=str(source.get("section", "")),
-                metadata={**metadata, "provenance": provenance},
+                metadata={
+                    **metadata,
+                    "provenance": provenance,
+                    **(
+                        {"ticket_id": str(source.get("ticket_id", ""))}
+                        if source.get("ticket_id")
+                        else {}
+                    ),
+                },
             )
         )
-    return documents
+    if config is None:
+        return documents
+
+    from .bedrock_rerank import rerank_documents
+
+    return list(
+        rerank_documents(
+            query_text=query_text,
+            documents=documents,
+            config=config,
+            top_k=top_k,
+            bedrock_client=rerank_client,
+        ).documents
+    )
 
 
 def render_documents(documents: Iterable[RetrievedDocument], *, budget_chars: int, header: str = "") -> str:
@@ -212,3 +240,38 @@ def adapter_for(config: Any, adapter: Any | None = None) -> Any:
     """Return an injected adapter or construct the configured signed client."""
 
     return adapter or OpenSearchClient.from_config(config)
+
+
+def closed_ticket_index_name(config: Any) -> str:
+    """Resolve the OpenSearch index for the closed-ticket advisory lane."""
+
+    return str(config_value(config, "OPENSEARCH_CLOSED_TICKET_INDEX", "closed_tickets")).strip()
+
+
+def retrieve_closed_ticket_documents(
+    *,
+    query_text: str,
+    config: Any,
+    top_k: int,
+    adapter: Any | None = None,
+    query_embedding: list[float] | None = None,
+    ticket_id: str = "",
+    rerank_client: Any | None = None,
+) -> list[RetrievedDocument]:
+    """Hybrid retrieval over indexed closed ServiceNow tickets (advisory lane)."""
+
+    if not opensearch_enabled(config):
+        return []
+    tenant_id = tenant_id_for(config, required=True)
+    return retrieve_documents(
+        query_text=query_text,
+        index=closed_ticket_index_name(config),
+        tenant_id=tenant_id,
+        corpus_id="closed_tickets",
+        top_k=top_k,
+        adapter=adapter_for(config, adapter),
+        query_embedding=query_embedding,
+        ticket_id=ticket_id.strip(),
+        config=config,
+        rerank_client=rerank_client,
+    )

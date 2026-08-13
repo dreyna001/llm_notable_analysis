@@ -19,18 +19,24 @@ from s3_notable_pipeline.portal_chat import (
     bounded_conversation_history,
     build_case_grounded_prompt,
     build_general_knowledge_prompt,
+    complete_markdown_answer,
     conversation_history_from_config,
+    resolve_portal_chat_bedrock_model_id,
     sanitize_portal_chat_answer,
     should_fallback_to_general_knowledge,
     synthesized_answer_crosses_action_boundary,
     synthesize_case_answer,
 )
+from s3_notable_pipeline.portal_chat_images import validate_chat_images
 
 
 class FakeBedrockClient:
     """Fake Bedrock client returning Markdown text."""
 
-    def converse(self, **_kwargs):
+    last_kwargs: dict[str, object] | None = None
+
+    def converse(self, **kwargs):
+        type(self).last_kwargs = kwargs
         return {
             "output": {
                 "message": {
@@ -188,6 +194,52 @@ class PortalChatTests(unittest.TestCase):
             ),
             [],
         )
+
+    def test_resolve_portal_chat_bedrock_model_id_uses_vision_override(self) -> None:
+        config = Config(
+            BEDROCK_MODEL_ID="anthropic.text",
+            PORTAL_CHAT_BEDROCK_MODEL_ID="anthropic.chat",
+            PORTAL_CHAT_VISION_BEDROCK_MODEL_ID="anthropic.vision",
+        )
+        self.assertEqual(
+            resolve_portal_chat_bedrock_model_id(config, has_images=True),
+            "anthropic.vision",
+        )
+        self.assertEqual(
+            resolve_portal_chat_bedrock_model_id(config, has_images=False),
+            "anthropic.chat",
+        )
+
+    def test_complete_markdown_answer_sends_bedrock_image_blocks(self) -> None:
+        import base64
+        import io
+
+        from PIL import Image
+
+        config = Config(
+            BEDROCK_MODEL_ID="anthropic.test",
+            CASE_QA_CHAT_IMAGES_ENABLED=True,
+        )
+        buffer = io.BytesIO()
+        Image.new("RGB", (8, 8), (0, 255, 0)).save(buffer, format="PNG")
+        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+        images = validate_chat_images(
+            [{"media_type": "image/png", "data_base64": encoded}],
+            config,
+        )
+        client = FakeBedrockClient()
+        answer = complete_markdown_answer(
+            prompt="Describe the image.",
+            config=config,
+            bedrock_client=client,
+            images=images,
+        )
+        self.assertIn("Grounded answer", answer)
+        assert client.last_kwargs is not None
+        messages = client.last_kwargs["messages"]
+        content = messages[0]["content"]
+        self.assertEqual(content[0]["text"], "Describe the image.")
+        self.assertEqual(content[1]["image"]["format"], "png")
 
 
 if __name__ == "__main__":

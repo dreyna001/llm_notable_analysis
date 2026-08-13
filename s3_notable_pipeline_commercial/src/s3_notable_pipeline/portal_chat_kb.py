@@ -6,6 +6,12 @@ import logging
 from typing import Any
 
 from .bedrock_kb_retrieval import retrieve_soc_context
+from .closed_ticket_retrieval import (
+    bounded_current_case_snippets,
+    closed_ticket_hits_to_chat_sources,
+    closed_ticket_lane_enabled,
+    retrieve_closed_tickets_fail_soft,
+)
 from .config import Config
 from .elasticsearch_query_grounding import retrieve_elasticsearch_grounding
 from .spl_query_grounding import retrieve_spl_query_grounding
@@ -88,3 +94,29 @@ def build_chat_knowledge_sources(
             logger.exception("Elasticsearch grounding retrieval failed for portal chat")
 
     return sources
+
+
+def build_chat_closed_ticket_sources(
+    *,
+    question: str,
+    case_sources: list[dict[str, Any]],
+    config: Config,
+    bedrock_client: Any,
+    opensearch_client: Any | None = None,
+) -> list[dict[str, Any]]:
+    """Return closed-ticket advisory sources for portal chat synthesis."""
+    if not closed_ticket_lane_enabled(config):
+        return []
+    outcome = retrieve_closed_tickets_fail_soft(
+        config=config,
+        question=question,
+        current_case_snippets=bounded_current_case_snippets(case_sources),
+        bedrock_client=bedrock_client,
+        opensearch_client=opensearch_client,
+    )
+    if outcome.error:
+        logger.warning(
+            "Closed-ticket chat retrieval failed soft: %s",
+            outcome.error,
+        )
+    return closed_ticket_hits_to_chat_sources(outcome.hits)

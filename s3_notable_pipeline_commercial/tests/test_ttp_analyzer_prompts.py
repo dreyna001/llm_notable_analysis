@@ -44,6 +44,18 @@ class TTPAnalyzerPromptTests(unittest.TestCase):
         self.assertNotIn("advisory only; not direct alert evidence", prompt)
         self.assertIn("Direct alert evidence must come only from SECURITY ALERT INPUT", prompt)
 
+    def test_build_prompt_includes_historical_lane_when_empty(self) -> None:
+        prompt = self.analyzer._build_prompt(
+            "user=alice index=main",
+            None,
+            use_tool=False,
+            historical_closed_tickets_context="",
+        )
+
+        self.assertIn("HISTORICAL_CLOSED_TICKETS\n(none)", prompt)
+        self.assertIn("HISTORICAL CLOSED-TICKET RULES:", prompt)
+        self.assertLess(prompt.index("SOC CONTEXT RULES:"), prompt.index("HISTORICAL_CLOSED_TICKETS"))
+
     def test_build_prompt_is_contract_first_for_raw_json_mode(self) -> None:
         prompt = self.analyzer._build_prompt(
             "user=alice index=main",
