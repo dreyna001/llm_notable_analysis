@@ -371,6 +371,9 @@ def _handle_chat_gate(config: Config, event: dict[str, Any]) -> dict[str, Any]:
                     session_id=session_id,
                 ),
             )
+        opensearch_client = None
+        if config.CASE_QA_CLOSED_TICKET_ENABLED and config.CLOSED_TICKET_RAG_ENABLED:
+            opensearch_client = adapter_for(config)
         answer = answer_selected_case_question(
             case_id=str(selected_case_id or ""),
             question=question,
@@ -380,7 +383,7 @@ def _handle_chat_gate(config: Config, event: dict[str, Any]) -> dict[str, Any]:
             bedrock_client=bedrock_runtime_client(),
             conversation_history=conversation_history,
             images=validated_images,
-            opensearch_client=adapter_for(config),
+            opensearch_client=opensearch_client,
         )
         response_payload: dict[str, Any] = {
             "answer": answer.answer,

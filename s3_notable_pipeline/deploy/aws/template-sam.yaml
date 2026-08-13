@@ -1728,9 +1728,6 @@ Resources:
           CLOSED_TICKET_RAG_MAX_SNIPPETS: !Ref RagMaxSnippets
           CLOSED_TICKET_RAG_CONTEXT_BUDGET_CHARS: !Ref RagContextBudgetChars
           OPENSEARCH_CLOSED_TICKET_INDEX: !Ref OpenSearchClosedTicketIndex
-          CASE_QA_EMBEDDING_MODEL: !Ref CaseQaEmbeddingModel
-          CASE_QA_VECTOR_DIMENSIONS: !Ref CaseQaVectorDimensions
-          CASE_QA_EMBED_NORMALIZE: !Ref CaseQaEmbedNormalize
           SPLUNK_SINK_MODE: !Ref SplunkSinkMode
           SPLUNK_BASE_URL: !Ref SplunkBaseUrl
           SPLUNK_API_TOKEN_SECRET_ARN: !Ref SplunkApiTokenSecretArn

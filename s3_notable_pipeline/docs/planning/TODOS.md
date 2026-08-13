@@ -7,37 +7,30 @@ _Last updated: 2026-08-13. Normative parity contract:
 
 - [ ] Add an explicit AWS analyzer backlog queue: change direct S3 `ObjectCreated` -> Lambda analyzer intake to S3 -> SQS -> Lambda so concurrency caps create queue depth instead of relying on S3/Lambda redelivery as the backlog mechanism.
 
-## Next parity block — closed-ticket RAG + rich KB ingest (on-prem shipped, AWS backlog)
+## Next parity block — on-prem customer-default (shipped 2026-08-13)
 
-Port on-prem customer-default capabilities not yet in GovCloud AWS. Commercial fork plan (reference):
-[`../../s3_notable_pipeline_commercial/docs/planning/COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md`](../../s3_notable_pipeline_commercial/docs/planning/COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md)
-(phases P2–P7). On-prem reference:
-[`IMAGE_INGEST_PREREQUISITES.md`](../../../llm_notable_analysis_onprem_systemd/docs/operations/rag/IMAGE_INGEST_PREREQUISITES.md),
-[`CLOSED_TICKET_RAG_PLAN.md`](../../../llm_notable_analysis_onprem_systemd/docs/planning/CLOSED_TICKET_RAG_PLAN.md).
+P0–P8 implemented on GovCloud AWS. Enable via SAM parameters documented in
+[`GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md`](../operations/deployment/GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md)
+and [`SERVICENOW_CLOSED_TICKET_OPERATIONS.md`](../operations/integrations/SERVICENOW_CLOSED_TICKET_OPERATIONS.md).
 
-- [ ] **Rich KB ingest (P2)** — PDF/DOCX/images in RAG manifests (on-prem `corpus_ingest`; AWS text/json/md/txt/csv only today).
-- [ ] **Closed-ticket ServiceNow sync (P3)** — raw closed tickets, journals, attachments (not disposition sync).
-- [ ] **Closed-ticket chunk + OpenSearch index (P4)** — render/chunk/embed advisory lane.
-- [ ] **Closed-ticket analysis RAG (P5)** — fail-soft grounding in analyzer before Bedrock.
-- [ ] **Portal closed-ticket chat lane (P6)** — merge with case + KB retrieval in portal chat.
-- [ ] **Closed-ticket attachment vision/OCR (P7)** — on-prem Tesseract + loopback vision; AWS target Bedrock multimodal or Textract.
-
-Related (same parity program):
-
-- [ ] **RAG rerank wired (P1)** — on-prem shipped; AWS config flag only.
-- [ ] **Portal chat image uploads (P8)** — on-prem shipped; AWS OpenAPI scaffold only.
+- [x] **Rich KB ingest (P2)** — PDF/DOCX/images when `ImageIngestEnabled=true`
+- [x] **Closed-ticket ServiceNow sync (P3)** — `ServiceNowClosedTicketSyncEnabled`
+- [x] **Closed-ticket chunk + OpenSearch index (P4)** — embed Lambda + `closed_tickets` index
+- [x] **Closed-ticket analysis RAG (P5)** — `ClosedTicketRagEnabled` in analyzer
+- [x] **Portal closed-ticket chat lane (P6)** — `CaseQaClosedTicketEnabled`
+- [x] **Closed-ticket attachment vision/OCR (P7)** — Textract when `ClosedTicketVisionEnabled=true`
+- [x] **RAG rerank wired (P1)** — `RagRerankEnabled` + Bedrock rerank models
+- [x] **Portal chat image uploads (P8)** — `CaseQaChatImagesEnabled`
 
 ## Parity snapshot (on-prem vs GovCloud AWS)
 
-| Gap | On-prem | GovCloud AWS (`s3_notable_pipeline`) |
+| Capability | On-prem | GovCloud AWS (`s3_notable_pipeline`) |
 | --- | --- | --- |
-| Rich KB ingest | Shipped | Backlog P2 |
-| Closed-ticket RAG | Shipped | Backlog P3–P7 |
-| Portal chat images | Shipped | Backlog P8 |
-| RAG rerank at runtime | Shipped | Backlog P1 |
-| Customer-default SAM preset | Shipped (on-prem doc) | Shipped — [`GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md`](../operations/deployment/GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md) |
-
-Implement in this tree or port from [`../../s3_notable_pipeline_commercial/`](../../s3_notable_pipeline_commercial/) after commercial validation.
+| Rich KB ingest | Shipped | Shipped (P2; optional Textract) |
+| Closed-ticket RAG | Shipped | Shipped (P3–P7) |
+| Portal chat images | Shipped | Shipped (P8) |
+| RAG rerank at runtime | Shipped | Shipped (P1) |
+| Customer-default SAM preset | Shipped | Shipped — [`GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md`](../operations/deployment/GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md) |
 
 ## Parity docs
 
@@ -52,6 +45,7 @@ Implement in this tree or port from [`../../s3_notable_pipeline_commercial/`](..
 - **Wave 1** — profiles, RAG/KB, SPL and Elastic read-only investigation, query enrichment, ServiceNow, idempotency, HTML reports, operations guides.
 - **Wave 2** — `analyst_portal`, S3 case archive, DynamoDB CaseIndex, portal API/UI, pinned-case Q&A, IAM split.
 - **Wave 3 + P3-1** — portal chat contract parity, hybrid retrieval (W3-4), analyzer verdict and SOC header, chat-readiness diagnostics, OpenAPI sync, multi-turn synthesis.
+- **On-prem customer-default parity (P0–P8)** — GovCloud preset, Bedrock rerank, rich KB ingest, closed-ticket sync/RAG, portal closed-ticket lane, Textract attachments, portal chat images.
 
 ## Backlog
 
@@ -64,14 +58,11 @@ Implement in this tree or port from [`../../s3_notable_pipeline_commercial/`](..
 - [ ] Real-AWS staging validation for Waves 1–2 profiles — see [TESTING.md](../testing/TESTING.md) staging checklists and [AIOPTIMIZED_SOC_ANALYSIS_AWS_READINESS_ASSESSMENT.md](../delivery_package/AIOPTIMIZED_SOC_ANALYSIS_AWS_READINESS_ASSESSMENT.md).
 - [ ] Customer front-door wiring when `analyst_portal` is enabled (JWT issuer/audience, CORS, optional DNS/WAF).
 
-**On-prem customer-default cloud parity — remaining code (P1, P2–P8):**
+**On-prem customer-default cloud parity — code complete (P0–P8 shipped 2026-08-13).**
 
-Open work is tracked in **Next parity block** above.
-[`../../s3_notable_pipeline_commercial/docs/planning/COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md`](../../s3_notable_pipeline_commercial/docs/planning/COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md).
-
-- [x] Publish GovCloud `CUSTOMER_DEFAULT_DEPLOYMENT` SAM parameter preset +
-  `core,rag,analyst_portal` staging smoke (no first-pass SPL; `SplQueryRagEnabled` for portal only) —
-  [`GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md`](../operations/deployment/GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md)
+Operator enablement: [`GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md`](../operations/deployment/GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md),
+[`SERVICENOW_CLOSED_TICKET_OPERATIONS.md`](../operations/integrations/SERVICENOW_CLOSED_TICKET_OPERATIONS.md).
+Commercial fork parity plan (reference): [`../../s3_notable_pipeline_commercial/docs/planning/COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md`](../../s3_notable_pipeline_commercial/docs/planning/COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md).
 
 Broader product backlog (both platforms):
 [`FUTURE_ENHANCEMENTS_ROADMAP.md`](../../../llm_notable_analysis_onprem_systemd/docs/planning/FUTURE_ENHANCEMENTS_ROADMAP.md).

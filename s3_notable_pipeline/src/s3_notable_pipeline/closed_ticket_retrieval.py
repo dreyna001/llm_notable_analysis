@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 
 _CORPUS_ID = "closed_tickets"
 _WHITESPACE_RE = re.compile(r"\s+")
+_MAX_CLOSED_TICKET_QUERY_SNIPPETS = 4
+_MAX_CLOSED_TICKET_QUERY_SNIPPET_CHARS = 400
+_MAX_CLOSED_TICKET_QUERY_SNIPPET_TOTAL_CHARS = 1200
 
 
 @dataclass(frozen=True)
@@ -42,6 +45,53 @@ class ClosedTicketRetrievalOutcome:
 
 def _collapse_ws(text: str) -> str:
     return _WHITESPACE_RE.sub(" ", (text or "").strip())
+
+
+def bounded_current_case_snippets(
+    sources: Sequence[dict[str, Any]],
+) -> list[str]:
+    """Collect bounded current-case text for closed-ticket retrieval queries."""
+    snippets: list[str] = []
+    used_chars = 0
+    for source in sources:
+        if str(source.get("source_lane") or "") != "current_case":
+            continue
+        if len(snippets) >= _MAX_CLOSED_TICKET_QUERY_SNIPPETS:
+            break
+        collapsed = _collapse_ws(str(source.get("text") or source.get("search_text") or ""))
+        if not collapsed:
+            continue
+        snippet = collapsed[:_MAX_CLOSED_TICKET_QUERY_SNIPPET_CHARS]
+        next_used = used_chars + len(snippet)
+        if next_used > _MAX_CLOSED_TICKET_QUERY_SNIPPET_TOTAL_CHARS:
+            break
+        snippets.append(snippet)
+        used_chars = next_used
+    return snippets
+
+
+def closed_ticket_hits_to_chat_sources(
+    hits: Sequence[ClosedTicketRetrievalHit],
+) -> list[dict[str, Any]]:
+    """Convert hits into plain source objects for portal chat synthesis."""
+    sources: list[dict[str, Any]] = []
+    for hit in hits:
+        sources.append(
+            {
+                "source_lane": "closed_ticket",
+                "text": hit.text,
+                "search_text": hit.text,
+                "score": hit.score,
+                "ticket_id": hit.ticket_id,
+                "ticket_number": hit.ticket_number,
+                "section": hit.section,
+                "field_path": hit.field_path,
+                "chunk_id": hit.chunk_id,
+                "source_url": hit.source_url,
+                "provenance": hit.provenance,
+            }
+        )
+    return sources
 
 
 def build_closed_ticket_retrieval_query(
@@ -163,6 +213,8 @@ def retrieve_closed_ticket_hits(
         top_k=max(top_k * 3, top_k),
         adapter=adapter,
         query_embedding=query_embedding,
+        config=config,
+        bedrock_client=bedrock_client,
     )
     hits: list[ClosedTicketRetrievalHit] = []
     for document in documents:
@@ -192,9 +244,14 @@ def retrieve_closed_tickets_fail_soft(
     current_case_snippets: Sequence[str] = (),
     bedrock_client: Any | None = None,
     adapter: Any | None = None,
+    opensearch_client: Any | None = None,
 ) -> ClosedTicketRetrievalOutcome:
     if not bool(getattr(config, "CLOSED_TICKET_RAG_ENABLED", False)):
         return ClosedTicketRetrievalOutcome(hits=[], context="")
+    if question.strip() and not alert_text.strip():
+        if not bool(getattr(config, "CASE_QA_CLOSED_TICKET_ENABLED", False)):
+            return ClosedTicketRetrievalOutcome(hits=[], context="")
+    resolved_adapter = adapter if adapter is not None else opensearch_client
     query_text = build_closed_ticket_retrieval_query(
         alert_text=alert_text,
         question=question,
@@ -205,7 +262,7 @@ def retrieve_closed_tickets_fail_soft(
             config=config,
             query_text=query_text,
             bedrock_client=bedrock_client,
-            adapter=adapter,
+            adapter=resolved_adapter,
         )
         context = render_historical_closed_tickets_context(hits, config=config)
         return ClosedTicketRetrievalOutcome(hits=hits, context=context)
