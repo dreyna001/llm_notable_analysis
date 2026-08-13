@@ -98,11 +98,17 @@ Integration tuning: [`../integrations/SPLUNK_WRITEBACK_OPERATIONS.md`](../integr
 
 Recovery behavior: [`../platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`](../platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md).
 
-## GovCloud vs commercial preset
+## GovCloud customer-default preset
 
-GovCloud has **no** copy-and-fill customer-default SAM preset. Set
-`CapabilityProfiles=core,rag,analyst_portal` and matching `*_Enabled` flags manually
-(Path B in [`../../README.md`](../../README.md)).
+GovCloud ships a copy-and-fill SAM preset for the on-prem **customer-default**
+bundle (`core,rag,analyst_portal`):
+
+[`GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md`](GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md)
+
+Preset files: [`../../../deploy/aws/presets/customer-default.env.example`](../../../deploy/aws/presets/customer-default.env.example),
+[`../../../deploy/aws/presets/samconfig.customer-default.toml.example`](../../../deploy/aws/presets/samconfig.customer-default.toml.example).
+
+Manual Path B (same bundle without the preset) remains in [`../../README.md`](../../README.md).
 
 Commercial reference (do not deploy into GovCloud):
 [`../../../../s3_notable_pipeline_commercial/docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](../../../../s3_notable_pipeline_commercial/docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md)

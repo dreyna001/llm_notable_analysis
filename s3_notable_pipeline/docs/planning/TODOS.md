@@ -35,7 +35,7 @@ Related (same parity program):
 | Closed-ticket RAG | Shipped | Backlog P3–P7 |
 | Portal chat images | Shipped | Backlog P8 |
 | RAG rerank at runtime | Shipped | Backlog P1 |
-| Customer-default SAM preset | Shipped (on-prem doc) | Backlog (commercial preset shipped in sibling tree) |
+| Customer-default SAM preset | Shipped (on-prem doc) | Shipped — [`GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md`](../operations/deployment/GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md) |
 
 Implement in this tree or port from [`../../s3_notable_pipeline_commercial/`](../../s3_notable_pipeline_commercial/) after commercial validation.
 
@@ -66,11 +66,12 @@ Implement in this tree or port from [`../../s3_notable_pipeline_commercial/`](..
 
 **On-prem customer-default cloud parity — remaining code (P1, P2–P8):**
 
-Open work is tracked in **Next parity block** above. Commercial fork ships P0 preset first;
+Open work is tracked in **Next parity block** above.
 [`../../s3_notable_pipeline_commercial/docs/planning/COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md`](../../s3_notable_pipeline_commercial/docs/planning/COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md).
 
-- [ ] Publish GovCloud `CUSTOMER_DEFAULT_DEPLOYMENT` SAM parameter preset +
-  `core,rag,analyst_portal` staging smoke (no first-pass SPL; `SplQueryRagEnabled` for portal only)
+- [x] Publish GovCloud `CUSTOMER_DEFAULT_DEPLOYMENT` SAM parameter preset +
+  `core,rag,analyst_portal` staging smoke (no first-pass SPL; `SplQueryRagEnabled` for portal only) —
+  [`GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md`](../operations/deployment/GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md)
 
 Broader product backlog (both platforms):
 [`FUTURE_ENHANCEMENTS_ROADMAP.md`](../../../llm_notable_analysis_onprem_systemd/docs/planning/FUTURE_ENHANCEMENTS_ROADMAP.md).
