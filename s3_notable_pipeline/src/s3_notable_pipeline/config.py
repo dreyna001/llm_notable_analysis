@@ -207,7 +207,7 @@ class Config:
     OPENSEARCH_SOC_INDEX: str = "notable-soc-knowledge"
     OPENSEARCH_SPLUNK_INDEX: str = "notable-splunk-dictionary"
     OPENSEARCH_ELASTIC_INDEX: str = "notable-elastic-dictionary"
-    OPENSEARCH_CLOSED_TICKET_INDEX: str = "notable-closed-tickets"
+    OPENSEARCH_CLOSED_TICKET_INDEX: str = "closed_tickets"
     RAG_SOURCE_BUCKET: str = ""
     RAG_SOURCE_PREFIX: str = "rag-sources"
     RAG_INGEST_QUEUE_URL: str = ""
@@ -303,6 +303,26 @@ class Config:
     DISPOSITION_RETENTION_DAYS: int = 365
     DISPOSITION_TABLE: str = ""
     DISPOSITION_SYNC_STATE_TABLE: str = ""
+
+    CLOSED_TICKET_RETENTION_DAYS: int = 30
+    SERVICENOW_CLOSED_TICKET_SYNC_ENABLED: bool = False
+    SERVICENOW_CLOSED_TICKET_TOKEN: str = ""
+    SERVICENOW_CLOSED_TICKET_TOKEN_SECRET_ARN: str = ""
+    SERVICENOW_CLOSED_TICKET_TABLE: str = "sn_si_incident"
+    SERVICENOW_CLOSED_TICKET_QUERY: str = ""
+    SERVICENOW_CLOSED_TICKET_BACKFILL_DAYS: int = 30
+    SERVICENOW_CLOSED_TICKET_CURSOR_OVERLAP_HOURS: int = 24
+    SERVICENOW_CLOSED_TICKET_RECONCILE_INTERVAL_DAYS: int = 7
+    SERVICENOW_CLOSED_TICKET_FETCH_JOURNALS: bool = True
+    SERVICENOW_CLOSED_TICKET_FETCH_ATTACHMENTS: bool = True
+    CLOSED_TICKET_ARCHIVE_BUCKET: str = ""
+    CLOSED_TICKET_ARCHIVE_PREFIX: str = "closed_tickets"
+    CLOSED_TICKET_ATTACHMENT_MAX_BYTES: int = 10 * 1024 * 1024
+    CLOSED_TICKET_ATTACHMENT_MAX_TEXT_CHARS: int = 12000
+    CLOSED_TICKET_TABLE: str = ""
+    CLOSED_TICKET_SYNC_STATE_TABLE: str = ""
+    CLOSED_TICKET_VISION_ENABLED: bool = False
+    CLOSED_TICKET_EMBED_LAMBDA_NAME: str = ""
 
     SIDE_EFFECT_IDEMPOTENCY_ENABLED: bool = False
     SIDE_EFFECT_IDEMPOTENCY_TABLE: str = ""
@@ -445,7 +465,12 @@ class Config:
                 raise ValueError(
                     "ELASTICSEARCH_ALLOWED_FIELDS is required when Elasticsearch execution is enabled"
                 )
-        if self.SERVICENOW_CREATE_ENABLED or self.SERVICENOW_DISPOSITION_SYNC_ENABLED:
+        if (
+            self.SERVICENOW_CREATE_ENABLED
+            or self.SERVICENOW_DISPOSITION_SYNC_ENABLED
+            or self.SERVICENOW_CLOSED_TICKET_SYNC_ENABLED
+            or self.CLOSED_TICKET_RAG_ENABLED
+        ):
             self.SERVICENOW_BASE_URL = validate_https_url(
                 self.SERVICENOW_BASE_URL,
                 setting_name="SERVICENOW_BASE_URL",
@@ -467,6 +492,59 @@ class Config:
                     self.DISPOSITION_SYNC_STATE_TABLE,
                     setting_name="DISPOSITION_SYNC_STATE_TABLE",
                 )
+        if self.CLOSED_TICKET_RETENTION_DAYS not in {30, 60, 90}:
+            raise ValueError("CLOSED_TICKET_RETENTION_DAYS must be one of 30, 60, or 90")
+        if self.SERVICENOW_CLOSED_TICKET_SYNC_ENABLED:
+            if not str(self.SERVICENOW_CLOSED_TICKET_QUERY or "").strip():
+                raise ValueError(
+                    "SERVICENOW_CLOSED_TICKET_QUERY is required when closed ticket sync is enabled"
+                )
+            if not (
+                str(self.SERVICENOW_CLOSED_TICKET_TOKEN or "").strip()
+                or str(self.SERVICENOW_CLOSED_TICKET_TOKEN_SECRET_ARN or "").strip()
+            ):
+                raise ValueError(
+                    "SERVICENOW_CLOSED_TICKET_TOKEN or SERVICENOW_CLOSED_TICKET_TOKEN_SECRET_ARN "
+                    "is required when closed ticket sync is enabled"
+                )
+            self.CLOSED_TICKET_TABLE = _validate_dynamodb_table_name(
+                self.CLOSED_TICKET_TABLE,
+                setting_name="CLOSED_TICKET_TABLE",
+            )
+            self.CLOSED_TICKET_SYNC_STATE_TABLE = _validate_dynamodb_table_name(
+                self.CLOSED_TICKET_SYNC_STATE_TABLE,
+                setting_name="CLOSED_TICKET_SYNC_STATE_TABLE",
+            )
+            self.CLOSED_TICKET_ARCHIVE_PREFIX = _normalize_s3_prefix(
+                self.CLOSED_TICKET_ARCHIVE_PREFIX,
+                setting_name="CLOSED_TICKET_ARCHIVE_PREFIX",
+            )
+            archive_bucket = (
+                self.CLOSED_TICKET_ARCHIVE_BUCKET.strip() or self.OUTPUT_BUCKET_NAME.strip()
+            )
+            if not archive_bucket:
+                raise ValueError(
+                    "CLOSED_TICKET_ARCHIVE_BUCKET or OUTPUT_BUCKET_NAME is required "
+                    "when closed ticket sync is enabled"
+                )
+            self.CLOSED_TICKET_ARCHIVE_BUCKET = archive_bucket
+        elif self.CLOSED_TICKET_TABLE:
+            self.CLOSED_TICKET_TABLE = _validate_dynamodb_table_name(
+                self.CLOSED_TICKET_TABLE,
+                setting_name="CLOSED_TICKET_TABLE",
+            )
+        if self.CLOSED_TICKET_SYNC_STATE_TABLE:
+            self.CLOSED_TICKET_SYNC_STATE_TABLE = _validate_dynamodb_table_name(
+                self.CLOSED_TICKET_SYNC_STATE_TABLE,
+                setting_name="CLOSED_TICKET_SYNC_STATE_TABLE",
+            )
+        if self.CLOSED_TICKET_ARCHIVE_PREFIX:
+            self.CLOSED_TICKET_ARCHIVE_PREFIX = _normalize_s3_prefix(
+                self.CLOSED_TICKET_ARCHIVE_PREFIX,
+                setting_name="CLOSED_TICKET_ARCHIVE_PREFIX",
+            )
+        if self.CLOSED_TICKET_ARCHIVE_BUCKET:
+            self.CLOSED_TICKET_ARCHIVE_BUCKET = self.CLOSED_TICKET_ARCHIVE_BUCKET.strip()
         self.CASE_ARCHIVE_FAILURE_MODE = (
             self.CASE_ARCHIVE_FAILURE_MODE or "suppress"
         ).strip().lower()
@@ -530,9 +608,13 @@ class Config:
             raise ValueError(
                 "CASE_EMBED_QUEUE_URL is required when Case Q&A is enabled"
             )
-        uses_vector_rag = self.RAG_ENABLED or self.SPL_QUERY_RAG_ENABLED or (
-            self.ELASTICSEARCH_GROUNDING_ENABLED
-        ) or self.CASE_QA_ENABLED or (
+        uses_vector_rag = (
+            self.RAG_ENABLED
+            or self.SPL_QUERY_RAG_ENABLED
+            or self.ELASTICSEARCH_GROUNDING_ENABLED
+            or self.CASE_QA_ENABLED
+            or self.CLOSED_TICKET_RAG_ENABLED
+        ) or (
             self.CASE_QA_CLOSED_TICKET_ENABLED and self.CLOSED_TICKET_RAG_ENABLED
         )
         if uses_vector_rag and self.RAG_RETRIEVAL_BACKEND == "opensearch":
@@ -658,7 +740,7 @@ def load_config() -> Config:
             "OPENSEARCH_ELASTIC_INDEX", "notable-elastic-dictionary"
         ),
         OPENSEARCH_CLOSED_TICKET_INDEX=os.getenv(
-            "OPENSEARCH_CLOSED_TICKET_INDEX", "notable-closed-tickets"
+            "OPENSEARCH_CLOSED_TICKET_INDEX", "closed_tickets"
         ),
         RAG_SOURCE_BUCKET=os.getenv("RAG_SOURCE_BUCKET", ""),
         RAG_SOURCE_PREFIX=os.getenv("RAG_SOURCE_PREFIX", "rag-sources"),
@@ -864,6 +946,49 @@ def load_config() -> Config:
         ),
         DISPOSITION_TABLE=os.getenv("DISPOSITION_TABLE", ""),
         DISPOSITION_SYNC_STATE_TABLE=os.getenv("DISPOSITION_SYNC_STATE_TABLE", ""),
+        CLOSED_TICKET_RETENTION_DAYS=_positive_int_env(
+            "CLOSED_TICKET_RETENTION_DAYS", 30, max_value=90
+        ),
+        SERVICENOW_CLOSED_TICKET_SYNC_ENABLED=_bool_env(
+            "SERVICENOW_CLOSED_TICKET_SYNC_ENABLED", False
+        ),
+        SERVICENOW_CLOSED_TICKET_TOKEN=_optional_str_env("SERVICENOW_CLOSED_TICKET_TOKEN"),
+        SERVICENOW_CLOSED_TICKET_TOKEN_SECRET_ARN=os.getenv(
+            "SERVICENOW_CLOSED_TICKET_TOKEN_SECRET_ARN", ""
+        ),
+        SERVICENOW_CLOSED_TICKET_TABLE=os.getenv(
+            "SERVICENOW_CLOSED_TICKET_TABLE", "sn_si_incident"
+        ),
+        SERVICENOW_CLOSED_TICKET_QUERY=os.getenv("SERVICENOW_CLOSED_TICKET_QUERY", ""),
+        SERVICENOW_CLOSED_TICKET_BACKFILL_DAYS=_positive_int_env(
+            "SERVICENOW_CLOSED_TICKET_BACKFILL_DAYS", 30, max_value=3650
+        ),
+        SERVICENOW_CLOSED_TICKET_CURSOR_OVERLAP_HOURS=_positive_int_env(
+            "SERVICENOW_CLOSED_TICKET_CURSOR_OVERLAP_HOURS", 24, max_value=168
+        ),
+        SERVICENOW_CLOSED_TICKET_RECONCILE_INTERVAL_DAYS=_positive_int_env(
+            "SERVICENOW_CLOSED_TICKET_RECONCILE_INTERVAL_DAYS", 7, max_value=90
+        ),
+        SERVICENOW_CLOSED_TICKET_FETCH_JOURNALS=_bool_env(
+            "SERVICENOW_CLOSED_TICKET_FETCH_JOURNALS", True
+        ),
+        SERVICENOW_CLOSED_TICKET_FETCH_ATTACHMENTS=_bool_env(
+            "SERVICENOW_CLOSED_TICKET_FETCH_ATTACHMENTS", True
+        ),
+        CLOSED_TICKET_ARCHIVE_BUCKET=os.getenv("CLOSED_TICKET_ARCHIVE_BUCKET", ""),
+        CLOSED_TICKET_ARCHIVE_PREFIX=os.getenv(
+            "CLOSED_TICKET_ARCHIVE_PREFIX", "closed_tickets"
+        ),
+        CLOSED_TICKET_ATTACHMENT_MAX_BYTES=_positive_int_env(
+            "CLOSED_TICKET_ATTACHMENT_MAX_BYTES", 10 * 1024 * 1024, max_value=52_428_800
+        ),
+        CLOSED_TICKET_ATTACHMENT_MAX_TEXT_CHARS=_positive_int_env(
+            "CLOSED_TICKET_ATTACHMENT_MAX_TEXT_CHARS", 12000, max_value=200000
+        ),
+        CLOSED_TICKET_TABLE=os.getenv("CLOSED_TICKET_TABLE", ""),
+        CLOSED_TICKET_SYNC_STATE_TABLE=os.getenv("CLOSED_TICKET_SYNC_STATE_TABLE", ""),
+        CLOSED_TICKET_VISION_ENABLED=_bool_env("CLOSED_TICKET_VISION_ENABLED", False),
+        CLOSED_TICKET_EMBED_LAMBDA_NAME=os.getenv("CLOSED_TICKET_EMBED_LAMBDA_NAME", ""),
         SIDE_EFFECT_IDEMPOTENCY_ENABLED=_profile_bool(
             "SIDE_EFFECT_IDEMPOTENCY_ENABLED", False, profile_flags
         ),
