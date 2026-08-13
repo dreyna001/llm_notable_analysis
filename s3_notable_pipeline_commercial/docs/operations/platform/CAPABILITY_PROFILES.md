@@ -78,6 +78,10 @@ Flags not controlled by any profile (legacy/lab only unless noted):
    for the selected profile.
 4. Run the smoke steps in the relevant operations guide and
    [`../../testing/TESTING.md`](../../testing/TESTING.md).
+
+**Customer-default bundle (`core,rag,analyst_portal`):** use the SAM preset in
+[`../deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](../deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md)
+instead of assembling flags manually.
 5. Promote the same profile list after ownership, approval boundaries, and
    rollback expectations are documented.
 

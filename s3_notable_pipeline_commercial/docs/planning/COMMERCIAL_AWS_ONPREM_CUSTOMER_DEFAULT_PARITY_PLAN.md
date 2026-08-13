@@ -3,9 +3,10 @@
 ## Status
 
 - Plan created: 2026-08-12
-- Implementation: not started
+- P0 operator preset: **shipped** (2026-08-13) — see [`../operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](../operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md)
+- Remaining parity gaps: P1–P8 (closed-ticket RAG, rerank, rich ingest, and related)
 - Target product: `s3_notable_pipeline_commercial/` only (`aws`, `us-east-1`)
-- GovCloud sibling (`../s3_notable_pipeline/`) is out of scope unless explicitly merged later
+- Sibling production tree (`../s3_notable_pipeline/`) is out of scope unless explicitly merged later
 
 ## Goal
 
@@ -69,10 +70,13 @@ No new code required for baseline customer-default analysis + portal:
 
 ### Phase P0 — Operator preset (docs + smoke, no feature code)
 
+**Status:** shipped 2026-08-13
+
 **Deliverables**
 
 - [`../operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](../operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md) — parameter checklist, OpenSearch index list, ingestion order, smoke steps
-- Example `samconfig` parameter block or commented SAM overrides in deploy script reference output
+- [`../operations/deployment/OPENSEARCH_PROVISIONING.md`](../operations/deployment/OPENSEARCH_PROVISIONING.md) — customer-managed VPC OpenSearch domain before SAM deploy
+- [`../../deploy/aws/presets/customer-default.env.example`](../../deploy/aws/presets/customer-default.env.example) and [`../../deploy/aws/presets/samconfig.customer-default.toml.example`](../../deploy/aws/presets/samconfig.customer-default.toml.example)
 - Update [`TESTING.md`](../testing/TESTING.md) Wave 1 row for customer-default bundle
 
 **Exit criteria**
@@ -327,7 +331,7 @@ New parameters (names tentative; finalize in P0 doc):
 
 - First-pass SPL generation (`spl_readonly`)
 - Archer connector (on-prem backlog)
-- GovCloud or Azure ports (separate plans; track in central roadmap)
+- Other cloud partition ports (separate plans; track in central roadmap)
 - Replacing disposition sync with closed-ticket sync
 - Customer-default preset for hardware-tuned vLLM (on-prem only)
 

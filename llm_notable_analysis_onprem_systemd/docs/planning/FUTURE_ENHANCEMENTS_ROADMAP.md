@@ -42,7 +42,7 @@ operator-owned):
 | KB image/PDF/DOCX corpus ingest | Shipped | **Backlog** |
 | Portal chat image uploads (multimodal) | Shipped | **Backlog** (OpenAPI fields only) |
 | RAG cross-encoder / Bedrock rerank (wired runtime) | Shipped | **Backlog** (config flags only) |
-| Cloud `CUSTOMER_DEFAULT_DEPLOYMENT` preset | Shipped | **Backlog** |
+| Cloud `CUSTOMER_DEFAULT_DEPLOYMENT` preset | Shipped (on-prem doc) | Commercial: **shipped**; GovCloud: **backlog** |
 | Threat-intel enrichment adapters | Backlog | Backlog |
 | SOC SOAR playbook invocation (investigation-time) | Backlog | Backlog |
 | LLM observability / Langfuse-class tracing | Backlog | Backlog |
@@ -60,10 +60,9 @@ On-prem normative customer-default bundle:
 
 ## On-prem customer-default cloud parity (AWS GovCloud + Azure)
 
-**Status: backlog.** Neither `s3_notable_pipeline` (AWS GovCloud/commercial fork baseline) nor
-`azure_notable_pipeline` ships the on-prem customer-default capabilities below. Both cloud
-stacks match each other on these gaps; port or reimplement from on-prem before claiming
-customer-default parity.
+**Status: backlog on AWS/Azure feature code; P0 commercial preset shipped (2026-08-13).** GovCloud
+and Azure still lack customer-default preset and P1–P8 feature parity. Port or reimplement from
+on-prem before claiming full customer-default parity on those partitions.
 
 Reference on-prem implementation:
 

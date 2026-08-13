@@ -1,6 +1,6 @@
 # S3 Notable Pipeline
 
-Minimal guide for new readers. Full documentation index: [`docs/README.md`](docs/README.md). Customer tuning guides: [`docs/operations/README.md`](docs/operations/README.md) (`deployment/`, `platform/`, `analyst_portal/`, `llm/`, `rag/`, `investigation/`, `integrations/`, `security/`). On-prem mirror: [`../llm_notable_analysis_onprem_systemd/docs/`](../llm_notable_analysis_onprem_systemd/docs/).
+Minimal guide for new readers. **Documentation hub:** [`docs/README.md`](docs/README.md) (deploy paths A/B/C). Customer tuning: [`docs/operations/README.md`](docs/operations/README.md). On-prem mirror: [`../llm_notable_analysis_onprem_systemd/docs/`](../llm_notable_analysis_onprem_systemd/docs/).
 
 This service processes security notables uploaded to S3, runs LLM-based ATT&CK analysis (Bedrock), and sends results to one of two sinks:
 
@@ -24,9 +24,24 @@ sam --version
 docker --version
 ```
 
-## 2) Deploy (Fast Path)
+## 2) Deploy
 
-**Packaging readiness:** Build with the default Lambda Python 3.12 base for development or override `LAMBDA_BASE_IMAGE` with the customer's approved digest-pinned mirror. Push the result to commercial ECR in `us-east-1` before deployment. See [`docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`](docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md).
+**Navigation hub:** [`docs/README.md`](docs/README.md) lists three deploy paths (core,
+customer-default, custom profiles). Start there if you are unsure which flow to follow.
+
+### Choose your path
+
+| Path | Doc trail |
+| --- | --- |
+| **A — Core only** (below) | This section + section 3 smoke test |
+| **B — Customer-default** (`core,rag,analyst_portal`) | [`docs/README.md`](docs/README.md) Path B: [`OPENSEARCH_PROVISIONING.md`](docs/operations/deployment/OPENSEARCH_PROVISIONING.md) -> [`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md) |
+| **C — Custom profiles** | [`docs/operations/platform/CAPABILITY_PROFILES.md`](docs/operations/platform/CAPABILITY_PROFILES.md) + [`docs/operations/README.md`](docs/operations/README.md) |
+
+Every path requires an ECR image first: [`docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`](docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md).
+
+### Path A — Core only (fast path)
+
+**Packaging readiness:** Build with the default Lambda Python 3.12 base for development or override `LAMBDA_BASE_IMAGE` with the customer's approved digest-pinned mirror. Push the result to commercial ECR in `us-east-1` before deployment.
 
 From this directory:
 
@@ -69,7 +84,7 @@ If using guided deploy, start with:
 - `ImageDigest`: immutable `sha256:...` digest returned by ECR
 - `BedrockAnalysisModelId`: customer-approved model or inference-profile ID
 - `BedrockAnalysisModelArn`: exact ARN matching `BedrockAnalysisModelId` (required for IAM)
-- `CapabilityProfiles=core` unless you are enabling optional bundles (see section 5)
+- `CapabilityProfiles=core` unless you are enabling optional bundles (Path B or C above; see [`docs/README.md`](docs/README.md))
 - `MaxDecompressedInputBytes`: keep the default `1048576` unless expected gzip notable payloads need a larger decompressed size
 - if using `notable_rest`, provide:
   - `SplunkBaseUrl`
@@ -124,6 +139,10 @@ Profiles are the preferred way to enable optional behavior. Set SAM parameter `C
 | `analyst_portal` | S3 case archive, DynamoDB CaseIndex, case-chunk embed Lambda, JWT/IAM portal API, static SPA, pinned-case Q&A |
 
 Full operator guide: [`docs/operations/platform/CAPABILITY_PROFILES.md`](docs/operations/platform/CAPABILITY_PROFILES.md). Authoritative flag mapping: `src/s3_notable_pipeline/config.py`.
+
+**Customer-default on AWS:** follow Path B in [`docs/README.md`](docs/README.md)
+(`OPENSEARCH_PROVISIONING.md` -> `COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md` ->
+[`deploy/aws/presets/`](deploy/aws/presets/)).
 
 ## 5) Runtime Contract (Important)
 
@@ -186,31 +205,11 @@ Operations: [`docs/operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md`](docs
 - `data/test-notable.txt` - sample notable used by the test helper
 - `config.env.example` - AWS runtime contract reference for Lambda environment variables
 
-**Documentation (start at [`docs/README.md`](docs/README.md))**
+**Documentation**
 
-- [`docs/operations/README.md`](docs/operations/README.md) - operations guide index by category
-- [`docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`](docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md) - Lambda image build and ECR deployment
-- [`docs/operations/platform/CAPABILITY_PROFILES.md`](docs/operations/platform/CAPABILITY_PROFILES.md) - supported AWS feature bundles and profile-first configuration
-- [`docs/operations/platform/FILE_DROP_AND_RETENTION_OPERATIONS.md`](docs/operations/platform/FILE_DROP_AND_RETENTION_OPERATIONS.md) - S3 intake prefixes, gzip handling, lifecycle, and size limits
-- [`docs/operations/platform/MITRE_TTP_OPERATIONS.md`](docs/operations/platform/MITRE_TTP_OPERATIONS.md) - bundled TTP ID data, refresh workflow, and validation
-- [`docs/operations/platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`](docs/operations/platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md) - failure behavior, retry semantics, and recovery duties
-- [`docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md) - AWS portal archive, JWT/IAM API, static SPA, Case Q&A, retention, and rollback
-- [`docs/operations/llm/LLM_INFERENCE_OPERATIONS.md`](docs/operations/llm/LLM_INFERENCE_OPERATIONS.md) - Bedrock model id, timeouts, structured output, rollout
-- [`docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md`](docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md) - S3 corpus ingestion and OpenSearch index lifecycle
-- [`docs/operations/rag/RAG_OPERATIONS.md`](docs/operations/rag/RAG_OPERATIONS.md) - RAG enablement, failure mode, snippets, budgets
-- [`docs/operations/investigation/SPL_OPERATIONS.md`](docs/operations/investigation/SPL_OPERATIONS.md) - SPL generation, grounding, and read-only Splunk investigation
-- [`docs/operations/investigation/ELASTICSEARCH_OPERATIONS.md`](docs/operations/investigation/ELASTICSEARCH_OPERATIONS.md) - Elasticsearch Query DSL generation and read-only `_search`
-- [`docs/operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md`](docs/operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md) - Splunk notable writeback and DynamoDB idempotency
-- [`docs/operations/integrations/SERVICENOW_OPERATIONS.md`](docs/operations/integrations/SERVICENOW_OPERATIONS.md) - ServiceNow incident draft/create operations
-- [`docs/operations/security/SECURITY_OPERATIONS.md`](docs/operations/security/SECURITY_OPERATIONS.md) - IAM, secrets, TLS, endpoint validation, hardening
-- [`docs/technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md`](docs/technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md) - AWS/on-prem parity implementation contract (normative for coding)
-- [`docs/delivery_package/EXECUTIVE_AWS_WORKFLOW.md`](docs/delivery_package/EXECUTIVE_AWS_WORKFLOW.md) - executive end-to-end workflow overview
-- [`docs/delivery_package/end_to_end_diagrams/END_TO_END_DIAGRAMS.md`](docs/delivery_package/end_to_end_diagrams/END_TO_END_DIAGRAMS.md) - end-to-end Mermaid diagrams (SVG exports in the same folder)
-- [`docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_AWS_READINESS_OVERVIEW.md`](docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_AWS_READINESS_OVERVIEW.md) - deployment readiness gateway (executive)
-- [`docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_AWS_READINESS_ASSESSMENT.md`](docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_AWS_READINESS_ASSESSMENT.md) - readiness assessment (technical checklist)
-- [`docs/testing/TESTING.md`](docs/testing/TESTING.md) - unit, smoke, LocalStack integration, and optional live validation
-- [`docs/integrations/SOAR_PLAYBOOK_PHANTOM.md`](docs/integrations/SOAR_PLAYBOOK_PHANTOM.md) - SOAR upload pattern
-- [`docs/security/ATTACK_LLM_ANALYSIS.md`](docs/security/ATTACK_LLM_ANALYSIS.md) - ATT&CK grounding and validation approach
+- [`docs/README.md`](docs/README.md) — **start here** for deploy paths and topic shortcuts
+- [`docs/operations/README.md`](docs/operations/README.md) — operations guides by category
+- [`docs/testing/TESTING.md`](docs/testing/TESTING.md) — validation commands
 
 ## 8) Common Issues
 

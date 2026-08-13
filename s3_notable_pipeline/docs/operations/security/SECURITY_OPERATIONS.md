@@ -8,6 +8,9 @@ capability profile semantics are in
 Implemented stack resources and IAM policies are defined in
 [`../../../deploy/aws/template-sam.yaml`](../../../deploy/aws/template-sam.yaml).
 
+Customer CMK provisioning and key policies:
+[`../deployment/KMS_CUSTOMER_KEY.md`](../deployment/KMS_CUSTOMER_KEY.md).
+
 ## What This Controls
 
 Runtime security posture for the S3-triggered Lambda stack: which AWS APIs and

@@ -35,7 +35,8 @@ testing. It is not a fallback in `us-gov-east-1`.
 ## Rollout
 
 1. Deploy core processing with RAG profiles disabled.
-2. Provision and validate the private OpenSearch domain and indexes.
+2. Provision and validate the private OpenSearch domain — see
+   [`../deployment/OPENSEARCH_PROVISIONING.md`](../deployment/OPENSEARCH_PROVISIONING.md).
 3. Ingest and approve one corpus lane at a time.
 4. Enable `rag`, then the selected investigation profile, in staging.
 5. Confirm retrieval attribution and evidence separation in JSON reports.

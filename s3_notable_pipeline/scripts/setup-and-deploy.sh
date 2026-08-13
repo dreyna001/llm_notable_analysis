@@ -95,6 +95,7 @@ fi
 
 echo
 echo "Before deploy: ensure EcrRepositoryUri and ImageDigest identify the approved image in us-gov-east-1."
+echo "Before RAG/portal: complete docs/operations/deployment/OPENSEARCH_PROVISIONING.md"
 echo
 echo "=== Step 1: Building application ==="
 echo "Running: sam build -t $SAM_TEMPLATE"

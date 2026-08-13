@@ -95,6 +95,13 @@ and `sam deploy` only. They do not build, tag, or push the container image.
 Publish the digest-qualified image to ECR before deploy, or include
 `EcrRepositoryUri` and `ImageDigest` in `samconfig.toml` / guided prompts.
 
+For the on-prem **customer-default** bundle (`core,rag,analyst_portal`), start from
+[`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md)
+and copy
+[`../../../deploy/aws/presets/samconfig.customer-default.toml.example`](../../../deploy/aws/presets/samconfig.customer-default.toml.example)
+to `samconfig.toml`. Provision OpenSearch first:
+[`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md).
+
 Enabled OpenSearch, portal, RAG ingestion, or disposition-sync capabilities
 additionally require the values in
 [`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md)

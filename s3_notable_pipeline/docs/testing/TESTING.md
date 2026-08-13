@@ -180,7 +180,7 @@ Run profile slices incrementally. Start with `CapabilityProfiles=core` and
 | --- | --- | --- |
 | **core** | Default SAM parameters; Bedrock model access | Upload `data/test-notable.txt` to `incoming/`; confirm markdown + JSON under `reports/`; review CloudWatch logs for bounded metadata without secrets |
 | **html_reports** | `CapabilityProfiles=core,html_reports`, `HtmlReportEnabled=true` | Confirm sibling `.html` object beside markdown/JSON |
-| **rag** | `CapabilityProfiles=core,rag`, `RagEnabled=true`, private OpenSearch settings and an ingested SOC corpus | JSON `metadata.rag_status` is `success` or `no_match`; analysis completes when `RagFailureMode=suppress` |
+| **rag** | Step 0: [`OPENSEARCH_PROVISIONING.md`](../operations/deployment/OPENSEARCH_PROVISIONING.md). `CapabilityProfiles=core,rag`, `RagEnabled=true`, private OpenSearch settings and an ingested SOC corpus | JSON `metadata.rag_status` is `success` or `no_match`; analysis completes when `RagFailureMode=suppress` |
 | **spl_readonly** | `CapabilityProfiles=core,rag,spl_readonly`; Splunk URL + token secret; `SplQueryRagEnabled=true` after dictionary ingestion | JSON includes SPL generation metadata and/or `investigation_query_results`; denied SPL commands do not outbound; Splunk allowlists enforced |
 | **elastic_readonly** | `CapabilityProfiles=core,rag,elastic_readonly` (not with `spl_readonly`); Elastic URL + API key secret + index allowlist; optional `ElasticsearchGroundingEnabled=true` | JSON `metadata.investigation_query_backend=elasticsearch` with bounded `investigation_query_results` |
 | **ticket_draft** | `CapabilityProfiles=core,ticket_draft`, `ServiceNowAssignmentGroup` | JSON `servicenow_section.draft` present; no ServiceNow POST unless create is separately enabled |
@@ -211,8 +211,20 @@ and
 This checklist is optional real AWS validation and must run only in an approved
 dev/staging/prod account.
 
+### OpenSearch preflight (before RAG or portal SAM deploy)
+
+Complete [`../operations/deployment/OPENSEARCH_PROVISIONING.md`](../operations/deployment/OPENSEARCH_PROVISIONING.md), then confirm:
+
+| Check | Pass criteria |
+| --- | --- |
+| Domain active | `aws opensearch describe-domain` in `us-gov-east-1` shows `Processing=false`, VPC endpoint present |
+| Network | Lambda subnets route to OpenSearch SG on 443; NAT or GovCloud VPC endpoints cover S3, SQS, DynamoDB, Bedrock, Logs |
+| Access policy | Domain policy allows analyzer, portal, case-embed, and rag-ingestion Lambda role ARNs (`aws-us-gov` partition) |
+| SAM inputs | `OpenSearchEndpoint`, `OpenSearchDomainArn`, `RagTenantId`, `CustomerVpcSubnetIds`, `CustomerSecurityGroupIds` set |
+| Post-ingest | First manifest creates expected index with k-NN mapping; tenant filter rejects wrong `RagTenantId` |
+
 | Profile slice | Deploy prerequisites | Staging validation |
 | --- | --- | --- |
-| **analyst_portal** | `CapabilityProfiles=core,analyst_portal`; `CaseArchiveBucketName`; `CaseIndexTableName`; JWT issuer/audience; portal CORS origin; optional `PortalUiBucketName` | After deploy, record `PortalBrowserApiBaseUrl`, `PortalApiUrl`, and `PortalChatFunctionUrl`; upload a representative notable; confirm archive envelope, chunks, and CaseIndex `retrieval_status=ready`; load `/`, `/cases`, and `/cases/{case_id}` through the SPA; ask a selected-case question and confirm cited answer |
+| **analyst_portal** | Step 0: [`OPENSEARCH_PROVISIONING.md`](../operations/deployment/OPENSEARCH_PROVISIONING.md) when case Q&A is enabled. `CapabilityProfiles=core,analyst_portal`; `CaseArchiveBucketName`; `CaseIndexTableName`; JWT issuer/audience; portal CORS origin; optional `PortalUiBucketName` | After deploy, record `PortalBrowserApiBaseUrl`, `PortalApiUrl`, and `PortalChatFunctionUrl`; upload a representative notable; confirm archive envelope, chunks, and CaseIndex `retrieval_status=ready`; load `/`, `/cases`, and `/cases/{case_id}` through the SPA; ask a selected-case question and confirm cited answer |
 
 See [`../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md).

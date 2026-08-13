@@ -1,0 +1,49 @@
+# Copy to samconfig.toml at the commercial project root, fill placeholders, then:
+#   sam build -t deploy/aws/template-sam.yaml
+#   sam deploy --region us-east-1 --template-file .aws-sam/build/template.yaml
+#
+# Checklist: docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md
+# OpenSearch first: docs/operations/deployment/OPENSEARCH_PROVISIONING.md
+
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "notable-analyzer-stack"
+region = "us-east-1"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+parameter_overrides = """
+DeploymentPartition=aws \
+DeploymentRegion=us-east-1 \
+AwsAccountId=<12-digit-account-id> \
+EcrRepositoryUri=<account>.dkr.ecr.us-east-1.amazonaws.com/notable-analyzer-s3 \
+ImageDigest=sha256:<immutable-digest> \
+BedrockAnalysisModelId=<approved-model-or-profile-id> \
+BedrockAnalysisModelArn=<approved-model-or-profile-arn> \
+InputBucketName=<customer-input-bucket> \
+OutputBucketName=<customer-output-bucket> \
+CapabilityProfiles=core,rag,analyst_portal \
+SplunkSinkMode=s3 \
+HtmlReportEnabled=false \
+RagEnabled=true \
+RagIngestionEnabled=true \
+SplQueryRagEnabled=true \
+PortalEnabled=true \
+CaseArchiveEnabled=true \
+CaseQaEnabled=true \
+CaseIndexTableName=notable-case-index \
+PortalUiBucketName=<customer-portal-ui-bucket> \
+PortalAuthMode=jwt \
+PortalJwtIssuer=<oidc-issuer-url> \
+PortalJwtAudience=<portal-api-audience> \
+PortalCorsAllowedOrigins=<https://portal.example.com> \
+OpenSearchEndpoint=<vpc-opensearch-endpoint> \
+OpenSearchDomainArn=arn:aws:es:us-east-1:<account-id>:domain/<domain-name> \
+OpenSearchSocIndex=soc_knowledge \
+OpenSearchSplunkIndex=splunk_dictionary \
+OpenSearchCaseIndex=case_chunks \
+RagTenantId=<stable-tenant-id> \
+CustomerVpcSubnetIds=<subnet-1>,<subnet-2> \
+CustomerSecurityGroupIds=<sg-id>
+"""

@@ -5,6 +5,9 @@ application, templates, queues, indexes, validation, and operational controls
 remain product-owned; only customer-specific identifiers, policies, content,
 and capacity values change.
 
+**Scope boundary:** what you must provision vs what the stack creates is summarized in
+[`CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md`](CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md).
+
 ## Deployment Boundary
 
 - Region: `us-gov-east-1`
@@ -19,11 +22,12 @@ and capacity values change.
 | Area | Values collected during operationalization |
 | --- | --- |
 | Account | GovCloud account ID, deployment role, stack name, ECR repository |
-| Identity | OIDC issuer, audience, analyst application role and/or delegated scope |
+| Identity | OIDC issuer, audience, analyst application role and/or delegated scope — see [`PORTAL_JWT_IDENTITY.md`](PORTAL_JWT_IDENTITY.md) |
 | Deployment scope | Stable deployment/tenant identifier used on every OpenSearch document and query |
-| Network | VPC, private subnets, Lambda security groups, private DNS, VPN or Direct Connect routes |
-| Encryption | Customer-managed KMS keys and key-administration roles |
-| Models | Approved Bedrock analysis, chat, and embedding model IDs available in `us-gov-east-1` |
+| Network | VPC, private subnets, Lambda security groups — see [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md) |
+| OpenSearch | VPC-only domain in `us-gov-east-1`; provision before RAG/portal SAM deploy — see [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) |
+| Encryption | Customer-managed KMS keys — see [`KMS_CUSTOMER_KEY.md`](KMS_CUSTOMER_KEY.md) |
+| Models | Approved Bedrock analysis, chat, and embedding model IDs — see [`BEDROCK_ACCOUNT_ENABLEMENT.md`](BEDROCK_ACCOUNT_ENABLEMENT.md) |
 | Integrations | Private Splunk, ServiceNow, or Elasticsearch endpoints and Secrets Manager ARNs |
 | Browser edge | CORS origins, API throttles, reserved concurrency, user quotas, and customer network access controls |
 | Retention | Input, report, case, chat, log, queue, DLQ, and OpenSearch retention values |

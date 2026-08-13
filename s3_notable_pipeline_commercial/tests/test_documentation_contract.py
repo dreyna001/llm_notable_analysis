@@ -15,8 +15,17 @@ class DocumentationContractTests(unittest.TestCase):
     def test_commercial_document_renames_and_links_are_complete(self) -> None:
         expected = (
             "docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md",
+            "docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md",
+            "docs/operations/deployment/OPENSEARCH_PROVISIONING.md",
+            "docs/operations/deployment/VPC_NETWORK_PREREQUISITES.md",
+            "docs/operations/deployment/BEDROCK_ACCOUNT_ENABLEMENT.md",
+            "docs/operations/deployment/KMS_CUSTOMER_KEY.md",
+            "docs/operations/deployment/PORTAL_JWT_IDENTITY.md",
+            "docs/operations/deployment/CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md",
             "docs/planning/AWS_COMMERCIAL_READINESS_PLAN.md",
             "docs/internal/AWS_COMMERCIAL_DEFERRED_GAPS.md",
+            "deploy/aws/presets/customer-default.env.example",
+            "deploy/aws/presets/samconfig.customer-default.toml.example",
         )
         retired = (
             "docs/operations/deployment/GOVCLOUD_CUSTOMER_CONFIGURATION.md",
@@ -91,6 +100,29 @@ class DocumentationContractTests(unittest.TestCase):
         for snippet in required_snippets:
             self.assertIn(snippet, steps)
 
+    def test_customer_default_preset_documents_core_bundle(self) -> None:
+        preset_doc = (
+            PROJECT_ROOT
+            / "docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md"
+        ).read_text(encoding="utf-8")
+        for snippet in (
+            "CapabilityProfiles=core,rag,analyst_portal",
+            "SplQueryRagEnabled=true",
+            "deploy/aws/presets/customer-default.env.example",
+            "VPC_NETWORK_PREREQUISITES.md",
+            "OPENSEARCH_PROVISIONING.md",
+            "PORTAL_JWT_IDENTITY.md",
+            "BEDROCK_ACCOUNT_ENABLEMENT.md",
+            "spl_readonly",
+        ):
+            self.assertIn(snippet, preset_doc)
+
+        env_example = (
+            PROJECT_ROOT / "deploy/aws/presets/customer-default.env.example"
+        ).read_text(encoding="utf-8")
+        self.assertIn("RagIngestionEnabled=true", env_example)
+        self.assertIn("PortalEnabled=true", env_example)
+
     def test_commercial_service_decisions_are_recorded(self) -> None:
         register = (
             PROJECT_ROOT / "docs/internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md"
@@ -104,6 +136,27 @@ class DocumentationContractTests(unittest.TestCase):
             "S3 Vectors",
         ):
             self.assertIn(decision, register)
+
+    def test_docs_readme_lists_deploy_paths(self) -> None:
+        hub = (PROJECT_ROOT / "docs/README.md").read_text(encoding="utf-8")
+        for snippet in (
+            "Choose your deploy path",
+            "Path A",
+            "Path B",
+            "Path C",
+            "VPC_NETWORK_PREREQUISITES.md",
+            "OPENSEARCH_PROVISIONING.md",
+            "BEDROCK_ACCOUNT_ENABLEMENT.md",
+            "PORTAL_JWT_IDENTITY.md",
+            "KMS_CUSTOMER_KEY.md",
+            "CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md",
+            "COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md",
+        ):
+            self.assertIn(snippet, hub)
+
+        root_readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("docs/README.md", root_readme)
+        self.assertIn("Choose your path", root_readme)
 
 
 if __name__ == "__main__":

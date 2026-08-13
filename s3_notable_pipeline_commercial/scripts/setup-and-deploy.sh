@@ -165,6 +165,12 @@ echo "    OpenSearchEndpoint, OpenSearchDomainArn, RagTenantId, private VPC IDs"
 echo "    SplQueryRagEnabled / ElasticsearchGroundingEnabled enable dictionary lanes"
 echo
 echo "  Safe first deploy: CapabilityProfiles=core, SplunkSinkMode=s3, HtmlReportEnabled=false, RagEnabled=false"
+echo ""
+echo "  Customer-default preset (core,rag,analyst_portal):"
+echo "    docs/operations/deployment/OPENSEARCH_PROVISIONING.md (Step 0)"
+echo "    docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md"
+echo "    deploy/aws/presets/customer-default.env.example"
+echo "    deploy/aws/presets/samconfig.customer-default.toml.example"
 
 echo
 echo "=== Step 2: Deploying to AWS ==="

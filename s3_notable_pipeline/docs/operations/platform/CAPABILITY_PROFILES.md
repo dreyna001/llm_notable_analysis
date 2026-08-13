@@ -78,6 +78,9 @@ Flags not controlled by any profile (legacy/lab only unless noted):
    for the selected profile.
 4. Run the smoke steps in the relevant operations guide and
    [`../../testing/TESTING.md`](../../testing/TESTING.md).
+
+For RAG or portal bundles, provision OpenSearch first — see
+[`../deployment/OPENSEARCH_PROVISIONING.md`](../deployment/OPENSEARCH_PROVISIONING.md).
 5. Promote the same profile list after ownership, approval boundaries, and
    rollback expectations are documented.
 

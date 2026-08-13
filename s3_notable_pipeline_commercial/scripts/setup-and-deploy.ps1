@@ -171,6 +171,12 @@ Write-Host "    ServiceNowAssignmentGroup (required for ticket_draft drafts)" -F
 Write-Host "    SideEffectIdempotencyTableName (default: notable-side-effect-idempotency)" -ForegroundColor Gray
 Write-Host ""
 Write-Host "  Safe first deploy: CapabilityProfiles=core, SplunkSinkMode=s3, HtmlReportEnabled=false, RagEnabled=false" -ForegroundColor Green
+Write-Host ""
+Write-Host "  Customer-default preset (core,rag,analyst_portal):" -ForegroundColor Yellow
+Write-Host "    docs/operations/deployment/OPENSEARCH_PROVISIONING.md (Step 0)" -ForegroundColor Gray
+Write-Host "    docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md" -ForegroundColor Gray
+Write-Host "    deploy/aws/presets/customer-default.env.example" -ForegroundColor Gray
+Write-Host "    deploy/aws/presets/samconfig.customer-default.toml.example" -ForegroundColor Gray
 
 # Deploy
 Write-Host "`n=== Step 2: Deploying to AWS ===" -ForegroundColor Cyan

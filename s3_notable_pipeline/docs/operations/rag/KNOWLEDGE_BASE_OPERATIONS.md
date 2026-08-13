@@ -30,6 +30,8 @@ stores transactional case/import status but is not a vector store.
 ## Security Boundary
 
 - OpenSearch is VPC-only and encrypted with the customer-configured KMS key.
+- Provision the domain before enabling RAG in SAM — see
+  [`../deployment/OPENSEARCH_PROVISIONING.md`](../deployment/OPENSEARCH_PROVISIONING.md).
 - Runtime access uses IAM/SigV4; do not store OpenSearch credentials.
 - Every document and query is scoped by the deployment/tenant identifier.
 - Case retrieval additionally requires an exact `case_id` filter.

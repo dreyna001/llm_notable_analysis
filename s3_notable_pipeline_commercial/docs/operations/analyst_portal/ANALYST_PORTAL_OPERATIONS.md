@@ -23,6 +23,8 @@ bucket; the UI bucket is separate from case data and blocks public access.
 
 ## Customer Inputs
 
+IdP and JWT contract: [`../deployment/PORTAL_JWT_IDENTITY.md`](../deployment/PORTAL_JWT_IDENTITY.md).
+
 - `PortalAuthMode=jwt|iam`
 - `PortalJwtIssuer`, `PortalJwtAudience`, and at least one of
   `PortalRequiredAnalystRole` or `PortalRequiredAnalystScope` for JWT mode

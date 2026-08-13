@@ -213,8 +213,21 @@ and
 This checklist is optional real AWS validation and must run only in an approved
 dev/staging/prod account.
 
+### OpenSearch preflight (before RAG or customer-default SAM deploy)
+
+Complete [`../operations/deployment/OPENSEARCH_PROVISIONING.md`](../operations/deployment/OPENSEARCH_PROVISIONING.md), then confirm:
+
+| Check | Pass criteria |
+| --- | --- |
+| Domain active | `aws opensearch describe-domain` shows `Processing=false`, VPC endpoint present |
+| Network | Lambda subnets route to OpenSearch SG on 443; NAT or VPC endpoints cover S3, SQS, DynamoDB, Bedrock, Logs |
+| Access policy | Domain policy allows analyzer, portal, case-embed, and rag-ingestion Lambda role ARNs |
+| SAM inputs | `OpenSearchEndpoint`, `OpenSearchDomainArn`, `RagTenantId`, `CustomerVpcSubnetIds`, `CustomerSecurityGroupIds` filled in preset |
+| Post-ingest | First manifest creates expected index with k-NN mapping; tenant filter rejects wrong `RagTenantId` |
+
 | Profile slice | Deploy prerequisites | Staging validation |
 | --- | --- | --- |
+| **customer-default** | Step 0: [`OPENSEARCH_PROVISIONING.md`](../operations/deployment/OPENSEARCH_PROVISIONING.md). Preset in [`../operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](../operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md): `CapabilityProfiles=core,rag,analyst_portal`; `RagEnabled=true`; `RagIngestionEnabled=true`; `SplQueryRagEnabled=true`; `PortalEnabled=true`; `CaseArchiveEnabled=true`; `CaseQaEnabled=true`; OpenSearch VPC path; portal JWT/CORS; `CaseIndexTableName`; SOC + Splunk dictionary corpora ingested | OpenSearch preflight table above; `.\scripts\test-pipeline.ps1 -Wave1Smoke -ExpectCapabilityProfiles "core,rag,analyst_portal"`; portal SPA uploaded; representative notable -> archive + CaseIndex ready; portal chat with KB grounding |
 | **analyst_portal** | `CapabilityProfiles=core,analyst_portal`; `CaseArchiveBucketName`; `CaseIndexTableName`; JWT issuer/audience; portal CORS origin; optional `PortalUiBucketName` | After deploy, record `PortalBrowserApiBaseUrl` and `PortalApiUrl`; upload a representative notable; confirm archive envelope, chunks, and CaseIndex `retrieval_status=ready`; load `/`, `/cases`, and `/cases/{case_id}` through the SPA; ask a selected-case question and confirm cited answer within the regional API timeout |
 
 For the deployed commercial JWT route, set `PORTAL_E2E_BASE_URL` to the

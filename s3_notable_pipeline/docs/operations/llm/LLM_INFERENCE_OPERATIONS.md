@@ -3,7 +3,13 @@
 This guide helps operators tune the Amazon Bedrock call path without changing
 code. Settings come from SAM/CloudFormation parameters in
 [`deploy/aws/template-sam.yaml`](../../../deploy/aws/template-sam.yaml) and the
-Lambda environment variables they populate. This doc covers Bedrock model routing,
+Lambda environment variables they populate.
+
+**Before first deploy:** complete [`../deployment/BEDROCK_ACCOUNT_ENABLEMENT.md`](../deployment/BEDROCK_ACCOUNT_ENABLEMENT.md)
+to enable models in the account and record `BedrockAnalysisModelId` /
+`BedrockAnalysisModelArn`.
+
+This doc covers Bedrock model routing,
 inference profile ARNs, Lambda timeout and memory sizing, structured output
 behavior, and optional runtime overrides.
 

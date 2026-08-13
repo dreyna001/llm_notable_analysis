@@ -86,6 +86,8 @@ sam deploy \
 
 Enabled OpenSearch or portal capabilities additionally require the values in
 [`GOVCLOUD_CUSTOMER_CONFIGURATION.md`](GOVCLOUD_CUSTOMER_CONFIGURATION.md).
+Provision the OpenSearch domain first:
+[`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md).
 CloudFormation rules fail deployment when tenant, endpoint, VPC, or JWT grants
 required by an enabled capability are missing.
 

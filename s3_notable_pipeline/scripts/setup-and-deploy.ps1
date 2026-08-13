@@ -129,6 +129,9 @@ Write-Host "    ServiceNowAssignmentGroup (required for ticket_draft drafts)" -F
 Write-Host "    SideEffectIdempotencyTableName (default: notable-side-effect-idempotency)" -ForegroundColor Gray
 Write-Host ""
 Write-Host "  Safe first deploy: CapabilityProfiles=core, SplunkSinkMode=s3, HtmlReportEnabled=false, RagEnabled=false" -ForegroundColor Green
+Write-Host ""
+Write-Host "  OpenSearch (before RAG/portal):" -ForegroundColor Yellow
+Write-Host "    docs/operations/deployment/OPENSEARCH_PROVISIONING.md" -ForegroundColor Gray
 
 # Deploy
 Write-Host "`n=== Step 2: Deploying to AWS ===" -ForegroundColor Cyan
