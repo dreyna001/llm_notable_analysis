@@ -12,6 +12,7 @@ from .runtime_security import validate_https_url
 _TRUE_VALUES = {"true", "1", "yes"}
 _FALSE_VALUES = {"false", "0", "no"}
 _DYNAMODB_TABLE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{3,255}$")
+_BYTE_SIZE_RE = re.compile(r"^(\d+)([KMG]iB|[KMG]B)?$", re.IGNORECASE)
 
 _CAPABILITY_PROFILE_FLAGS: dict[str, dict[str, Any]] = {
     "core": {},
@@ -71,6 +72,32 @@ def _positive_int_env(name: str, default: int, *, max_value: int | None = None) 
         raise ValueError(f"{name} must be a positive integer")
     if max_value is not None and value > max_value:
         raise ValueError(f"{name} must be <= {max_value}")
+    return value
+
+
+def _byte_size_env(name: str, default: int) -> int:
+    """Read a positive byte-size env var (supports KiB/MiB/GiB suffixes)."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    text = raw.strip()
+    if not text:
+        return default
+    match = _BYTE_SIZE_RE.fullmatch(text)
+    if not match:
+        raise ValueError(f"{name} must be a byte size such as 10485760 or 10MiB")
+    amount = int(match.group(1))
+    suffix = (match.group(2) or "").upper()
+    multiplier = 1
+    if suffix in {"KIB", "KB"}:
+        multiplier = 1024
+    elif suffix in {"MIB", "MB"}:
+        multiplier = 1024 * 1024
+    elif suffix in {"GIB", "GB"}:
+        multiplier = 1024 * 1024 * 1024
+    value = amount * multiplier
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive byte size")
     return value
 
 
@@ -180,10 +207,26 @@ class Config:
     OPENSEARCH_SOC_INDEX: str = "notable-soc-knowledge"
     OPENSEARCH_SPLUNK_INDEX: str = "notable-splunk-dictionary"
     OPENSEARCH_ELASTIC_INDEX: str = "notable-elastic-dictionary"
+    OPENSEARCH_CLOSED_TICKET_INDEX: str = "notable-closed-tickets"
     RAG_SOURCE_BUCKET: str = ""
     RAG_SOURCE_PREFIX: str = "rag-sources"
     RAG_INGEST_QUEUE_URL: str = ""
     RAG_INGEST_MAX_DOCUMENT_BYTES: int = 5_242_880
+
+    IMAGE_INGEST_ENABLED: bool = False
+    IMAGE_INGEST_ALLOWED_MIME_TYPES: str = (
+        "application/pdf,"
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document,"
+        "image/gif,image/jpeg,image/jpg,image/png,image/webp"
+    )
+    IMAGE_INGEST_MAX_BYTES: int = 10 * 1024 * 1024
+    IMAGE_INGEST_MAX_PIXELS: int = 25_000_000
+    IMAGE_INGEST_MAX_WIDTH: int = 8192
+    IMAGE_INGEST_MAX_HEIGHT: int = 8192
+    IMAGE_INGEST_MAX_PDF_PAGES: int = 50
+    IMAGE_INGEST_MAX_EMBEDDED_IMAGES: int = 20
+    IMAGE_INGEST_MAX_OUTPUT_CHARS: int = 12_000
+    IMAGE_INGEST_USE_TEXTRACT: bool = False
 
     SPLUNK_BASE_URL: str = ""
     SPLUNK_API_TOKEN_SECRET_ARN: str = ""
@@ -316,6 +359,18 @@ class Config:
     CASE_QA_MAX_STORED_MESSAGE_BYTES: int = 4_000
     CASE_QA_MAX_CONVERSATION_TURNS: int = 10
     CASE_QA_MAX_CONVERSATION_CHARS: int = 6_000
+    CASE_QA_CHAT_IMAGES_ENABLED: bool = False
+    CASE_QA_MAX_CHAT_IMAGES: int = 1
+    CASE_QA_MAX_CHAT_IMAGE_BYTES: int = 750_000
+    CASE_QA_MAX_CHAT_IMAGE_DIMENSION: int = 4096
+    CASE_QA_MAX_CHAT_IMAGE_PIXELS: int = 16_777_216
+    CASE_QA_CLOSED_TICKET_ENABLED: bool = False
+    CASE_QA_CLOSED_TICKET_MAX_TICKETS: int = 5
+    CLOSED_TICKET_RAG_ENABLED: bool = False
+    CLOSED_TICKET_RAG_MAX_SNIPPETS: int = 6
+    CLOSED_TICKET_RAG_CONTEXT_BUDGET_CHARS: int = 6000
+    CLOSED_TICKET_LEXICAL_TOP_K: int = 30
+    CLOSED_TICKET_VECTOR_TOP_K: int = 30
     CHAT_SESSIONS_TABLE: str = ""
     CHAT_MESSAGES_TABLE: str = ""
 
@@ -477,7 +532,9 @@ class Config:
             )
         uses_vector_rag = self.RAG_ENABLED or self.SPL_QUERY_RAG_ENABLED or (
             self.ELASTICSEARCH_GROUNDING_ENABLED
-        ) or self.CASE_QA_ENABLED
+        ) or self.CASE_QA_ENABLED or (
+            self.CASE_QA_CLOSED_TICKET_ENABLED and self.CLOSED_TICKET_RAG_ENABLED
+        )
         if uses_vector_rag and self.RAG_RETRIEVAL_BACKEND == "opensearch":
             if not self.OPENSEARCH_ENDPOINT:
                 raise ValueError(
@@ -521,6 +578,25 @@ class Config:
                 raise ValueError(
                     "RAG_RERANK_MODEL_FALLBACK is required when rerank is enabled"
                 )
+        if self.IMAGE_INGEST_MAX_BYTES < 1:
+            raise ValueError("IMAGE_INGEST_MAX_BYTES must be >= 1")
+        if self.IMAGE_INGEST_MAX_PIXELS < 1:
+            raise ValueError("IMAGE_INGEST_MAX_PIXELS must be >= 1")
+        if self.IMAGE_INGEST_MAX_WIDTH < 1 or self.IMAGE_INGEST_MAX_HEIGHT < 1:
+            raise ValueError("IMAGE_INGEST_MAX_WIDTH and IMAGE_INGEST_MAX_HEIGHT must be >= 1")
+        if self.IMAGE_INGEST_MAX_PDF_PAGES < 1:
+            raise ValueError("IMAGE_INGEST_MAX_PDF_PAGES must be >= 1")
+        if self.IMAGE_INGEST_MAX_EMBEDDED_IMAGES < 1:
+            raise ValueError("IMAGE_INGEST_MAX_EMBEDDED_IMAGES must be >= 1")
+        if self.IMAGE_INGEST_MAX_OUTPUT_CHARS < 1:
+            raise ValueError("IMAGE_INGEST_MAX_OUTPUT_CHARS must be >= 1")
+        allowed_mimes = {
+            item.split(";", 1)[0].strip().lower()
+            for item in self.IMAGE_INGEST_ALLOWED_MIME_TYPES.replace(";", ",").split(",")
+            if item.strip()
+        }
+        if not allowed_mimes:
+            raise ValueError("IMAGE_INGEST_ALLOWED_MIME_TYPES must contain at least one MIME type")
 
 
 def load_config() -> Config:
@@ -581,12 +657,44 @@ def load_config() -> Config:
         OPENSEARCH_ELASTIC_INDEX=os.getenv(
             "OPENSEARCH_ELASTIC_INDEX", "notable-elastic-dictionary"
         ),
+        OPENSEARCH_CLOSED_TICKET_INDEX=os.getenv(
+            "OPENSEARCH_CLOSED_TICKET_INDEX", "notable-closed-tickets"
+        ),
         RAG_SOURCE_BUCKET=os.getenv("RAG_SOURCE_BUCKET", ""),
         RAG_SOURCE_PREFIX=os.getenv("RAG_SOURCE_PREFIX", "rag-sources"),
         RAG_INGEST_QUEUE_URL=os.getenv("RAG_INGEST_QUEUE_URL", ""),
         RAG_INGEST_MAX_DOCUMENT_BYTES=_positive_int_env(
             "RAG_INGEST_MAX_DOCUMENT_BYTES", 5_242_880, max_value=20_971_520
         ),
+        IMAGE_INGEST_ENABLED=_bool_env("IMAGE_INGEST_ENABLED", False),
+        IMAGE_INGEST_ALLOWED_MIME_TYPES=os.getenv(
+            "IMAGE_INGEST_ALLOWED_MIME_TYPES",
+            "application/pdf,"
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document,"
+            "image/gif,image/jpeg,image/jpg,image/png,image/webp",
+        ),
+        IMAGE_INGEST_MAX_BYTES=_byte_size_env(
+            "IMAGE_INGEST_MAX_BYTES", 10 * 1024 * 1024
+        ),
+        IMAGE_INGEST_MAX_PIXELS=_positive_int_env(
+            "IMAGE_INGEST_MAX_PIXELS", 25_000_000, max_value=200_000_000
+        ),
+        IMAGE_INGEST_MAX_WIDTH=_positive_int_env(
+            "IMAGE_INGEST_MAX_WIDTH", 8192, max_value=16384
+        ),
+        IMAGE_INGEST_MAX_HEIGHT=_positive_int_env(
+            "IMAGE_INGEST_MAX_HEIGHT", 8192, max_value=16384
+        ),
+        IMAGE_INGEST_MAX_PDF_PAGES=_positive_int_env(
+            "IMAGE_INGEST_MAX_PDF_PAGES", 50, max_value=500
+        ),
+        IMAGE_INGEST_MAX_EMBEDDED_IMAGES=_positive_int_env(
+            "IMAGE_INGEST_MAX_EMBEDDED_IMAGES", 20, max_value=200
+        ),
+        IMAGE_INGEST_MAX_OUTPUT_CHARS=_positive_int_env(
+            "IMAGE_INGEST_MAX_OUTPUT_CHARS", 12_000, max_value=200_000
+        ),
+        IMAGE_INGEST_USE_TEXTRACT=_bool_env("IMAGE_INGEST_USE_TEXTRACT", False),
         SPLUNK_BASE_URL=os.getenv("SPLUNK_BASE_URL", ""),
         SPLUNK_API_TOKEN_SECRET_ARN=os.getenv("SPLUNK_API_TOKEN_SECRET_ARN", ""),
         SPLUNK_API_TOKEN_SECRET_FIELD=(
@@ -883,6 +991,36 @@ def load_config() -> Config:
         ),
         CASE_QA_MAX_CONVERSATION_CHARS=_positive_int_env(
             "CASE_QA_MAX_CONVERSATION_CHARS", 6_000, max_value=65_536
+        ),
+        CASE_QA_CHAT_IMAGES_ENABLED=_bool_env("CASE_QA_CHAT_IMAGES_ENABLED", False),
+        CASE_QA_MAX_CHAT_IMAGES=_positive_int_env(
+            "CASE_QA_MAX_CHAT_IMAGES", 1, max_value=4
+        ),
+        CASE_QA_MAX_CHAT_IMAGE_BYTES=_positive_int_env(
+            "CASE_QA_MAX_CHAT_IMAGE_BYTES", 750_000, max_value=5_000_000
+        ),
+        CASE_QA_MAX_CHAT_IMAGE_DIMENSION=_positive_int_env(
+            "CASE_QA_MAX_CHAT_IMAGE_DIMENSION", 4096, max_value=8192
+        ),
+        CASE_QA_MAX_CHAT_IMAGE_PIXELS=_positive_int_env(
+            "CASE_QA_MAX_CHAT_IMAGE_PIXELS", 16_777_216, max_value=33_554_432
+        ),
+        CASE_QA_CLOSED_TICKET_ENABLED=_bool_env("CASE_QA_CLOSED_TICKET_ENABLED", False),
+        CASE_QA_CLOSED_TICKET_MAX_TICKETS=_positive_int_env(
+            "CASE_QA_CLOSED_TICKET_MAX_TICKETS", 5, max_value=20
+        ),
+        CLOSED_TICKET_RAG_ENABLED=_bool_env("CLOSED_TICKET_RAG_ENABLED", False),
+        CLOSED_TICKET_RAG_MAX_SNIPPETS=_positive_int_env(
+            "CLOSED_TICKET_RAG_MAX_SNIPPETS", 6, max_value=20
+        ),
+        CLOSED_TICKET_RAG_CONTEXT_BUDGET_CHARS=_positive_int_env(
+            "CLOSED_TICKET_RAG_CONTEXT_BUDGET_CHARS", 6000, max_value=50_000
+        ),
+        CLOSED_TICKET_LEXICAL_TOP_K=_positive_int_env(
+            "CLOSED_TICKET_LEXICAL_TOP_K", 30, max_value=100
+        ),
+        CLOSED_TICKET_VECTOR_TOP_K=_positive_int_env(
+            "CLOSED_TICKET_VECTOR_TOP_K", 30, max_value=100
         ),
         CHAT_SESSIONS_TABLE=os.getenv("CHAT_SESSIONS_TABLE", ""),
         CHAT_MESSAGES_TABLE=os.getenv("CHAT_MESSAGES_TABLE", ""),

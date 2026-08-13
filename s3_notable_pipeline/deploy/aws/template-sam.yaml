@@ -582,6 +582,30 @@ Parameters:
     MinValue: 1
     MaxValue: 65536
 
+  CaseQaChatImagesEnabled:
+    Type: String
+    Description: Enables request-scoped chat image uploads in portal Case Q&A.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  CaseQaClosedTicketEnabled:
+    Type: String
+    Description: Enables closed-ticket advisory retrieval lane in portal Case Q&A.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  ClosedTicketRagEnabled:
+    Type: String
+    Description: Enables closed-ticket OpenSearch retrieval backing the portal lane.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
   ChatSessionsTableName:
     Type: String
     Description: DynamoDB chat sessions table required when CaseQaChatHistoryEnabled=true.
@@ -1617,6 +1641,8 @@ Resources:
                 - bedrock:InvokeModel
               Resource:
                 - !Ref BedrockAnalysisModelArn
+                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${RagRerankModel}'
+                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${RagRerankModelFallback}'
         - !If
           - IsNotableRest
           - Statement:
@@ -2091,6 +2117,9 @@ Resources:
           CASE_QA_MAX_SESSIONS_PER_USER: !Ref CaseQaMaxSessionsPerUser
           CASE_QA_MAX_MESSAGES_PER_SESSION: !Ref CaseQaMaxMessagesPerSession
           CASE_QA_MAX_STORED_MESSAGE_BYTES: !Ref CaseQaMaxStoredMessageBytes
+          CASE_QA_CHAT_IMAGES_ENABLED: !Ref CaseQaChatImagesEnabled
+          CASE_QA_CLOSED_TICKET_ENABLED: !Ref CaseQaClosedTicketEnabled
+          CLOSED_TICKET_RAG_ENABLED: !Ref ClosedTicketRagEnabled
           CHAT_SESSIONS_TABLE: !If
             - HasChatHistory
             - !If
@@ -2105,6 +2134,9 @@ Resources:
               - !Ref ChatMessagesTable
               - !Ref ChatMessagesTableName
             - ''
+          RAG_RERANK_ENABLED: !Ref RagRerankEnabled
+          RAG_RERANK_MODEL: !Ref RagRerankModel
+          RAG_RERANK_MODEL_FALLBACK: !Ref RagRerankModelFallback
       Policies:
         - !If [HasCustomerKmsKey, !Ref CustomerKmsReadPolicy, !Ref AWS::NoValue]
         - !If [HasCustomerVpc, !Ref LambdaVpcEniPolicy, !Ref AWS::NoValue]
@@ -2152,6 +2184,8 @@ Resources:
                   - HasPortalChatBedrockModelOverride
                   - !Ref PortalChatBedrockModelArn
                   - !Ref BedrockAnalysisModelArn
+                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${RagRerankModel}'
+                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${RagRerankModelFallback}'
         - !If
           - HasOpenSearch
           - Statement:
