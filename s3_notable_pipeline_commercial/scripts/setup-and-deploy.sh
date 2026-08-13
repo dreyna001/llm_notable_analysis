@@ -147,6 +147,26 @@ if ! sam build -t "$SAM_TEMPLATE"; then
 fi
 
 echo
+echo "=== Wave 1 Parity Parameters (reference) ==="
+echo "Defaults are core-only and safe for first deploy. Enable parity profiles only in dev/staging after prerequisites are ready."
+echo "See docs/operations/platform/CAPABILITY_PROFILES.md and config.env.example for full contracts."
+echo
+echo "  CapabilityProfiles (default: core)"
+echo "    core                          - required base analysis path"
+echo "    core,html_reports             - add escaped HTML companion reports"
+echo "    core,rag                      - private OpenSearch advisory context (set RagEnabled=true)"
+echo "    core,rag,spl_readonly         - SPL generation + read-only Splunk investigation (SplunkBaseUrl, token secret)"
+echo "    core,rag,elastic_readonly     - Elasticsearch read-only investigation (mutually exclusive with spl_readonly)"
+echo "    core,ticket_draft             - ServiceNow draft payloads in JSON reports"
+echo "    core,action_gated             - Splunk writeback / ServiceNow create + DynamoDB idempotency"
+echo
+echo "  OpenSearch grounding"
+echo "    OpenSearchEndpoint, OpenSearchDomainArn, RagTenantId, private VPC IDs"
+echo "    SplQueryRagEnabled / ElasticsearchGroundingEnabled enable dictionary lanes"
+echo
+echo "  Safe first deploy: CapabilityProfiles=core, SplunkSinkMode=s3, HtmlReportEnabled=false, RagEnabled=false"
+
+echo
 echo "=== Step 2: Deploying to AWS ==="
 if [ -f "samconfig.toml" ]; then
   echo "Found samconfig.toml - using existing configuration"
@@ -165,7 +185,7 @@ else
   echo "  - Input bucket name (must be globally unique)"
   echo "  - Output bucket name (must be globally unique)"
   echo "  - Splunk sink mode ('s3' or 'notable_rest'; use 's3' for testing)"
-  echo "  - AwsAccountId, EcrRepositoryUri, ImageDigest, and BedrockAnalysisModelId"
+  echo "  - AwsAccountId, EcrRepositoryUri, ImageDigest, BedrockAnalysisModelId, and BedrockAnalysisModelArn"
   echo "  - If notable_rest: SplunkBaseUrl + SplunkApiTokenSecretArn (Secrets Manager ARN)"
   echo "  - Optional: SplunkApiTokenSecretField (default 'token') and SplunkNotableUpdatePath"
   if ! sam deploy --guided --region "$region" --template-file "$SAM_BUILT_TEMPLATE"; then

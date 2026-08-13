@@ -330,7 +330,7 @@ This table is the implementation source of truth for AWS-to-Azure substitutions.
 | AWS account | Azure subscription + resource group | Bicep deploys one resource group per environment. |
 | AWS region | Azure region | Bicep parameter `Location` defaults to `eastus`; the Foundry Claude deployment, Azure OpenAI, Functions, Storage, Cosmos, Search, Key Vault, and Front Door origins use the same region unless a documented Azure limitation prevents it. Deployment scripts may source this from the operator environment. |
 | SAM / CloudFormation stack | Bicep deployment | `deploy/azure/main.bicep` is the root. Modules mirror SAM resources by area. |
-| ECR repository + `ImageUri` | ACR repository + `ContainerImageUri` | Build one image. Bicep deploys the same image digest to all Function Apps. |
+| ECR repository + `EcrRepositoryUri` + `ImageDigest` | ACR repository + `ContainerImageUri` | Commercial AWS SAM passes repository URI and immutable digest separately; build one image. Bicep deploys the same image digest to all Function Apps. |
 | Lambda Python 3.12 base image | Azure Functions Python 3.12 custom container base | Reuse dependency/build stages where valid, but implement the runtime stage and host layout for Azure Functions. Do not constrain the Azure Dockerfile to a base-image-only diff. |
 | SAM `ImageConfig.Command` handler override | Azure Functions host wrappers + disabled-function app settings | Image contains all thin Azure trigger wrappers. Each Function App disables wrappers it does not own with `AzureWebJobs.<FunctionName>.Disabled=true`. Do not use separate images. |
 | Lambda environment variables | Function App application settings | Preserve cloud-neutral business/capability names. Replace AWS service settings with the Azure-native names defined in this plan; do not provide AWS-name aliases. |
@@ -540,7 +540,8 @@ Front Door route order must match AWS CloudFront cache behavior order: `/api/cha
 
 ### 7. Single ECR image, four handlers
 
-**AWS:** One `ImageUri`; SAM `ImageConfig.Command` overrides per function.
+**AWS (commercial v1):** One ECR repository referenced by `EcrRepositoryUri` and
+immutable `ImageDigest`; SAM `ImageConfig.Command` overrides per function.
 
 **Azure:** Azure Functions custom containers run the Functions host; per-function handler commands are not the same as Lambda `ImageConfig.Command`.
 
@@ -677,7 +678,7 @@ Do not map SAM parameters one-for-one. Apply this deterministic rule:
 | `CaseQaEmbeddingModel` | `AzureOpenAiEmbeddingsDeployment` | `AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT`; this is an Azure deployment name, not a model ID |
 | `LambdaTimeoutSeconds` | `AnalyzerTimeoutSeconds` | Analyzer `functionTimeout`; default remains 360 seconds |
 | `LambdaReservedConcurrentExecutions` | `AnalyzerMaxInstanceCount` | Analyzer Function App scale limit; default 5 |
-| `ImageUri` | `ContainerImageUri` | Full ACR image URI pinned to an immutable digest in production |
+| `EcrRepositoryUri` + `ImageDigest` | `ContainerImageUri` | Commercial AWS SAM passes repository URI and immutable digest separately; Azure uses one digest-pinned ACR URI |
 
 `Location` defaults to `eastus` and is the single deployment-region input for Azure resources. `AzureAiFoundryAnalysisDeployment` defaults to `claude-sonnet-4-6` and writes `AZURE_AI_FOUNDRY_ANALYSIS_DEPLOYMENT`; `AzureAiFoundryAnthropicBaseUrl` writes `AZURE_AI_FOUNDRY_ANTHROPIC_BASE_URL`; and `AzureAiFoundryResourceId` writes `AZURE_AI_FOUNDRY_RESOURCE_ID`. Together they replace the SAM template's hardcoded Bedrock inference-profile ARN. `AzureOpenAiApiVersion` defaults to `2024-10-21` and writes `AZURE_OPENAI_API_VERSION`. `AzureOpenAiEndpoint`, `AzureOpenAiResourceRegion`, `AzureOpenAiPortalChatDeployment`, `AzureSearchEndpoint`, `KeyVaultName`, `CosmosAccountName`, `CosmosDatabaseName`, `FunctionPlanSkuName` (default `EP1`), `ApiManagementSkuName` (fixed to `StandardV2` in v1), `AnalyzerMaxInstanceCount` (default 5), `EmbedMaxInstanceCount` (default 5), `PortalEntraRequiredAppRole` (required only when `PortalAuthMode=iam`), `AlertActionGroupResourceId` (required for production), `ContainerRegistryResourceId`, and `FunctionsHostStorageAccountName` are Azure-only infrastructure parameters.
 

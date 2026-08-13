@@ -1,8 +1,8 @@
 # AI Notable Analysis Pipeline — End-to-End Diagrams
 
-Pre-rendered SVG exports of each figure (same folder): `END_TO_END_DIAGRAMS.fig01-full-story.svg` through `END_TO_END_DIAGRAMS.fig04-deployment-sequence.svg`.
+Pre-rendered SVG exports of each figure (same folder): `END_TO_END_DIAGRAMS.fig01-full-story.svg` through `END_TO_END_DIAGRAMS.fig04-deployment-sequence.svg`. Matching Mermaid sources: `END_TO_END_DIAGRAMS.fig01-full-story.mmd` through `END_TO_END_DIAGRAMS.fig04-deployment-sequence.mmd`.
 
-**PowerPoint PNGs (fig01):** Source `END_TO_END_DIAGRAMS.fig01-full-story.mmd`. Exports: `END_TO_END_DIAGRAMS.fig01-full-story.ppt-slide01-upstream.png` (A-C), `END_TO_END_DIAGRAMS.fig01-full-story.ppt-slide02-aws-pipeline.png` (D-E), and optional `END_TO_END_DIAGRAMS.fig01-full-story.ppt-full.png`. The upstream slide is also split into 16:9 slide crops: `END_TO_END_DIAGRAMS.fig01-full-story.ppt-slide01-upstream-part01-authoring-live.png`, `END_TO_END_DIAGRAMS.fig01-full-story.ppt-slide01-upstream-part02-live-handoff.png`, and `END_TO_END_DIAGRAMS.fig01-full-story.ppt-slide01-upstream-part03-handoff-pipeline-entry.png`. Regenerate the base exports from `s3_notable_pipeline`: `npm install`, `pip install pillow`, then `node scripts/tools/export_svg_to_ppt_pngs.mjs docs/delivery_package/end_to_end_diagrams/END_TO_END_DIAGRAMS.fig01-full-story.mmd` (uses `mmdc`/Chromium so labels render; do not rasterize the SVG with resvg alone).
+**PowerPoint PNGs (fig01):** Source `END_TO_END_DIAGRAMS.fig01-full-story.mmd`. Exports: `END_TO_END_DIAGRAMS.fig01-full-story.ppt-slide01-upstream.png` (A-C), `END_TO_END_DIAGRAMS.fig01-full-story.ppt-slide02-aws-pipeline.png` (D-E), and optional `END_TO_END_DIAGRAMS.fig01-full-story.ppt-full.png`. The upstream slide is also split into 16:9 slide crops: `END_TO_END_DIAGRAMS.fig01-full-story.ppt-slide01-upstream-part01-authoring-live.png`, `END_TO_END_DIAGRAMS.fig01-full-story.ppt-slide01-upstream-part02-live-handoff.png`, and `END_TO_END_DIAGRAMS.fig01-full-story.ppt-slide01-upstream-part03-handoff-pipeline-entry.png`. Regenerate SVG exports with `npx @mermaid-js/mermaid-cli -i END_TO_END_DIAGRAMS.fig0N-*.mmd -o END_TO_END_DIAGRAMS.fig0N-*.svg` from this folder. Regenerate the base PNG exports from `s3_notable_pipeline`: `npm install`, `pip install pillow`, then `node scripts/tools/export_svg_to_ppt_pngs.mjs docs/delivery_package/end_to_end_diagrams/END_TO_END_DIAGRAMS.fig01-full-story.mmd` (uses `mmdc`/Chromium so labels render; do not rasterize the SVG with resvg alone).
 
 These Mermaid diagrams summarize how work flows from **how customers build and fire notables** through **customer-side deployment** to **analyst-ready reports**.
 
@@ -41,7 +41,7 @@ flowchart TB
     LAM[Lambda container<br/>notable-analyzer-s3]
     READ[Read + normalize JSON or plaintext]
     PRM[Prompt stack + output contract:<br/>doctrine, evidence-gate,<br/>stateless / unknown discipline,<br/>6-way competing hypotheses,<br/>analyze_notable tool JSON schema]
-    KB[Optional Bedrock KB retrieve:<br/>SOC RAG, SPL grounding,<br/>Elastic grounding]
+    KB[Optional OpenSearch retrieve:<br/>SOC RAG, SPL grounding,<br/>Elastic grounding]
     BD[Bedrock Converse<br/>base analysis + optional<br/>query generation / interpretation]
     VAL["Hallucination controls:<br/>required keys, parse + repair,<br/>content rules, ATT&CK v17.1 allowlist<br/>raw fallback for human review"]
     QRY[Optional read-only investigation:<br/>Splunk REST/MCP or Elasticsearch _search<br/>policy validated and bounded]
@@ -118,7 +118,7 @@ flowchart LR
   subgraph Inputs["Inputs the customer must have or configure"]
     I1[(Per-notable bundle:<br/>threshold alert + correlation context)]
     I2[("S3 input bucket<br/>prefix: incoming/")]
-    I3[Deploy-time params:<br/>bucket names, ImageUri, AwsAccountId,<br/>CapabilityProfiles, SplunkSinkMode,<br/>optional Splunk + secret ARN]
+    I3[Deploy-time params:<br/>bucket names, EcrRepositoryUri, ImageDigest,<br/>AwsAccountId, BedrockAnalysisModelId/Arn,<br/>CapabilityProfiles, SplunkSinkMode,<br/>optional Splunk + secret ARN]
     I4[Runtime: Bedrock access in account]
     I5[Container image in ECR<br/>before sam deploy]
   end
@@ -217,7 +217,7 @@ flowchart TB
     CFN -. provisions .-> BIN
     CFN -. provisions .-> BOUT
     CFN -. provisions .-> FN
-    ECR -. ImageUri at deploy .-> FN
+    ECR -. EcrRepositoryUri + ImageDigest at deploy .-> FN
   end
 ```
 
@@ -244,14 +244,21 @@ sequenceDiagram
   Eng->>ECR: Create or choose repository
   Eng->>SAM: docker build + tag + push image to ECR
   Eng->>SAM: sam build -t deploy/aws/template-sam.yaml
-  Eng->>CFN: sam deploy guided, ParameterOverrides buckets AwsAccountId ImageUri CapabilityProfiles sink mode
+  Eng->>CFN: sam deploy guided, ParameterOverrides buckets AwsAccountId EcrRepositoryUri ImageDigest BedrockAnalysisModelId/Arn CapabilityProfiles sink mode
   CFN->>S3: Create buckets, notifications, lifecycle
   CFN->>CFN: Create Lambda function + IAM policies
   Eng->>S3: Upload test notable to prefix incoming
   S3-->>Eng: Verify report under reports/ + CloudWatch logs
 ```
 
-**Important:** The SAM template **references** a pre-published `ImageUri`; it does not build or push the image for the customer. See `../../operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`.
+**Important:** The SAM template references a pre-published ECR image by
+`EcrRepositoryUri` and immutable `ImageDigest`; it does not build or push the
+image for the customer. See
+[`../../operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`](../../operations/deployment/DEPLOYMENT_IMAGE_STEPS.md).
+
+Pre-rendered SVG exports in this folder may lag the Mermaid sources above.
+Regenerate with `mmdc` from the `.mmd` files or the fenced Mermaid blocks when
+preparing slides.
 
 **Documentation** shipped with the solution includes, among others: **`../../../README.md`** (deploy, sinks, test path), **`../EXECUTIVE_AWS_WORKFLOW.md`** (end-to-end narrative), **`../../operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`** (ECR and Lambda image order), **`../../operations/platform/CAPABILITY_PROFILES.md`** (feature bundles including `analyst_portal`), **`../../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`** (portal stack and day-two ops), **`../../integrations/SOAR_PLAYBOOK_PHANTOM.md`** (SOAR → S3 pattern), **`../../security/ATTACK_LLM_ANALYSIS.md`** (ATT&CK grounding and validation posture), and **`../../../deploy/aws/template-sam.yaml`** (infrastructure contract).
 

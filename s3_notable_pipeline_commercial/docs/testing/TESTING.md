@@ -155,6 +155,8 @@ sam local invoke NotableAnalyzerFunction \
   --env-vars events/sam-local-env.json \
   --parameter-overrides \
     AwsAccountId=000000000000 \
+    BedrockAnalysisModelId=amazon.nova-pro-v1:0 \
+    BedrockAnalysisModelArn=arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0 \
     EcrRepositoryUri=000000000000.dkr.ecr.us-east-1.amazonaws.com/notable-analyzer-s3 \
     ImageDigest=sha256:0000000000000000000000000000000000000000000000000000000000000000
 ```
@@ -178,7 +180,7 @@ Run profile slices incrementally. Start with `CapabilityProfiles=core` and
 
 | Profile slice | Deploy prerequisites | Staging validation |
 | --- | --- | --- |
-| **core** | Default SAM parameters; Bedrock model access | Upload `data/test-notable.txt` to `incoming/`; confirm markdown + JSON under `reports/`; review CloudWatch logs for bounded metadata without secrets |
+| **core** | Default SAM parameters; Bedrock model ID and ARN; Bedrock model access | Upload `data/test-notable.txt` to `incoming/`; confirm markdown + JSON under `reports/`; review CloudWatch logs for bounded metadata without secrets |
 | **html_reports** | `CapabilityProfiles=core,html_reports`, `HtmlReportEnabled=true` | Confirm sibling `.html` object beside markdown/JSON |
 | **rag** | `CapabilityProfiles=core,rag`, `RagEnabled=true`, private OpenSearch settings and an ingested SOC corpus | JSON `metadata.rag_status` is `success` or `no_match`; analysis completes when `RagFailureMode=suppress` |
 | **spl_readonly** | `CapabilityProfiles=core,rag,spl_readonly`; Splunk URL + token secret; `SplQueryRagEnabled=true` after dictionary ingestion | JSON includes SPL generation metadata and/or `investigation_query_results`; denied SPL commands do not outbound; Splunk allowlists enforced |

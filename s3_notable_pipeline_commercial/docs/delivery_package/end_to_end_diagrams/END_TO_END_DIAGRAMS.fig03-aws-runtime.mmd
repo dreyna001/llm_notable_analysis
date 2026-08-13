@@ -1,0 +1,62 @@
+flowchart TB
+  subgraph Account["Customer AWS account"]
+    subgraph Storage["S3"]
+      BIN[("Input bucket<br/>Lifecycle: prefix incoming/")]
+      BOUT[("Output bucket<br/>Lifecycle: prefix reports/")]
+    end
+
+    subgraph Compute["Compute"]
+      ECR[(Amazon ECR<br/>Lambda container image)]
+      FN[Lambda: notable-analyzer-s3<br/>Image from ECR]
+    end
+
+    subgraph AI["Model + Retrieval"]
+      BR[Amazon Bedrock<br/>inference in target region<br/>Claude Sonnet 4.6 or comparable]
+      KB[VPC-only OpenSearch<br/>SOC, SPL, Elastic, case context]
+    end
+
+    subgraph Secret["Optional integrations"]
+      SM[Secrets Manager<br/>Splunk, MCP, Elastic,<br/>ServiceNow tokens]
+      DDB[(DynamoDB<br/>side-effect idempotency)]
+    end
+
+    subgraph Portal["Optional analyst_portal"]
+      CIDX[(DynamoDB CaseIndex)]
+      CARC[(Case archive S3<br/>envelopes + chunks)]
+      PEMB[Lambda: notable-case-embed]
+      PLAM[Lambda: notable-portal-api]
+      APIGW[API Gateway HTTP API]
+      UI[Private SPA bucket<br/>optional]
+    end
+
+    subgraph Ops["Operations"]
+      CW[CloudWatch Logs]
+      CFN[CloudFormation / SAM stack]
+    end
+
+    BIN -->|s3:ObjectCreated incoming/*| FN
+    FN -->|GetObject| BIN
+    FN -->|PutObject reports/*| BOUT
+    FN -->|bounded prompt + toolSpec| BR
+    FN -. optional tenant-scoped retrieve .-> KB
+    FN -. optional GetSecretValue .-> SM
+    FN -. optional idempotency .-> DDB
+    FN -. optional HTTPS .-> SPL[Splunk REST / MCP]
+    FN -. optional HTTPS .-> ES[Elasticsearch _search]
+    FN -. optional HTTPS .-> SN[ServiceNow REST]
+    FN -. analyst_portal archive .-> CARC
+    FN -. CaseIndex upsert .-> CIDX
+    FN -. async embed invoke .-> PEMB
+    PEMB --> CARC
+    PEMB --> CIDX
+    PLAM -->|read| CIDX
+    PLAM -->|read| CARC
+    PLAM -. pinned-case Q&A .-> BR
+    APIGW --> PLAM
+    PLAM -->|bounded static reads| UI
+    FN --> CW
+    CFN -. provisions .-> BIN
+    CFN -. provisions .-> BOUT
+    CFN -. provisions .-> FN
+    ECR -. EcrRepositoryUri + ImageDigest at deploy .-> FN
+  end

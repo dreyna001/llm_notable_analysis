@@ -21,19 +21,21 @@ flowchart TB
     LAM[Lambda container<br/>notable-analyzer-s3]
     READ[Read + normalize JSON or plaintext]
     PRM[Prompt stack + output contract:<br/>doctrine, evidence-gate,<br/>stateless / unknown discipline,<br/>6-way competing hypotheses,<br/>analyze_notable tool JSON schema]
-    KB[Optional Bedrock KB retrieve:<br/>SOC RAG, SPL grounding,<br/>Elastic grounding]
+    KB[Optional OpenSearch retrieve:<br/>SOC RAG, SPL grounding,<br/>Elastic grounding]
     BD[Bedrock Converse<br/>base analysis + optional<br/>query generation / interpretation]
     VAL["Hallucination controls:<br/>required keys, parse + repair,<br/>content rules, ATT&CK v17.1 allowlist<br/>raw fallback for human review"]
     QRY[Optional read-only investigation:<br/>Splunk REST/MCP or Elasticsearch _search<br/>policy validated and bounded]
-    MD[Markdown report assembly]
-    OUT[("Output bucket<br/>reports/{stem}.md")]
+    MD[Report assembly:<br/>markdown + JSON + optional HTML]
+    OUT[("Output bucket<br/>reports/{stem}.*")]
+    ARCH{{Optional case archive:<br/>S3 envelope + CaseIndex<br/>analyst_portal profile}}
+    PAPI{{Optional analyst portal:<br/>API Gateway + portal Lambda<br/>+ private SPA bucket}}
     SPLK{{Splunk REST<br/>notable comment?}}
     SN{{ServiceNow<br/>incident create?}}
     DDB[(DynamoDB<br/>side-effect idempotency)]
   end
 
   subgraph Consume["E. Who consumes the output"]
-    REV[Analyst review:<br/>S3 markdown and/or SIEM comment]
+    REV[Analyst review:<br/>S3 reports, optional portal,<br/>and/or SIEM comment]
   end
 
   DE --> NR
@@ -56,11 +58,15 @@ flowchart TB
   QRY --> MD
   VAL --> MD
   MD --> OUT
+  MD -. analyst_portal .-> ARCH
+  ARCH -. browse + pinned-case Q&A .-> PAPI
   MD -. optional: SplunkSinkMode notable_rest .-> SPLK
   MD -. optional: ServiceNow approval .-> SN
   SPLK -. idempotency .-> DDB
   SN -. idempotency .-> DDB
   OUT --> REV
+  ARCH --> REV
+  PAPI --> REV
   SPLK --> REV
   SN --> REV
   ANA -. human parallel path .-> REV

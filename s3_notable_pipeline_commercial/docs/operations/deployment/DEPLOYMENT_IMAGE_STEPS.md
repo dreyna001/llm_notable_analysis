@@ -57,12 +57,17 @@ docker pull $ECR_REPOSITORY_URI@$IMAGE_DIGEST
 
 ## Deploy Contract
 
-Required image parameters:
+Required deploy parameters (core stack):
 
 | Parameter | Value |
 | --- | --- |
 | `EcrRepositoryUri` | Repository URI without tag or digest |
 | `ImageDigest` | ECR `sha256:...` digest |
+| `AwsAccountId` | 12-digit commercial AWS account ID |
+| `BedrockAnalysisModelId` | Customer-approved model or inference-profile ID |
+| `BedrockAnalysisModelArn` | Exact ARN for least-privilege `bedrock:InvokeModel` IAM |
+| `InputBucketName` | Globally unique input bucket |
+| `OutputBucketName` | Globally unique output bucket |
 | `DeploymentRegion` | `us-east-1` |
 | `DeploymentPartition` | `aws` |
 
@@ -80,14 +85,31 @@ sam deploy \
     EcrRepositoryUri=$ECR_REPOSITORY_URI \
     ImageDigest=$IMAGE_DIGEST \
     BedrockAnalysisModelId=<approved-model-or-profile> \
+    BedrockAnalysisModelArn=<approved-model-or-profile-arn> \
     InputBucketName=<customer-input-bucket> \
     OutputBucketName=<customer-output-bucket>
 ```
 
-Enabled OpenSearch or portal capabilities additionally require the values in
-[`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md).
-CloudFormation rules fail deployment when tenant, endpoint, VPC, or JWT grants
-required by an enabled capability are missing.
+`scripts/setup-and-deploy.ps1` and `scripts/setup-and-deploy.sh` run `sam build`
+and `sam deploy` only. They do not build, tag, or push the container image.
+Publish the digest-qualified image to ECR before deploy, or include
+`EcrRepositoryUri` and `ImageDigest` in `samconfig.toml` / guided prompts.
+
+Enabled OpenSearch, portal, RAG ingestion, or disposition-sync capabilities
+additionally require the values in
+[`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md)
+and profile detail in
+[`../platform/CAPABILITY_PROFILES.md`](../platform/CAPABILITY_PROFILES.md).
+CloudFormation rules fail deployment when tenant, endpoint, VPC, JWT grants,
+or other required inputs for an enabled capability are missing.
+
+## Post-Deploy Steps (when enabled)
+
+| Capability | After `sam deploy` |
+| --- | --- |
+| `analyst_portal` | Build `frontend/analyst-portal`, upload `dist/` to `PortalUiBucketName`, configure JWT/CORS; see [`../analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../analyst_portal/ANALYST_PORTAL_OPERATIONS.md) |
+| `rag` | Load approved corpora to S3, publish manifest to trigger ingestion; see [`../rag/KNOWLEDGE_BASE_OPERATIONS.md`](../rag/KNOWLEDGE_BASE_OPERATIONS.md) |
+| ServiceNow disposition sync | Verify EventBridge schedule, field maps, and sync token secret; see [`../integrations/SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md`](../integrations/SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md) |
 
 ## Release Evidence
 

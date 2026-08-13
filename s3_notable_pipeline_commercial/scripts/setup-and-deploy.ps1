@@ -146,7 +146,7 @@ if ($LASTEXITCODE -ne 0) {
 # Wave 1 parity parameters (safe defaults stay core-first)
 Write-Host "`n=== Wave 1 Parity Parameters (reference) ===" -ForegroundColor Cyan
 Write-Host "Defaults are core-only and safe for first deploy. Enable parity profiles only in dev/staging after prerequisites are ready." -ForegroundColor Gray
-Write-Host "See docs/operations/CAPABILITY_PROFILES.md and config.env.example for full contracts." -ForegroundColor Gray
+Write-Host "See docs/operations/platform/CAPABILITY_PROFILES.md and config.env.example for full contracts." -ForegroundColor Gray
 Write-Host ""
 Write-Host "  CapabilityProfiles (default: core)" -ForegroundColor Yellow
 Write-Host "    core                          - required base analysis path" -ForegroundColor Gray
@@ -195,7 +195,7 @@ if (Test-Path "samconfig.toml") {
     Write-Host "  - ElasticsearchBaseUrl / ElasticsearchApiKeySecretArn (elastic_readonly)" -ForegroundColor Gray
     Write-Host "  - ServiceNowBaseUrl, ServiceNowApiTokenSecretArn, ServiceNowApprovalHmacSecretArn, ServiceNowAssignmentGroup" -ForegroundColor Gray
     Write-Host "  - SideEffectIdempotencyTableName (action_gated; default notable-side-effect-idempotency)" -ForegroundColor Gray
-    Write-Host "  - AwsAccountId, EcrRepositoryUri, ImageDigest, and BedrockAnalysisModelId" -ForegroundColor Gray
+    Write-Host "  - AwsAccountId, EcrRepositoryUri, ImageDigest, BedrockAnalysisModelId, and BedrockAnalysisModelArn" -ForegroundColor Gray
     Write-Host "  - If notable_rest: SplunkBaseUrl + SplunkApiTokenSecretArn (Secrets Manager ARN)" -ForegroundColor Gray
     Write-Host "  - Optional: SplunkApiTokenSecretField (default 'token') and SplunkNotableUpdatePath" -ForegroundColor Gray
     sam deploy --guided --region $region --template-file $samBuiltTemplate

@@ -67,7 +67,8 @@ If using guided deploy, start with:
 - `AwsAccountId`: your 12-digit AWS account ID (Bedrock inference profile ARN)
 - `EcrRepositoryUri`: customer commercial `us-east-1` ECR repository URI without a tag or digest
 - `ImageDigest`: immutable `sha256:...` digest returned by ECR
-- `BedrockAnalysisModelId`: customer-approved model or inference-profile ID/ARN
+- `BedrockAnalysisModelId`: customer-approved model or inference-profile ID
+- `BedrockAnalysisModelArn`: exact ARN matching `BedrockAnalysisModelId` (required for IAM)
 - `CapabilityProfiles=core` unless you are enabling optional bundles (see section 5)
 - `MaxDecompressedInputBytes`: keep the default `1048576` unless expected gzip notable payloads need a larger decompressed size
 - if using `notable_rest`, provide:
@@ -77,6 +78,13 @@ If using guided deploy, start with:
   - optional `SplunkNotableUpdatePath` (default `/services/notable_update`)
 
 Infrastructure template: [`deploy/aws/template-sam.yaml`](deploy/aws/template-sam.yaml). Runtime env reference: [`config.env.example`](config.env.example).
+
+The setup scripts do not build or push the Lambda image. Build and push to ECR
+first (see [`docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`](docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md)), then deploy with
+`EcrRepositoryUri` and `ImageDigest`.
+
+When `analyst_portal` is enabled, build and upload the SPA after deploy; see
+[`docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md).
 
 ## 3) Test End-to-End
 
@@ -188,7 +196,7 @@ Operations: [`docs/operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md`](docs
 - [`docs/operations/platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`](docs/operations/platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md) - failure behavior, retry semantics, and recovery duties
 - [`docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md) - AWS portal archive, JWT/IAM API, static SPA, Case Q&A, retention, and rollback
 - [`docs/operations/llm/LLM_INFERENCE_OPERATIONS.md`](docs/operations/llm/LLM_INFERENCE_OPERATIONS.md) - Bedrock model id, timeouts, structured output, rollout
-- [`docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md`](docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md) - Bedrock KB source lifecycle
+- [`docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md`](docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md) - S3 corpus ingestion and OpenSearch index lifecycle
 - [`docs/operations/rag/RAG_OPERATIONS.md`](docs/operations/rag/RAG_OPERATIONS.md) - RAG enablement, failure mode, snippets, budgets
 - [`docs/operations/investigation/SPL_OPERATIONS.md`](docs/operations/investigation/SPL_OPERATIONS.md) - SPL generation, grounding, and read-only Splunk investigation
 - [`docs/operations/investigation/ELASTICSEARCH_OPERATIONS.md`](docs/operations/investigation/ELASTICSEARCH_OPERATIONS.md) - Elasticsearch Query DSL generation and read-only `_search`
@@ -208,7 +216,7 @@ Operations: [`docs/operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md`](docs
 
 - **No Lambda trigger:** verify object key is under `incoming/`.
 - **No output report:** check `OUTPUT_BUCKET_NAME` and CloudWatch logs for `notable-analyzer-s3`.
-- **Bedrock permission errors:** verify `bedrock:InvokeModel` and model/inference-profile access; confirm `AwsAccountId` matches the deployed account.
+- **Bedrock permission errors:** verify `bedrock:InvokeModel` and model/inference-profile access; confirm `AwsAccountId`, `BedrockAnalysisModelId`, and `BedrockAnalysisModelArn` match the deployed account and approved model.
 - **Deploy fails on image resolution:** verify `EcrRepositoryUri` is in `us-east-1`, `ImageDigest` exists in that repository, and Lambda can pull it.
 - **Compressed input errors:** only gzip is supported. Verify the object is valid gzip, contains UTF-8 text/JSON after decompression, and does not exceed `MAX_DECOMPRESSED_INPUT_BYTES`.
 - **Secrets access errors in notable_rest:** verify Lambda can call `secretsmanager:GetSecretValue` on `SplunkApiTokenSecretArn`.

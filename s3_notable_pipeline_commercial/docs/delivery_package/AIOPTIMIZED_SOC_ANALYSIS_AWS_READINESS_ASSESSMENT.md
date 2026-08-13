@@ -53,7 +53,7 @@ They need:
 - access to the exact model or inference profile the stack will call
 - IAM permission for `bedrock:InvokeModel`
 - if vector retrieval or query-grounding profiles are enabled, IAM/SigV4 access to the configured OpenSearch domain and `bedrock:InvokeModel` for the approved embedding model
-- confirmation that org-level controls like SCPs (AWS Organizations guardrails that can deny actions even when IAM allows them) are not blocking the model or KB access
+- confirmation that org-level controls like SCPs (AWS Organizations guardrails that can deny actions even when IAM allows them) are not blocking the model or OpenSearch access
 
 For this package, Bedrock readiness must be explicit, because `deploy/aws/template-sam.yaml` ties Bedrock to a configurable inference profile ARN. If the customer account, region, or approved model differs from what they deploy, deployment may succeed but runtime will fail. Operator tuning is in `docs/operations/llm/LLM_INFERENCE_OPERATIONS.md`.
 
@@ -65,9 +65,14 @@ Right now, the package still assumes they can resolve:
 
 - what base image to build from
 - how to publish the Lambda image to ECR
-- what `ImageUri` to pass to SAM
+- what `EcrRepositoryUri` and `ImageDigest` to pass to SAM
 
-SAM expects an `ImageUri` pointing at an image already in ECR. Until that image exists, deploy is blocked. The repo `deploy/docker/Dockerfile` uses a placeholder or org-specific base image, so many teams cannot build it unchanged. In practice, "ready to deploy" implicitly requires "we already know how to build and publish this Lambda image." Step-by-step build and push guidance is in `docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`.
+SAM expects a digest-qualified image already in customer ECR. Until that image
+exists, deploy is blocked. The repo `deploy/docker/Dockerfile` uses the public
+Lambda Python 3.12 base for development or a customer-approved digest-pinned
+mirror for production, so many teams cannot build it unchanged without choosing
+an approved base. Step-by-step build and push guidance is in
+`docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`.
 
 ### 4. Data And Runtime Contract Readiness
 
@@ -94,8 +99,8 @@ Before enabling optional profiles beyond `core`, the org should have profile-spe
 
 - `html_reports` — no additional secrets; acceptance of a third S3 report artifact.
 - `rag` — curated SOC corpus, private OpenSearch domain/index, `RAG_TENANT_ID`, embedding-model IAM, VPC connectivity, and advisory-context approval; see `docs/operations/rag/RAG_OPERATIONS.md` and `docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md`.
-- `spl_readonly` — Splunk owner approval, executor choice (`rest` or `mcp`), index/command/field allowlists, secrets, optional SPL grounding KB.
-- `elastic_readonly` — Elasticsearch owner approval, HTTPS base URL, API key secret, index allowlist, optional grounding KB.
+- `spl_readonly` — Splunk owner approval, executor choice (`rest` or `mcp`), index/command/field allowlists, secrets, optional Splunk dictionary corpus in OpenSearch.
+- `elastic_readonly` — Elasticsearch owner approval, HTTPS base URL, API key secret, index allowlist, optional Elasticsearch dictionary corpus in OpenSearch.
 - `ticket_draft` — ServiceNow assignment group for draft payloads (no POST).
 - `action_gated` — write approval, `SIDE_EFFECT_IDEMPOTENCY_TABLE`, Splunk and/or ServiceNow secrets, signed create approval workflow.
 - `analyst_portal` — case archive bucket, CaseIndex table, embed Lambda target, portal JWT issuer/audience, CORS origins, SPA build API base URL, and customer API front-door routing.
@@ -140,7 +145,7 @@ A low-issue deployment also requires basic day-2 readiness:
 - someone knows where Lambda logs are
 - someone can rerun the smoke test for each enabled profile
 - someone can upload a known-good test file
-- someone can tell the difference between deploy failure, Bedrock permission failure, KB retrieve failure, query policy rejection, and sink integration failure
+- someone can tell the difference between deploy failure, Bedrock permission failure, OpenSearch retrieve failure, query policy rejection, and sink integration failure
 - there is a rollback path to the last known-good image
 - if `action_gated` is enabled, someone understands idempotency keys and duplicate side-effect behavior
 
@@ -213,7 +218,7 @@ This section does not add new requirements. It reorganizes the same readiness po
 - Bedrock is enabled in the chosen region and the exact model or inference profile is approved
 - there is `bedrock:InvokeModel` permission for analysis and configured embeddings; enabled retrieval profiles also have scoped OpenSearch HTTP permissions
 - the org has already decided how the Lambda image will be built and published to ECR
-- for each planned optional profile, the team knows required KB IDs, secrets, allowlists, and owner approvals
+- for each planned optional profile, the team knows required OpenSearch indexes/corpora, secrets, allowlists, and owner approvals
 - if `action_gated` is in scope, idempotency table and write approval boundaries are understood
 - the upstream system that writes notable files into `incoming/` is identified and assumptions are understood
 - someone is identified to own smoke testing and runtime support after deploy
@@ -228,12 +233,12 @@ This section does not add new requirements. It reorganizes the same readiness po
 - run smoke tests by uploading a known-good file and checking output for each enabled profile
 - verify Lambda logs, report generation (markdown/JSON/HTML), optional RAG and read-only investigation, and if enabled writeback or ServiceNow paths
 - if `analyst_portal` is enabled, validate archive/envelope write, embed completion, portal routes, SPA load, and cited selected-case chat
-- distinguish whether a failure is coming from deployment, Bedrock invocation, KB retrieve, query policy, or sink integration
+- distinguish whether a failure is coming from deployment, Bedrock invocation, OpenSearch retrieve, query policy, or sink integration
 - document or hand off the exact values and commands needed for rerun and rollback
 
 ### 3. What May Still Require Customer Or External-Team Action During Integration
 
-- security or platform approval for S3, Lambda, Bedrock, optional KB retrieve, optional HTTPS egress, and CloudWatch use
+- security or platform approval for S3, Lambda, Bedrock, optional OpenSearch retrieval, optional HTTPS egress, and CloudWatch use
 - IAM changes or SCP exceptions if Bedrock or other AWS actions are still blocked
 - confirmation that the selected analysis and embedding models and OpenSearch domain are approved for that account and region
 - final approval of globally unique bucket names and target deployment region

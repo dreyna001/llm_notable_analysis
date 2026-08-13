@@ -20,8 +20,9 @@ Primary data and control flow:
 1. **S3 input** — customer-owned bucket; object size is bounded before prompt construction.
 2. **Lambda analyzer** — reads input, orchestrates Bedrock and optional integrations;
    loads integration secrets from Secrets Manager at runtime.
-3. **Amazon Bedrock** — structured analysis inference; optional Knowledge Base retrieve
-   for advisory context only.
+3. **Amazon Bedrock** — structured analysis inference; optional tenant-scoped
+   OpenSearch retrieve for advisory context (Bedrock Knowledge Base only when
+   explicitly configured as a compatibility backend).
 4. **S3 output** — markdown, JSON, and optional HTML reports under configured prefixes.
 5. **Optional outbound HTTPS** — Splunk, Elasticsearch, or ServiceNow only when the
    matching profile, sink mode, and secrets are enabled; URLs pass HTTPS validation
@@ -29,9 +30,10 @@ Primary data and control flow:
 6. **Optional DynamoDB** — side-effect idempotency for Splunk notable update and
    ServiceNow create; CaseIndex when `analyst_portal` is enabled.
 
-Untrusted inputs: S3 object content, Bedrock model output, Knowledge Base snippets,
-generated SPL/Query DSL, and ServiceNow approval payloads. None of these drive
-external writes until deterministic validation and configured gates pass.
+Untrusted inputs: S3 object content, Bedrock model output, OpenSearch or
+compatibility Knowledge Base snippets, generated SPL/Query DSL, and ServiceNow
+approval payloads. None of these drive external writes until deterministic
+validation and configured gates pass.
 
 ## Capability Profile Boundaries
 
@@ -42,7 +44,7 @@ Profiles are additive. `core` is included automatically when omitted.
 | --- | --- |
 | `core` | Structured notable analysis; deterministic parse, repair, schema validation, and ATT&CK allowlist; writes S3 reports only. |
 | `html_reports` | Extra S3 HTML artifact from validated analysis; no additional LLM boundary. |
-| `rag` | Advisory SOC context in the prompt; Bedrock KB retrieve only; snippets are labeled advisory, not case facts; no external writes. |
+| `rag` | Advisory SOC context in the prompt; tenant-scoped OpenSearch retrieve (Bedrock Knowledge Base only when explicitly configured); snippets are labeled advisory, not case facts; no external writes. |
 | `spl_readonly` | SPL generation and result interpretation; index/command/field allowlists, timeouts, and row limits; validated before read-only REST or MCP execution. |
 | `elastic_readonly` | Query DSL generation and interpretation; index allowlist, field bounds, HTTPS; validated before read-only `_search`. |
 | `ticket_draft` | ServiceNow incident draft fields in JSON reports only; no ServiceNow POST. |
@@ -68,7 +70,7 @@ End-to-end flow: [`../delivery_package/end_to_end_diagrams/END_TO_END_DIAGRAMS.m
 | Unsupported or invented ATT&CK technique IDs | Bundled allowlist in `src/s3_notable_pipeline/enterprise_attack_v17.1_ids.json`; full allowed set injected into the prompt; post-parse `filter_valid_ttps` drops IDs not in the set. |
 | Schema drift or malformed JSON | Structured output schema; parse and repair retry; schema, content-policy, and competing-hypotheses validation before scoring. |
 | Evidence fabrication | Prompts require evidence-vs-inference separation; unknown context stays `unknown`; confidence is numeric and tied to cited alert fields. |
-| RAG or KB snippet treated as alert facts | KB retrieve is advisory-only; snippets are labeled as context, not observed case evidence. |
+| RAG or retrieval snippet treated as alert facts | OpenSearch retrieval is advisory-only; snippets are labeled as context, not observed case evidence. |
 | Prompt injection via notable content | Input size bounded; model output validated before reports or side effects; integration queries validated against allowlists before execution. |
 | Unbounded external query or write | Capability profiles gate features; Splunk/Elastic queries require allowlist validation; ServiceNow create requires approval HMAC; writeback uses idempotency reservations. |
 

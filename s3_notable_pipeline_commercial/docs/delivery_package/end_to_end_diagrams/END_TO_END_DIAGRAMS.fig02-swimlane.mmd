@@ -1,0 +1,34 @@
+flowchart LR
+  subgraph Inputs["Inputs the customer must have or configure"]
+    I1[(Per-notable bundle:<br/>threshold alert + correlation context)]
+    I2[("S3 input bucket<br/>prefix: incoming/")]
+    I3[Deploy-time params:<br/>bucket names, EcrRepositoryUri, ImageDigest,<br/>AwsAccountId, BedrockAnalysisModelId/Arn,<br/>CapabilityProfiles, SplunkSinkMode,<br/>optional Splunk + secret ARN]
+    I4[Runtime: Bedrock access in account]
+    I5[Container image in ECR<br/>before sam deploy]
+  end
+
+  subgraph Middle["What happens in the middle"]
+    M1[S3 notifies Lambda]
+    M2[Lambda reads object body]
+    M3[Assemble bounded prompt + tool schema - Bedrock Converse]
+    M4[Validate, allowlist TTPs, repair, policies]
+    M5[Report generator]
+  end
+
+  subgraph Outputs["Outputs"]
+    O1[("Markdown + JSON reports under S3 prefix reports/;<br/>optional HTML when html_reports")]
+    O2[("Splunk notable comment, notable_rest + action_gated")]
+    O3[CloudWatch Logs - traceability]
+    O4{{Optional analyst portal:<br/>CaseIndex browse + pinned-case Q&A<br/>analyst_portal profile}}
+  end
+
+  I1 --> I2
+  I2 --> M1
+  M1 --> M2
+  M2 --> M3
+  M3 --> M4
+  M4 --> M5
+  M5 --> O1
+  M5 -. notable_rest .-> O2
+  M5 --> O3
+  M5 -. analyst_portal archive .-> O4

@@ -1,0 +1,19 @@
+sequenceDiagram
+  participant Dev as Development org<br/>ships code at milestone
+  participant Eng as Customer engineer / platform team<br/>owns integration
+  participant IAM as AWS IAM and Bedrock access
+  participant ECR as Amazon ECR
+  participant SAM as SAM CLI + Docker
+  participant CFN as CloudFormation stack
+  participant S3 as S3 buckets
+
+  Dev->>Eng: Hand off source (README, template-sam.yaml, Dockerfile, optional upstream for merges)
+  Eng->>IAM: Confirm credentials, Bedrock model access, Secrets Manager if notable_rest
+  Eng->>ECR: Create or choose repository
+  Eng->>SAM: docker build + tag + push image to ECR
+  Eng->>SAM: sam build -t deploy/aws/template-sam.yaml
+  Eng->>CFN: sam deploy guided, ParameterOverrides buckets AwsAccountId EcrRepositoryUri ImageDigest BedrockAnalysisModelId/Arn CapabilityProfiles sink mode
+  CFN->>S3: Create buckets, notifications, lifecycle
+  CFN->>CFN: Create Lambda function + IAM policies
+  Eng->>S3: Upload test notable to prefix incoming
+  S3-->>Eng: Verify report under reports/ + CloudWatch logs

@@ -61,6 +61,36 @@ class DocumentationContractTests(unittest.TestCase):
                         findings.append(f"{path.relative_to(PROJECT_ROOT)}:{line_number}")
         self.assertEqual(findings, [])
 
+    def test_deploy_docs_use_ecr_digest_contract(self) -> None:
+        deploy_docs = (
+            PROJECT_ROOT / "README.md",
+            PROJECT_ROOT / "docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md",
+            PROJECT_ROOT / "docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_AWS_READINESS_ASSESSMENT.md",
+            PROJECT_ROOT / "docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_AWS_READINESS_OVERVIEW.md",
+            PROJECT_ROOT / "docs/delivery_package/end_to_end_diagrams/END_TO_END_DIAGRAMS.md",
+        )
+        forbidden = re.compile(r"\bImageUri\b")
+        findings: list[str] = []
+        for path in deploy_docs:
+            for line_number, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(),
+                start=1,
+            ):
+                if forbidden.search(line):
+                    findings.append(f"{path.relative_to(PROJECT_ROOT)}:{line_number}")
+        self.assertEqual(findings, [])
+
+        required_snippets = (
+            "EcrRepositoryUri",
+            "ImageDigest",
+            "BedrockAnalysisModelArn",
+        )
+        steps = (PROJECT_ROOT / "docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md").read_text(
+            encoding="utf-8"
+        )
+        for snippet in required_snippets:
+            self.assertIn(snippet, steps)
+
     def test_commercial_service_decisions_are_recorded(self) -> None:
         register = (
             PROJECT_ROOT / "docs/internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md"

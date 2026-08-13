@@ -74,21 +74,21 @@ If those six buckets are not understood, this is not yet a low-friction deployme
 - platform access to deploy SAM, publish ECR images, and create required AWS resources
 - security, model approval, and policy authority in place for Bedrock and optional integrations
 - Lambda image build-and-publish path decided
-- integration inputs known: bucket naming, upstream writer, and per-profile secrets, KB IDs, and endpoint mapping
+- integration inputs known: bucket naming, upstream writer, and per-profile secrets, OpenSearch settings, and endpoint mapping
 - if external writes are planned, Splunk or ServiceNow owners confirmed write boundaries, approval workflow, and idempotency; new production writeback rollouts should use `action_gated`
 
 ## What The Engineer Can Do Once Engaged
 
 - verify prerequisites and deployment tooling
 - build or standardize the Lambda image and publish it to ECR
-- supply deploy-time parameters (`CapabilityProfiles`, buckets, `ImageUri`, sink mode, optional integration settings) and run the documented SAM path
+- supply deploy-time parameters (`CapabilityProfiles`, buckets, `EcrRepositoryUri`, `ImageDigest`, `BedrockAnalysisModelId`, `BedrockAnalysisModelArn`, sink mode, optional integration settings) and run the documented SAM path
 - validate runtime behavior, logs, and report generation (markdown/JSON/HTML as enabled), optional RAG and read-only investigation, and if enabled Splunk writeback or ServiceNow paths
 - if `analyst_portal` is enabled, validate archive write, embed completion, portal API routes, SPA load, and pinned-case chat after customer front-door wiring
 - run smoke tests and hand off rerun and rollback steps
 
 ## What May Still Depend On The Customer
 
-- security or platform approval for Bedrock, optional KB retrieve, and optional HTTPS egress to Splunk, MCP, Elasticsearch, or ServiceNow
+- security or platform approval for Bedrock, optional OpenSearch retrieval, and optional HTTPS egress to Splunk, MCP, Elasticsearch, or ServiceNow
 - IAM or SCP changes if AWS actions are still blocked
 - final confirmation of approved runtime targets, names, regions, and capability profile rollout order
 - secret creation, rotation, and access review for each enabled integration
