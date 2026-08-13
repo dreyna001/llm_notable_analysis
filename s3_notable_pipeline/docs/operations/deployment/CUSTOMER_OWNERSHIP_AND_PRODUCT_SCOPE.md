@@ -47,18 +47,24 @@ Rendered from [`../../../deploy/aws/template-sam.yaml`](../../../deploy/aws/temp
 The stack does **not** create OpenSearch indexes until runtime: `ensure_vector_index()`
 in the application creates k-NN indexes on first ingest or case embed.
 
-## Capabilities not shipped on AWS (on-prem may differ)
+## Optional customer-default parity features (off by default)
 
-Intentional product gaps for v1 GovCloud AWS. Do not expect SAM parameters alone
-to enable these.
+Enable via SAM parameters when matching on-prem customer-default behavior. See
+[`GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md`](GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md) and
+[`../integrations/SERVICENOW_CLOSED_TICKET_OPERATIONS.md`](../integrations/SERVICENOW_CLOSED_TICKET_OPERATIONS.md).
+
+| Capability | SAM / config | Reference |
+| --- | --- | --- |
+| Closed-ticket ServiceNow sync + RAG | `ServiceNowClosedTicketSyncEnabled`, `ClosedTicketRagEnabled`, `CaseQaClosedTicketEnabled` | [`../integrations/SERVICENOW_CLOSED_TICKET_OPERATIONS.md`](../integrations/SERVICENOW_CLOSED_TICKET_OPERATIONS.md) |
+| KB ingest for PDF / DOCX / images | `ImageIngestEnabled` (+ optional `ImageIngestUseTextract`) | [`../rag/KNOWLEDGE_BASE_OPERATIONS.md`](../rag/KNOWLEDGE_BASE_OPERATIONS.md) |
+| Bedrock rerank | `RagRerankEnabled` | [`../rag/RAG_OPERATIONS.md`](../rag/RAG_OPERATIONS.md) |
+| Portal chat image uploads | `CaseQaChatImagesEnabled` | [`../analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../analyst_portal/ANALYST_PORTAL_OPERATIONS.md) |
+
+## Capabilities not shipped on AWS (on-prem may differ)
 
 | Capability | Status | Reference |
 | --- | --- | --- |
-| Closed-ticket ServiceNow sync + closed-ticket RAG | Not shipped | Commercial parity plan (reference only): [`../../../../s3_notable_pipeline_commercial/docs/planning/COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md`](../../../../s3_notable_pipeline_commercial/docs/planning/COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md) |
 | Live Splunk SPL in analysis without `spl_readonly` | Use `spl_readonly` profile or S3-only sink | [`../platform/CAPABILITY_PROFILES.md`](../platform/CAPABILITY_PROFILES.md) |
-| Portal chat image uploads (backend) | Not shipped | [`../../../../PORTAL_CHATBOT_CAPABILITY_GAPS.md`](../../../../PORTAL_CHATBOT_CAPABILITY_GAPS.md) |
-| KB ingest for PDF / DOCX / images | **On-prem shipped** (`IMAGE_INGEST_ENABLED`); **AWS backlog** (text/json/md/txt/csv only) | On-prem: [`IMAGE_INGEST_PREREQUISITES.md`](../../../llm_notable_analysis_onprem_systemd/docs/operations/rag/IMAGE_INGEST_PREREQUISITES.md); AWS: [`../../planning/TODOS.md`](../../planning/TODOS.md) |
-| Bedrock rerank as default retrieval step | `RAG_RERANK_ENABLED` not wired in OpenSearch path | Keep off; see [`../rag/RAG_OPERATIONS.md`](../rag/RAG_OPERATIONS.md) |
 | Backup, restore, RPO/RTO, cross-region DR | Out of initial release | [`GOVCLOUD_CUSTOMER_CONFIGURATION.md`](GOVCLOUD_CUSTOMER_CONFIGURATION.md) deployment boundary |
 
 ## Portal and auth: validate, do not issue
