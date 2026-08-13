@@ -256,6 +256,8 @@ def retrieve_case_chunks_for_question(
             case_id=case_id,
             top_k=max(config.CASE_QA_LEXICAL_TOP_K, config.CASE_QA_VECTOR_TOP_K),
             adapter=adapter_for(config, opensearch_client),
+            config=config,
+            bedrock_client=bedrock_client,
         )
         chunks = []
         for document in documents:

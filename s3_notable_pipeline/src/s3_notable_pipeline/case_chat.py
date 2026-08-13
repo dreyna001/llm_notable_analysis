@@ -17,7 +17,8 @@ from .portal_chat import (
     synthesize_case_answer,
     trim_sources,
 )
-from .portal_chat_kb import build_chat_knowledge_sources
+from .portal_chat_images import ValidatedChatImage
+from .portal_chat_kb import build_chat_knowledge_sources, build_closed_ticket_chat_sources
 from .portal_chat_kb_query import build_case_aware_kb_query
 
 
@@ -30,6 +31,8 @@ def answer_selected_case_question(
     s3_client: Any,
     bedrock_client: Any,
     conversation_history: Sequence[ChatTurn] | None = None,
+    images: tuple[ValidatedChatImage, ...] = (),
+    opensearch_client: Any | None = None,
 ) -> PortalAnswer:
     """Answer one question using retrieval-bound synthesis for the selected case."""
 
@@ -78,6 +81,16 @@ def answer_selected_case_question(
         )
     )
     sources = trim_sources(sources, config)
+    closed_ticket_sources = build_closed_ticket_chat_sources(
+        question=normalized_question,
+        config=config,
+        case_sources=sources,
+        bedrock_client=bedrock_client,
+        opensearch_client=opensearch_client,
+    )
+    if closed_ticket_sources:
+        sources.extend(closed_ticket_sources)
+        sources = trim_sources(sources, config)
 
     return synthesize_case_answer(
         question=normalized_question,
@@ -85,6 +98,7 @@ def answer_selected_case_question(
         config=config,
         bedrock_client=bedrock_client,
         conversation_history=conversation_history,
+        images=images,
     )
 
 

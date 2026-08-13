@@ -157,6 +157,8 @@ def retrieve_elasticsearch_grounding(
                     config,
                     opensearch_client or (client if hasattr(client, "search") else None),
                 ),
+                config=config,
+                bedrock_client=bedrock_client or bedrock_runtime_client(),
             )
             context = render_documents(
                 documents,

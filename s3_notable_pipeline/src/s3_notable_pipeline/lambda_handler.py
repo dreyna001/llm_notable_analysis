@@ -25,9 +25,14 @@ from .aws_clients import secretsmanager_client as make_secretsmanager_client
 from .aws_clients import dynamodb_client as make_dynamodb_client
 from .aws_clients import lambda_client as make_lambda_client
 from .aws_clients import sqs_client as make_sqs_client
+from .aws_clients import bedrock_runtime_client as make_bedrock_runtime_client
 from .bedrock_kb_retrieval import RetrievalResult, retrieve_soc_context
 from .case_archive import SourceContext, archive_case
 from .config import Config, load_config
+from .historical_closed_ticket_grounding import (
+    merge_closed_ticket_rag_metadata_into_payload,
+    retrieve_historical_closed_tickets_for_first_pass,
+)
 from .html_generator import generate_html_report
 from .idempotency import (
     begin_side_effect,
@@ -1027,6 +1032,17 @@ def handler(event, context):
                 RetrievalResult(status="failed", message="SOC RAG enrichment unavailable"),
                 degraded_enrichments,
             )
+
+            historical_context, closed_ticket_rag_meta = _optional_call(
+                "closed_ticket_rag",
+                lambda: retrieve_historical_closed_tickets_for_first_pass(
+                    config,
+                    alert_text,
+                    bedrock_client=make_bedrock_runtime_client(),
+                ),
+                ("", {}),
+                degraded_enrichments,
+            )
             
             # Run analysis
             start_time = time.time()
@@ -1034,6 +1050,7 @@ def handler(event, context):
             scored_ttps = analyzer.analyze_ttp(
                 alert_text,
                 advisory_context=rag_result.context,
+                historical_closed_tickets_context=historical_context,
             )
             
             # Get the full LLM response
@@ -1045,6 +1062,7 @@ def handler(event, context):
                     metadata["rag_snippet_count"] = rag_result.snippet_count
                     if rag_result.message:
                         metadata["rag_message"] = rag_result.message
+                    metadata.update(closed_ticket_rag_meta)
 
             if (
                 isinstance(llm_response, dict)

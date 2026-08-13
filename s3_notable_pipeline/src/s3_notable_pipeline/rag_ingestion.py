@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from typing import Any, Iterable, Mapping
 
 from .case_embed import embed_text
+from .kb_document_extract import extract_document_text, image_ingest_enabled
 from .opensearch_retrieval import config_value
 
 MANIFEST_SCHEMA_VERSION = 1
@@ -133,8 +134,9 @@ def parse_s3_document(
     version_id: str = "",
     etag: str = "",
     max_bytes: int | None = None,
+    config: Any = None,
 ) -> str:
-    """Parse bounded text from JSON, Markdown, text, or CSV S3 content."""
+    """Parse bounded text from JSON, Markdown, text, CSV, or rich media S3 content."""
 
     response = _get_exact_object(
         bucket=bucket,
@@ -143,22 +145,32 @@ def parse_s3_document(
         version_id=version_id,
         etag=etag,
     )
+    effective_max_bytes = _effective_document_byte_limit(max_bytes=max_bytes, config=config)
     content_length = response.get("ContentLength")
-    if max_bytes is not None and content_length is not None and int(content_length) > max_bytes:
+    if (
+        effective_max_bytes is not None
+        and content_length is not None
+        and int(content_length) > effective_max_bytes
+    ):
         raise ValueError(f"RAG document exceeds configured size limit: {key}")
     body = response.get("Body")
     raw = body.read() if hasattr(body, "read") else body
     if isinstance(raw, str):
-        if max_bytes is not None and len(raw.encode("utf-8")) > max_bytes:
+        raw_bytes = raw.encode("utf-8")
+        if effective_max_bytes is not None and len(raw_bytes) > effective_max_bytes:
             raise ValueError(f"RAG document exceeds configured size limit: {key}")
-        text = raw
     elif isinstance(raw, bytes):
-        if max_bytes is not None and len(raw) > max_bytes:
+        raw_bytes = raw
+        if effective_max_bytes is not None and len(raw_bytes) > effective_max_bytes:
             raise ValueError(f"RAG document exceeds configured size limit: {key}")
-        text = raw.decode("utf-8")
     else:
         raise ValueError("S3 document body must be bytes or text")
     suffix = key.rsplit("/", 1)[-1].lower().rsplit(".", 1)[-1] if "." in key else ""
+    if suffix in {"pdf", "docx", "png", "jpg", "jpeg", "webp", "gif"}:
+        if config is None or not image_ingest_enabled(config):
+            raise ValueError(f"unsupported RAG document type: {suffix}")
+        return extract_document_text(raw_bytes, suffix, config)
+    text = raw_bytes.decode("utf-8")
     if suffix == "json":
         try:
             parsed = json.loads(text)
@@ -450,6 +462,7 @@ def ingest_manifest(
             version_id=source.version_id,
             etag=source.etag,
             max_bytes=max_bytes,
+            config=config,
         )
         documents = build_rag_documents(
             manifest=manifest,
@@ -547,6 +560,15 @@ def stable_document_id(*parts: str) -> str:
     """Build a replay-safe ID from immutable source identity."""
 
     return hashlib.sha256("\x1f".join(str(part) for part in parts).encode("utf-8")).hexdigest()
+
+
+def _effective_document_byte_limit(*, max_bytes: int | None, config: Any) -> int | None:
+    if config is not None and image_ingest_enabled(config):
+        image_limit = int(config_value(config, "IMAGE_INGEST_MAX_BYTES", 10 * 1024 * 1024))
+        if max_bytes is None:
+            return image_limit
+        return min(max_bytes, image_limit)
+    return max_bytes
 
 
 def _required_string(payload: Mapping[str, Any], key: str) -> str:

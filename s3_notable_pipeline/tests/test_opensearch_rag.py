@@ -37,17 +37,30 @@ from s3_notable_pipeline.rag_ingest_handler import handler
 
 
 class FakeBedrockClient:
-    def invoke_model(self, **_kwargs):
+    rerank_results: list[dict] = []
+
+    def invoke_model(self, **kwargs):
+        if kwargs.get("modelId", "").startswith("cohere.rerank") or kwargs.get(
+            "modelId", ""
+        ).startswith("amazon.rerank"):
+            return {
+                "body": io.BytesIO(
+                    json.dumps({"results": self.rerank_results}).encode()
+                )
+            }
         return {"body": io.BytesIO(json.dumps({"embedding": [0.01] * 1024}).encode())}
 
 
 class FakeAdapter:
-    def __init__(self):
+    def __init__(self, hits=None):
         self.searches = []
         self.bulks = []
+        self.hits = hits
 
     def search(self, **kwargs):
         self.searches.append(kwargs)
+        if self.hits is not None:
+            return {"hits": {"hits": self.hits}}
         return {
             "hits": {
                 "hits": [
@@ -231,6 +244,51 @@ class OpenSearchRetrievalTests(unittest.TestCase):
             adapter.searches[0]["query"]["query"]["bool"]["filter"][0],
             {"term": {"tenant_id.keyword": "tenant-a"}},
         )
+
+    def test_rerank_fetches_larger_candidate_pool_and_trims_to_top_k(self) -> None:
+        hits = [
+            {
+                "_id": f"chunk-{index}",
+                "_score": float(index),
+                "_source": {
+                    "tenant_id": "tenant-a",
+                    "corpus_id": "soc",
+                    "text": f"Document {index}",
+                    "source_key": f"knowledge/doc-{index}.md",
+                    "metadata": {"provenance": {"manifest_id": "m-1"}},
+                },
+            }
+            for index in range(4)
+        ]
+        adapter = FakeAdapter(hits=hits)
+        rerank_client = FakeBedrockClient()
+        rerank_client.rerank_results = [
+            {"index": 3, "relevance_score": 0.99},
+            {"index": 2, "relevance_score": 0.75},
+        ]
+        config = SimpleNamespace(
+            RAG_RERANK_ENABLED=True,
+            RAG_RERANK_MODEL="cohere.rerank-v3-5:0",
+            RAG_RERANK_MODEL_FALLBACK="amazon.rerank-v1:0",
+        )
+
+        documents = retrieve_documents(
+            query_text="sign in",
+            query_embedding=[0.1],
+            index="soc-knowledge",
+            tenant_id="tenant-a",
+            corpus_id="soc",
+            top_k=2,
+            adapter=adapter,
+            config=config,
+            bedrock_client=rerank_client,
+        )
+
+        self.assertEqual(adapter.searches[0]["size"], 4)
+        self.assertEqual(len(documents), 2)
+        self.assertEqual(documents[0].text, "Document 3")
+        self.assertEqual(documents[1].text, "Document 2")
+        self.assertEqual(documents[0].metadata["rerank_status"], "success")
 
 
 class RagIngestionTests(unittest.TestCase):

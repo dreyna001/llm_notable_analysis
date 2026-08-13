@@ -98,6 +98,8 @@ def retrieve_soc_context(
                 corpus_id="soc",
                 top_k=config.RAG_MAX_SNIPPETS,
                 adapter=adapter_for(config, adapter),
+                config=config,
+                bedrock_client=embedding_client,
             )
             context = render_documents(
                 documents,

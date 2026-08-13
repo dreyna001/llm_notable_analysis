@@ -381,6 +381,18 @@ SOC CONTEXT RULES:
 - If SOC context is weak, missing, or conflicting, keep guidance broad and explicitly use "unknown" where needed.
 """
 
+HISTORICAL_CLOSED_TICKET_RULES = """
+HISTORICAL CLOSED-TICKET RULES:
+- The HISTORICAL_CLOSED_TICKETS block is advisory precedent from prior closed investigations only.
+- Never treat HISTORICAL_CLOSED_TICKETS as direct evidence about the current alert.
+- Never copy closed-ticket excerpts into evidence_vs_inference.evidence, ttp_analysis[*].evidence_fields, or ioc_extraction unless the same fact is present in SECURITY ALERT INPUT.
+- Prior tickets may inform alert_reconciliation recommended verdict/disposition, confidence, decision_drivers, competing_hypotheses framing, and recommended validation steps in recommended_actions as precedent guidance, not as proof.
+- Current alert facts in SECURITY ALERT INPUT override conflicting precedent; explicitly compare similarities, differences, and uncertainty when precedent influences reasoning.
+- Do not recommend automatic closure, escalation, or containment solely because a similar ticket was closed a certain way.
+- Do not add IOCs or ATT&CK mappings sourced only from HISTORICAL_CLOSED_TICKETS.
+- If historical context is weak, missing, or conflicting with current facts, keep guidance broad and use "unknown" where appropriate.
+""".strip()
+
 RULES = """
 RULES:
 - NO EMOJIS OR UNICODE SYMBOLS; use only plain ASCII text.
@@ -1166,6 +1178,7 @@ class BedrockAnalyzer:
         *,
         use_tool: bool,
         advisory_context: Optional[str] = None,
+        historical_closed_tickets_context: Optional[str] = None,
     ) -> str:
         """Assemble the full prompt from modular sections.
         
@@ -1186,6 +1199,11 @@ class BedrockAnalyzer:
             )
         else:
             soc_context_block = "SOC_OPERATIONAL_CONTEXT\n(none)\n"
+        historical_block = (
+            historical_closed_tickets_context.strip()
+            if historical_closed_tickets_context and historical_closed_tickets_context.strip()
+            else "HISTORICAL_CLOSED_TICKETS\n(none)\n"
+        )
 
         return f"""You are a cybersecurity expert producing a structured SOC analysis from a single alert.
 
@@ -1219,6 +1237,12 @@ SECURITY ALERT INPUT:
 {soc_context_block}
 
 {SOC_CONTEXT_RULES}
+
+---
+
+{historical_block}
+
+{HISTORICAL_CLOSED_TICKET_RULES}
 
 ---
 
@@ -1403,6 +1427,7 @@ SECURITY ALERT INPUT:
         alert_text: str,
         alert_time: Optional[str] = None,
         advisory_context: Optional[str] = None,
+        historical_closed_tickets_context: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Analyze one alert and return validated scored TTP entries."""
         logger.info("Starting TTP analysis")
@@ -1415,12 +1440,14 @@ SECURITY ALERT INPUT:
             alert_time,
             use_tool=True,
             advisory_context=advisory_context,
+            historical_closed_tickets_context=historical_closed_tickets_context,
         )
         prompt_raw = self._build_prompt(
             alert_text,
             alert_time,
             use_tool=False,
             advisory_context=advisory_context,
+            historical_closed_tickets_context=historical_closed_tickets_context,
         )
 
         if not alert_text or not alert_text.strip():

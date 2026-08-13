@@ -582,6 +582,97 @@ Parameters:
     MinValue: 1
     MaxValue: 65536
 
+  CaseQaChatImagesEnabled:
+    Type: String
+    Description: Enables request-scoped chat image uploads in portal Case Q&A.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  CaseQaClosedTicketEnabled:
+    Type: String
+    Description: Enables closed-ticket advisory retrieval lane in portal Case Q&A.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  ClosedTicketRagEnabled:
+    Type: String
+    Description: Enables closed-ticket OpenSearch retrieval backing the portal lane.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  ServiceNowClosedTicketSyncEnabled:
+    Type: String
+    Description: Enables scheduled read-only ServiceNow closed ticket raw sync.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  ServiceNowClosedTicketTokenSecretArn:
+    Type: String
+    Description: Secrets Manager ARN for read-only ServiceNow closed ticket sync bearer token.
+    Default: '*'
+
+  ServiceNowClosedTicketQuery:
+    Type: String
+    Description: Encoded ServiceNow query for closed security tickets.
+    Default: ''
+
+  ServiceNowClosedTicketTable:
+    Type: String
+    Description: ServiceNow table for closed ticket pull.
+    Default: sn_si_incident
+
+  ServiceNowClosedTicketBackfillDays:
+    Type: Number
+    Description: First-run sys_updated_on lookback window for closed ticket sync.
+    Default: 30
+    MinValue: 1
+    MaxValue: 3650
+
+  ClosedTicketRetentionDays:
+    Type: Number
+    Description: Retention in days for synced closed tickets (30, 60, or 90).
+    Default: 30
+    AllowedValues:
+      - 30
+      - 60
+      - 90
+
+  ClosedTicketArchivePrefix:
+    Type: String
+    Description: S3 prefix for raw closed ticket envelopes and attachments.
+    Default: closed_tickets
+
+  OpenSearchClosedTicketIndex:
+    Type: String
+    Description: OpenSearch index for closed ticket RAG chunks.
+    Default: closed_tickets
+
+  ClosedTicketVisionEnabled:
+    Type: String
+    Description: Enables Textract document text extraction for closed ticket attachments.
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  ClosedTicketSyncLambdaName:
+    Type: String
+    Description: Lambda function name for ServiceNow closed ticket sync.
+    Default: notable-closed-ticket-sync
+
+  ClosedTicketEmbedLambdaName:
+    Type: String
+    Description: Lambda function name for closed ticket chunk embedding.
+    Default: notable-closed-ticket-embed
+
   ChatSessionsTableName:
     Type: String
     Description: DynamoDB chat sessions table required when CaseQaChatHistoryEnabled=true.
@@ -806,6 +897,72 @@ Parameters:
     Type: String
     Default: notable-rag-ingestion
 
+  ImageIngestEnabled:
+    Type: String
+    Description: Enables PDF, DOCX, and image extraction during RAG manifest ingest.
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+
+  ImageIngestUseTextract:
+    Type: String
+    Description: Use Amazon Textract for image OCR during KB ingest when ImageIngestEnabled=true.
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+
+  ImageIngestAllowedMimeTypes:
+    Type: String
+    Description: CSV MIME allowlist for KB image and document ingest.
+    Default: application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/gif,image/jpeg,image/jpg,image/png,image/webp
+
+  ImageIngestMaxBytes:
+    Type: Number
+    Description: Maximum raw bytes per KB image or document ingest payload.
+    Default: 10485760
+    MinValue: 1
+    MaxValue: 52428800
+
+  ImageIngestMaxPixels:
+    Type: Number
+    Description: Maximum decoded pixel count per raster image.
+    Default: 25000000
+    MinValue: 1
+    MaxValue: 200000000
+
+  ImageIngestMaxWidth:
+    Type: Number
+    Description: Maximum decoded image width in pixels.
+    Default: 8192
+    MinValue: 1
+    MaxValue: 16384
+
+  ImageIngestMaxHeight:
+    Type: Number
+    Description: Maximum decoded image height in pixels.
+    Default: 8192
+    MinValue: 1
+    MaxValue: 16384
+
+  ImageIngestMaxPdfPages:
+    Type: Number
+    Description: Maximum PDF pages extracted during ingest.
+    Default: 50
+    MinValue: 1
+    MaxValue: 500
+
+  ImageIngestMaxEmbeddedImages:
+    Type: Number
+    Description: Maximum embedded images noted from DOCX payloads.
+    Default: 20
+    MinValue: 1
+    MaxValue: 200
+
+  ImageIngestMaxOutputChars:
+    Type: Number
+    Description: Maximum combined extracted text per KB document.
+    Default: 12000
+    MinValue: 1
+    MaxValue: 200000
+
   RagSourceBucketName:
     Type: String
     Default: ''
@@ -1014,6 +1171,10 @@ Conditions:
   HasServiceNowSecret: !Not [!Equals [!Ref ServiceNowApiTokenSecretArn, '*']]
   HasServiceNowApprovalSecret: !Not [!Equals [!Ref ServiceNowApprovalHmacSecretArn, '*']]
   HasServiceNowDispositionSyncSecret: !Not [!Equals [!Ref ServiceNowDispositionSyncTokenSecretArn, '*']]
+  HasServiceNowClosedTicketSyncSecret: !Not [!Equals [!Ref ServiceNowClosedTicketTokenSecretArn, '*']]
+  HasClosedTicketRag: !Equals [!Ref ClosedTicketRagEnabled, 'true']
+  HasClosedTicketSync: !Equals [!Ref ServiceNowClosedTicketSyncEnabled, 'true']
+  HasClosedTicketPipeline: !Or [!Condition HasClosedTicketRag, !Condition HasClosedTicketSync]
   HasElasticsearchSecret: !Not [!Equals [!Ref ElasticsearchApiKeySecretArn, '*']]
   HasCaseArchiveBucketName: !Not [!Equals [!Ref CaseArchiveBucketName, '']]
   HasCaseIndexTable: !Not [!Equals [!Ref CaseIndexTableName, '']]
@@ -1044,6 +1205,10 @@ Conditions:
   HasCustomerKmsAdminRole: !Not [!Equals [!Ref CustomerKmsKeyAdminRoleArn, '']]
   HasAlarmTopic: !Not [!Equals [!Ref AlarmNotificationTopicArn, '']]
   HasRagIngestion: !Equals [!Ref RagIngestionEnabled, 'true']
+  HasImageIngestTextract: !And
+    - !Condition HasRagIngestion
+    - !Equals [!Ref ImageIngestEnabled, 'true']
+    - !Equals [!Ref ImageIngestUseTextract, 'true']
   HasRagSource: !Not [!Equals [!Ref RagSourceBucketName, '']]
   HasOpenSearch: !Not [!Equals [!Ref OpenSearchDomainArn, '']]
   HasPortalChatBedrockModelOverride: !Not [!Equals [!Ref PortalChatBedrockModelId, '']]
@@ -1271,6 +1436,13 @@ Resources:
               Prefix: !Sub '${CaseArchiveChunksPrefix}/'
               ExpirationInDays: !Ref CaseRetentionDays
             - !Ref AWS::NoValue
+          - !If
+            - HasClosedTicketPipeline
+            - Id: DeleteClosedTicketsAfterRetention
+              Status: Enabled
+              Prefix: !Sub '${ClosedTicketArchivePrefix}/'
+              ExpirationInDays: !Ref ClosedTicketRetentionDays
+            - !Ref AWS::NoValue
 
   SideEffectIdempotencyTable:
     Type: AWS::DynamoDB::Table
@@ -1398,6 +1570,58 @@ Resources:
         - AttributeName: job_name
           KeyType: HASH
 
+  ClosedTicketTable:
+    Type: AWS::DynamoDB::Table
+    Condition: HasClosedTicketPipeline
+    Properties:
+      TableName: !Sub '${AWS::StackName}-closed-tickets'
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification: !If
+        - HasCustomerKmsKey
+        - SSEEnabled: true
+          SSEType: KMS
+          KMSMasterKeyId: !Ref CustomerKmsKeyArn
+        - SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: ticket_id
+          AttributeType: S
+        - AttributeName: index_status
+          AttributeType: S
+      KeySchema:
+        - AttributeName: ticket_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: IndexStatusIndex
+          KeySchema:
+            - AttributeName: index_status
+              KeyType: HASH
+            - AttributeName: ticket_id
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: expires_at_epoch
+        Enabled: true
+
+  ClosedTicketSyncStateTable:
+    Type: AWS::DynamoDB::Table
+    Condition: HasClosedTicketPipeline
+    Properties:
+      TableName: !Sub '${AWS::StackName}-closed-ticket-sync-state'
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification: !If
+        - HasCustomerKmsKey
+        - SSEEnabled: true
+          SSEType: KMS
+          KMSMasterKeyId: !Ref CustomerKmsKeyArn
+        - SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: job_name
+          AttributeType: S
+      KeySchema:
+        - AttributeName: job_name
+          KeyType: HASH
+
   ChatSessionsTable:
     Type: AWS::DynamoDB::Table
     Condition: HasManagedChatSessionsTable
@@ -1500,6 +1724,10 @@ Resources:
           OPENSEARCH_SOC_INDEX: !Ref OpenSearchSocIndex
           OPENSEARCH_SPLUNK_INDEX: !Ref OpenSearchSplunkIndex
           OPENSEARCH_ELASTIC_INDEX: !Ref OpenSearchElasticIndex
+          CLOSED_TICKET_RAG_ENABLED: !Ref ClosedTicketRagEnabled
+          CLOSED_TICKET_RAG_MAX_SNIPPETS: !Ref RagMaxSnippets
+          CLOSED_TICKET_RAG_CONTEXT_BUDGET_CHARS: !Ref RagContextBudgetChars
+          OPENSEARCH_CLOSED_TICKET_INDEX: !Ref OpenSearchClosedTicketIndex
           SPLUNK_SINK_MODE: !Ref SplunkSinkMode
           SPLUNK_BASE_URL: !Ref SplunkBaseUrl
           SPLUNK_API_TOKEN_SECRET_ARN: !Ref SplunkApiTokenSecretArn
@@ -1617,6 +1845,8 @@ Resources:
                 - bedrock:InvokeModel
               Resource:
                 - !Ref BedrockAnalysisModelArn
+                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${RagRerankModel}'
+                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${RagRerankModelFallback}'
         - !If
           - IsNotableRest
           - Statement:
@@ -1697,6 +1927,14 @@ Resources:
                   - es:ESHttpGet
                   - es:ESHttpPost
                 Resource: !Sub '${OpenSearchDomainArn}/*'
+          - !Ref AWS::NoValue
+        - !If
+          - HasClosedTicketRag
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${CaseQaEmbeddingModel}'
           - !Ref AWS::NoValue
         - Statement:
             - Effect: Allow
@@ -1867,6 +2105,16 @@ Resources:
           OPENSEARCH_ELASTIC_INDEX: !Ref OpenSearchElasticIndex
           RAG_RETRIEVAL_BACKEND: opensearch
           CASE_QA_EMBEDDING_MODEL: !Ref CaseQaEmbeddingModel
+          IMAGE_INGEST_ENABLED: !Ref ImageIngestEnabled
+          IMAGE_INGEST_USE_TEXTRACT: !Ref ImageIngestUseTextract
+          IMAGE_INGEST_ALLOWED_MIME_TYPES: !Ref ImageIngestAllowedMimeTypes
+          IMAGE_INGEST_MAX_BYTES: !Ref ImageIngestMaxBytes
+          IMAGE_INGEST_MAX_PIXELS: !Ref ImageIngestMaxPixels
+          IMAGE_INGEST_MAX_WIDTH: !Ref ImageIngestMaxWidth
+          IMAGE_INGEST_MAX_HEIGHT: !Ref ImageIngestMaxHeight
+          IMAGE_INGEST_MAX_PDF_PAGES: !Ref ImageIngestMaxPdfPages
+          IMAGE_INGEST_MAX_EMBEDDED_IMAGES: !Ref ImageIngestMaxEmbeddedImages
+          IMAGE_INGEST_MAX_OUTPUT_CHARS: !Ref ImageIngestMaxOutputChars
           CUSTOMER_KMS_KEY_ARN: !Ref CustomerKmsKeyArn
           CUSTOMER_VPC_SUBNET_IDS: !Ref CustomerVpcSubnetIds
           CUSTOMER_SECURITY_GROUP_IDS: !Ref CustomerSecurityGroupIds
@@ -1915,6 +2163,14 @@ Resources:
                   - es:ESHttpPut
                   - es:ESHttpDelete
                 Resource: !Sub '${OpenSearchDomainArn}/*'
+          - !Ref AWS::NoValue
+        - !If
+          - HasImageIngestTextract
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - textract:DetectDocumentText
+                Resource: '*'
           - !Ref AWS::NoValue
       Events:
         RagIngestionQueueEvent:
@@ -2028,6 +2284,212 @@ Resources:
               Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${DispositionSyncLambdaName}:*'
       ImageUri: !Sub '${EcrRepositoryUri}@${ImageDigest}'
 
+  ClosedTicketSyncFunction:
+    Type: AWS::Serverless::Function
+    Condition: HasClosedTicketSync
+    Properties:
+      FunctionName: !Ref ClosedTicketSyncLambdaName
+      PackageType: Image
+      Timeout: 900
+      MemorySize: !Ref LambdaMemorySize
+      EphemeralStorage:
+        Size: !Ref LambdaEphemeralStorageMb
+      VpcConfig: !If
+        - HasCustomerVpc
+        - SubnetIds: !Split [',', !Ref CustomerVpcSubnetIds]
+          SecurityGroupIds: !Split [',', !Ref CustomerSecurityGroupIds]
+        - !Ref AWS::NoValue
+      ImageConfig:
+        Command:
+          - s3_notable_pipeline.closed_ticket_sync_handler.handler
+      Environment:
+        Variables:
+          AWS_PARTITION: !Ref DeploymentPartition
+          CUSTOMER_KMS_KEY_ARN: !Ref CustomerKmsKeyArn
+          CUSTOMER_VPC_SUBNET_IDS: !Ref CustomerVpcSubnetIds
+          CUSTOMER_SECURITY_GROUP_IDS: !Ref CustomerSecurityGroupIds
+          CAPABILITY_PROFILES: core
+          ALLOW_PRIVATE_OUTBOUND_ENDPOINTS: !Ref AllowPrivateOutboundEndpoints
+          SERVICENOW_BASE_URL: !Ref ServiceNowBaseUrl
+          SERVICENOW_TIMEOUT_SECONDS: !Ref ServiceNowTimeoutSeconds
+          SERVICENOW_CLOSED_TICKET_SYNC_ENABLED: !Ref ServiceNowClosedTicketSyncEnabled
+          SERVICENOW_CLOSED_TICKET_TOKEN_SECRET_ARN: !Ref ServiceNowClosedTicketTokenSecretArn
+          SERVICENOW_CLOSED_TICKET_QUERY: !Ref ServiceNowClosedTicketQuery
+          SERVICENOW_CLOSED_TICKET_TABLE: !Ref ServiceNowClosedTicketTable
+          SERVICENOW_CLOSED_TICKET_BACKFILL_DAYS: !Ref ServiceNowClosedTicketBackfillDays
+          CLOSED_TICKET_RETENTION_DAYS: !Ref ClosedTicketRetentionDays
+          CLOSED_TICKET_ARCHIVE_BUCKET: !If [HasCaseArchiveBucketName, !Ref CaseArchiveBucketName, !Ref OutputBucketName]
+          CLOSED_TICKET_ARCHIVE_PREFIX: !Ref ClosedTicketArchivePrefix
+          CLOSED_TICKET_TABLE: !Ref ClosedTicketTable
+          CLOSED_TICKET_SYNC_STATE_TABLE: !Ref ClosedTicketSyncStateTable
+      Events:
+        DailyClosedTicketSync:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 day)
+            Enabled: true
+      Policies:
+        - !If [HasCustomerVpc, !Ref LambdaVpcEniPolicy, !Ref AWS::NoValue]
+        - !If
+          - HasServiceNowClosedTicketSyncSecret
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref ServiceNowClosedTicketTokenSecretArn
+          - !Ref AWS::NoValue
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - !GetAtt ClosedTicketTable.Arn
+                - !Sub '${ClosedTicketTable.Arn}/index/*'
+                - !GetAtt ClosedTicketSyncStateTable.Arn
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:DeleteObject
+                - s3:ListBucket
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:s3:::${OutputBucketName}'
+                - !Sub 'arn:${AWS::Partition}:s3:::${OutputBucketName}/${ClosedTicketArchivePrefix}/*'
+        - !If
+          - HasCaseArchiveBucketName
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:s3:::${CaseArchiveBucketName}'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${CaseArchiveBucketName}/${ClosedTicketArchivePrefix}/*'
+          - !Ref AWS::NoValue
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ClosedTicketSyncLambdaName}:*'
+      ImageUri: !Sub '${EcrRepositoryUri}@${ImageDigest}'
+
+  ClosedTicketEmbedFunction:
+    Type: AWS::Serverless::Function
+    Condition: HasClosedTicketRag
+    Properties:
+      FunctionName: !Ref ClosedTicketEmbedLambdaName
+      PackageType: Image
+      Timeout: 900
+      MemorySize: !Ref LambdaMemorySize
+      EphemeralStorage:
+        Size: !Ref LambdaEphemeralStorageMb
+      VpcConfig: !If
+        - HasCustomerVpc
+        - SubnetIds: !Split [',', !Ref CustomerVpcSubnetIds]
+          SecurityGroupIds: !Split [',', !Ref CustomerSecurityGroupIds]
+        - !Ref AWS::NoValue
+      ImageConfig:
+        Command:
+          - s3_notable_pipeline.closed_ticket_embed_handler.handler
+      Environment:
+        Variables:
+          AWS_PARTITION: !Ref DeploymentPartition
+          CUSTOMER_KMS_KEY_ARN: !Ref CustomerKmsKeyArn
+          CUSTOMER_VPC_SUBNET_IDS: !Ref CustomerVpcSubnetIds
+          CUSTOMER_SECURITY_GROUP_IDS: !Ref CustomerSecurityGroupIds
+          CAPABILITY_PROFILES: core
+          RAG_TENANT_ID: !Ref RagTenantId
+          RAG_RETRIEVAL_BACKEND: opensearch
+          OPENSEARCH_ENDPOINT: !Ref OpenSearchEndpoint
+          OPENSEARCH_REGION: !Ref OpenSearchRegion
+          OPENSEARCH_SERVICE: !Ref OpenSearchService
+          OPENSEARCH_CLOSED_TICKET_INDEX: !Ref OpenSearchClosedTicketIndex
+          CLOSED_TICKET_RAG_ENABLED: !Ref ClosedTicketRagEnabled
+          CLOSED_TICKET_VISION_ENABLED: !Ref ClosedTicketVisionEnabled
+          CLOSED_TICKET_ARCHIVE_BUCKET: !If [HasCaseArchiveBucketName, !Ref CaseArchiveBucketName, !Ref OutputBucketName]
+          CLOSED_TICKET_ARCHIVE_PREFIX: !Ref ClosedTicketArchivePrefix
+          CLOSED_TICKET_TABLE: !Ref ClosedTicketTable
+          CASE_QA_EMBEDDING_MODEL: !Ref CaseQaEmbeddingModel
+          CASE_QA_VECTOR_DIMENSIONS: !Ref CaseQaVectorDimensions
+          CASE_QA_EMBED_NORMALIZE: !Ref CaseQaEmbedNormalize
+      Events:
+        DailyClosedTicketEmbed:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 day)
+            Enabled: true
+      Policies:
+        - !If [HasCustomerKmsKey, !Ref CustomerKmsReadPolicy, !Ref AWS::NoValue]
+        - !If [HasCustomerVpc, !Ref LambdaVpcEniPolicy, !Ref AWS::NoValue]
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - !GetAtt ClosedTicketTable.Arn
+                - !Sub '${ClosedTicketTable.Arn}/index/*'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:ListBucket
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:s3:::${OutputBucketName}'
+                - !Sub 'arn:${AWS::Partition}:s3:::${OutputBucketName}/${ClosedTicketArchivePrefix}/*'
+        - !If
+          - HasCaseArchiveBucketName
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:s3:::${CaseArchiveBucketName}'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${CaseArchiveBucketName}/${ClosedTicketArchivePrefix}/*'
+          - !Ref AWS::NoValue
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${CaseQaEmbeddingModel}'
+        - !If
+          - HasOpenSearch
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - es:ESHttpGet
+                  - es:ESHttpPost
+                  - es:ESHttpPut
+                  - es:ESHttpDelete
+                Resource: !Sub '${OpenSearchDomainArn}/*'
+          - !Ref AWS::NoValue
+        - Statement:
+            - Effect: Allow
+              Action:
+                - textract:DetectDocumentText
+              Resource: '*'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ClosedTicketEmbedLambdaName}:*'
+      ImageUri: !Sub '${EcrRepositoryUri}@${ImageDigest}'
+
   PortalApiFunction:
     Type: AWS::Serverless::Function
     Condition: HasPortalApi
@@ -2091,6 +2553,10 @@ Resources:
           CASE_QA_MAX_SESSIONS_PER_USER: !Ref CaseQaMaxSessionsPerUser
           CASE_QA_MAX_MESSAGES_PER_SESSION: !Ref CaseQaMaxMessagesPerSession
           CASE_QA_MAX_STORED_MESSAGE_BYTES: !Ref CaseQaMaxStoredMessageBytes
+          CASE_QA_CHAT_IMAGES_ENABLED: !Ref CaseQaChatImagesEnabled
+          CASE_QA_CLOSED_TICKET_ENABLED: !Ref CaseQaClosedTicketEnabled
+          CLOSED_TICKET_RAG_ENABLED: !Ref ClosedTicketRagEnabled
+          OPENSEARCH_CLOSED_TICKET_INDEX: !Ref OpenSearchClosedTicketIndex
           CHAT_SESSIONS_TABLE: !If
             - HasChatHistory
             - !If
@@ -2105,6 +2571,9 @@ Resources:
               - !Ref ChatMessagesTable
               - !Ref ChatMessagesTableName
             - ''
+          RAG_RERANK_ENABLED: !Ref RagRerankEnabled
+          RAG_RERANK_MODEL: !Ref RagRerankModel
+          RAG_RERANK_MODEL_FALLBACK: !Ref RagRerankModelFallback
       Policies:
         - !If [HasCustomerKmsKey, !Ref CustomerKmsReadPolicy, !Ref AWS::NoValue]
         - !If [HasCustomerVpc, !Ref LambdaVpcEniPolicy, !Ref AWS::NoValue]
@@ -2152,6 +2621,8 @@ Resources:
                   - HasPortalChatBedrockModelOverride
                   - !Ref PortalChatBedrockModelArn
                   - !Ref BedrockAnalysisModelArn
+                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${RagRerankModel}'
+                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${RagRerankModelFallback}'
         - !If
           - HasOpenSearch
           - Statement:
@@ -2372,6 +2843,22 @@ Resources:
       RetentionInDays: !Ref LogRetentionDays
       KmsKeyId: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
 
+  ClosedTicketSyncLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: HasClosedTicketSync
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ClosedTicketSyncLambdaName}'
+      RetentionInDays: !Ref LogRetentionDays
+      KmsKeyId: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+
+  ClosedTicketEmbedLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: HasClosedTicketRag
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ClosedTicketEmbedLambdaName}'
+      RetentionInDays: !Ref LogRetentionDays
+      KmsKeyId: !If [HasCustomerKmsKey, !Ref CustomerKmsKeyArn, !Ref AWS::NoValue]
+
   AnalyzerQueueDepthAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -2577,6 +3064,21 @@ Outputs:
   DispositionSyncFunctionName:
     Description: Lambda function name for ServiceNow disposition sync
     Value: !Ref DispositionSyncFunction
+
+  ClosedTicketTableName:
+    Condition: HasClosedTicketPipeline
+    Description: DynamoDB table for synced ServiceNow closed tickets
+    Value: !Ref ClosedTicketTable
+
+  ClosedTicketSyncFunctionName:
+    Condition: HasClosedTicketSync
+    Description: Lambda function name for ServiceNow closed ticket sync
+    Value: !Ref ClosedTicketSyncFunction
+
+  ClosedTicketEmbedFunctionName:
+    Condition: HasClosedTicketRag
+    Description: Lambda function name for closed ticket chunk embedding
+    Value: !Ref ClosedTicketEmbedFunction
 
   PortalBrowserApiBaseUrl:
     Condition: HasPortalApi
