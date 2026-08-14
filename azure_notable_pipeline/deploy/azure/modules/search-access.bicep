@@ -3,6 +3,7 @@ targetScope = 'resourceGroup'
 param searchServiceName string
 param analyzerPrincipalId string
 param portalPrincipalId string = ''
+param dispositionPrincipalId string = ''
 
 resource search 'Microsoft.Search/searchServices@2023-11-01' existing = {
   name: searchServiceName
@@ -27,5 +28,15 @@ resource portalIndexReader 'Microsoft.Authorization/roleAssignments@2022-04-01' 
     principalId: portalPrincipalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', searchIndexDataReaderRoleId)
+  }
+}
+
+resource dispositionIndexContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(dispositionPrincipalId)) {
+  name: guid(search.id, dispositionPrincipalId, searchIndexDataContributorRoleId)
+  scope: search
+  properties: {
+    principalId: dispositionPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', searchIndexDataContributorRoleId)
   }
 }

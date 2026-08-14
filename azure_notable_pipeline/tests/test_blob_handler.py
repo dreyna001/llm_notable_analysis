@@ -74,7 +74,12 @@ class FakeAnalyzer:
         self.formatted_payload = payload
         return json.dumps(payload, separators=(",", ":"))
 
-    def analyze_ttp(self, _alert_text: str, advisory_context: str = ""):
+    def analyze_ttp(
+        self,
+        _alert_text: str,
+        advisory_context: str = "",
+        historical_closed_tickets_context: str = "",
+    ):
         return []
 
 

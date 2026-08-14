@@ -115,6 +115,8 @@ def test_single_digest_image_and_wrapper_isolation_are_explicit() -> None:
         "analyzer_queue": {"analyzer": "false", "embed": "true", "disposition": "true", "portal": "true"},
         "case_embed_queue": {"analyzer": "true", "embed": "false", "disposition": "true", "portal": "true"},
         "disposition_sync_timer": {"analyzer": "true", "embed": "true", "portal": "true"},
+        "closed_ticket_sync_timer": {"analyzer": "true", "embed": "true", "portal": "true"},
+        "closed_ticket_embed_timer": {"analyzer": "true", "embed": "true", "portal": "true"},
         "operations_monitor_timer": {"analyzer": "true", "embed": "true", "disposition": "false", "portal": "true"},
         "portal_http": {"analyzer": "true", "embed": "true", "disposition": "true", "portal": "false"},
     }
@@ -129,8 +131,17 @@ def test_single_digest_image_and_wrapper_isolation_are_explicit() -> None:
             setting = f"AzureWebJobs.{wrapper}.Disabled', value: '{expected_value}'"
             assert modules[app_name].count(setting) == 1
     assert "AzureWebJobs.disposition_sync_timer.Disabled', value: string(!serviceNowDispositionSyncEnabled)" in disposition
+    assert "AzureWebJobs.closed_ticket_sync_timer.Disabled', value: string(!serviceNowClosedTicketSyncEnabled)" in disposition
+    assert "AzureWebJobs.closed_ticket_embed_timer.Disabled', value: string(!closedTicketRagEnabled)" in disposition
+    assert "AzureWebJobs.rag_ingest_queue.Disabled', value: 'true'" in disposition
+    expected_disabled_counts = {
+        "analyzer": 8,
+        "embed": 9,
+        "disposition": 9,
+        "portal": 9,
+    }
     for app_name, module in modules.items():
-        assert module.count("AzureWebJobs.") == 6, app_name
+        assert module.count("AzureWebJobs.") == expected_disabled_counts[app_name], app_name
     assert "functionAppScaleLimit" in analyzer
     assert "functionAppScaleLimit" in embed
 
@@ -400,6 +411,8 @@ def test_cosmos_container_partition_and_ttl_contracts_are_exact() -> None:
         "caseIndex": "/case_id",
         "disposition": "/snow_sys_id",
         "dispositionSyncState": "/job_name",
+        "closedTicket": "/ticket_id",
+        "closedTicketSyncState": "/job_name",
         "chatSessions": "/user_id",
         "chatMessages": "/session_id",
         "chatQuota": "/user_id",
@@ -429,6 +442,7 @@ def test_cosmos_container_partition_and_ttl_contracts_are_exact() -> None:
         "sideEffectIdempotency",
         "caseIndex",
         "disposition",
+        "closedTicket",
         "chatSessions",
         "chatMessages",
         "chatQuota",
@@ -436,6 +450,7 @@ def test_cosmos_container_partition_and_ttl_contracts_are_exact() -> None:
     for resource_name in ttl_resources:
         assert "defaultTtl: -1" in resource_bodies[resource_name]
     assert "defaultTtl" not in resource_bodies["dispositionSyncState"]
+    assert "defaultTtl" not in resource_bodies["closedTicketSyncState"]
 
 
 def test_cosmos_composite_indexes_cover_bounded_ordered_queries() -> None:
@@ -451,6 +466,11 @@ def test_cosmos_composite_indexes_cover_bounded_ordered_queries() -> None:
         "{ path: '/session_id', order: 'descending' }",
         "{ path: '/created_at', order: 'ascending' }",
         "{ path: '/message_id', order: 'ascending' }",
+        "{ path: '/index_status', order: 'ascending' }",
+        "{ path: '/source_updated_at', order: 'ascending' }",
+        "{ path: '/ticket_id', order: 'ascending' }",
+        "{ path: '/expires_at_epoch', order: 'ascending' }",
+        "{ path: '/active', order: 'ascending' }",
     )
     assert all(path in cosmos for path in required_composite_paths)
     assert "indexingMode: 'consistent'" in cosmos
@@ -471,6 +491,8 @@ def test_cosmos_sql_rbac_is_container_scoped_and_capability_gated() -> None:
         ("chatSessionsScope", "chatSessionsContainerName"),
         ("chatMessagesScope", "chatMessagesContainerName"),
         ("chatQuotaScope", "chatQuotaContainerName"),
+        ("closedTicketScope", "closedTicketContainerName"),
+        ("closedTicketSyncStateScope", "closedTicketSyncStateContainerName"),
     ):
         assert (
             f"var {scope_variable} = "
@@ -485,6 +507,8 @@ def test_cosmos_sql_rbac_is_container_scoped_and_capability_gated() -> None:
         "chatSessions",
         "chatMessages",
         "chatQuota",
+        "closedTicket",
+        "closedTicketSyncState",
     ):
         # The role-assignment GUID references the container ARM ID, preserving an
         # implicit deployment dependency while its scope uses the Cosmos data path.
@@ -502,6 +526,7 @@ def test_cosmos_sql_rbac_is_container_scoped_and_capability_gated() -> None:
     assert "if" not in side_effect_declaration.group(1)
     assert "deployCaseIndex: hasAnalystPortalProfile" in main
     assert "deployDispositionContainers: ServiceNowDispositionSyncEnabled" in main
+    assert "deployClosedTicketContainers: deployClosedTicketContainers" in main
     assert "deployChatHistoryContainers: deployChatHistoryContainers" in main
     assert "deployChatQuota: deployPortal && PortalChatDistributedQuotaEnabled" in main
 
@@ -589,6 +614,15 @@ def test_disposition_app_is_always_deployed_keyless_and_least_privilege() -> Non
     assert "queueReaderRoleId = '19e7f393-937e-4f77-808e-94535e297925'" in disposition
     assert "resource outputBlobReader" in disposition
     assert "if (serviceNowDispositionSyncEnabled)" in disposition
+    assert "if (serviceNowClosedTicketSyncEnabled || closedTicketRagEnabled)" in disposition
+    assert "SERVICENOW_CLOSED_TICKET_SYNC_ENABLED" in disposition
+    assert "CLOSED_TICKET_RAG_ENABLED" in disposition
+    assert "dispositionOpenAiAccess" in _read(AZURE / "modules" / "openai-access.bicep")
+    assert "dispositionIndexContributor" in _read(AZURE / "modules" / "search-access.bicep")
+    assert "IMAGE_INGEST_ENABLED" in _read(AZURE / "modules" / "functions-analyzer.bicep")
+    assert "RAG_RERANK_ENABLED" in _read(AZURE / "modules" / "functions-analyzer.bicep")
+    assert "CASE_QA_CLOSED_TICKET_ENABLED" in _read(AZURE / "modules" / "functions-portal.bicep")
+    assert "CASE_QA_CHAT_IMAGES_ENABLED" in _read(AZURE / "modules" / "functions-portal.bicep")
     assert "acrUseManagedIdentityCreds: true" in disposition
     assert "AzureWebJobsStorage__credential" in disposition
     for forbidden in (

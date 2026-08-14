@@ -62,6 +62,9 @@ class PortalCapabilitiesResponse(BaseModel):
     chat_ready: bool
     chat_dependency_status: ChatDependencyStatusResponse | None = None
     chat_degraded_reason: str | None = None
+    chat_images_enabled: bool = False
+    max_chat_images: int = 1
+    max_chat_image_bytes: int = 750_000
 
 
 class CaseSummaryResponse(BaseModel):

@@ -25,12 +25,17 @@ param dispositionSyncStateContainerName string
 param chatSessionsContainerName string
 param chatMessagesContainerName string
 param chatQuotaContainerName string
+param closedTicketContainerName string
+param closedTicketSyncStateContainerName string
 
 @description('Create the case-index aggregate for the analyst_portal profile.')
 param deployCaseIndex bool = false
 
 @description('Create ServiceNow disposition aggregates when disposition sync is enabled.')
 param deployDispositionContainers bool = false
+
+@description('Create closed-ticket aggregates when closed-ticket sync or RAG is enabled.')
+param deployClosedTicketContainers bool = false
 
 @description('Create chat-history aggregates only for analyst_portal deployments with history enabled.')
 param deployChatHistoryContainers bool = false
@@ -54,6 +59,8 @@ var dispositionSyncStateScope = '${account.id}/dbs/${databaseName}/colls/${dispo
 var chatSessionsScope = '${account.id}/dbs/${databaseName}/colls/${chatSessionsContainerName}'
 var chatMessagesScope = '${account.id}/dbs/${databaseName}/colls/${chatMessagesContainerName}'
 var chatQuotaScope = '${account.id}/dbs/${databaseName}/colls/${chatQuotaContainerName}'
+var closedTicketScope = '${account.id}/dbs/${databaseName}/colls/${closedTicketContainerName}'
+var closedTicketSyncStateScope = '${account.id}/dbs/${databaseName}/colls/${closedTicketSyncStateContainerName}'
 
 var defaultIndexingPolicy = {
   indexingMode: 'consistent'
@@ -211,6 +218,56 @@ resource dispositionSyncState 'Microsoft.DocumentDB/databaseAccounts/sqlDatabase
   }
 }
 
+resource closedTicket 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = if (deployClosedTicketContainers) {
+  parent: database
+  name: closedTicketContainerName
+  properties: {
+    resource: {
+      id: closedTicketContainerName
+      partitionKey: {
+        paths: ['/ticket_id']
+        kind: 'Hash'
+        version: 2
+      }
+      defaultTtl: -1
+      indexingPolicy: union(defaultIndexingPolicy, {
+        compositeIndexes: [
+          [
+            { path: '/index_status', order: 'ascending' }
+            { path: '/source_updated_at', order: 'ascending' }
+            { path: '/ticket_id', order: 'ascending' }
+          ]
+          [
+            { path: '/expires_at_epoch', order: 'ascending' }
+            { path: '/ticket_id', order: 'ascending' }
+          ]
+          [
+            { path: '/active', order: 'ascending' }
+            { path: '/source_updated_at', order: 'ascending' }
+            { path: '/ticket_id', order: 'ascending' }
+          ]
+        ]
+      })
+    }
+  }
+}
+
+resource closedTicketSyncState 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = if (deployClosedTicketContainers) {
+  parent: database
+  name: closedTicketSyncStateContainerName
+  properties: {
+    resource: {
+      id: closedTicketSyncStateContainerName
+      partitionKey: {
+        paths: ['/job_name']
+        kind: 'Hash'
+        version: 2
+      }
+      indexingPolicy: defaultIndexingPolicy
+    }
+  }
+}
+
 resource chatSessions 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = if (deployChatHistoryContainers) {
   parent: database
   name: chatSessionsContainerName
@@ -347,6 +404,26 @@ resource dispositionSyncStateContributor 'Microsoft.DocumentDB/databaseAccounts/
   }
 }
 
+resource dispositionClosedTicketContributor 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = if (deployClosedTicketContainers) {
+  parent: account
+  name: guid(closedTicket.id, dispositionPrincipalId, dataContributorRoleDefinitionId)
+  properties: {
+    principalId: dispositionPrincipalId
+    roleDefinitionId: '${account.id}/sqlRoleDefinitions/${dataContributorRoleDefinitionId}'
+    scope: closedTicketScope
+  }
+}
+
+resource dispositionClosedTicketSyncStateContributor 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = if (deployClosedTicketContainers) {
+  parent: account
+  name: guid(closedTicketSyncState.id, dispositionPrincipalId, dataContributorRoleDefinitionId)
+  properties: {
+    principalId: dispositionPrincipalId
+    roleDefinitionId: '${account.id}/sqlRoleDefinitions/${dataContributorRoleDefinitionId}'
+    scope: closedTicketSyncStateScope
+  }
+}
+
 resource portalChatSessionsContributor 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = if (deployChatHistoryContainers) {
   parent: account
   name: guid(chatSessions.id, portalPrincipalId, dataContributorRoleDefinitionId)
@@ -384,6 +461,8 @@ output sideEffectIdempotencyContainerName string = sideEffectIdempotency.name
 output caseIndexContainerName string = deployCaseIndex ? caseIndex.name : ''
 output dispositionContainerName string = deployDispositionContainers ? disposition.name : ''
 output dispositionSyncStateContainerName string = deployDispositionContainers ? dispositionSyncState.name : ''
+output closedTicketContainerName string = deployClosedTicketContainers ? closedTicket.name : ''
+output closedTicketSyncStateContainerName string = deployClosedTicketContainers ? closedTicketSyncState.name : ''
 output chatSessionsContainerName string = deployChatHistoryContainers ? chatSessions.name : ''
 output chatMessagesContainerName string = deployChatHistoryContainers ? chatMessages.name : ''
 output chatQuotaContainerName string = deployChatQuota ? chatQuota.name : ''

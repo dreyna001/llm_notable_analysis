@@ -242,9 +242,27 @@ class Config:
     RAG_SOURCE_STORAGE_ACCOUNT_URL: str = ""
     RAG_INGEST_QUEUE_NAME: str = "rag-ingest-invocations"
     RAG_AZURE_SEARCH_INDEX: str = ""
+    RAG_INGEST_MAX_DOCUMENT_BYTES: int = 5_242_880
     RAG_MAX_SNIPPETS: int = 4
     RAG_CONTEXT_BUDGET_CHARS: int = 1600
     RAG_FAILURE_MODE: str = "suppress"
+
+    IMAGE_INGEST_ENABLED: bool = False
+    IMAGE_INGEST_ALLOWED_MIME_TYPES: str = (
+        "application/pdf,"
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document,"
+        "image/gif,image/jpeg,image/jpg,image/png,image/webp"
+    )
+    IMAGE_INGEST_MAX_BYTES: int = 10 * 1024 * 1024
+    IMAGE_INGEST_MAX_PIXELS: int = 25_000_000
+    IMAGE_INGEST_MAX_WIDTH: int = 8192
+    IMAGE_INGEST_MAX_HEIGHT: int = 8192
+    IMAGE_INGEST_MAX_PDF_PAGES: int = 50
+    IMAGE_INGEST_MAX_EMBEDDED_IMAGES: int = 20
+    IMAGE_INGEST_MAX_OUTPUT_CHARS: int = 12_000
+    IMAGE_INGEST_USE_DOCUMENT_INTELLIGENCE: bool = False
+    AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT: str = ""
+    AZURE_DOCUMENT_INTELLIGENCE_API_KEY: str = ""
 
     SPLUNK_BASE_URL: str = ""
     SPLUNK_API_TOKEN_SECRET_NAME: str = ""
@@ -322,6 +340,31 @@ class Config:
     DISPOSITION_CONTAINER: str = ""
     DISPOSITION_SYNC_STATE_CONTAINER: str = ""
 
+    CLOSED_TICKET_RETENTION_DAYS: int = 30
+    SERVICENOW_CLOSED_TICKET_SYNC_ENABLED: bool = False
+    SERVICENOW_CLOSED_TICKET_TOKEN: str = ""
+    SERVICENOW_CLOSED_TICKET_TOKEN_SECRET_NAME: str = ""
+    SERVICENOW_CLOSED_TICKET_TABLE: str = "sn_si_incident"
+    SERVICENOW_CLOSED_TICKET_QUERY: str = ""
+    SERVICENOW_CLOSED_TICKET_BACKFILL_DAYS: int = 30
+    SERVICENOW_CLOSED_TICKET_CURSOR_OVERLAP_HOURS: int = 24
+    SERVICENOW_CLOSED_TICKET_RECONCILE_INTERVAL_DAYS: int = 7
+    SERVICENOW_CLOSED_TICKET_FETCH_JOURNALS: bool = True
+    SERVICENOW_CLOSED_TICKET_FETCH_ATTACHMENTS: bool = True
+    CLOSED_TICKET_ARCHIVE_CONTAINER: str = ""
+    CLOSED_TICKET_ARCHIVE_PREFIX: str = "closed_tickets"
+    CLOSED_TICKET_ATTACHMENT_MAX_BYTES: int = 10 * 1024 * 1024
+    CLOSED_TICKET_ATTACHMENT_MAX_TEXT_CHARS: int = 12000
+    CLOSED_TICKET_CONTAINER: str = ""
+    CLOSED_TICKET_SYNC_STATE_CONTAINER: str = ""
+    CLOSED_TICKET_VISION_ENABLED: bool = False
+    CLOSED_TICKET_DOCUMENT_INTELLIGENCE_ENDPOINT: str = ""
+    CLOSED_TICKET_EMBED_QUEUE_NAME: str = ""
+    CLOSED_TICKET_AZURE_SEARCH_INDEX: str = "closed_tickets"
+    CLOSED_TICKET_EMBEDDING_MODEL: str = ""
+    CLOSED_TICKET_CHUNK_SCHEMA_VERSION: int = 1
+    CLOSED_TICKET_MAX_INDEX_CHUNKS_PER_TICKET: int = 120
+
     SIDE_EFFECT_IDEMPOTENCY_ENABLED: bool = False
     SIDE_EFFECT_IDEMPOTENCY_CONTAINER: str = ""
     SIDE_EFFECT_IDEMPOTENCY_RETENTION_DAYS: int = 30
@@ -385,6 +428,18 @@ class Config:
     CASE_QA_MAX_STORED_MESSAGE_BYTES: int = 4_000
     CASE_QA_MAX_CONVERSATION_TURNS: int = 10
     CASE_QA_MAX_CONVERSATION_CHARS: int = 6_000
+    CASE_QA_CHAT_IMAGES_ENABLED: bool = False
+    CASE_QA_MAX_CHAT_IMAGES: int = 1
+    CASE_QA_MAX_CHAT_IMAGE_BYTES: int = 750_000
+    CASE_QA_MAX_CHAT_IMAGE_DIMENSION: int = 4096
+    CASE_QA_MAX_CHAT_IMAGE_PIXELS: int = 16_777_216
+    CASE_QA_CLOSED_TICKET_ENABLED: bool = False
+    CASE_QA_CLOSED_TICKET_MAX_TICKETS: int = 5
+    CLOSED_TICKET_RAG_ENABLED: bool = False
+    CLOSED_TICKET_RAG_MAX_SNIPPETS: int = 6
+    CLOSED_TICKET_RAG_CONTEXT_BUDGET_CHARS: int = 6000
+    CLOSED_TICKET_LEXICAL_TOP_K: int = 30
+    CLOSED_TICKET_VECTOR_TOP_K: int = 30
     CHAT_SESSIONS_CONTAINER: str = ""
     CHAT_MESSAGES_CONTAINER: str = ""
 
@@ -522,7 +577,12 @@ class Config:
                 raise ValueError(
                     "ELASTICSEARCH_ALLOWED_FIELDS is required when Elasticsearch execution is enabled"
                 )
-        if self.SERVICENOW_CREATE_ENABLED or self.SERVICENOW_DISPOSITION_SYNC_ENABLED:
+        if (
+            self.SERVICENOW_CREATE_ENABLED
+            or self.SERVICENOW_DISPOSITION_SYNC_ENABLED
+            or self.SERVICENOW_CLOSED_TICKET_SYNC_ENABLED
+            or self.CLOSED_TICKET_RAG_ENABLED
+        ):
             self.SERVICENOW_BASE_URL = validate_https_url(
                 self.SERVICENOW_BASE_URL,
                 setting_name="SERVICENOW_BASE_URL",
@@ -544,6 +604,107 @@ class Config:
                     self.DISPOSITION_SYNC_STATE_CONTAINER,
                     setting_name="DISPOSITION_SYNC_STATE_CONTAINER",
                 )
+        if self.CLOSED_TICKET_RETENTION_DAYS not in {30, 60, 90}:
+            raise ValueError("CLOSED_TICKET_RETENTION_DAYS must be one of 30, 60, or 90")
+        if self.SERVICENOW_CLOSED_TICKET_SYNC_ENABLED:
+            if not str(self.SERVICENOW_CLOSED_TICKET_QUERY or "").strip():
+                raise ValueError(
+                    "SERVICENOW_CLOSED_TICKET_QUERY is required when closed ticket sync is enabled"
+                )
+            if not (
+                str(self.SERVICENOW_CLOSED_TICKET_TOKEN or "").strip()
+                or str(self.SERVICENOW_CLOSED_TICKET_TOKEN_SECRET_NAME or "").strip()
+            ):
+                raise ValueError(
+                    "SERVICENOW_CLOSED_TICKET_TOKEN or SERVICENOW_CLOSED_TICKET_TOKEN_SECRET_NAME "
+                    "is required when closed ticket sync is enabled"
+                )
+            self.CLOSED_TICKET_CONTAINER = _validate_cosmos_container_name(
+                self.CLOSED_TICKET_CONTAINER,
+                setting_name="CLOSED_TICKET_CONTAINER",
+            )
+            self.CLOSED_TICKET_SYNC_STATE_CONTAINER = _validate_cosmos_container_name(
+                self.CLOSED_TICKET_SYNC_STATE_CONTAINER,
+                setting_name="CLOSED_TICKET_SYNC_STATE_CONTAINER",
+            )
+            self.CLOSED_TICKET_ARCHIVE_PREFIX = _normalize_blob_prefix(
+                self.CLOSED_TICKET_ARCHIVE_PREFIX,
+                setting_name="CLOSED_TICKET_ARCHIVE_PREFIX",
+            )
+            archive_container = (
+                self.CLOSED_TICKET_ARCHIVE_CONTAINER.strip()
+                or self.OUTPUT_CONTAINER_NAME.strip()
+            )
+            if not archive_container:
+                raise ValueError(
+                    "CLOSED_TICKET_ARCHIVE_CONTAINER or OUTPUT_CONTAINER_NAME is required "
+                    "when closed ticket sync is enabled"
+                )
+            self.CLOSED_TICKET_ARCHIVE_CONTAINER = archive_container
+        elif self.CLOSED_TICKET_CONTAINER:
+            self.CLOSED_TICKET_CONTAINER = _validate_cosmos_container_name(
+                self.CLOSED_TICKET_CONTAINER,
+                setting_name="CLOSED_TICKET_CONTAINER",
+            )
+        if self.CLOSED_TICKET_SYNC_STATE_CONTAINER:
+            self.CLOSED_TICKET_SYNC_STATE_CONTAINER = _validate_cosmos_container_name(
+                self.CLOSED_TICKET_SYNC_STATE_CONTAINER,
+                setting_name="CLOSED_TICKET_SYNC_STATE_CONTAINER",
+            )
+        if self.CLOSED_TICKET_ARCHIVE_PREFIX:
+            self.CLOSED_TICKET_ARCHIVE_PREFIX = _normalize_blob_prefix(
+                self.CLOSED_TICKET_ARCHIVE_PREFIX,
+                setting_name="CLOSED_TICKET_ARCHIVE_PREFIX",
+            )
+        if self.CLOSED_TICKET_ARCHIVE_CONTAINER:
+            self.CLOSED_TICKET_ARCHIVE_CONTAINER = self.CLOSED_TICKET_ARCHIVE_CONTAINER.strip()
+        uses_vector_rag = (
+            self.RAG_ENABLED
+            or self.SPL_QUERY_RAG_ENABLED
+            or self.ELASTICSEARCH_GROUNDING_ENABLED
+            or self.CASE_QA_ENABLED
+            or self.CLOSED_TICKET_RAG_ENABLED
+        ) or (
+            self.CASE_QA_CLOSED_TICKET_ENABLED and self.CLOSED_TICKET_RAG_ENABLED
+        )
+        search_endpoint_configured = bool(self.AZURE_SEARCH_ENDPOINT.strip())
+        if (
+            uses_vector_rag
+            and search_endpoint_configured
+            and not self.RAG_TENANT_ID.strip()
+            and (
+                self.RAG_ENABLED
+                or self.CASE_QA_ENABLED
+                or self.CLOSED_TICKET_RAG_ENABLED
+            )
+        ):
+            raise ValueError(
+                "RAG_TENANT_ID is required for enabled Azure Search RAG capabilities"
+            )
+        if self.IMAGE_INGEST_MAX_BYTES < 1:
+            raise ValueError("IMAGE_INGEST_MAX_BYTES must be >= 1")
+        if self.IMAGE_INGEST_MAX_PIXELS < 1:
+            raise ValueError("IMAGE_INGEST_MAX_PIXELS must be >= 1")
+        if self.IMAGE_INGEST_MAX_WIDTH < 1 or self.IMAGE_INGEST_MAX_HEIGHT < 1:
+            raise ValueError("IMAGE_INGEST_MAX_WIDTH and IMAGE_INGEST_MAX_HEIGHT must be >= 1")
+        if self.IMAGE_INGEST_MAX_PDF_PAGES < 1:
+            raise ValueError("IMAGE_INGEST_MAX_PDF_PAGES must be >= 1")
+        if self.IMAGE_INGEST_MAX_EMBEDDED_IMAGES < 1:
+            raise ValueError("IMAGE_INGEST_MAX_EMBEDDED_IMAGES must be >= 1")
+        if self.IMAGE_INGEST_MAX_OUTPUT_CHARS < 1:
+            raise ValueError("IMAGE_INGEST_MAX_OUTPUT_CHARS must be >= 1")
+        allowed_mimes = {
+            item.split(";", 1)[0].strip().lower()
+            for item in self.IMAGE_INGEST_ALLOWED_MIME_TYPES.replace(";", ",").split(",")
+            if item.strip()
+        }
+        if not allowed_mimes:
+            raise ValueError("IMAGE_INGEST_ALLOWED_MIME_TYPES must contain at least one MIME type")
+        if self.IMAGE_INGEST_USE_DOCUMENT_INTELLIGENCE and not self.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT.strip():
+            raise ValueError(
+                "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT is required when "
+                "IMAGE_INGEST_USE_DOCUMENT_INTELLIGENCE=true"
+            )
         self.CASE_ARCHIVE_FAILURE_MODE = (
             self.CASE_ARCHIVE_FAILURE_MODE or "suppress"
         ).strip().lower()
@@ -715,6 +876,10 @@ class Config:
                 raise ValueError(
                     "CASE_QA_AZURE_SEARCH_INDEX is required when Case Q&A is enabled"
                 )
+        if self.CLOSED_TICKET_RAG_ENABLED and not self.CLOSED_TICKET_AZURE_SEARCH_INDEX.strip():
+            raise ValueError(
+                "CLOSED_TICKET_AZURE_SEARCH_INDEX is required when closed ticket RAG is enabled"
+            )
 
 
 def load_config() -> Config:
@@ -794,12 +959,52 @@ def load_config() -> Config:
             or "rag-ingest-invocations"
         ),
         RAG_AZURE_SEARCH_INDEX=os.getenv("RAG_AZURE_SEARCH_INDEX", ""),
+        RAG_INGEST_MAX_DOCUMENT_BYTES=_positive_int_env(
+            "RAG_INGEST_MAX_DOCUMENT_BYTES", 5_242_880, max_value=20_971_520
+        ),
         RAG_MAX_SNIPPETS=_positive_int_env("RAG_MAX_SNIPPETS", 4, max_value=20),
         RAG_CONTEXT_BUDGET_CHARS=_positive_int_env(
             "RAG_CONTEXT_BUDGET_CHARS", 1600, max_value=10000
         ),
         RAG_FAILURE_MODE=(
             os.getenv("RAG_FAILURE_MODE", "suppress").strip().lower() or "suppress"
+        ),
+        IMAGE_INGEST_ENABLED=_bool_env("IMAGE_INGEST_ENABLED", False),
+        IMAGE_INGEST_ALLOWED_MIME_TYPES=os.getenv(
+            "IMAGE_INGEST_ALLOWED_MIME_TYPES",
+            "application/pdf,"
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document,"
+            "image/gif,image/jpeg,image/jpg,image/png,image/webp",
+        ),
+        IMAGE_INGEST_MAX_BYTES=_positive_int_env(
+            "IMAGE_INGEST_MAX_BYTES", 10 * 1024 * 1024, max_value=52_428_800
+        ),
+        IMAGE_INGEST_MAX_PIXELS=_positive_int_env(
+            "IMAGE_INGEST_MAX_PIXELS", 25_000_000, max_value=200_000_000
+        ),
+        IMAGE_INGEST_MAX_WIDTH=_positive_int_env(
+            "IMAGE_INGEST_MAX_WIDTH", 8192, max_value=16384
+        ),
+        IMAGE_INGEST_MAX_HEIGHT=_positive_int_env(
+            "IMAGE_INGEST_MAX_HEIGHT", 8192, max_value=16384
+        ),
+        IMAGE_INGEST_MAX_PDF_PAGES=_positive_int_env(
+            "IMAGE_INGEST_MAX_PDF_PAGES", 50, max_value=500
+        ),
+        IMAGE_INGEST_MAX_EMBEDDED_IMAGES=_positive_int_env(
+            "IMAGE_INGEST_MAX_EMBEDDED_IMAGES", 20, max_value=200
+        ),
+        IMAGE_INGEST_MAX_OUTPUT_CHARS=_positive_int_env(
+            "IMAGE_INGEST_MAX_OUTPUT_CHARS", 12_000, max_value=200_000
+        ),
+        IMAGE_INGEST_USE_DOCUMENT_INTELLIGENCE=_bool_env(
+            "IMAGE_INGEST_USE_DOCUMENT_INTELLIGENCE", False
+        ),
+        AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=_optional_str_env(
+            "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT"
+        ),
+        AZURE_DOCUMENT_INTELLIGENCE_API_KEY=_optional_str_env(
+            "AZURE_DOCUMENT_INTELLIGENCE_API_KEY"
         ),
         SPLUNK_BASE_URL=os.getenv("SPLUNK_BASE_URL", ""),
         SPLUNK_API_TOKEN_SECRET_NAME=os.getenv("SPLUNK_API_TOKEN_SECRET_NAME", ""),
@@ -970,6 +1175,62 @@ def load_config() -> Config:
         ),
         DISPOSITION_CONTAINER=os.getenv("DISPOSITION_CONTAINER", ""),
         DISPOSITION_SYNC_STATE_CONTAINER=os.getenv("DISPOSITION_SYNC_STATE_CONTAINER", ""),
+        CLOSED_TICKET_RETENTION_DAYS=_positive_int_env(
+            "CLOSED_TICKET_RETENTION_DAYS", 30, max_value=90
+        ),
+        SERVICENOW_CLOSED_TICKET_SYNC_ENABLED=_bool_env(
+            "SERVICENOW_CLOSED_TICKET_SYNC_ENABLED", False
+        ),
+        SERVICENOW_CLOSED_TICKET_TOKEN=_optional_str_env("SERVICENOW_CLOSED_TICKET_TOKEN"),
+        SERVICENOW_CLOSED_TICKET_TOKEN_SECRET_NAME=os.getenv(
+            "SERVICENOW_CLOSED_TICKET_TOKEN_SECRET_NAME", ""
+        ),
+        SERVICENOW_CLOSED_TICKET_TABLE=os.getenv(
+            "SERVICENOW_CLOSED_TICKET_TABLE", "sn_si_incident"
+        ),
+        SERVICENOW_CLOSED_TICKET_QUERY=os.getenv("SERVICENOW_CLOSED_TICKET_QUERY", ""),
+        SERVICENOW_CLOSED_TICKET_BACKFILL_DAYS=_positive_int_env(
+            "SERVICENOW_CLOSED_TICKET_BACKFILL_DAYS", 30, max_value=3650
+        ),
+        SERVICENOW_CLOSED_TICKET_CURSOR_OVERLAP_HOURS=_positive_int_env(
+            "SERVICENOW_CLOSED_TICKET_CURSOR_OVERLAP_HOURS", 24, max_value=168
+        ),
+        SERVICENOW_CLOSED_TICKET_RECONCILE_INTERVAL_DAYS=_positive_int_env(
+            "SERVICENOW_CLOSED_TICKET_RECONCILE_INTERVAL_DAYS", 7, max_value=90
+        ),
+        SERVICENOW_CLOSED_TICKET_FETCH_JOURNALS=_bool_env(
+            "SERVICENOW_CLOSED_TICKET_FETCH_JOURNALS", True
+        ),
+        SERVICENOW_CLOSED_TICKET_FETCH_ATTACHMENTS=_bool_env(
+            "SERVICENOW_CLOSED_TICKET_FETCH_ATTACHMENTS", True
+        ),
+        CLOSED_TICKET_ARCHIVE_CONTAINER=os.getenv("CLOSED_TICKET_ARCHIVE_CONTAINER", ""),
+        CLOSED_TICKET_ARCHIVE_PREFIX=os.getenv(
+            "CLOSED_TICKET_ARCHIVE_PREFIX", "closed_tickets"
+        ),
+        CLOSED_TICKET_ATTACHMENT_MAX_BYTES=_positive_int_env(
+            "CLOSED_TICKET_ATTACHMENT_MAX_BYTES", 10 * 1024 * 1024, max_value=52_428_800
+        ),
+        CLOSED_TICKET_ATTACHMENT_MAX_TEXT_CHARS=_positive_int_env(
+            "CLOSED_TICKET_ATTACHMENT_MAX_TEXT_CHARS", 12000, max_value=200000
+        ),
+        CLOSED_TICKET_CONTAINER=os.getenv("CLOSED_TICKET_CONTAINER", ""),
+        CLOSED_TICKET_SYNC_STATE_CONTAINER=os.getenv("CLOSED_TICKET_SYNC_STATE_CONTAINER", ""),
+        CLOSED_TICKET_VISION_ENABLED=_bool_env("CLOSED_TICKET_VISION_ENABLED", False),
+        CLOSED_TICKET_DOCUMENT_INTELLIGENCE_ENDPOINT=os.getenv(
+            "CLOSED_TICKET_DOCUMENT_INTELLIGENCE_ENDPOINT", ""
+        ),
+        CLOSED_TICKET_EMBED_QUEUE_NAME=os.getenv("CLOSED_TICKET_EMBED_QUEUE_NAME", ""),
+        CLOSED_TICKET_AZURE_SEARCH_INDEX=os.getenv(
+            "CLOSED_TICKET_AZURE_SEARCH_INDEX", "closed_tickets"
+        ),
+        CLOSED_TICKET_EMBEDDING_MODEL=os.getenv("CLOSED_TICKET_EMBEDDING_MODEL", ""),
+        CLOSED_TICKET_CHUNK_SCHEMA_VERSION=_positive_int_env(
+            "CLOSED_TICKET_CHUNK_SCHEMA_VERSION", 1, max_value=100
+        ),
+        CLOSED_TICKET_MAX_INDEX_CHUNKS_PER_TICKET=_positive_int_env(
+            "CLOSED_TICKET_MAX_INDEX_CHUNKS_PER_TICKET", 120, max_value=500
+        ),
         SIDE_EFFECT_IDEMPOTENCY_ENABLED=_profile_bool(
             "SIDE_EFFECT_IDEMPOTENCY_ENABLED", False, profile_flags
         ),
@@ -1125,6 +1386,36 @@ def load_config() -> Config:
         ),
         CASE_QA_MAX_CONVERSATION_CHARS=_positive_int_env(
             "CASE_QA_MAX_CONVERSATION_CHARS", 6_000, max_value=65_536
+        ),
+        CASE_QA_CHAT_IMAGES_ENABLED=_bool_env("CASE_QA_CHAT_IMAGES_ENABLED", False),
+        CASE_QA_MAX_CHAT_IMAGES=_positive_int_env(
+            "CASE_QA_MAX_CHAT_IMAGES", 1, max_value=4
+        ),
+        CASE_QA_MAX_CHAT_IMAGE_BYTES=_positive_int_env(
+            "CASE_QA_MAX_CHAT_IMAGE_BYTES", 750_000, max_value=5_000_000
+        ),
+        CASE_QA_MAX_CHAT_IMAGE_DIMENSION=_positive_int_env(
+            "CASE_QA_MAX_CHAT_IMAGE_DIMENSION", 4096, max_value=8192
+        ),
+        CASE_QA_MAX_CHAT_IMAGE_PIXELS=_positive_int_env(
+            "CASE_QA_MAX_CHAT_IMAGE_PIXELS", 16_777_216, max_value=33_554_432
+        ),
+        CASE_QA_CLOSED_TICKET_ENABLED=_bool_env("CASE_QA_CLOSED_TICKET_ENABLED", False),
+        CASE_QA_CLOSED_TICKET_MAX_TICKETS=_positive_int_env(
+            "CASE_QA_CLOSED_TICKET_MAX_TICKETS", 5, max_value=20
+        ),
+        CLOSED_TICKET_RAG_ENABLED=_bool_env("CLOSED_TICKET_RAG_ENABLED", False),
+        CLOSED_TICKET_RAG_MAX_SNIPPETS=_positive_int_env(
+            "CLOSED_TICKET_RAG_MAX_SNIPPETS", 6, max_value=20
+        ),
+        CLOSED_TICKET_RAG_CONTEXT_BUDGET_CHARS=_positive_int_env(
+            "CLOSED_TICKET_RAG_CONTEXT_BUDGET_CHARS", 6000, max_value=50_000
+        ),
+        CLOSED_TICKET_LEXICAL_TOP_K=_positive_int_env(
+            "CLOSED_TICKET_LEXICAL_TOP_K", 30, max_value=100
+        ),
+        CLOSED_TICKET_VECTOR_TOP_K=_positive_int_env(
+            "CLOSED_TICKET_VECTOR_TOP_K", 30, max_value=100
         ),
         CHAT_SESSIONS_CONTAINER=os.getenv("CHAT_SESSIONS_CONTAINER", ""),
         CHAT_MESSAGES_CONTAINER=os.getenv("CHAT_MESSAGES_CONTAINER", ""),

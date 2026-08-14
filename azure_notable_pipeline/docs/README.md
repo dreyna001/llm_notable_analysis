@@ -1,5 +1,9 @@
 # Azure documentation index
 
+**Customer-default parity (P0–P8):** [`planning/AZURE_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md`](planning/AZURE_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md),
+[`operations/deployment/AZURE_CUSTOMER_DEFAULT_DEPLOYMENT.md`](operations/deployment/AZURE_CUSTOMER_DEFAULT_DEPLOYMENT.md),
+[`planning/TODOS.md`](planning/TODOS.md).
+
 - [Normative Azure/AWS parity specification](technical_specs/AZURE_AWS_PARITY_TECHNICAL_SPEC.md)
 - [Azure Government architecture](architecture/AZURE_GOVERNMENT_ARCHITECTURE.md)
 - [End-to-end workflow diagrams](architecture/AZURE_GOVERNMENT_END_TO_END.md)

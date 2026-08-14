@@ -20,7 +20,8 @@ from .portal_chat import (
     synthesize_case_answer,
     trim_sources,
 )
-from .portal_chat_kb import build_chat_knowledge_sources
+from .portal_chat_images import ValidatedChatImage
+from .portal_chat_kb import build_chat_knowledge_sources, build_closed_ticket_chat_sources
 from .portal_chat_kb_query import build_case_aware_kb_query
 
 
@@ -35,6 +36,8 @@ def answer_selected_case_question(
     embedding_gateway: Any | None = None,
     search_clients: Mapping[str, Any] | None = None,
     conversation_history: Sequence[ChatTurn] | None = None,
+    images: tuple[ValidatedChatImage, ...] = (),
+    search_adapter: Any | None = None,
 ) -> PortalAnswer:
     """Answer one question using native, retrieval-bound selected-case synthesis."""
 
@@ -79,12 +82,25 @@ def answer_selected_case_question(
             search_clients=search_clients,
         )
     )
+    sources = trim_sources(sources, config)
+    closed_ticket_sources = build_closed_ticket_chat_sources(
+        question=normalized_question,
+        config=config,
+        case_sources=sources,
+        embedding_gateway=embedding_gateway,
+        search_adapter=search_adapter,
+    )
+    if closed_ticket_sources:
+        sources.extend(closed_ticket_sources)
+        sources = trim_sources(sources, config)
+
     return synthesize_case_answer(
         question=normalized_question,
-        sources=trim_sources(sources, config),
+        sources=sources,
         config=config,
         chat_gateway=chat_gateway,
         conversation_history=conversation_history,
+        images=images,
     )
 
 
@@ -100,6 +116,8 @@ def answer_portal_chat(
     chat_gateway: Any | None = None,
     embedding_gateway: Any | None = None,
     search_clients: Mapping[str, Any] | None = None,
+    images: tuple[ValidatedChatImage, ...] = (),
+    search_adapter: Any | None = None,
 ) -> PortalAnswer:
     """Handler-facing adapter over native Cosmos, Blob, Search, and OpenAI seams.
 
@@ -127,6 +145,8 @@ def answer_portal_chat(
         embedding_gateway=embedding_gateway,
         search_clients=search_clients,
         conversation_history=history,
+        images=images,
+        search_adapter=search_adapter,
     )
 
 

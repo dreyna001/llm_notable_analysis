@@ -61,8 +61,8 @@ On-prem normative customer-default bundle:
 ## On-prem customer-default cloud parity (AWS GovCloud + Azure)
 
 **Status: backlog on AWS/Azure feature code; P0 commercial preset shipped (2026-08-13).** GovCloud
-and Azure still lack customer-default preset and P1–P8 feature parity. Port or reimplement from
-on-prem before claiming full customer-default parity on those partitions.
+and Azure Government **P0–P8 feature code shipped offline (2026-08-13)**; live subscription
+validation remains operator-owned. Commercial AWS also ships P1–P8.
 
 Reference on-prem implementation:
 

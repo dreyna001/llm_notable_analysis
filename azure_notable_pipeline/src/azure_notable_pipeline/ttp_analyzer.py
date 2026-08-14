@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from . import azure_openai_gateway
+from .historical_closed_ticket_grounding import HISTORICAL_CLOSED_TICKET_RULES
 from .verdicts import ALLOWED_VERDICTS, normalize_verdict
 
 # Configure logging
@@ -1092,6 +1093,7 @@ class AzureOpenAIAnalyzer:
         *,
         use_tool: bool = True,
         advisory_context: Optional[str] = None,
+        historical_closed_tickets_context: Optional[str] = None,
     ) -> str:
         """Assemble the unchanged contract-first analyzer prompt."""
 
@@ -1103,6 +1105,11 @@ class AzureOpenAIAnalyzer:
             )
         else:
             soc_context_block = "SOC_OPERATIONAL_CONTEXT\n(none)\n"
+        historical_block = (
+            historical_closed_tickets_context.strip()
+            if historical_closed_tickets_context and historical_closed_tickets_context.strip()
+            else "HISTORICAL_CLOSED_TICKETS\n(none)\n"
+        )
 
         return f"""You are a cybersecurity expert producing a structured SOC analysis from a single alert.
 
@@ -1136,6 +1143,12 @@ SECURITY ALERT INPUT:
 {soc_context_block}
 
 {SOC_CONTEXT_RULES}
+
+---
+
+{historical_block}
+
+{HISTORICAL_CLOSED_TICKET_RULES}
 
 ---
 
@@ -1229,6 +1242,7 @@ SECURITY ALERT INPUT:
         alert_text: str,
         alert_time: Optional[str] = None,
         advisory_context: Optional[str] = None,
+        historical_closed_tickets_context: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Analyze one alert with one primary call and at most one repair call."""
 
@@ -1246,6 +1260,7 @@ SECURITY ALERT INPUT:
             alert_time,
             use_tool=True,
             advisory_context=advisory_context,
+            historical_closed_tickets_context=historical_closed_tickets_context,
         )
         primary_elapsed = 0.0
         primary_raw = ""

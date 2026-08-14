@@ -7,6 +7,11 @@ from collections.abc import Mapping
 from typing import Any
 
 from .azure_search_retrieval import retrieve_soc_context
+from .closed_ticket_retrieval import (
+    bounded_current_case_snippets,
+    closed_ticket_hits_to_chat_sources,
+    retrieve_closed_tickets_fail_soft,
+)
 from .config import Config
 from .elasticsearch_query_grounding import retrieve_elasticsearch_grounding
 from .spl_query_grounding import retrieve_spl_query_grounding
@@ -106,4 +111,34 @@ def build_chat_knowledge_sources(
     return sources
 
 
-__all__ = ["build_chat_knowledge_sources"]
+def build_closed_ticket_chat_sources(
+    *,
+    question: str,
+    config: Config,
+    case_sources: list[dict[str, Any]],
+    embedding_gateway: Any | None = None,
+    search_adapter: Any | None = None,
+) -> list[dict[str, Any]]:
+    """Return closed-ticket advisory sources when the portal lane is enabled."""
+    if not config.CASE_QA_CLOSED_TICKET_ENABLED:
+        return []
+    try:
+        outcome = retrieve_closed_tickets_fail_soft(
+            config=config,
+            question=question,
+            current_case_snippets=bounded_current_case_snippets(case_sources),
+            embedding_gateway=embedding_gateway,
+            search_adapter=search_adapter,
+        )
+        if outcome.error:
+            logger.warning(
+                "Closed-ticket chat retrieval failed soft: %s",
+                outcome.error,
+            )
+        return closed_ticket_hits_to_chat_sources(outcome.hits)
+    except Exception:
+        logger.exception("Closed-ticket retrieval failed for portal chat")
+        return []
+
+
+__all__ = ["build_chat_knowledge_sources", "build_closed_ticket_chat_sources"]

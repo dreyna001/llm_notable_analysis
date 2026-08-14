@@ -63,7 +63,8 @@
 - [x] Add executive workflow and readiness artifacts.
 - [x] Add local deterministic coverage across intake, queues, immutable runs, ingestion, retrieval, portal replay, and side-effect uncertainty; use Azurite for Blob/Queue and injected substitutes where Azure has no faithful emulator.
 - [x] Add Bicep contract tests for sovereign endpoints, private networking, CMK option, queue retention, identities, and alerts.
-- [ ] Require live Azure Government validation for model availability/quota, managed identity, private DNS, Search vector behavior, Front Door/Function Private Link, poison recovery, and rollback.
+- [x] Port on-prem customer-default parity P0–P8 (see [`AZURE_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md`](AZURE_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md)).
+- [ ] Require live Azure Government validation for model availability/quota, managed identity, private DNS, Search vector behavior, Front Door/Function Private Link, poison recovery, closed-ticket sync/index, and rollback.
 
 ## Deferred internal gap
 

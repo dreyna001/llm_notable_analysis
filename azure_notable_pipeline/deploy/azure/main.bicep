@@ -62,9 +62,41 @@ param DispositionSyncStateContainerName string = '${DeploymentPrefix}-dispositio
 param ChatSessionsContainerName string = '${DeploymentPrefix}-chat-sessions'
 param ChatMessagesContainerName string = '${DeploymentPrefix}-chat-messages'
 param ChatQuotaContainerName string = '${DeploymentPrefix}-chat-quota'
+param ClosedTicketContainerName string = '${DeploymentPrefix}-closed-tickets'
+param ClosedTicketSyncStateContainerName string = '${DeploymentPrefix}-closed-ticket-sync-state'
 
 @description('Provision disposition persistence and grants for the future timer app.')
 param ServiceNowDispositionSyncEnabled bool = false
+
+@description('Enable daily ServiceNow closed-ticket raw sync on the disposition Function app.')
+param ServiceNowClosedTicketSyncEnabled bool = false
+
+@description('Enable closed-ticket chunk indexing and analyzer/portal retrieval.')
+param ClosedTicketRagEnabled bool = false
+
+@description('Enable image and document text extraction during RAG ingest on the analyzer app.')
+param ImageIngestEnabled bool = false
+
+@description('Enable Azure AI Search semantic ranker after hybrid retrieval on the analyzer app.')
+param RagRerankEnabled bool = false
+
+@description('Enable closed-ticket advisory lane in analyst portal chat.')
+param CaseQaClosedTicketEnabled bool = false
+
+@description('Enable multimodal image attachments in analyst portal chat.')
+param CaseQaChatImagesEnabled bool = false
+
+@description('Use Document Intelligence Read for closed-ticket attachment OCR on the disposition app.')
+param ClosedTicketVisionEnabled bool = false
+
+@description('Existing customer-provisioned Government Search closed-ticket index.')
+param ClosedTicketAzureSearchIndex string = 'closed_tickets'
+
+@allowed([30, 60, 90])
+param ClosedTicketRetentionDays int = 30
+
+param ServiceNowClosedTicketTokenSecretName string = ''
+param ServiceNowClosedTicketQuery string = ''
 
 @description('Provision chat-history persistence only with the analyst_portal profile.')
 param CaseQaChatHistoryEnabled bool = false
@@ -237,6 +269,7 @@ var hasAnalystPortalProfile = contains(normalizedCapabilityProfiles, 'analyst_po
 var hasRagProfile = contains(normalizedCapabilityProfiles, 'rag')
 var deployPortal = hasAnalystPortalProfile && !empty(StorageAccountNamePortalUi)
 var deployChatHistoryContainers = hasAnalystPortalProfile && CaseQaChatHistoryEnabled
+var deployClosedTicketContainers = ServiceNowClosedTicketSyncEnabled || ClosedTicketRagEnabled
 var queueDepthTracePrefix = 'notable.queue.depth.v1 '
 var isProduction = DeploymentEnvironment == 'production'
 var validatedCloudEnvironment = cloudEnvironment != 'AzureUSGovernment'
@@ -281,12 +314,21 @@ var validatedAlertActionGroupResourceId = isProduction && empty(AlertActionGroup
 var validatedSyntheticCheckName = isProduction && deployPortal && empty(PortalSyntheticCheckName)
   ? fail('PortalSyntheticCheckName is required for a production analyst portal.')
   : PortalSyntheticCheckName
-var validatedKeyVaultName = (ServiceNowDispositionSyncEnabled || CustomerManagedKeyEnabled) && empty(KeyVaultName)
-  ? fail('KeyVaultName is required when ServiceNowDispositionSyncEnabled or CustomerManagedKeyEnabled is true.')
+var validatedKeyVaultName = (ServiceNowDispositionSyncEnabled || ServiceNowClosedTicketSyncEnabled || CustomerManagedKeyEnabled) && empty(KeyVaultName)
+  ? fail('KeyVaultName is required when ServiceNowDispositionSyncEnabled, ServiceNowClosedTicketSyncEnabled, or CustomerManagedKeyEnabled is true.')
   : KeyVaultName
 var validatedDispositionTokenSecretName = ServiceNowDispositionSyncEnabled && empty(ServiceNowDispositionSyncTokenSecretName)
   ? fail('ServiceNowDispositionSyncTokenSecretName is required when ServiceNowDispositionSyncEnabled=true.')
   : ServiceNowDispositionSyncTokenSecretName
+var validatedClosedTicketTokenSecretName = ServiceNowClosedTicketSyncEnabled && empty(ServiceNowClosedTicketTokenSecretName)
+  ? fail('ServiceNowClosedTicketTokenSecretName is required when ServiceNowClosedTicketSyncEnabled=true.')
+  : ServiceNowClosedTicketTokenSecretName
+var validatedClosedTicketQuery = ServiceNowClosedTicketSyncEnabled && empty(ServiceNowClosedTicketQuery)
+  ? fail('ServiceNowClosedTicketQuery is required when ServiceNowClosedTicketSyncEnabled=true.')
+  : ServiceNowClosedTicketQuery
+var validatedClosedTicketRagContract = ClosedTicketRagEnabled && (empty(AzureSearchEndpoint) || empty(AzureSearchResourceId) || empty(RagTenantId) || empty(AzureOpenAiEmbeddingsDeployment))
+  ? fail('ClosedTicketRagEnabled requires Azure Search endpoint, resource ID, tenant, and embeddings deployment.')
+  : true
 // Recovery controls remain an explicit customer deployment choice in this phase.
 var validatedBlobDataProtection = BlobDataProtectionEnabled
 var validatedCosmosContinuousBackup = CosmosContinuousBackupEnabled
@@ -384,8 +426,11 @@ module cosmos 'modules/cosmos.bicep' = {
     chatSessionsContainerName: ChatSessionsContainerName
     chatMessagesContainerName: ChatMessagesContainerName
     chatQuotaContainerName: ChatQuotaContainerName
+    closedTicketContainerName: ClosedTicketContainerName
+    closedTicketSyncStateContainerName: ClosedTicketSyncStateContainerName
     deployCaseIndex: hasAnalystPortalProfile
     deployDispositionContainers: ServiceNowDispositionSyncEnabled
+    deployClosedTicketContainers: deployClosedTicketContainers
     deployChatHistoryContainers: deployChatHistoryContainers
     deployChatQuota: deployPortal && PortalChatDistributedQuotaEnabled
     analyzerPrincipalId: identities.outputs.analyzer.principalId
@@ -455,6 +500,7 @@ module openAiAccess 'modules/openai-access.bicep' = {
     analyzerPrincipalId: identities.outputs.analyzer.principalId
     embedPrincipalId: identities.outputs.embed.principalId
     portalPrincipalId: deployPortal ? identities.outputs.portal.principalId : ''
+    dispositionPrincipalId: ClosedTicketRagEnabled ? identities.outputs.disposition.principalId : ''
   }
 }
 
@@ -465,6 +511,7 @@ module searchAccess 'modules/search-access.bicep' = if (!empty(AzureSearchResour
     searchServiceName: searchIdSegments[8]
     analyzerPrincipalId: identities.outputs.analyzer.principalId
     portalPrincipalId: deployPortal ? identities.outputs.portal.principalId : ''
+    dispositionPrincipalId: ClosedTicketRagEnabled ? identities.outputs.disposition.principalId : ''
   }
 }
 
@@ -476,7 +523,7 @@ module keyVaultAccess 'modules/keyvault-access.bicep' = if (!empty(validatedKeyV
     customerManagedKeyIdentityResourceId: CustomerManagedKeyIdentityResourceId
     secretReaderPrincipalIds: concat(
       [identities.outputs.analyzer.principalId],
-      ServiceNowDispositionSyncEnabled ? [identities.outputs.disposition.principalId] : []
+      (ServiceNowDispositionSyncEnabled || ServiceNowClosedTicketSyncEnabled) ? [identities.outputs.disposition.principalId] : []
     )
   }
 }
@@ -550,6 +597,10 @@ module analyzerFunction 'modules/functions-analyzer.bicep' = {
     maxCompressedInputBytes: MaxCompressedInputBytes
     timeoutSeconds: AnalyzerTimeoutSeconds
     zoneRedundant: FunctionPlanZoneRedundant
+    imageIngestEnabled: ImageIngestEnabled
+    closedTicketRagEnabled: ClosedTicketRagEnabled
+    ragRerankEnabled: RagRerankEnabled
+    closedTicketAzureSearchIndex: ClosedTicketAzureSearchIndex
   }
   dependsOn: [registryAccess, openAiAccess, analyzerHostAccess]
 }
@@ -622,9 +673,23 @@ module dispositionFunction 'modules/functions-disposition.bicep' = {
     serviceNowDispositionBackfillDays: ServiceNowDispositionBackfillDays
     dispositionRetentionDays: DispositionRetentionDays
     allowPrivateOutboundEndpoints: AllowPrivateOutboundEndpoints
+    serviceNowClosedTicketSyncEnabled: ServiceNowClosedTicketSyncEnabled
+    closedTicketRagEnabled: ClosedTicketRagEnabled
+    closedTicketVisionEnabled: ClosedTicketVisionEnabled
+    serviceNowClosedTicketTokenSecretName: validatedClosedTicketTokenSecretName
+    serviceNowClosedTicketQuery: validatedClosedTicketQuery
+    closedTicketRetentionDays: ClosedTicketRetentionDays
+    closedTicketContainerName: deployClosedTicketContainers ? cosmos.outputs.closedTicketContainerName : ''
+    closedTicketSyncStateContainerName: deployClosedTicketContainers ? cosmos.outputs.closedTicketSyncStateContainerName : ''
+    closedTicketAzureSearchIndex: ClosedTicketAzureSearchIndex
+    azureOpenAiEndpoint: validatedOpenAiEndpoint
+    azureOpenAiApiVersion: AzureOpenAiApiVersion
+    azureOpenAiEmbeddingsDeployment: AzureOpenAiEmbeddingsDeployment
+    azureSearchEndpoint: validatedSearchEndpoint
+    ragTenantId: validatedClosedTicketRagContract ? RagTenantId : ''
     zoneRedundant: FunctionPlanZoneRedundant
   }
-  dependsOn: [registryAccess, dispositionHostAccess]
+  dependsOn: [registryAccess, dispositionHostAccess, openAiAccess]
 }
 
 module portalFunction 'modules/functions-portal.bicep' = if (deployPortal) {
@@ -677,6 +742,10 @@ module portalFunction 'modules/functions-portal.bicep' = if (deployPortal) {
     portalChatRequestDedupeSeconds: PortalChatRequestDedupeSeconds
     caseQaChatHistoryEnabled: deployChatHistoryContainers
     portalChatTimeoutSec: PortalChatTimeoutSec
+    caseQaClosedTicketEnabled: CaseQaClosedTicketEnabled
+    caseQaChatImagesEnabled: CaseQaChatImagesEnabled
+    closedTicketRagEnabled: ClosedTicketRagEnabled
+    closedTicketAzureSearchIndex: ClosedTicketAzureSearchIndex
     zoneRedundant: FunctionPlanZoneRedundant
   }
   dependsOn: [registryAccess, portalHostAccess, openAiAccess, searchAccess]
@@ -751,6 +820,8 @@ output DispositionSyncStateContainerName string = cosmos.outputs.dispositionSync
 output ChatSessionsContainerName string = cosmos.outputs.chatSessionsContainerName
 output ChatMessagesContainerName string = cosmos.outputs.chatMessagesContainerName
 output ChatQuotaContainerName string = cosmos.outputs.chatQuotaContainerName
+output ClosedTicketContainerName string = cosmos.outputs.closedTicketContainerName
+output ClosedTicketSyncStateContainerName string = cosmos.outputs.closedTicketSyncStateContainerName
 output PortalApiUrl string = deployPortal ? 'https://${portalFrontDoor!.outputs.endpointHostName}/api' : ''
 output PortalChatUrl string = deployPortal ? 'https://${portalFrontDoor!.outputs.endpointHostName}/api/chat' : ''
 output PortalBrowserApiBaseUrl string = deployPortal ? 'https://${portalFrontDoor!.outputs.endpointHostName}' : ''

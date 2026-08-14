@@ -43,6 +43,7 @@ from .portal_api_models import (
     PortalCapabilitiesResponse,
     portal_response,
 )
+from .portal_chat_images import portal_chat_image_capabilities, validate_chat_images
 from .portal_jwt import bearer_token_from_headers, validate_portal_jwt
 
 CHAT_LIMIT_MESSAGE = "Too many chat requests are already running. Try again shortly."
@@ -331,6 +332,9 @@ def _handle_chat_gate(
             r"[A-Za-z0-9._-]{8,128}", client_request_id
         ):
             raise ValueError("client_request_id must be 8-128 URL-safe characters")
+        if client_request_id and not config.CASE_QA_CHAT_HISTORY_ENABLED:
+            raise ValueError("client_request_id requires chat history to be enabled")
+        validated_images = validate_chat_images(payload.get("images"), config)
         store = _cosmos_store(config)
         if config.CASE_QA_CHAT_HISTORY_ENABLED and client_request_id:
             replay = get_idempotent_chat_response(
@@ -382,6 +386,13 @@ def _handle_chat_gate(
                 cosmos_store=store,
                 session_id=session_id,
             )
+        search_adapter = None
+        if config.CASE_QA_CLOSED_TICKET_ENABLED and config.CLOSED_TICKET_RAG_ENABLED:
+            from .azure_search_adapter import AzureSearchAdapter
+
+            index = str(config.CLOSED_TICKET_AZURE_SEARCH_INDEX or "").strip()
+            if index:
+                search_adapter = AzureSearchAdapter.from_config(config, index_name=index)
         service = chat_service or _configured_chat_service or _default_chat_service()
         answer = service(
             selected_case_id=selected_case_id,
@@ -391,6 +402,8 @@ def _handle_chat_gate(
             blob_store=_blob_service(config),
             user_id=user_id,
             prior_transcript=prior_transcript,
+            images=validated_images,
+            search_adapter=search_adapter,
         )
         response_payload = _chat_response_payload(answer)
         if config.CASE_QA_CHAT_HISTORY_ENABLED:
@@ -539,6 +552,7 @@ def _capabilities(config: Config) -> dict[str, Any]:
         "chat_ready": chat_ready,
         "chat_dependency_status": dependency_status,
         "chat_degraded_reason": degraded_reason,
+        **portal_chat_image_capabilities(config),
     }
 
 

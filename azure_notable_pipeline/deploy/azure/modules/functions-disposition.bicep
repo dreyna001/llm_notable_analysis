@@ -32,6 +32,20 @@ param serviceNowDispositionCodeMap string = '/home/site/wwwroot/deploy/serviceno
 param serviceNowDispositionBackfillDays int = 90
 param dispositionRetentionDays int = 365
 param allowPrivateOutboundEndpoints bool = false
+param serviceNowClosedTicketSyncEnabled bool = false
+param closedTicketRagEnabled bool = false
+param closedTicketVisionEnabled bool = false
+param serviceNowClosedTicketTokenSecretName string = ''
+param serviceNowClosedTicketQuery string = ''
+param closedTicketRetentionDays int = 30
+param closedTicketContainerName string = ''
+param closedTicketSyncStateContainerName string = ''
+param closedTicketAzureSearchIndex string = 'closed_tickets'
+param azureOpenAiEndpoint string = ''
+param azureOpenAiApiVersion string = '2024-10-21'
+param azureOpenAiEmbeddingsDeployment string = ''
+param azureSearchEndpoint string = ''
+param ragTenantId string = ''
 param zoneRedundant bool = false
 
 var applicationSettings = [
@@ -71,11 +85,30 @@ var applicationSettings = [
   { name: 'SERVICENOW_DISPOSITION_BACKFILL_DAYS', value: string(serviceNowDispositionBackfillDays) }
   { name: 'DISPOSITION_RETENTION_DAYS', value: string(dispositionRetentionDays) }
   { name: 'DISPOSITION_SYNC_SCHEDULE', value: '0 0 0 * * *' }
+  { name: 'SERVICENOW_CLOSED_TICKET_SYNC_ENABLED', value: string(serviceNowClosedTicketSyncEnabled) }
+  { name: 'SERVICENOW_CLOSED_TICKET_TOKEN_SECRET_NAME', value: serviceNowClosedTicketTokenSecretName }
+  { name: 'SERVICENOW_CLOSED_TICKET_QUERY', value: serviceNowClosedTicketQuery }
+  { name: 'CLOSED_TICKET_RETENTION_DAYS', value: string(closedTicketRetentionDays) }
+  { name: 'CLOSED_TICKET_CONTAINER', value: closedTicketContainerName }
+  { name: 'CLOSED_TICKET_SYNC_STATE_CONTAINER', value: closedTicketSyncStateContainerName }
+  { name: 'CLOSED_TICKET_ARCHIVE_CONTAINER', value: 'output' }
+  { name: 'CLOSED_TICKET_ARCHIVE_PREFIX', value: 'closed_tickets' }
+  { name: 'CLOSED_TICKET_RAG_ENABLED', value: string(closedTicketRagEnabled) }
+  { name: 'CLOSED_TICKET_AZURE_SEARCH_INDEX', value: closedTicketAzureSearchIndex }
+  { name: 'CLOSED_TICKET_VISION_ENABLED', value: string(closedTicketVisionEnabled) }
+  { name: 'AZURE_OPENAI_ENDPOINT', value: azureOpenAiEndpoint }
+  { name: 'AZURE_OPENAI_API_VERSION', value: azureOpenAiApiVersion }
+  { name: 'AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT', value: azureOpenAiEmbeddingsDeployment }
+  { name: 'AZURE_SEARCH_ENDPOINT', value: azureSearchEndpoint }
+  { name: 'RAG_TENANT_ID', value: ragTenantId }
   { name: 'OPERATIONS_MONITOR_SCHEDULE', value: '0 */5 * * * *' }
   { name: 'AzureWebJobs.intake_blob.Disabled', value: 'true' }
   { name: 'AzureWebJobs.analyzer_queue.Disabled', value: 'true' }
   { name: 'AzureWebJobs.case_embed_queue.Disabled', value: 'true' }
+  { name: 'AzureWebJobs.rag_ingest_queue.Disabled', value: 'true' }
   { name: 'AzureWebJobs.disposition_sync_timer.Disabled', value: string(!serviceNowDispositionSyncEnabled) }
+  { name: 'AzureWebJobs.closed_ticket_sync_timer.Disabled', value: string(!serviceNowClosedTicketSyncEnabled) }
+  { name: 'AzureWebJobs.closed_ticket_embed_timer.Disabled', value: string(!closedTicketRagEnabled) }
   { name: 'AzureWebJobs.operations_monitor_timer.Disabled', value: 'false' }
   { name: 'AzureWebJobs.portal_http.Disabled', value: 'true' }
 ]
@@ -107,6 +140,7 @@ resource outputContainer 'Microsoft.Storage/storageAccounts/blobServices/contain
 }
 
 var blobReaderRoleId = '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1'
+var blobContributorRoleId = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
 var queueReaderRoleId = '19e7f393-937e-4f77-808e-94535e297925'
 resource outputBlobReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (serviceNowDispositionSyncEnabled) {
   name: guid(outputContainer.id, dispositionIdentityResourceId, blobReaderRoleId)
@@ -115,6 +149,15 @@ resource outputBlobReader 'Microsoft.Authorization/roleAssignments@2022-04-01' =
     principalId: dispositionIdentityPrincipalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', blobReaderRoleId)
+  }
+}
+resource outputBlobContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (serviceNowClosedTicketSyncEnabled || closedTicketRagEnabled) {
+  name: guid(outputContainer.id, dispositionIdentityResourceId, blobContributorRoleId)
+  scope: outputContainer
+  properties: {
+    principalId: dispositionIdentityPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', blobContributorRoleId)
   }
 }
 resource inputQueueReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
@@ -165,7 +208,7 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
       appSettings: applicationSettings
     }
   }
-  dependsOn: [outputBlobReader, inputQueueReader, outputQueueReader]
+  dependsOn: [outputBlobReader, outputBlobContributor, inputQueueReader, outputQueueReader]
 }
 
 output functionAppId string = functionApp.id

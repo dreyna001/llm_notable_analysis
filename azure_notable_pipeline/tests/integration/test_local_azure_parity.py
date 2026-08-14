@@ -148,7 +148,12 @@ class _DeterministicAnalyzer:
     def format_alert_input(self, payload, **_kwargs) -> str:
         return json.dumps(payload, sort_keys=True)
 
-    def analyze_ttp(self, _alert_text: str, advisory_context: str = ""):
+    def analyze_ttp(
+        self,
+        _alert_text: str,
+        advisory_context: str = "",
+        historical_closed_tickets_context: str = "",
+    ):
         return []
 
 

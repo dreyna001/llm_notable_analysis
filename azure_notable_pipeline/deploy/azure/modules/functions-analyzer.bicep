@@ -41,6 +41,10 @@ param sideEffectIdempotencyContainerName string
 param caseIndexContainerName string = ''
 param reportSinkMode string = 'blob'
 param capabilityProfiles string = 'core'
+param imageIngestEnabled bool = false
+param closedTicketRagEnabled bool = false
+param ragRerankEnabled bool = false
+param closedTicketAzureSearchIndex string = 'closed_tickets'
 param zoneRedundant bool = false
 
 @minValue(1)
@@ -111,10 +115,16 @@ var applicationSettings = concat(azureWebJobsStorage, [
   { name: 'CAPABILITY_PROFILES', value: capabilityProfiles }
   { name: 'MAX_COMPRESSED_INPUT_BYTES', value: string(maxCompressedInputBytes) }
   { name: 'KEY_VAULT_URI', value: keyVaultUri }
+  { name: 'IMAGE_INGEST_ENABLED', value: string(imageIngestEnabled) }
+  { name: 'CLOSED_TICKET_RAG_ENABLED', value: string(closedTicketRagEnabled) }
+  { name: 'RAG_RERANK_ENABLED', value: string(ragRerankEnabled) }
+  { name: 'CLOSED_TICKET_AZURE_SEARCH_INDEX', value: closedTicketAzureSearchIndex }
   { name: 'AzureWebJobs.intake_blob.Disabled', value: 'false' }
   { name: 'AzureWebJobs.analyzer_queue.Disabled', value: 'false' }
   { name: 'AzureWebJobs.case_embed_queue.Disabled', value: 'true' }
   { name: 'AzureWebJobs.disposition_sync_timer.Disabled', value: 'true' }
+  { name: 'AzureWebJobs.closed_ticket_sync_timer.Disabled', value: 'true' }
+  { name: 'AzureWebJobs.closed_ticket_embed_timer.Disabled', value: 'true' }
   { name: 'AzureWebJobs.operations_monitor_timer.Disabled', value: 'true' }
   { name: 'AzureWebJobs.portal_http.Disabled', value: 'true' }
 ])

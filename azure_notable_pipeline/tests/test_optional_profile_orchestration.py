@@ -48,7 +48,12 @@ class OptionalProfileAnalyzer:
     def format_alert_input(self, payload, **_kwargs) -> str:
         return json.dumps(payload, separators=(",", ":"))
 
-    def analyze_ttp(self, _alert_text: str, advisory_context: str = "") -> list:
+    def analyze_ttp(
+        self,
+        _alert_text: str,
+        advisory_context: str = "",
+        historical_closed_tickets_context: str = "",
+    ) -> list:
         self.operations.append("analyze")
         self.advisory_context = advisory_context
         self.last_llm_response = {
@@ -197,6 +202,11 @@ def test_rag_and_spl_profile_preserve_order_attribution_and_report_schema(
     assert report["metadata"] == {
         "rag_status": "success",
         "rag_snippet_count": 1,
+        "closed_ticket_rag_enabled": False,
+        "closed_ticket_rag_included": False,
+        "closed_ticket_rag_hit_count": 0,
+        "closed_ticket_rag_context_chars": 0,
+        "closed_ticket_rag_unavailable": False,
         "interpretation_fixture": True,
         "investigation_query_backend": "splunk",
         "investigation_query_executor": "rest",

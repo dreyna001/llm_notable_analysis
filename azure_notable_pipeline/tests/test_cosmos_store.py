@@ -187,6 +187,8 @@ def test_container_partition_keys_match_native_aggregate_contract() -> None:
         "case_index": "/case_id",
         "disposition": "/snow_sys_id",
         "disposition_sync_state": "/job_name",
+        "closed_ticket": "/ticket_id",
+        "closed_ticket_sync_state": "/job_name",
         "chat_sessions": "/user_id",
         "chat_messages": "/session_id",
         "chat_quota": "/user_id",

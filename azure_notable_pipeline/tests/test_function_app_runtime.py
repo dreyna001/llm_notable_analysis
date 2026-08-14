@@ -23,6 +23,8 @@ def test_runtime_enumerates_native_wrappers_with_bicep_function_names() -> None:
         "case_embed_queue",
         "rag_ingest_queue",
         "disposition_sync_timer",
+        "closed_ticket_sync_timer",
+        "closed_ticket_embed_timer",
         "operations_monitor_timer",
         "portal_http",
     }
@@ -91,7 +93,11 @@ def test_portal_wrapper_passes_native_http_request(monkeypatch) -> None:
 def test_disposition_timer_wrapper_passes_native_timer_request(monkeypatch) -> None:
     timer = SimpleNamespace(past_due=False)
     calls = []
-    monkeypatch.setattr(function_app, "handle_timer", lambda value: calls.append(value))
+    monkeypatch.setattr(
+        function_app,
+        "handle_disposition_timer",
+        lambda value: calls.append(value),
+    )
 
     function_app.disposition_sync_timer(timer)
 

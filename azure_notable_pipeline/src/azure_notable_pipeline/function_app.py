@@ -22,7 +22,9 @@ if app is not None:
     )
     from .embed_handler import dispatch_embed_queue_message
     from .rag_ingest_handler import dispatch_queue_message
-    from .disposition_sync_handler import handle_timer
+    from .disposition_sync_handler import handle_timer as handle_disposition_timer
+    from .closed_ticket_sync_handler import handle_timer as handle_closed_ticket_sync_timer
+    from .closed_ticket_embed_handler import handle_timer as handle_closed_ticket_embed_timer
     from .portal_handler import handle_request
     from .queue_monitor import emit_queue_depth_traces
 
@@ -98,9 +100,41 @@ if app is not None:
         """Run the daily native ServiceNow disposition synchronization pass."""
 
         try:
-            handle_timer(timer)
+            handle_disposition_timer(timer)
         except Exception:
             logger.exception("ServiceNow disposition timer processing failed")
+            raise
+
+    @app.function_name(name="closed_ticket_sync_timer")
+    @app.timer_trigger(
+        arg_name="timer",
+        schedule="0 0 1 * * *",
+        run_on_startup=False,
+        use_monitor=True,
+    )
+    def closed_ticket_sync_timer(timer: func.TimerRequest) -> None:
+        """Run the daily native ServiceNow closed ticket synchronization pass."""
+
+        try:
+            handle_closed_ticket_sync_timer(timer)
+        except Exception:
+            logger.exception("ServiceNow closed ticket sync timer processing failed")
+            raise
+
+    @app.function_name(name="closed_ticket_embed_timer")
+    @app.timer_trigger(
+        arg_name="timer",
+        schedule="0 30 1 * * *",
+        run_on_startup=False,
+        use_monitor=True,
+    )
+    def closed_ticket_embed_timer(timer: func.TimerRequest) -> None:
+        """Index pending closed tickets into Azure AI Search."""
+
+        try:
+            handle_closed_ticket_embed_timer(timer)
+        except Exception:
+            logger.exception("Closed ticket embed timer processing failed")
             raise
 
     @app.function_name(name="operations_monitor_timer")

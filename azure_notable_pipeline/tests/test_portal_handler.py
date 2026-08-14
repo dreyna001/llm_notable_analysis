@@ -405,9 +405,9 @@ def test_distributed_chat_quota_returns_retry_after_and_does_not_call_model(
             "POST",
             body=json.dumps(
                 {
+                    "mode": "selected_case",
                     "selected_case_id": "case-1",
                     "question": "What happened?",
-                    "client_request_id": "request-0001",
                 }
             ).encode(),
         ),

@@ -41,6 +41,10 @@ param portalJwtIssuer string
 param portalJwtAudience string
 param portalEntraRequiredAppRole string = ''
 param caseQaChatHistoryEnabled bool = false
+param caseQaClosedTicketEnabled bool = false
+param caseQaChatImagesEnabled bool = false
+param closedTicketRagEnabled bool = false
+param closedTicketAzureSearchIndex string = 'closed_tickets'
 param portalChatDistributedQuotaEnabled bool = true
 @minValue(1)
 @maxValue(16)
@@ -115,10 +119,17 @@ var applicationSettings = [
   { name: 'PORTAL_CHAT_LEASE_SECONDS', value: string(portalChatLeaseSeconds) }
   { name: 'PORTAL_CHAT_REQUEST_DEDUPE_SECONDS', value: string(portalChatRequestDedupeSeconds) }
   { name: 'CASE_QA_CHAT_HISTORY_ENABLED', value: string(caseQaChatHistoryEnabled) }
+  { name: 'CASE_QA_CLOSED_TICKET_ENABLED', value: string(caseQaClosedTicketEnabled) }
+  { name: 'CASE_QA_CHAT_IMAGES_ENABLED', value: string(caseQaChatImagesEnabled) }
+  { name: 'CLOSED_TICKET_RAG_ENABLED', value: string(closedTicketRagEnabled) }
+  { name: 'CLOSED_TICKET_AZURE_SEARCH_INDEX', value: closedTicketAzureSearchIndex }
   { name: 'AzureWebJobs.intake_blob.Disabled', value: 'true' }
   { name: 'AzureWebJobs.analyzer_queue.Disabled', value: 'true' }
   { name: 'AzureWebJobs.case_embed_queue.Disabled', value: 'true' }
+  { name: 'AzureWebJobs.rag_ingest_queue.Disabled', value: 'true' }
   { name: 'AzureWebJobs.disposition_sync_timer.Disabled', value: 'true' }
+  { name: 'AzureWebJobs.closed_ticket_sync_timer.Disabled', value: 'true' }
+  { name: 'AzureWebJobs.closed_ticket_embed_timer.Disabled', value: 'true' }
   { name: 'AzureWebJobs.operations_monitor_timer.Disabled', value: 'true' }
   { name: 'AzureWebJobs.portal_http.Disabled', value: 'false' }
 ]

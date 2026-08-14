@@ -21,6 +21,8 @@ CONTAINER_PARTITION_KEYS: dict[str, str] = {
     "case_index": "/case_id",
     "disposition": "/snow_sys_id",
     "disposition_sync_state": "/job_name",
+    "closed_ticket": "/ticket_id",
+    "closed_ticket_sync_state": "/job_name",
     "chat_sessions": "/user_id",
     "chat_messages": "/session_id",
     "chat_quota": "/user_id",
@@ -448,6 +450,133 @@ class CosmosStore:
         job_name = _required_text(body.get("job_name"), "job_name")
         body["id"] = job_name
         return self.upsert_item(container_name, body)
+
+    def get_closed_ticket(
+        self,
+        container_name: str,
+        ticket_id: str,
+    ) -> dict[str, Any] | None:
+        normalized = _required_text(ticket_id, "ticket_id")
+        return self.read_item(
+            container_name,
+            item_id=normalized,
+            partition_key=normalized,
+        )
+
+    def upsert_closed_ticket(
+        self,
+        container_name: str,
+        ticket: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        body = dict(ticket)
+        ticket_id = _required_text(body.get("ticket_id"), "ticket_id")
+        body["id"] = ticket_id
+        return self.upsert_item(container_name, body)
+
+    def list_closed_tickets_by_index_status(
+        self,
+        container_name: str,
+        *,
+        index_status: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        bounded = _bounded_limit(limit, maximum=500)
+        return self._query(
+            container_name,
+            query=(
+                "SELECT TOP @limit * FROM c WHERE c.index_status = @index_status "
+                "ORDER BY c.source_updated_at ASC, c.ticket_id ASC"
+            ),
+            parameters=[
+                {"name": "@limit", "value": bounded},
+                {"name": "@index_status", "value": _required_text(index_status, "index_status")},
+            ],
+            max_results=bounded,
+            cross_partition=True,
+            operation="list_closed_tickets_by_index_status",
+        )
+
+    def list_expired_closed_tickets(
+        self,
+        container_name: str,
+        *,
+        now_epoch: int,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        bounded = _bounded_limit(limit, maximum=500)
+        return self._query(
+            container_name,
+            query=(
+                "SELECT TOP @limit * FROM c WHERE c.expires_at_epoch <= @now_epoch "
+                "ORDER BY c.expires_at_epoch ASC, c.ticket_id ASC"
+            ),
+            parameters=[
+                {"name": "@limit", "value": bounded},
+                {"name": "@now_epoch", "value": int(now_epoch)},
+            ],
+            max_results=bounded,
+            cross_partition=True,
+            operation="list_expired_closed_tickets",
+        )
+
+    def list_active_closed_tickets_updated_since(
+        self,
+        container_name: str,
+        *,
+        start_timestamp: str,
+        limit: int = 2000,
+    ) -> list[dict[str, Any]]:
+        bounded = _bounded_limit(limit, maximum=2000)
+        return self._query(
+            container_name,
+            query=(
+                "SELECT TOP @limit c.ticket_id FROM c "
+                "WHERE c.is_active = true AND c.source_updated_at >= @start "
+                "ORDER BY c.source_updated_at ASC, c.ticket_id ASC"
+            ),
+            parameters=[
+                {"name": "@limit", "value": bounded},
+                {"name": "@start", "value": _required_text(start_timestamp, "start_timestamp")},
+            ],
+            max_results=bounded,
+            cross_partition=True,
+            operation="list_active_closed_tickets_updated_since",
+        )
+
+    def deactivate_closed_ticket(
+        self,
+        container_name: str,
+        *,
+        ticket_id: str,
+        synced_at: str,
+    ) -> dict[str, Any] | None:
+        existing = self.get_closed_ticket(container_name, ticket_id)
+        if existing is None or existing.get("is_active") is False:
+            return None
+        replacement = dict(existing)
+        replacement.update({"is_active": False, "synced_at": _required_text(synced_at, "synced_at")})
+        return self.upsert_closed_ticket(container_name, replacement)
+
+    def delete_closed_ticket(
+        self,
+        container_name: str,
+        ticket_id: str,
+    ) -> bool:
+        container = self._container(container_name)
+        normalized = _required_text(ticket_id, "ticket_id")
+        try:
+            self._call(
+                container_name,
+                "delete_closed_ticket",
+                container.delete_item,
+                item=normalized,
+                partition_key=normalized,
+            )
+        except Exception as exc:
+            if _status_code(exc) == 404:
+                return False
+            raise
+        return True
 
     def get_chat_session(
         self,

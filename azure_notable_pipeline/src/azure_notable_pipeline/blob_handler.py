@@ -28,6 +28,9 @@ from .case_archive import SourceContext, archive_case
 from .config import Config, load_config
 from .elasticsearch_investigation import execute_hypothesis_elasticsearch_queries
 from .elasticsearch_query_grounding import retrieve_elasticsearch_grounding
+from .historical_closed_ticket_grounding import (
+    retrieve_historical_closed_tickets_for_first_pass,
+)
 from .html_generator import generate_html_report
 from .idempotency import (
     begin_side_effect,
@@ -795,10 +798,15 @@ def process_blob_created(
         content_type=decoded.content_type,
     )
     rag_result = retrieve_soc_context(alert_text, runtime_config)
+    historical_context, closed_ticket_rag_meta = retrieve_historical_closed_tickets_for_first_pass(
+        runtime_config,
+        alert_text,
+    )
     started = time.monotonic()
     scored_ttps = analysis_engine.analyze_ttp(
         alert_text,
         advisory_context=rag_result.context,
+        historical_closed_tickets_context=historical_context,
     )
     llm_response = analysis_engine.last_llm_response or {}
     if isinstance(llm_response, dict):
@@ -808,6 +816,7 @@ def process_blob_created(
             metadata["rag_snippet_count"] = rag_result.snippet_count
             if rag_result.message:
                 metadata["rag_message"] = rag_result.message
+            metadata.update(closed_ticket_rag_meta)
 
     if (
         isinstance(llm_response, dict)

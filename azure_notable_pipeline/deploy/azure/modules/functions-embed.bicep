@@ -64,7 +64,10 @@ var applicationSettings = [
   { name: 'AzureWebJobs.intake_blob.Disabled', value: 'true' }
   { name: 'AzureWebJobs.analyzer_queue.Disabled', value: 'true' }
   { name: 'AzureWebJobs.case_embed_queue.Disabled', value: 'false' }
+  { name: 'AzureWebJobs.rag_ingest_queue.Disabled', value: 'true' }
   { name: 'AzureWebJobs.disposition_sync_timer.Disabled', value: 'true' }
+  { name: 'AzureWebJobs.closed_ticket_sync_timer.Disabled', value: 'true' }
+  { name: 'AzureWebJobs.closed_ticket_embed_timer.Disabled', value: 'true' }
   { name: 'AzureWebJobs.operations_monitor_timer.Disabled', value: 'true' }
   { name: 'AzureWebJobs.portal_http.Disabled', value: 'true' }
 ]

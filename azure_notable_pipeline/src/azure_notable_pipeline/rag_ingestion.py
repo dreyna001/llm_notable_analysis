@@ -15,6 +15,7 @@ from .azure_openai_gateway import embed_texts
 from .azure_search_adapter import AzureSearchAdapter, build_filter
 from .azure_clients import blob_service_client
 from .blob_store import read_blob_result
+from .kb_document_extract import extract_document_text, image_ingest_enabled
 
 MANIFEST_SCHEMA_VERSION = 1
 _SAFE_CORPUS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
@@ -149,6 +150,7 @@ def parse_blob_document(
     blob_store: Any | None = None,
     account_url: str | None = None,
     max_bytes: int = 5_242_880,
+    config: Any | None = None,
 ) -> str:
     """Read one exact version and normalize supported text document formats."""
 
@@ -161,11 +163,15 @@ def parse_blob_document(
         max_bytes=max_bytes,
         account_url=account_url,
     )
+    suffix = source.blob_name.rsplit("/", 1)[-1].lower().rsplit(".", 1)[-1] if "." in source.blob_name else ""
+    if suffix in {"pdf", "docx", "png", "jpg", "jpeg", "webp", "gif"}:
+        if config is None or not image_ingest_enabled(config):
+            raise ValueError(f"unsupported RAG document type: {suffix}")
+        return extract_document_text(raw, suffix, config)
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise ValueError(f"RAG document must be UTF-8 text: {source.blob_name}") from exc
-    suffix = source.blob_name.rsplit("/", 1)[-1].lower().rsplit(".", 1)[-1] if "." in source.blob_name else ""
     if suffix not in _SUPPORTED_SUFFIXES:
         raise ValueError(f"unsupported RAG document type: {suffix}")
     if suffix == "json":
@@ -299,6 +305,7 @@ def ingest_manifest(
             blob_store=blob_store,
             max_bytes=max_bytes,
             account_url=source_account_url or str(config_value(config, "RAG_SOURCE_STORAGE_ACCOUNT_URL", "") or "") or None,
+            config=config,
         )
         documents = build_rag_documents(
             manifest=manifest,

@@ -4,6 +4,7 @@ param openAiAccountName string
 param analyzerPrincipalId string = ''
 param embedPrincipalId string
 param portalPrincipalId string = ''
+param dispositionPrincipalId string = ''
 
 resource openAi 'Microsoft.CognitiveServices/accounts@2024-10-01' existing = {
   name: openAiAccountName
@@ -35,6 +36,16 @@ resource portalOpenAiAccess 'Microsoft.Authorization/roleAssignments@2022-04-01'
   scope: openAi
   properties: {
     principalId: portalPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', openAiUserRoleId)
+  }
+}
+
+resource dispositionOpenAiAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(dispositionPrincipalId)) {
+  name: guid(openAi.id, dispositionPrincipalId, openAiUserRoleId)
+  scope: openAi
+  properties: {
+    principalId: dispositionPrincipalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', openAiUserRoleId)
   }
