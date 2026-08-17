@@ -1,6 +1,9 @@
 # Test Script for Notable Analyzer Pipeline
 # Uploads test file and checks output.
 #
+# Requires PowerShell 5.1+ or pwsh, AWS CLI, and COMMERCIAL_AWS_ACCOUNT_ID set to the
+# approved 12-digit commercial account. Fails closed outside aws/us-east-1.
+#
 # Default: core smoke only (upload + markdown report check).
 # Optional Wave 1 checks (require live AWS credentials and a deployed stack):
 #   .\scripts\test-pipeline.ps1 -Wave1Smoke
@@ -27,6 +30,70 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectDir = Resolve-Path (Join-Path $scriptDir "..")
 Set-Location $projectDir
 
+$region = "us-east-1"
+
+function Assert-CommercialAwsBoundary {
+    Write-Host "`nChecking commercial AWS deployment boundary..." -ForegroundColor Yellow
+    if (
+        -not [string]::IsNullOrWhiteSpace($env:AWS_REGION) -and
+        -not [string]::IsNullOrWhiteSpace($env:AWS_DEFAULT_REGION) -and
+        $env:AWS_REGION -ne $env:AWS_DEFAULT_REGION
+    ) {
+        Write-Host "  AWS_REGION and AWS_DEFAULT_REGION disagree; both must be $region." -ForegroundColor Red
+        exit 1
+    }
+
+    $configuredRegion = $env:AWS_REGION
+    if ([string]::IsNullOrWhiteSpace($configuredRegion)) {
+        $configuredRegion = $env:AWS_DEFAULT_REGION
+    }
+    if ([string]::IsNullOrWhiteSpace($configuredRegion)) {
+        $configuredRegionOutput = aws configure get region 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $configuredRegion = ($configuredRegionOutput | Out-String).Trim()
+        }
+    }
+    if ($configuredRegion -ne $region) {
+        $reportedRegion = if ([string]::IsNullOrWhiteSpace($configuredRegion)) { "<unset>" } else { $configuredRegion }
+        Write-Host "  Configured AWS region must be $region; found: $reportedRegion" -ForegroundColor Red
+        exit 1
+    }
+
+    $expectedAccountId = $env:COMMERCIAL_AWS_ACCOUNT_ID
+    if ($expectedAccountId -notmatch '^[0-9]{12}$') {
+        Write-Host "  Set COMMERCIAL_AWS_ACCOUNT_ID to the approved 12-digit commercial AWS account." -ForegroundColor Red
+        exit 1
+    }
+
+    $callerAccountOutput = aws sts get-caller-identity --region $region --query Account --output text 2>$null
+    $callerAccountExitCode = $LASTEXITCODE
+    $callerAccount = ($callerAccountOutput | Out-String).Trim()
+    if ($callerAccountExitCode -ne 0 -or $callerAccount -notmatch '^[0-9]{12}$') {
+        Write-Host "  AWS credentials are unavailable or STS returned an invalid account ID." -ForegroundColor Red
+        exit 1
+    }
+    $callerArnOutput = aws sts get-caller-identity --region $region --query Arn --output text 2>$null
+    $callerArnExitCode = $LASTEXITCODE
+    $callerArn = ($callerArnOutput | Out-String).Trim()
+    if ($callerArnExitCode -ne 0 -or -not $callerArn.StartsWith("arn:aws:", [System.StringComparison]::Ordinal)) {
+        Write-Host "  AWS caller ARN is not in the commercial aws partition: $callerArn" -ForegroundColor Red
+        exit 1
+    }
+    if ($callerAccount -ne $expectedAccountId) {
+        Write-Host "  AWS caller account $callerAccount does not match approved account $expectedAccountId." -ForegroundColor Red
+        exit 1
+    }
+
+    $credentialSource = if ([string]::IsNullOrWhiteSpace($env:AWS_PROFILE)) { "default credential chain" } else { $env:AWS_PROFILE }
+    Write-Host "  Account: $callerAccount" -ForegroundColor Green
+    Write-Host "  Caller: $callerArn" -ForegroundColor Green
+    Write-Host "  Partition: aws" -ForegroundColor Green
+    Write-Host "  Region: $region" -ForegroundColor Green
+    Write-Host "  Credential source: $credentialSource" -ForegroundColor Green
+}
+
+Assert-CommercialAwsBoundary
+
 Write-Host "`nUsing stack name: $StackName" -ForegroundColor Yellow
 
 function Get-LambdaEnvironmentVariables {
@@ -36,6 +103,7 @@ function Get-LambdaEnvironmentVariables {
     )
 
     $functionArn = aws cloudformation describe-stacks `
+        --region $region `
         --stack-name $Stack `
         --query 'Stacks[0].Outputs[?OutputKey==`FunctionArn`].OutputValue' `
         --output text 2>$null
@@ -45,6 +113,7 @@ function Get-LambdaEnvironmentVariables {
     }
 
     $envJson = aws lambda get-function-configuration `
+        --region $region `
         --function-name $FunctionName `
         --query 'Environment.Variables' `
         --output json 2>$null
@@ -66,7 +135,7 @@ function Test-S3ObjectExists {
         [string]$Key
     )
 
-    aws s3 ls "s3://$Bucket/$Key" 2>$null | Out-Null
+    aws s3 ls "s3://$Bucket/$Key" --region $region 2>$null | Out-Null
     return $LASTEXITCODE -eq 0
 }
 
@@ -127,7 +196,7 @@ function Invoke-Wave1SmokeChecks {
         $wave1Failed = $true
     } else {
         Write-Host "  JSON report found" -ForegroundColor Green
-        aws s3 cp "s3://$OutputBucketName/$jsonKey" $localJson | Out-Null
+        aws s3 cp "s3://$OutputBucketName/$jsonKey" $localJson --region $region | Out-Null
         if ($LASTEXITCODE -ne 0) {
             Write-Host "  Could not download JSON report for profile checks" -ForegroundColor Red
             $wave1Failed = $true
@@ -202,7 +271,7 @@ function Invoke-Wave1SmokeChecks {
                     Write-Host "  action_gated: SIDE_EFFECT_IDEMPOTENCY_TABLE not set on Lambda" -ForegroundColor Red
                     $wave1Failed = $true
                 } else {
-                    aws dynamodb describe-table --table-name $tableName 2>$null | Out-Null
+                    aws dynamodb describe-table --region $region --table-name $tableName 2>$null | Out-Null
                     if ($LASTEXITCODE -eq 0) {
                         Write-Host "  action_gated: idempotency table exists ($tableName)" -ForegroundColor Green
                     } else {
@@ -228,11 +297,13 @@ function Invoke-Wave1SmokeChecks {
 Write-Host "`nGetting bucket names from stack..." -ForegroundColor Yellow
 try {
     $inputBucket = aws cloudformation describe-stacks `
+        --region $region `
         --stack-name $StackName `
         --query 'Stacks[0].Outputs[?OutputKey==`InputBucketName`].OutputValue' `
         --output text 2>&1
 
     $outputBucket = aws cloudformation describe-stacks `
+        --region $region `
         --stack-name $StackName `
         --query 'Stacks[0].Outputs[?OutputKey==`OutputBucketName`].OutputValue' `
         --output text 2>&1
@@ -263,7 +334,7 @@ if (-not (Test-Path $testFile)) {
 }
 
 Write-Host "  Uploading $testFile to s3://$inputBucket/$s3Key" -ForegroundColor Gray
-aws s3 cp $testFile "s3://$inputBucket/$s3Key"
+aws s3 cp $testFile "s3://$inputBucket/$s3Key" --region $region
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Upload failed" -ForegroundColor Red
     exit 1
@@ -280,7 +351,7 @@ Write-Host "`nChecking output bucket..." -ForegroundColor Yellow
 $outputKey = "reports/$reportBaseName.md"
 
 Write-Host "  Looking for: s3://$outputBucket/$outputKey" -ForegroundColor Gray
-$null = aws s3 ls "s3://$outputBucket/$outputKey" 2>&1
+$null = aws s3 ls "s3://$outputBucket/$outputKey" --region $region 2>&1
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "  Report found!" -ForegroundColor Green
@@ -288,7 +359,7 @@ if ($LASTEXITCODE -eq 0) {
     # Download report
     Write-Host "`nDownloading report..." -ForegroundColor Yellow
     $localReport = "$reportBaseName.md"
-    aws s3 cp "s3://$outputBucket/$outputKey" $localReport
+    aws s3 cp "s3://$outputBucket/$outputKey" $localReport --region $region
 
     if ($LASTEXITCODE -eq 0) {
         Write-Host "  Report downloaded to: $localReport" -ForegroundColor Green
@@ -299,7 +370,7 @@ if ($LASTEXITCODE -eq 0) {
 } else {
     Write-Host "  Report not found yet" -ForegroundColor Yellow
     Write-Host "  Listing all reports in output bucket:" -ForegroundColor Gray
-    aws s3 ls "s3://$outputBucket/reports/" --recursive | Select-Object -Last 5
+    aws s3 ls "s3://$outputBucket/reports/" --recursive --region $region | Select-Object -Last 5
     Write-Host "`n  You may need to wait a bit longer or check CloudWatch logs" -ForegroundColor Yellow
 }
 

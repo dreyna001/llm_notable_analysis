@@ -1,53 +1,37 @@
 # Commercial AWS OpenSearch provisioning
 
-Run this **before** deploying the main SAM stack when `rag`, `RagIngestionEnabled`,
-`SplQueryRagEnabled`, or `analyst_portal` case Q&A is enabled.
-
-The product stack does **not** create an OpenSearch domain. Operators provision a
-customer-managed VPC-only Amazon OpenSearch Service domain in `us-east-1`, wire
-network access, attach IAM permissions, then pass endpoint and ARN values into
+Run **before** the main SAM stack when `rag`, `RagIngestionEnabled`,
+`SplQueryRagEnabled`, or `analyst_portal` case Q&A is enabled. The product stack
+does **not** create an OpenSearch domain — provision a customer-managed VPC-only
+domain in `us-east-1`, wire network access, then pass endpoint and ARN values into
 SAM (`OpenSearchEndpoint`, `OpenSearchDomainArn`, `CustomerVpcSubnetIds`,
-`CustomerSecurityGroupIds`, `RagTenantId`).
+`CustomerSecurityGroupIds`, `RagTenantId`). AWS commercial uses OpenSearch per
+[`../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md`](../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md) (CAWS-004).
 
-On-prem equivalent: Postgres + pgvector (see on-prem RAG ops). AWS commercial
-uses OpenSearch per
-[`../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md`](../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md)
-(CAWS-004).
-
-## Deploy order
-
-```text
-1. VPC private subnets + routing (VPC_NETWORK_PREREQUISITES.md)
-2. OpenSearch domain (this runbook)
-3. Security groups: Lambda SG <-> OpenSearch SG
-4. Domain access policy (Lambda role ARNs after SAM deploy, or pre-planned role pattern)
-5. Main SAM stack (customer-default or custom parameters)
-6. First ingest / first case embed (indexes auto-created)
-7. Validation (see bottom)
-```
-
-Customer-default preset:
-[`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md).
-
-VPC and subnet design:
-[`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md).
+**Path B steps 3 (Phase A) and 8 (Phase B):**
+[`../../../README.md`](../../../README.md#path-b-customer-default).
+Customer-default preset: [`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md).
 
 ## Domain requirements
 
 | Requirement | Notes |
 | --- | --- |
 | Region | `us-east-1` only for this product |
-| Network | VPC-only; disable public access |
+| Network | VPC-only; disable public access — layout in [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md#target-layout) |
 | Endpoint | HTTPS URL for `OpenSearchEndpoint` (no credentials in URL) |
 | ARN | `OpenSearchDomainArn` for IAM least privilege |
 | k-NN | Required; indexes use `knn_vector` at 1024 dimensions (Titan V2) |
-| Encryption | At rest with customer CMK recommended; align with `CustomerKmsKeyArn` |
+| Encryption | At rest with customer CMK recommended; create domain with same CMK as `CustomerKmsKeyArn` |
 | Fine-grained access control | **Off** for v1 unless your security team validates IAM role mapping separately |
 
 The application creates indexes and k-NN mappings on first write via
 `ensure_vector_index()` in `src/s3_notable_pipeline/opensearch_client.py`. Do
 **not** hand-create index mappings unless you are debugging; use the product
 ingestion and case-embed paths instead.
+
+OpenSearch cost is separate from Bedrock embedding and Lambda. Start small in
+staging; scale from observed corpus size and query latency. Snapshot and ISM
+retention policies are customer-owned.
 
 ## Indexes (customer-default)
 
@@ -60,70 +44,51 @@ ingestion and case-embed paths instead.
 Optional `OpenSearchElasticIndex` (`elastic_dictionary`) applies only when
 `ElasticsearchGroundingEnabled=true`.
 
-## Network layout
-
-Lambdas that touch OpenSearch run inside the customer VPC when
-`CustomerVpcSubnetIds` and `CustomerSecurityGroupIds` are set (required for
-enabled vector capabilities).
-
-```text
-                    +---------------------------+
-                    |  Private subnets (2+ AZ)  |
-                    |                           |
-  S3 / SQS / DDB /  |  Lambda SG  ----443---->  |  OpenSearch domain SG
-  Bedrock / Logs    |       |                   |  (VPC endpoint only)
-  via NAT or        |       v                   |
-  VPC endpoints     |  Analyzer, Portal,        |
-                    |  Case embed, RAG ingest   |
-                    +---------------------------+
-```
-
-### Lambda security group (egress)
-
-- TCP **443** to the OpenSearch domain security group only (not `0.0.0.0/0` for
-  OpenSearch path).
-- Egress to AWS APIs required for non-VPC services: use **NAT gateway** in the
-  VPC route table **or** interface VPC endpoints for:
-  - `com.amazonaws.us-east-1.s3`
-  - `com.amazonaws.us-east-1.sqs`
-  - `com.amazonaws.us-east-1.dynamodb`
-  - `com.amazonaws.us-east-1.logs`
-  - `com.amazonaws.us-east-1.bedrock-runtime`
-  - `com.amazonaws.us-east-1.secretsmanager` (when integrations use Secrets Manager)
-
-Record the Lambda security group ID as `CustomerSecurityGroupIds` and private
-subnet IDs as `CustomerVpcSubnetIds` (comma-separated, no spaces).
-
-### OpenSearch domain security group (ingress)
-
-- TCP **443** from the Lambda security group only.
-
-Place the domain in the **same VPC** as the Lambda subnets. Cross-VPC peering
-is out of scope for the default runbook; treat as a custom network design.
-
 ## IAM: product Lambda roles and OpenSearch actions
 
 The SAM template grants these **IAM role** permissions (SigV4 to the domain):
 
-| Lambda (default name) | OpenSearch IAM actions |
-| --- | --- |
-| `notable-analyzer-s3` | `es:ESHttpGet`, `es:ESHttpPost` |
-| `notable-portal-api` | `es:ESHttpGet`, `es:ESHttpPost` |
-| `notable-case-embed` | `es:ESHttpGet`, `es:ESHttpPost`, `es:ESHttpPut`, `es:ESHttpDelete` |
-| `notable-rag-ingestion` | `es:ESHttpGet`, `es:ESHttpPost`, `es:ESHttpPut`, `es:ESHttpDelete` |
+| Lambda (default name) | CloudFormation logical role id (pattern) | OpenSearch IAM actions |
+| --- | --- | --- |
+| `notable-analyzer-s3` | `NotableAnalyzerFunctionRole` | `es:ESHttpGet`, `es:ESHttpPost` |
+| `notable-portal-api` | `PortalApiFunctionRole` | `es:ESHttpGet`, `es:ESHttpPost` |
+| `notable-case-embed` | `CaseEmbedFunctionRole` | `es:ESHttpGet`, `es:ESHttpPost`, `es:ESHttpPut`, `es:ESHttpDelete` |
+| `notable-rag-ingestion` | `RagIngestionFunctionRole` | `es:ESHttpGet`, `es:ESHttpPost`, `es:ESHttpPut`, `es:ESHttpDelete` |
 
 You must also allow those **role ARNs** in the OpenSearch **domain access
 policy** (resource-based policy on the domain). IAM on the Lambda side alone is
 not sufficient.
 
-### Two-phase access policy (recommended)
+### Two-phase access policy (required)
+
+SAM creates Lambda execution roles during deploy. The OpenSearch domain access
+policy must trust those roles in a second step.
 
 **Phase A — create domain:** use your deployment role or a break-glass admin
-principal to create the domain and validate cluster health.
+principal to create the domain and validate cluster health. The access policy may
+list only admin principals.
 
-**Phase B — after `sam deploy`:** collect Lambda execution role ARNs from the
-CloudFormation stack (Resources tab or CLI), then update the domain access
-policy:
+**Phase B — after `sam deploy`:** copy **physical** IAM role names from the stack
+(not logical ids alone). Vector SigV4 calls can return **403** until Phase B is
+applied, even when Lambda IAM policies already allow `es:*` to the domain.
+
+Lookup physical role names:
+
+```bash
+aws cloudformation describe-stack-resources \
+  --stack-name notable-analyzer-stack \
+  --region us-east-1 \
+  --query "StackResources[?ResourceType=='AWS::IAM::Role'].[LogicalResourceId,PhysicalResourceId]" \
+  --output table
+```
+
+Match `LogicalResourceId` values such as `NotableAnalyzerFunctionRole`,
+`PortalApiFunctionRole`, `CaseEmbedFunctionRole`, and `RagIngestionFunctionRole`
+to the `PhysicalResourceId` role names. Use those physical names in the domain
+policy `Principal.AWS` ARNs.
+
+Example Phase B policy (replace `<physical-role-name>` with values from the table
+above):
 
 ```json
 {
@@ -133,10 +98,10 @@ policy:
       "Effect": "Allow",
       "Principal": {
         "AWS": [
-          "arn:aws:iam::<account-id>:role/<stack-name>-AnalyzerFunctionRole-<suffix>",
-          "arn:aws:iam::<account-id>:role/<stack-name>-PortalApiFunctionRole-<suffix>",
-          "arn:aws:iam::<account-id>:role/<stack-name>-CaseEmbedFunctionRole-<suffix>",
-          "arn:aws:iam::<account-id>:role/<stack-name>-RagIngestionFunctionRole-<suffix>"
+          "arn:aws:iam::<account-id>:role/<physical-role-name-for-NotableAnalyzerFunctionRole>",
+          "arn:aws:iam::<account-id>:role/<physical-role-name-for-PortalApiFunctionRole>",
+          "arn:aws:iam::<account-id>:role/<physical-role-name-for-CaseEmbedFunctionRole>",
+          "arn:aws:iam::<account-id>:role/<physical-role-name-for-RagIngestionFunctionRole>"
         ]
       },
       "Action": [
@@ -155,16 +120,6 @@ Use read-only actions only for analyzer and portal roles if your policy engine
 requires least privilege per principal. The template currently grants write
 actions only to case-embed and rag-ingestion roles.
 
-Example role lookup after deploy:
-
-```bash
-aws cloudformation describe-stack-resources \
-  --stack-name notable-analyzer-stack \
-  --region us-east-1 \
-  --query "StackResources[?ResourceType=='AWS::IAM::Role'].[LogicalResourceId,PhysicalResourceId]" \
-  --output table
-```
-
 ## Create domain (console or CLI outline)
 
 Use your organization's standard OpenSearch baseline. Minimum fields:
@@ -179,7 +134,7 @@ Use your organization's standard OpenSearch baseline. Minimum fields:
 | VPC | Customer VPC | Same as Lambda subnets |
 | Subnets | Private subnets (domain ENI) | Often 1 subnet per AZ used |
 | Security group | OpenSearch SG (ingress from Lambda SG) | |
-| Access policy | Phase B policy above | No public access |
+| Access policy | Phase A admin-only; Phase B after SAM | No public access |
 | Encryption | CMK optional but recommended | Same key as `CustomerKmsKeyArn` when set |
 
 CLI sketch (adjust for your VPC; requires approved deployment role):
@@ -241,8 +196,8 @@ Run in order:
    the VPC endpoint succeeds.
 3. **SAM deploy** — stack completes with OpenSearch parameters set; no
    `RequireOpenSearchForVectorCapabilities` assertion failures.
-4. **Access policy** — after role ARNs are attached, no `403` on SigV4 requests
-   from Lambdas.
+4. **Access policy Phase B** — after physical role ARNs are attached, no `403`
+   on SigV4 requests from Lambdas.
 5. **Index bootstrap** — publish one SOC manifest; confirm `soc_knowledge` (or
    your `OpenSearchSocIndex`) appears with k-NN mapping.
 6. **Tenant isolation** — query with a wrong tenant returns zero hits (see
@@ -255,16 +210,8 @@ Staging gate for customer-default:
 [`../../testing/TESTING.md`](../../testing/TESTING.md) (OpenSearch preflight +
 customer-default row).
 
-## Sizing and cost (orientation only)
+## Next
 
-OpenSearch cost is separate from Bedrock embedding and Lambda. Start small in
-staging; scale data nodes and storage from observed corpus size, case chunk
-count, and query latency. Snapshot and ISM retention policies are customer-owned.
-
-## Related docs
-
-- [`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md)
-- [`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md)
-- [`../rag/RAG_OPERATIONS.md`](../rag/RAG_OPERATIONS.md)
-- [`../rag/KNOWLEDGE_BASE_OPERATIONS.md`](../rag/KNOWLEDGE_BASE_OPERATIONS.md)
-- [`../analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../analyst_portal/ANALYST_PORTAL_OPERATIONS.md)
+- **Path B step 4 (after Phase A):** [`BEDROCK_ACCOUNT_ENABLEMENT.md`](BEDROCK_ACCOUNT_ENABLEMENT.md)
+- **Path B step 8 complete:** [`KMS_CUSTOMER_KEY.md`](KMS_CUSTOMER_KEY.md) Phase B when using `CustomerKmsKeyArn`; then [`KNOWLEDGE_BASE_OPERATIONS.md`](../rag/KNOWLEDGE_BASE_OPERATIONS.md)
+- **Path C:** [`../../../README.md`](../../../README.md#path-c-custom-profiles) after Phase A or Phase B as applicable

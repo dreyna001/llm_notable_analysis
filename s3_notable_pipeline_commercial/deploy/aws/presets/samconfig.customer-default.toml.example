@@ -4,6 +4,8 @@
 #
 # Checklist: docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md
 # OpenSearch first: docs/operations/deployment/OPENSEARCH_PROVISIONING.md
+# For a scope-based IdP, replace PortalRequiredAnalystRole with PortalRequiredAnalystScope.
+# When using a customer CMK, add CustomerKmsKeyArn=<customer-kms-key-arn>.
 
 version = 0.1
 
@@ -37,6 +39,7 @@ PortalUiBucketName=<customer-portal-ui-bucket> \
 PortalAuthMode=jwt \
 PortalJwtIssuer=<oidc-issuer-url> \
 PortalJwtAudience=<portal-api-audience> \
+PortalRequiredAnalystRole=<analyst-role-claim-value> \
 PortalCorsAllowedOrigins=<https://portal.example.com> \
 OpenSearchEndpoint=<vpc-opensearch-endpoint> \
 OpenSearchDomainArn=arn:aws:es:us-east-1:<account-id>:domain/<domain-name> \

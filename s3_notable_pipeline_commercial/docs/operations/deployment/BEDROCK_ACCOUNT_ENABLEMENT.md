@@ -4,7 +4,8 @@ Enable and select Bedrock models **before** `sam deploy`. The stack requires
 `BedrockAnalysisModelId` and `BedrockAnalysisModelArn` on every deployment; it
 does not enable model access in your account.
 
-Region: `us-east-1`. Partition: `aws`.
+Partition `aws`, region `us-east-1` — see
+[`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md#deployment-boundary).
 
 ## Models the product uses
 
@@ -22,13 +23,15 @@ model ARN. Analyzer and portal need invoke on the analysis (and optional chat) m
 Run in the **target commercial account** before deploy:
 
 1. **Confirm region** — active CLI/SDK region is `us-east-1`
-2. **Request model access** — in Bedrock console (Model access) or your org’s
+2. **Request model access** — in Bedrock console (Model access) or your org's
    approved process, enable the analysis model or inference profile you plan to use
 3. **Enable embedding model** — ensure `amazon.titan-embed-text-v2:0` (or your
    approved alternate documented with engineering) is available if RAG or portal
    case Q&A is enabled
 4. **Record IDs and ARNs** — copy exact strings for SAM parameters (see below)
-5. **Verify invoke** — from an approved role in the account:
+5. **Verify invoke** — from an approved role in the account, confirm your
+   **customer-approved** model or inference profile is listed and invocable.
+   The examples below are discovery commands only; they do not choose deploy values.
 
 ```bash
 export AWS_REGION=us-east-1
@@ -43,10 +46,21 @@ aws bedrock list-inference-profiles --region us-east-1 \
   --output table
 ```
 
+`scripts/setup-and-deploy.ps1` runs illustrative readiness probes (Nova, Claude).
+Those probes only confirm list APIs succeed — they are **not** the deploy-time
+model choice. Record the exact customer-approved `BedrockAnalysisModelId` and
+`BedrockAnalysisModelArn` pair and pass both at `sam deploy`.
+
 6. **Map to SAM** — set deploy parameters (guided deploy, `samconfig.toml`, or preset env file)
 7. **Scope IAM** — template grants `bedrock:InvokeModel` only on ARNs you pass; mismatched ID/ARN pairs fail closed at deploy or runtime
 
 ## Choosing `BedrockAnalysisModelId` and `BedrockAnalysisModelArn`
+
+The table below shows **format patterns** only. Replace every example with the
+exact ID and ARN your customer approved for this deployment. A Claude inference
+profile in the table is not interchangeable with a Nova foundation model, and
+setup-script probe strings (such as `claude-sonnet-4-6`) may differ from the
+profile ID you deploy.
 
 | Model type | `BedrockAnalysisModelId` example | `BedrockAnalysisModelArn` pattern |
 | --- | --- | --- |
@@ -55,9 +69,10 @@ aws bedrock list-inference-profiles --region us-east-1 \
 
 Rules:
 
-- **ID and ARN must refer to the same deploy-time choice** — the template validates both are non-empty
+- **ID and ARN must refer to the same deploy-time choice** — the template validates both are non-empty and IAM is scoped to the ARN you pass
 - Use the **inference profile ARN** when routing through a profile (least privilege for cross-region inference setups your org approves)
 - Do not hardcode unapproved model IDs in shared presets; keep them in customer env files only
+- Setup/deploy readiness probes that list Nova or Claude availability are hints only; mismatched ID/ARN pairs still fail closed at deploy or runtime
 
 ## Embedding model (RAG + portal)
 
@@ -76,7 +91,7 @@ when override is present.
 ## VPC Lambdas and Bedrock
 
 Lambdas in a VPC reach Bedrock via NAT or a `com.amazonaws.us-east-1.bedrock-runtime`
-interface endpoint. See [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md).
+interface endpoint — see [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md#nat-gateway-vs-vpc-endpoints).
 
 ## Validation after deploy
 
@@ -85,8 +100,9 @@ interface endpoint. See [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISIT
 3. With RAG enabled, confirm `metadata.rag_status` in JSON output (success, no_match, or explicit degraded — not auth failures)
 4. With portal enabled, pinned-case chat returns within API timeout without model errors
 
-## Related docs
+## Next
 
-- [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md)
-- [`../llm/LLM_INFERENCE_OPERATIONS.md`](../llm/LLM_INFERENCE_OPERATIONS.md) — timeouts, memory, tuning after enablement
-- [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md)
+- **Path A step 2:** [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md)
+- **Path B step 5:** [`PORTAL_JWT_IDENTITY.md`](PORTAL_JWT_IDENTITY.md)
+- **Path C:** [`PORTAL_JWT_IDENTITY.md`](PORTAL_JWT_IDENTITY.md) when `analyst_portal` is enabled; otherwise [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md) — [`../../../README.md`](../../../README.md#path-c-custom-profiles)
+- Tuning after enablement: [`../llm/LLM_INFERENCE_OPERATIONS.md`](../llm/LLM_INFERENCE_OPERATIONS.md)

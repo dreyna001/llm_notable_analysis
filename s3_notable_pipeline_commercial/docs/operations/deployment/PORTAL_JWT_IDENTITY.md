@@ -1,12 +1,15 @@
 # Commercial AWS portal JWT identity
 
 Configure an OIDC identity source for the analyst portal when
-`PortalEnabled=true` and `PortalAuthMode=jwt` (default).
+`PortalEnabled=true` and `PortalAuthMode=jwt` (default). The product **validates**
+JWTs at API Gateway and again in the portal Lambda — it does **not** host login
+pages, user directories, or token issuance.
 
-The product **validates** JWTs at API Gateway and again in the portal Lambda.
-It does **not** host login pages, user directories, or token issuance.
+Partition `aws`, region `us-east-1` — see
+[`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md#deployment-boundary).
 
-Region: `us-east-1`. Partition: `aws`.
+**Path B step 5** (before SAM when portal JWT mode is enabled):
+[`../../../README.md`](../../../README.md#path-b-customer-default).
 
 ## What you must provide
 
@@ -45,18 +48,11 @@ case and chat routes require authentication.
 
 Use when you do not already have a corporate IdP. Adapt names to your org.
 
-1. **Create user pool** in `us-east-1` with MFA per org policy
-2. **Create app client** (no client secret for public SPA + PKCE, or confidential client if your edge handles secrets)
-3. **Configure hosted UI / OIDC** — note:
-   - Issuer: `https://cognito-idp.us-east-1.amazonaws.com/<user-pool-id>`
-   - Audience: app client id **or** resource-server identifier if using custom scopes
-4. **Define analyst grant** — pick one approach:
-   - **Scope:** create resource server scope e.g. `portal:analyst`; set `PortalRequiredAnalystScope=portal:analyst`
-   - **Role:** map a Cognito group to a `custom:roles` or use pre-token generation Lambda to emit `roles` claim; set `PortalRequiredAnalystRole=analyst`
-5. **Create test user** in the `analyst` group or assign scope
-6. **Obtain token** for smoke (CLI or hosted UI redirect); decode at jwt.io locally — verify `iss`, `aud`, `sub`, role/scope
-7. **Set SAM parameters** at deploy with issuer, audience, grant, and CORS origin
-8. **Deploy stack**, then build/upload portal SPA to `PortalUiBucketName`
+1. **Create user pool** in `us-east-1` with MFA per org policy; create app client (PKCE for public SPA)
+2. **Note issuer and audience** — issuer: `https://cognito-idp.us-east-1.amazonaws.com/<user-pool-id>`; audience: app client id or resource-server identifier
+3. **Define analyst grant** — scope (e.g. `portal:analyst` -> `PortalRequiredAnalystScope`) or role via group/`custom:roles` -> `PortalRequiredAnalystRole`
+4. **Create test user**, obtain token, verify `iss`, `aud`, `sub`, role/scope
+5. **Set SAM parameters** at deploy; after deploy build/upload portal SPA to `PortalUiBucketName`
 
 Cognito is one option; Okta, Azure AD, Keycloak, or corporate OIDC work the same
 way if they expose RS256/ES256 JWKS and the claims above.
@@ -80,16 +76,6 @@ your edge DNS may front that URL but CORS must match the origin the browser send
 The product does not provision CloudFront, ALB, or WAF — customer network edge is
 out of scope for v1.
 
-## Deploy order
-
-```text
-1. VPC + OpenSearch (if case Q&A / RAG) — see path B in docs/README.md
-2. Choose IdP + analyst grant model (this runbook)
-3. sam deploy with portal JWT parameters
-4. Build/upload frontend/analyst-portal to PortalUiBucketName
-5. Smoke: browser or curl with Bearer token to /api/cases
-```
-
 ## Validation
 
 1. **Without token** — `GET /api/cases` returns 401
@@ -105,8 +91,8 @@ Obtain a short-lived test token; do not commit tokens to git or store in SPA ass
 Set `PortalAuthMode=iam`. Clients sign requests with SigV4. Browser automation
 requires customer tooling; JWT is the documented analyst browser path.
 
-## Related docs
+## Next
 
-- [`../analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../analyst_portal/ANALYST_PORTAL_OPERATIONS.md)
-- [`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md)
-- [`../security/SECURITY_OPERATIONS.md`](../security/SECURITY_OPERATIONS.md)
+- **Path B step 6:** [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md)
+- **Path C:** same when `analyst_portal` is in the profile set — [`../../../README.md`](../../../README.md#path-c-custom-profiles)
+- Day-two portal ops: [`../analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../analyst_portal/ANALYST_PORTAL_OPERATIONS.md)

@@ -1,5 +1,9 @@
 # Testing
 
+Canonical commands for unit, smoke, integration, and staging validation on
+commercial AWS. **Deploy path terminus:** all paths in
+[`../../README.md`](../../README.md) section 2 end here.
+
 ## Golden Eval
 
 Offline disposition rubric tests for the fixed `data/golden_eval/` corpus. See
@@ -62,15 +66,14 @@ python -m pytest tests/test_idempotency.py tests/test_servicenow.py
 python -m pytest tests/test_elastic_query_generation.py tests/test_elasticsearch_investigation.py
 ```
 
-Wave 2 portal slices use the stdlib test runner (same working directory as above):
+Portal handler unit tests (from commercial project root):
 
 ```bash
-python -m unittest discover -s tests -p "test_portal_handler.py" -v
-python -m unittest discover -s tests -p "test_case_chat.py" -v
-python -m unittest discover -s tests -p "test_portal_chat.py" -v
+python -m pytest tests/test_portal_handler.py tests/test_portal_jwt.py tests/test_case_index.py tests/test_case_chat_history.py -q
+python -m pytest tests/test_case_chat.py tests/test_portal_chat.py -q
 ```
 
-Portal frontend checks do not call real AWS. From the commercial project root:
+Portal frontend checks do not call real AWS:
 
 ```bash
 npm ci --prefix frontend/analyst-portal
@@ -80,18 +83,17 @@ npm --prefix frontend/analyst-portal run build
 
 ## Smoke Validation
 
-For a deployed non-production stack:
+For a deployed non-production stack (see also Wave 1 **core** row below):
 
 1. Upload a small representative notable to `incoming/`.
-2. Confirm JSON and markdown reports are written under `reports/`.
-3. If `html_reports` is enabled, confirm the HTML object is also written.
-4. Confirm CloudWatch logs show bounded status metadata without secrets.
-5. For read-only investigation profiles, confirm denied generated queries do not
-   make outbound calls and successful calls produce `investigation_query_results`.
-6. For writeback or ServiceNow create, confirm duplicate events do not duplicate
-   side effects when idempotency is enabled.
-7. For `analyst_portal`, confirm case archive objects, CaseIndex rows, and
-   retrieval chunks are present before opening the static SPA.
+2. Confirm JSON and markdown reports under `reports/`; HTML when `html_reports` enabled.
+3. Confirm CloudWatch logs show bounded status metadata without secrets.
+4. For read-only investigation profiles: denied generated queries do not outbound;
+   successful calls produce `investigation_query_results`.
+5. For writeback or ServiceNow create: duplicate events do not duplicate side
+   effects when idempotency is enabled.
+6. For `analyst_portal`: case archive objects, CaseIndex rows, and retrieval
+   chunks present before opening the SPA.
 
 ## LocalStack Integration Tests
 
@@ -188,9 +190,12 @@ Run profile slices incrementally. Start with `CapabilityProfiles=core` and
 | **ticket_draft** | `CapabilityProfiles=core,ticket_draft`, `ServiceNowAssignmentGroup` | JSON `servicenow_section.draft` present; no ServiceNow POST unless create is separately enabled |
 | **action_gated** | `CapabilityProfiles=core,action_gated`; Splunk writeback and/or ServiceNow secrets as needed; `SideEffectIdempotencyTableName` | DynamoDB idempotency table exists; replay duplicate side-effect keys and confirm no duplicate Splunk/ServiceNow writes |
 
-Helper script (live AWS, optional):
+Helper script (live AWS, optional; requires **PowerShell 5.1+** or **pwsh**):
 
 ```powershell
+$env:COMMERCIAL_AWS_ACCOUNT_ID = "<approved-12-digit-account>"
+$env:AWS_REGION = "us-east-1"
+
 # Core smoke (default behavior unchanged)
 .\scripts\test-pipeline.ps1
 
@@ -201,6 +206,26 @@ Helper script (live AWS, optional):
 .\scripts\test-pipeline.ps1 -Wave1Smoke -ExpectCapabilityProfiles "core,rag,spl_readonly"
 ```
 
+Without PowerShell, run the same core smoke manually from the commercial project
+root (replace bucket names from stack outputs; use `--region us-east-1` on every
+AWS CLI call):
+
+```bash
+export AWS_REGION=us-east-1
+export COMMERCIAL_AWS_ACCOUNT_ID=<approved-12-digit-account>
+# Confirm caller account/partition before mutating (see setup-and-deploy.sh preflight)
+INPUT_BUCKET=$(aws cloudformation describe-stacks --region us-east-1 --stack-name <stack> \
+  --query 'Stacks[0].Outputs[?OutputKey==`InputBucketName`].OutputValue' --output text)
+OUTPUT_BUCKET=$(aws cloudformation describe-stacks --region us-east-1 --stack-name <stack> \
+  --query 'Stacks[0].Outputs[?OutputKey==`OutputBucketName`].OutputValue' --output text)
+STAMP=$(date -u +%Y%m%d-%H%M%S)
+BASE="test-notable-$STAMP"
+aws s3 cp data/test-notable.txt "s3://$INPUT_BUCKET/incoming/$BASE.txt" --region us-east-1
+sleep 60
+aws s3 ls "s3://$OUTPUT_BUCKET/reports/$BASE.md" --region us-east-1
+aws s3 cp "s3://$OUTPUT_BUCKET/reports/$BASE.md" "./$BASE.md" --region us-east-1
+```
+
 Manual follow-ups still required for **action_gated** idempotency replay, signed
 ServiceNow create approval, and Splunk `notable_rest` writeback. See
 [`../operations/platform/CAPABILITY_PROFILES.md`](../operations/platform/CAPABILITY_PROFILES.md),
@@ -208,34 +233,29 @@ ServiceNow create approval, and Splunk `notable_rest` writeback. See
 and
 [`../operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md`](../operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md).
 
-### Wave 2 portal staging checklist
-
-This checklist is optional real AWS validation and must run only in an approved
-dev/staging/prod account.
-
 ### OpenSearch preflight (before RAG or customer-default SAM deploy)
 
 Complete [`../operations/deployment/OPENSEARCH_PROVISIONING.md`](../operations/deployment/OPENSEARCH_PROVISIONING.md), then confirm:
 
 | Check | Pass criteria |
 | --- | --- |
-| Domain active | `aws opensearch describe-domain` shows `Processing=false`, VPC endpoint present |
+| Domain active | `aws opensearch describe-domain --region us-east-1` shows `Processing=false`, VPC endpoint present |
 | Network | Lambda subnets route to OpenSearch SG on 443; NAT or VPC endpoints cover S3, SQS, DynamoDB, Bedrock, Logs |
 | Access policy | Domain policy allows analyzer, portal, case-embed, and rag-ingestion Lambda role ARNs |
 | SAM inputs | `OpenSearchEndpoint`, `OpenSearchDomainArn`, `RagTenantId`, `CustomerVpcSubnetIds`, `CustomerSecurityGroupIds` filled in preset |
 | Post-ingest | First manifest creates expected index with k-NN mapping; tenant filter rejects wrong `RagTenantId` |
 
+### Portal and customer-default staging checklist
+
+Optional real AWS validation for `analyst_portal` and the customer-default bundle.
+Run only in an approved dev/staging/prod account **after** OpenSearch preflight
+when RAG is enabled.
+
 | Profile slice | Deploy prerequisites | Staging validation |
 | --- | --- | --- |
-| **customer-default** | Step 0: [`OPENSEARCH_PROVISIONING.md`](../operations/deployment/OPENSEARCH_PROVISIONING.md). Preset in [`../operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](../operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md): `CapabilityProfiles=core,rag,analyst_portal`; `RagEnabled=true`; `RagIngestionEnabled=true`; `SplQueryRagEnabled=true`; `PortalEnabled=true`; `CaseArchiveEnabled=true`; `CaseQaEnabled=true`; OpenSearch VPC path; portal JWT/CORS; `CaseIndexTableName`; SOC + Splunk dictionary corpora ingested | OpenSearch preflight table above; `.\scripts\test-pipeline.ps1 -Wave1Smoke -ExpectCapabilityProfiles "core,rag,analyst_portal"`; portal SPA uploaded; representative notable -> archive + CaseIndex ready; portal chat with KB grounding |
-| **analyst_portal** | `CapabilityProfiles=core,analyst_portal`; `CaseArchiveBucketName`; `CaseIndexTableName`; JWT issuer/audience; portal CORS origin; optional `PortalUiBucketName` | After deploy, record `PortalBrowserApiBaseUrl` and `PortalApiUrl`; upload a representative notable; confirm archive envelope, chunks, and CaseIndex `retrieval_status=ready`; load `/`, `/cases`, and `/cases/{case_id}` through the SPA; ask a selected-case question and confirm cited answer within the regional API timeout |
+| **customer-default** | Preset [`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](../operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md): `CapabilityProfiles=core,rag,analyst_portal`; `RagEnabled=true`; `RagIngestionEnabled=true`; `SplQueryRagEnabled=true`; `PortalEnabled=true`; `CaseArchiveEnabled=true`; `CaseQaEnabled=true`; OpenSearch VPC; portal JWT/CORS; `CaseIndexTableName`; SOC + Splunk dictionary ingested | OpenSearch preflight above; `.\scripts\test-pipeline.ps1 -Wave1Smoke -ExpectCapabilityProfiles "core,rag,analyst_portal"`; SPA uploaded; notable -> archive + CaseIndex ready; portal chat with KB grounding |
+| **analyst_portal** | `CapabilityProfiles=core,analyst_portal`; `CaseArchiveBucketName`; `CaseIndexTableName`; JWT issuer/audience; portal CORS; optional `PortalUiBucketName` | Record `PortalBrowserApiBaseUrl` and `PortalApiUrl`; upload notable; archive + chunks + CaseIndex `retrieval_status=ready`; load `/`, `/cases`, `/cases/{case_id}`; cited chat within regional API timeout |
 
-For the deployed commercial JWT route, set `PORTAL_E2E_BASE_URL` to the
-`PortalBrowserApiBaseUrl` output, set `PORTAL_E2E_AUTH_MODE=jwt`, and provide a
-short-lived token in `PORTAL_E2E_JWT` before running
-`npm --prefix frontend/analyst-portal run test:e2e`. JWT traces are disabled so
-the bearer token is not persisted in Playwright artifacts. The older Basic-auth
-preview remains available with `PORTAL_E2E_AUTH_MODE=basic`; IAM/SigV4 browser
-automation is not claimed by this suite.
-
-See [`../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md).
+Playwright E2E for the commercial JWT route:
+[`../../frontend/analyst-portal/README.md`](../../frontend/analyst-portal/README.md)
+(`PORTAL_E2E_BASE_URL`, `PORTAL_E2E_AUTH_MODE=jwt`, `PORTAL_E2E_JWT`).

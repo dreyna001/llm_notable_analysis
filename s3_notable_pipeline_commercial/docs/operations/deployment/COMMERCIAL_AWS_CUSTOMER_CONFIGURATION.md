@@ -1,12 +1,12 @@
 # Commercial AWS Customer Configuration
 
-This runbook defines the values collected for each customer deployment. The
-application, templates, queues, indexes, validation, and operational controls
-remain product-owned; only customer-specific identifiers, policies, content,
-and capacity values change.
+Values collected for each customer deployment. The application, templates, queues,
+indexes, validation, and operational controls remain product-owned; only
+customer-specific identifiers, policies, content, and capacity values change.
 
-**Scope boundary:** what you must provision vs what the stack creates is summarized in
+What you provision vs what the stack creates:
 [`CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md`](CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md).
+Deploy path order: [`../../README.md`](../../README.md).
 
 ## Deployment Boundary
 
@@ -66,11 +66,7 @@ new corpus version is promoted for analyst use.
 1. Customer exports or authors an approved JSON, YAML, Markdown, or text corpus.
 2. Operator validates ownership, classification, file type, size, and checksum.
 3. Operator uploads it under the configured S3 source prefix with versioning enabled.
-4. Operator uploads the approved manifest under `RagManifestPrefix`; S3 publishes that exact manifest version to the ingestion queue.
-5. The ingestion worker chunks and embeds the approved content with the configured model.
-6. The worker writes tenant-scoped vectors and provenance to the Splunk dictionary index.
-7. Reconciliation confirms manifest, source versions, and OpenSearch chunks match.
-8. A representative alert verifies grounded SPL uses only approved customer tokens.
+4. Operator uploads the approved manifest under `RagManifestPrefix`; ingestion, reconciliation, and validation follow [`../rag/KNOWLEDGE_BASE_OPERATIONS.md`](../rag/KNOWLEDGE_BASE_OPERATIONS.md).
 
 The dictionary is advisory query-construction context. It does not prove that a
 case event occurred and cannot be promoted to direct alert evidence.
@@ -89,3 +85,8 @@ Record these values for every release:
 - KMS key ARNs and VPC resource IDs
 - retention settings and alarm destinations
 - smoke-test, failure-injection, redrive, and rollback results
+
+## Next
+
+- Customer-default deploy: [`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md)
+- Deploy path hub: [`../../README.md`](../../README.md)

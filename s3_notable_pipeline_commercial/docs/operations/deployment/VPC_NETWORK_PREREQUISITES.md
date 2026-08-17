@@ -2,12 +2,12 @@
 
 Provision customer VPC networking **before** OpenSearch, private integration
 endpoints, or any SAM deploy that sets `CustomerVpcSubnetIds` and
-`CustomerSecurityGroupIds`.
+`CustomerSecurityGroupIds`. The product stack does **not** create a VPC, subnets,
+NAT gateway, route tables, or VPC endpoints — it attaches Lambdas to subnets and
+security groups you supply.
 
-The product stack does **not** create a VPC, subnets, NAT gateway, route tables,
-or VPC endpoints. It attaches Lambdas to subnets and security groups you supply.
-
-Partition `aws`, region `us-east-1` only.
+Partition `aws`, region `us-east-1` — see
+[`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md#deployment-boundary).
 
 ## When this runbook is required
 
@@ -18,8 +18,7 @@ Partition `aws`, region `us-east-1` only.
 | `spl_readonly` / `elastic_readonly` to **private** SIEM URLs | **Required** — set `AllowPrivateOutboundEndpoints=true` |
 | `analyst_portal` with OpenSearch case retrieval | **Required** |
 
-OpenSearch domain setup continues in
-[`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) after this runbook.
+**Path B step 2:** [`../../../README.md`](../../../README.md#path-b-customer-default).
 
 ## Target layout
 
@@ -89,17 +88,6 @@ Ensure:
 - Security groups and NACLs allow egress from Lambda SG to integration targets on 443
 - Secrets and URLs use HTTPS without embedded credentials
 
-## Deploy order relative to other runbooks
-
-```text
-1. VPC + subnets + routing (this runbook)
-2. OpenSearch domain (OPENSEARCH_PROVISIONING.md)
-3. Optional KMS key (KMS_CUSTOMER_KEY.md)
-4. Bedrock model access (BEDROCK_ACCOUNT_ENABLEMENT.md)
-5. SAM stack
-6. Optional portal JWT (PORTAL_JWT_IDENTITY.md) before portal cutover
-```
-
 ## Validation
 
 Before SAM deploy with VPC parameters:
@@ -115,9 +103,7 @@ After SAM deploy:
 2. CloudWatch logs show no persistent `Timeout` connecting to OpenSearch or Bedrock
 3. `/ready` on the portal reports OpenSearch reachable when case Q&A is enabled
 
-## Related docs
+## Next
 
-- [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md)
-- [`KMS_CUSTOMER_KEY.md`](KMS_CUSTOMER_KEY.md)
-- [`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md)
-- [`../security/SECURITY_OPERATIONS.md`](../security/SECURITY_OPERATIONS.md)
+- **Path B step 3:** [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) — OpenSearch Phase A (create domain)
+- **Path C:** same when `rag`, ingest, or portal case Q&A needs OpenSearch — [`../../../README.md`](../../../README.md#path-c-custom-profiles)

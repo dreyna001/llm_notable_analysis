@@ -11,6 +11,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BASH_SCRIPT = PROJECT_ROOT / "scripts" / "setup-and-deploy.sh"
 POWERSHELL_SCRIPT = PROJECT_ROOT / "scripts" / "setup-and-deploy.ps1"
+SMOKE_POWERSHELL_SCRIPT = PROJECT_ROOT / "scripts" / "test-pipeline.ps1"
 LOCALSTACK_BASH_SCRIPT = PROJECT_ROOT / "scripts" / "localstack_bootstrap.sh"
 LOCALSTACK_POWERSHELL_SCRIPT = PROJECT_ROOT / "scripts" / "localstack_bootstrap.ps1"
 
@@ -168,6 +169,16 @@ echo "Docker fake"
         self.assertIn('sam deploy --guided --region "$region"', bash_source)
         self.assertIn("sam deploy --region $region", powershell_source)
         self.assertIn("sam deploy --guided --region $region", powershell_source)
+
+    def test_smoke_script_enforces_commercial_boundary_and_explicit_region(self) -> None:
+        source = SMOKE_POWERSHELL_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn("Assert-CommercialAwsBoundary", source)
+        self.assertIn("COMMERCIAL_AWS_ACCOUNT_ID", source)
+        self.assertIn("arn:aws:", source)
+        self.assertIn('$region = "us-east-1"', source)
+        self.assertIn("--region $region", source)
+        self.assertNotIn("arn:aws-us-gov:", source)
 
     def test_localstack_bootstrap_rejects_remote_endpoint_before_aws_calls(self) -> None:
         env = {
