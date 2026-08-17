@@ -85,3 +85,8 @@ Record these values for every release:
 - KMS key ARNs and VPC resource IDs
 - retention settings and alarm destinations
 - smoke-test, failure-injection, redrive, and rollback results
+
+## Next
+
+- Customer-default deploy: [`GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md`](GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md)
+- Deploy path hub: [`../../../README.md`](../../../README.md)

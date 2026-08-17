@@ -1,12 +1,14 @@
 # GovCloud AWS portal JWT identity
 
 Configure an OIDC identity source for the analyst portal when
-`PortalEnabled=true` and `PortalAuthMode=jwt` (default).
-
-The product **validates** JWTs at API Gateway and again in the portal Lambda.
-It does **not** host login pages, user directories, or token issuance.
+`PortalEnabled=true` and `PortalAuthMode=jwt` (default). The product **validates**
+JWTs at API Gateway and again in the portal Lambda — it does **not** host login
+pages, user directories, or token issuance.
 
 Region: `us-gov-east-1`. Partition: `aws-us-gov`.
+
+**Path B step 5** (before SAM when portal JWT mode is enabled):
+[`../../../README.md`](../../../README.md#path-b-customer-default).
 
 ## What you must provide
 
@@ -63,20 +65,6 @@ Use comma-separated values for multiple allowed roles or scopes.
 `PortalCorsAllowedOrigins` must list the **exact origin** the browser uses.
 The product does not provision CloudFront, ALB, or WAF.
 
-## Deploy order (Path B — RAG + portal)
-
-```text
-1. VPC_NETWORK_PREREQUISITES.md
-2. OPENSEARCH_PROVISIONING.md
-3. BEDROCK_ACCOUNT_ENABLEMENT.md
-4. PORTAL_JWT_IDENTITY.md (plan IdP before deploy)
-5. DEPLOYMENT_IMAGE_STEPS.md + SAM with portal JWT parameters
-6. Build/upload frontend/analyst-portal
-```
-
-Commercial preset reference (parity only, not a GovCloud deploy file):
-[`../../../../s3_notable_pipeline_commercial/docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](../../../../s3_notable_pipeline_commercial/docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md)
-
 ## Validation
 
 1. **Without token** — `GET /api/cases` returns 401
@@ -86,8 +74,8 @@ Commercial preset reference (parity only, not a GovCloud deploy file):
 
 Do not commit tokens to git or store in SPA assets.
 
-## Related docs
+## Next
 
-- [`../analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../analyst_portal/ANALYST_PORTAL_OPERATIONS.md)
-- [`GOVCLOUD_CUSTOMER_CONFIGURATION.md`](GOVCLOUD_CUSTOMER_CONFIGURATION.md)
-- [`../security/SECURITY_OPERATIONS.md`](../security/SECURITY_OPERATIONS.md)
+- **Path B step 6:** [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md)
+- **Path C:** same when `analyst_portal` is in the profile set — [`../../../README.md`](../../../README.md#path-c-custom-profiles)
+- Day-two portal ops: [`../analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../analyst_portal/ANALYST_PORTAL_OPERATIONS.md)

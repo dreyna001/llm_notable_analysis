@@ -12,6 +12,9 @@ AWS (`aws-us-gov`, `us-gov-east-1`):
 On-prem normative reference:
 [`../../../../llm_notable_analysis_onprem_systemd/docs/operations/deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md`](../../../../llm_notable_analysis_onprem_systemd/docs/operations/deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md)
 
+**Path B step 7** (SAM deploy):
+[`../../../README.md`](../../../README.md#path-b-customer-default).
+
 ## Preset files (copy and fill)
 
 | File | Purpose |
@@ -19,31 +22,20 @@ On-prem normative reference:
 | [`../../../deploy/aws/presets/customer-default.env.example`](../../../deploy/aws/presets/customer-default.env.example) | Placeholder env file; source before `sam deploy --parameter-overrides` |
 | [`../../../deploy/aws/presets/samconfig.customer-default.toml.example`](../../../deploy/aws/presets/samconfig.customer-default.toml.example) | Copy to project-root `samconfig.toml` for repeat deploys |
 
-Image build and ECR push still follow
-[`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md) before deploy.
+Complete Path B steps 1–6 before `sam deploy` (authoritative order:
+[`../../../README.md`](../../../README.md#path-b-customer-default)):
 
-## Step 0: Customer prerequisites (required for this preset)
+| Step | Runbook |
+| --- | --- |
+| 1 (optional) | [`KMS_CUSTOMER_KEY.md`](KMS_CUSTOMER_KEY.md) |
+| 2 | [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md) |
+| 3 | [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) — Phase A |
+| 4 | [`BEDROCK_ACCOUNT_ENABLEMENT.md`](BEDROCK_ACCOUNT_ENABLEMENT.md) |
+| 5 | [`PORTAL_JWT_IDENTITY.md`](PORTAL_JWT_IDENTITY.md) |
+| 6 | [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md) |
 
-Complete these runbooks **before** `sam deploy`:
-
-| Order | Runbook | Purpose |
-| --- | --- | --- |
-| 1 | [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md) | Private subnets, NAT or VPC endpoints, Lambda security groups |
-| 2 | [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) | VPC-only OpenSearch domain (stack does not create it) |
-| 3 | [`BEDROCK_ACCOUNT_ENABLEMENT.md`](BEDROCK_ACCOUNT_ENABLEMENT.md) | Analysis + embedding model IDs/ARNs |
-| 4 | [`PORTAL_JWT_IDENTITY.md`](PORTAL_JWT_IDENTITY.md) | Issuer, audience, analyst grant, CORS |
-| Optional | [`KMS_CUSTOMER_KEY.md`](KMS_CUSTOMER_KEY.md) | Customer CMK for production encryption |
-
-Copy into `customer-default.env`:
-
-- `OpenSearchEndpoint`, `OpenSearchDomainArn`, `RagTenantId`
-- `CustomerVpcSubnetIds`, `CustomerSecurityGroupIds`
-- `BedrockAnalysisModelId`, `BedrockAnalysisModelArn`
-- `PortalJwtIssuer`, `PortalJwtAudience`, `PortalRequiredAnalystRole` or `PortalRequiredAnalystScope`, `PortalCorsAllowedOrigins`
-- `CustomerKmsKeyArn` when using a CMK
-
-Indexes (`soc_knowledge`, `splunk_dictionary`, `case_chunks`) are created
-automatically on first ingest or case embed; do not hand-provision mappings.
+Fill `customer-default.env` from those runbooks (account ID, image digest, OpenSearch, VPC, Bedrock, JWT, optional CMK).
+Indexes (`soc_knowledge`, `splunk_dictionary`, `case_chunks`) auto-create on first ingest or case embed.
 
 ## Why both profiles and explicit flags
 
@@ -66,22 +58,8 @@ tables, and API routes. For customer-default, set **both** to the same intent:
 Do **not** add `spl_readonly`, `elastic_readonly`, `ticket_draft`, or
 `action_gated` for this preset.
 
-## Customer values checklist
-
-Collect these before deploy (see also
-[`GOVCLOUD_CUSTOMER_CONFIGURATION.md`](GOVCLOUD_CUSTOMER_CONFIGURATION.md)):
-
-| Area | Parameters |
-| --- | --- |
-| Image | `EcrRepositoryUri`, `ImageDigest`, `AwsAccountId` |
-| Bedrock | `BedrockAnalysisModelId`, `BedrockAnalysisModelArn` |
-| S3 | `InputBucketName`, `OutputBucketName` |
-| Portal | `CaseIndexTableName`, `PortalUiBucketName`, `PortalJwtIssuer`, `PortalJwtAudience`, `PortalCorsAllowedOrigins` |
-| OpenSearch | `OpenSearchEndpoint`, `OpenSearchDomainArn`, `RagTenantId`, `CustomerVpcSubnetIds`, `CustomerSecurityGroupIds` — from [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) |
-| Indexes (defaults OK) | `OpenSearchSocIndex=soc_knowledge`, `OpenSearchSplunkIndex=splunk_dictionary`, `OpenSearchCaseIndex=case_chunks` |
-
-Optional tuning left at product defaults unless customer policy requires changes:
-`CaseQaEmbeddingModel`, `RagMaxSnippets`, `CaseRetentionDays`, `LogRetentionDays`.
+Full customer values checklist:
+[`GOVCLOUD_CUSTOMER_CONFIGURATION.md`](GOVCLOUD_CUSTOMER_CONFIGURATION.md).
 
 ## Deploy (fast path)
 
@@ -136,14 +114,19 @@ to `samconfig.toml`, fill placeholders, then run `scripts/setup-and-deploy.sh` o
 
 ## Post-deploy (required for full customer-default)
 
-1. **Portal SPA** — build `frontend/analyst-portal`, upload `dist/` to
+1. **OpenSearch Phase B** — add the deployed Lambda physical role ARNs to the
+   domain access policy before ingest or portal retrieval. See
+   [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md).
+2. **CMK Phase B (when used)** — add the deployed Lambda physical role ARNs to
+   the key policy. See [`KMS_CUSTOMER_KEY.md`](KMS_CUSTOMER_KEY.md).
+3. **SOC KB ingest** — load approved general SOC corpus to S3, publish manifest.
+   See [`../rag/KNOWLEDGE_BASE_OPERATIONS.md`](../rag/KNOWLEDGE_BASE_OPERATIONS.md).
+4. **Splunk dictionary ingest** — required when `SplQueryRagEnabled=true` (portal
+   SPL grounding). Same manifest workflow; target index `splunk_dictionary`.
+5. **Portal SPA** — build `frontend/analyst-portal`, upload `dist/` to
    `PortalUiBucketName`. See
    [`../analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../analyst_portal/ANALYST_PORTAL_OPERATIONS.md).
-2. **SOC KB ingest** — load approved general SOC corpus to S3, publish manifest.
-   See [`../rag/KNOWLEDGE_BASE_OPERATIONS.md`](../rag/KNOWLEDGE_BASE_OPERATIONS.md).
-3. **Splunk dictionary ingest** — required when `SplQueryRagEnabled=true` (portal
-   SPL grounding). Same manifest workflow; target index `splunk_dictionary`.
-4. **Smoke** — run Wave 1 + portal staging checks in
+6. **Smoke** — run Wave 1 + portal staging checks in
    [`../../testing/TESTING.md`](../../testing/TESTING.md).
 
 ```powershell
@@ -163,10 +146,7 @@ to `samconfig.toml`, fill placeholders, then run `scripts/setup-and-deploy.sh` o
 Track remaining parity work in
 [`../../planning/TODOS.md`](../../planning/TODOS.md).
 
-## Related docs
+## Next
 
-- [`GOVCLOUD_CUSTOMER_CONFIGURATION.md`](GOVCLOUD_CUSTOMER_CONFIGURATION.md)
-- [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md)
-- [`../platform/CAPABILITY_PROFILES.md`](../platform/CAPABILITY_PROFILES.md)
-- [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md)
-- [`../rag/RAG_OPERATIONS.md`](../rag/RAG_OPERATIONS.md)
+- **Path B step 8:** [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) — Phase B domain access policy (Lambda physical role ARNs)
+- **Path B steps 9–12:** [`../../../README.md`](../../../README.md#path-b-customer-default) (CMK Phase B, KB ingest, portal SPA, smoke)

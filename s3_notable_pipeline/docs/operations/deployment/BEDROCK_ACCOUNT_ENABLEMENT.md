@@ -85,8 +85,9 @@ Lambdas in a VPC reach Bedrock via NAT or a
 3. With RAG enabled, confirm `metadata.rag_status` in JSON output (success, no_match, or explicit degraded — not auth failures)
 4. With portal enabled, pinned-case chat returns within API timeout without model errors
 
-## Related docs
+## Next
 
-- [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md)
-- [`../llm/LLM_INFERENCE_OPERATIONS.md`](../llm/LLM_INFERENCE_OPERATIONS.md)
-- [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md)
+- **Path A step 2:** [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md)
+- **Path B step 5:** [`PORTAL_JWT_IDENTITY.md`](PORTAL_JWT_IDENTITY.md)
+- **Path C:** [`PORTAL_JWT_IDENTITY.md`](PORTAL_JWT_IDENTITY.md) when `analyst_portal` is enabled; otherwise [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md) — [`../../../README.md`](../../../README.md#path-c-custom-profiles)
+- Tuning after enablement: [`../llm/LLM_INFERENCE_OPERATIONS.md`](../llm/LLM_INFERENCE_OPERATIONS.md)

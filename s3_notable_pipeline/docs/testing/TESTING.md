@@ -1,5 +1,9 @@
 # Testing
 
+Canonical commands for unit, smoke, integration, and staging validation on
+GovCloud AWS. **Deploy path terminus:** all paths in
+[`../../README.md`](../../README.md) section 2 end here.
+
 ## Golden Eval
 
 Offline disposition rubric tests for the fixed `data/golden_eval/` corpus. See
@@ -226,6 +230,10 @@ Complete [`../operations/deployment/OPENSEARCH_PROVISIONING.md`](../operations/d
 | Profile slice | Deploy prerequisites | Staging validation |
 | --- | --- | --- |
 | **customer-default** | Deploy via [`GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md`](../operations/deployment/GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md). Step 0: [`OPENSEARCH_PROVISIONING.md`](../operations/deployment/OPENSEARCH_PROVISIONING.md). `CapabilityProfiles=core,rag,analyst_portal`; `SplQueryRagEnabled=true` for portal SPL dictionary only (no `spl_readonly`); SOC KB + Splunk dictionary ingested | Wave 1 + portal checks: `.\scripts\test-pipeline.ps1 -Wave1Smoke -ExpectCapabilityProfiles "core,rag,analyst_portal"`; confirm `metadata.rag_status` on analysis; portal case Q&A with cited answer; Splunk dictionary grounding in portal chat without live Splunk queries |
-| **analyst_portal** | Step 0: [`OPENSEARCH_PROVISIONING.md`](../operations/deployment/OPENSEARCH_PROVISIONING.md) when case Q&A is enabled. `CapabilityProfiles=core,analyst_portal`; `CaseArchiveBucketName`; `CaseIndexTableName`; JWT issuer/audience; portal CORS origin; optional `PortalUiBucketName` | After deploy, record `PortalBrowserApiBaseUrl`, `PortalApiUrl`, and `PortalChatFunctionUrl`; upload a representative notable; confirm archive envelope, chunks, and CaseIndex `retrieval_status=ready`; load `/`, `/cases`, and `/cases/{case_id}` through the SPA; ask a selected-case question and confirm cited answer |
+| **analyst_portal** | Step 0: [`OPENSEARCH_PROVISIONING.md`](../operations/deployment/OPENSEARCH_PROVISIONING.md) when case Q&A is enabled. `CapabilityProfiles=core,analyst_portal`; `CaseArchiveBucketName`; `CaseIndexTableName`; JWT issuer/audience; portal CORS origin; optional `PortalUiBucketName` | Record `PortalBrowserApiBaseUrl` and `PortalApiUrl`; upload a representative notable; confirm archive envelope, chunks, and CaseIndex `retrieval_status=ready`; load `/`, `/cases`, and `/cases/{case_id}` through the SPA; ask a selected-case question and confirm cited answer |
+
+Playwright E2E for the GovCloud JWT route:
+[`../../frontend/analyst-portal/README.md`](../../frontend/analyst-portal/README.md)
+(`PORTAL_E2E_BASE_URL`, `PORTAL_E2E_CASE_ID`).
 
 See [`../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md).

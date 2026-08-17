@@ -1,13 +1,16 @@
 # GovCloud OpenSearch provisioning
 
-Run this **before** deploying the main SAM stack when `rag`, `RagIngestionEnabled`,
-`SplQueryRagEnabled`, or `analyst_portal` case Q&A is enabled.
+Run **before** the main SAM stack when `rag`, `RagIngestionEnabled`,
+`SplQueryRagEnabled`, or `analyst_portal` case Q&A is enabled. The product stack
+does **not** create an OpenSearch domain — provision a customer-managed VPC-only
+Amazon OpenSearch Service domain in `us-gov-east-1` (partition `aws-us-gov`),
+wire network access, attach IAM permissions, then pass endpoint and ARN values
+into SAM (`OpenSearchEndpoint`, `OpenSearchDomainArn`, `CustomerVpcSubnetIds`,
+`CustomerSecurityGroupIds`, `RagTenantId`).
 
-The product stack does **not** create an OpenSearch domain. Operators provision a
-customer-managed VPC-only Amazon OpenSearch Service domain in `us-gov-east-1`
-(partition `aws-us-gov`), wire network access, attach IAM permissions, then pass
-endpoint and ARN values into SAM (`OpenSearchEndpoint`, `OpenSearchDomainArn`,
-`CustomerVpcSubnetIds`, `CustomerSecurityGroupIds`, `RagTenantId`).
+**Path B steps 3 (Phase A) and 8 (Phase B):**
+[`../../../README.md`](../../../README.md#path-b-customer-default).
+Customer-default preset: [`GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md`](GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md).
 
 On-prem equivalent: Postgres + pgvector (see on-prem RAG ops). GovCloud production
 uses application-managed OpenSearch retrieval per
@@ -15,18 +18,6 @@ uses application-managed OpenSearch retrieval per
 
 VPC and subnet design:
 [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md).
-
-## Deploy order
-
-```text
-1. VPC private subnets + routing (VPC_NETWORK_PREREQUISITES.md)
-2. OpenSearch domain (this runbook)
-3. Security groups: Lambda SG <-> OpenSearch SG
-4. Domain access policy (Lambda role ARNs after SAM deploy, or pre-planned role pattern)
-5. Main SAM stack (CapabilityProfiles and OpenSearch parameters)
-6. First ingest / first case embed (indexes auto-created)
-7. Validation (see bottom)
-```
 
 ## Domain requirements
 
@@ -258,10 +249,8 @@ OpenSearch cost is separate from Bedrock embedding and Lambda. Start small in
 staging; scale data nodes and storage from observed corpus size, case chunk
 count, and query latency. Snapshot and ISM retention policies are customer-owned.
 
-## Related docs
+## Next
 
-- [`GOVCLOUD_CUSTOMER_CONFIGURATION.md`](GOVCLOUD_CUSTOMER_CONFIGURATION.md)
-- [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md)
-- [`../rag/RAG_OPERATIONS.md`](../rag/RAG_OPERATIONS.md)
-- [`../rag/KNOWLEDGE_BASE_OPERATIONS.md`](../rag/KNOWLEDGE_BASE_OPERATIONS.md)
-- [`../analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../analyst_portal/ANALYST_PORTAL_OPERATIONS.md)
+- **Path B step 4 (after Phase A):** [`BEDROCK_ACCOUNT_ENABLEMENT.md`](BEDROCK_ACCOUNT_ENABLEMENT.md)
+- **Path B step 8 complete:** [`KMS_CUSTOMER_KEY.md`](KMS_CUSTOMER_KEY.md) Phase B when using `CustomerKmsKeyArn`; then [`KNOWLEDGE_BASE_OPERATIONS.md`](../rag/KNOWLEDGE_BASE_OPERATIONS.md)
+- **Path C:** [`../../../README.md`](../../../README.md#path-c-custom-profiles) after Phase A or Phase B as applicable

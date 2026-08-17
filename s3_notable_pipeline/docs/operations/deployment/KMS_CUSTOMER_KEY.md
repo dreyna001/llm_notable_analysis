@@ -2,10 +2,9 @@
 
 Optional but common for production. When `CustomerKmsKeyArn` is set, the SAM
 template encrypts supported data-plane resources with that CMK instead of AWS
-owned keys.
-
-The product does **not** create the CMK or key policy. You provision the key,
-grant the product Lambda roles (and OpenSearch when used), then pass the ARN at deploy.
+owned keys. The product does **not** create the CMK or key policy — you provision
+the key, grant the product Lambda roles (and OpenSearch when used), then pass the
+ARN at deploy.
 
 Region: `us-gov-east-1`. Partition: `aws-us-gov`.
 
@@ -16,6 +15,9 @@ Region: `us-gov-east-1`. Partition: `aws-us-gov`.
 | Dev/staging core-only | AWS owned keys (leave `CustomerKmsKeyArn` blank) |
 | Production or regulated customer | CMK with explicit key policy |
 | OpenSearch encryption at rest | Same CMK as `CustomerKmsKeyArn` when aligning policies |
+
+**Path B step 1** (optional CMK before OpenSearch when the domain encrypts with it):
+[`../../../README.md`](../../../README.md#path-b-customer-default).
 
 Resources encrypted when `CustomerKmsKeyArn` is set (template behavior):
 
@@ -136,8 +138,8 @@ Create alias, enable rotation per org policy, then pass ARN as `CustomerKmsKeyAr
 3. SQS send/receive and DynamoDB writes succeed (no `KMS.AccessDeniedException` in logs)
 4. OpenSearch domain reports encryption at rest with the same CMK when aligned
 
-## Related docs
+## Next
 
-- [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md)
-- [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md)
-- [`../security/SECURITY_OPERATIONS.md`](../security/SECURITY_OPERATIONS.md)
+- **Path B step 1 complete (or skipped):** [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md) (step 2)
+- **Path B step 9 (CMK Phase B):** [`KNOWLEDGE_BASE_OPERATIONS.md`](../rag/KNOWLEDGE_BASE_OPERATIONS.md) after key policy update
+- **Path C:** [`../../../README.md`](../../../README.md#path-c-custom-profiles) when OpenSearch or CMK applies

@@ -3,44 +3,27 @@
 Customer-facing AWS tuning guides: SAM/CloudFormation parameters, Lambda environment
 variables, and validation steps without code changes.
 
-**Deploy navigation:** start at [`../../README.md`](../../README.md) for Path A (core),
-then [`../README.md`](../README.md) for Path B (RAG + portal) or Path C (custom profiles).
-
-Start with [`platform/CAPABILITY_PROFILES.md`](platform/CAPABILITY_PROFILES.md) and
-[`../../README.md`](../../README.md) deploy parameters when tuning an existing stack.
-Set SAM `CapabilityProfiles` (Lambda `CAPABILITY_PROFILES`); profiles are additive and
-`core` is included when omitted. Then open the category that matches your task.
-
-## Common Guide Shape
-
-- **What This Controls** — runtime behavior on AWS.
-- **Recommended Starting Posture** — conservative defaults for first rollout.
-- **Customer Decisions** — per-environment choices.
-- **Config Quick Reference** — SAM parameters and Lambda env vars.
-- **Validation And Rollout** — safe proof steps.
-- **Related Docs** — deployment, security, parity, and testing context.
+**Deploy navigation:** [`../../README.md`](../../README.md) contains the complete
+Path A (core), Path B (customer-default), and Path C (custom profiles) journeys.
 
 ## Deployment
 
-- [`deployment/GOVCLOUD_CUSTOMER_CONFIGURATION.md`](deployment/GOVCLOUD_CUSTOMER_CONFIGURATION.md) — reusable product boundary and per-customer operationalization inputs for `us-gov-east-1`.
-- [`deployment/CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md`](deployment/CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md) — what customers provision vs what the SAM stack creates.
-
-Lambda container image, ECR, and SAM deploy flow.
-
 | Guide | Purpose |
 |-------|---------|
-| [`deployment/DEPLOYMENT_IMAGE_STEPS.md`](deployment/DEPLOYMENT_IMAGE_STEPS.md) | Build, push, and deploy the Lambda image via SAM. |
-| [`deployment/VPC_NETWORK_PREREQUISITES.md`](deployment/VPC_NETWORK_PREREQUISITES.md) | VPC, subnets, NAT/endpoints, Lambda security groups before RAG/portal. |
-| [`deployment/OPENSEARCH_PROVISIONING.md`](deployment/OPENSEARCH_PROVISIONING.md) | Provision customer-managed VPC OpenSearch before RAG/portal deploy. |
-| [`deployment/BEDROCK_ACCOUNT_ENABLEMENT.md`](deployment/BEDROCK_ACCOUNT_ENABLEMENT.md) | Enable Bedrock models and map IDs/ARNs to SAM before deploy. |
+| [`deployment/GOVCLOUD_CUSTOMER_CONFIGURATION.md`](deployment/GOVCLOUD_CUSTOMER_CONFIGURATION.md) | GovCloud product boundary and per-customer operationalization inputs. |
+| [`deployment/CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md`](deployment/CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md) | What customers provision vs what the SAM stack creates. |
+| [`deployment/GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md`](deployment/GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md) | Copy-and-fill preset for `core,rag,analyst_portal`. |
+| [`deployment/DEPLOYMENT_IMAGE_STEPS.md`](deployment/DEPLOYMENT_IMAGE_STEPS.md) | Build, push, deploy Lambda image; rollback guidance. |
+| [`deployment/VPC_NETWORK_PREREQUISITES.md`](deployment/VPC_NETWORK_PREREQUISITES.md) | VPC, subnets, NAT/endpoints, Lambda security groups. |
+| [`deployment/OPENSEARCH_PROVISIONING.md`](deployment/OPENSEARCH_PROVISIONING.md) | Customer-managed VPC OpenSearch; Phase A/B access policy. |
+| [`deployment/BEDROCK_ACCOUNT_ENABLEMENT.md`](deployment/BEDROCK_ACCOUNT_ENABLEMENT.md) | Bedrock model enablement and ID/ARN mapping. |
 | [`deployment/KMS_CUSTOMER_KEY.md`](deployment/KMS_CUSTOMER_KEY.md) | Customer CMK key policies for stack-encrypted resources. |
 | [`deployment/PORTAL_JWT_IDENTITY.md`](deployment/PORTAL_JWT_IDENTITY.md) | OIDC/JWT IdP setup and claim mapping for analyst portal. |
-| [`../../README.md`](../../README.md) | Fast-path deploy and test scripts. |
 
 ## Platform
 
-Capability profiles (`core` default, optional `html_reports`), S3 intake/retention,
-MITRE validation, recovery.
+Capability profiles (`core` default, optional bundles), S3 intake/retention, MITRE
+validation, recovery.
 
 | Guide | Purpose |
 |-------|---------|
@@ -51,17 +34,15 @@ MITRE validation, recovery.
 
 ## Analyst Portal
 
-Requires `analyst_portal` and non-empty `CaseIndexTableName`. S3 case archive,
-DynamoDB CaseIndex, read-only portal API, pinned-case Q&A, optional static SPA.
+Requires `analyst_portal` and non-empty `CaseIndexTableName`.
 
 | Guide | Purpose |
 |-------|---------|
 | [`analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](analyst_portal/ANALYST_PORTAL_OPERATIONS.md) | Portal stack, archive, chat, and day-two ops. |
-| [`analyst_portal/ANALYST_PORTAL_THEME.md`](analyst_portal/ANALYST_PORTAL_THEME.md) | Federal SOC Dark theme: palette, fonts, radius, WCAG notes, visual reference. |
+| [`frontend/analyst-portal/README.md`](../../frontend/analyst-portal/README.md) | SPA local dev, build, upload, and Playwright E2E. |
+| [`analyst_portal/ANALYST_PORTAL_THEME.md`](analyst_portal/ANALYST_PORTAL_THEME.md) | Federal SOC Dark theme reference. |
 
 ## LLM Inference
-
-Part of `core` on every stack: Bedrock model id, Lambda timeout, inference budgets.
 
 | Guide | Purpose |
 |-------|---------|
@@ -69,7 +50,7 @@ Part of `core` on every stack: Bedrock model id, Lambda timeout, inference budge
 
 ## RAG and OpenSearch
 
-Requires `rag` profile. S3 manifest ingestion, Bedrock embeddings, and OpenSearch retrieval tuning.
+Requires `rag` profile. Application-managed OpenSearch retrieval in GovCloud.
 
 | Guide | Purpose |
 |-------|---------|
@@ -87,18 +68,12 @@ Requires `spl_readonly` or `elastic_readonly` (mutually exclusive).
 
 ## Integrations
 
-`ticket_draft` for ServiceNow drafts in JSON reports (no POST); `action_gated` for
-Splunk writeback when `SplunkSinkMode=notable_rest`, approval-gated ServiceNow
-create, and DynamoDB side-effect idempotency.
-
 | Guide | Purpose |
 |-------|---------|
 | [`integrations/SPLUNK_WRITEBACK_OPERATIONS.md`](integrations/SPLUNK_WRITEBACK_OPERATIONS.md) | Notable comment writeback when `action_gated` and `SplunkSinkMode=notable_rest`. |
 | [`integrations/SERVICENOW_OPERATIONS.md`](integrations/SERVICENOW_OPERATIONS.md) | Incident draft/create and approval payload. |
 
 ## Security
-
-IAM, secrets, TLS, and action gates regardless of profiles.
 
 | Guide | Purpose |
 |-------|---------|

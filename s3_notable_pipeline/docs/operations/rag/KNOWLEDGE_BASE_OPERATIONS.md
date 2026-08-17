@@ -136,11 +136,18 @@ customer. See
 
 ## Validation
 
+Corpus-level checks (infra preflight: [`../../testing/TESTING.md`](../../testing/TESTING.md)
+OpenSearch preflight table):
+
 1. Upload a versioned representative source document and manifest.
 2. Confirm the ingestion queue drains and no DLQ message appears.
-3. Verify indexed documents contain the correct tenant, corpus, source version, and embedding model.
-4. Retrieve a known query and confirm bounded, attributed results.
+3. Verify indexed documents contain correct tenant, corpus, source version, and embedding model.
+4. Retrieve a known query; confirm bounded, attributed results.
 5. Update and delete the source; verify stale chunks are no longer active.
-6. Replay the original job; verify no duplicate active chunks are created.
-7. Attempt a cross-tenant and cross-case query; verify no documents are returned.
+6. Replay the original job; verify no duplicate active chunks.
+7. **Negative:** cross-tenant and cross-case queries return no documents.
 8. Exercise Bedrock throttling and OpenSearch outage; verify retries, alarms, and redrive.
+
+## Deploy path — next
+
+- **Path B (step 11):** [`../analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../analyst_portal/ANALYST_PORTAL_OPERATIONS.md) and [`../../../frontend/analyst-portal/README.md`](../../../frontend/analyst-portal/README.md)

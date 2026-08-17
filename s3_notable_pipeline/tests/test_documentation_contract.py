@@ -19,6 +19,7 @@ class DocumentationContractTests(unittest.TestCase):
             "docs/operations/deployment/KMS_CUSTOMER_KEY.md",
             "docs/operations/deployment/PORTAL_JWT_IDENTITY.md",
             "docs/operations/deployment/CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md",
+            "docs/operations/deployment/GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md",
         )
         for relative_path in expected:
             self.assertTrue((PROJECT_ROOT / relative_path).is_file(), relative_path)
@@ -48,12 +49,13 @@ class DocumentationContractTests(unittest.TestCase):
                 msg=str(path.relative_to(PROJECT_ROOT)),
             )
 
-    def test_docs_readme_lists_deploy_paths(self) -> None:
+    def test_root_readme_owns_deploy_paths_and_docs_readme_indexes_runbooks(
+        self,
+    ) -> None:
         hub = (PROJECT_ROOT / "docs/README.md").read_text(encoding="utf-8")
         for snippet in (
-            "Choose your deploy path",
-            "Path A",
-            "Path B",
+            "Deploy journey (Path A/B/C)",
+            "GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md",
             "VPC_NETWORK_PREREQUISITES.md",
             "OPENSEARCH_PROVISIONING.md",
             "BEDROCK_ACCOUNT_ENABLEMENT.md",
@@ -66,7 +68,33 @@ class DocumentationContractTests(unittest.TestCase):
 
         root_readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("docs/README.md", root_readme)
-        self.assertIn("Choose your path", root_readme)
+        self.assertIn("Deploy — pick one path", root_readme)
+        self.assertIn("aws-us-gov", root_readme)
+        for path_heading in (
+            "Path A — Core only",
+            "Path B — Customer-default",
+            "Path C — Custom profiles",
+        ):
+            self.assertIn(path_heading, root_readme)
+        for path_b_step in (
+            "KMS_CUSTOMER_KEY.md",
+            "VPC_NETWORK_PREREQUISITES.md",
+            "OPENSEARCH_PROVISIONING.md",
+            "PORTAL_JWT_IDENTITY.md",
+            "GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md",
+            "KNOWLEDGE_BASE_OPERATIONS.md",
+            "ANALYST_PORTAL_OPERATIONS.md",
+            "docs/testing/TESTING.md",
+        ):
+            self.assertIn(path_b_step, root_readme)
+
+        deployment_docs = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in (PROJECT_ROOT / "docs/operations/deployment").glob("*.md")
+        )
+        self.assertNotIn("#path-a--", deployment_docs)
+        self.assertNotIn("#path-b--", deployment_docs)
+        self.assertNotIn("#path-c--", deployment_docs)
 
 
 if __name__ == "__main__":

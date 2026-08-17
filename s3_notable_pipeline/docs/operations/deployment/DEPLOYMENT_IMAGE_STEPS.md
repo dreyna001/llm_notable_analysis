@@ -5,6 +5,14 @@ embedding, RAG ingestion, disposition sync, and portal functions. Handler
 commands are overridden per function. The release image must be stored in the
 customer's `us-gov-east-1` ECR repository and referenced by digest.
 
+Partition `aws-us-gov`, region `us-gov-east-1` only. Before ECR push or `sam deploy`, follow
+the live mutation gate in [`../../../README.md`](../../../README.md#1-prerequisites)
+(account ID, partition, region, role/profile, stack name, change set, explicit
+customer approval).
+
+**Path B step 6** (digest-qualified image before SAM):
+[`../../../README.md`](../../../README.md#path-b-customer-default).
+
 ## Build Contract
 
 Run from `s3_notable_pipeline/`:
@@ -91,8 +99,26 @@ Provision the OpenSearch domain first:
 CloudFormation rules fail deployment when tenant, endpoint, VPC, or JWT grants
 required by an enabled capability are missing.
 
+## Rollback (failed release)
+
+Rollback is **redeploy**, not stack deletion.
+
+1. Identify the last known-good immutable `ImageDigest` for the same ECR repository.
+2. Review the previous CloudFormation template/parameters or change set.
+3. Obtain explicit customer approval for the redeploy.
+4. Run `sam deploy` with the previous `ImageDigest` (and prior parameter set if it changed).
+5. Validate recovery: core smoke ([`../../../README.md`](../../../README.md) section 3), OpenSearch preflight if vector capabilities are enabled ([`../../testing/TESTING.md`](../../testing/TESTING.md)), portal `/ready` when applicable.
+
+Record rollback digest, deploy time, and validation outcome in release evidence.
+
 ## Release Evidence
 
 Record the source commit, base-image digest, final image digest, ECR repository,
 rendered template, CloudFormation change set, test results, smoke-test results,
 and rollback digest. Do not use `latest` as a release reference.
+
+## Next
+
+- **Path A step 3:** `setup-and-deploy.*` — [`../../../README.md`](../../../README.md#path-a-core-only)
+- **Path B step 7:** [`GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md`](GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md)
+- **Path C step 6:** SAM deploy with profile-specific parameters — [`../../../README.md`](../../../README.md#path-c-custom-profiles)

@@ -114,12 +114,10 @@ bundle (`core,rag,analyst_portal`):
 Preset files: [`../../../deploy/aws/presets/customer-default.env.example`](../../../deploy/aws/presets/customer-default.env.example),
 [`../../../deploy/aws/presets/samconfig.customer-default.toml.example`](../../../deploy/aws/presets/samconfig.customer-default.toml.example).
 
-Manual Path B (same bundle without the preset) remains in [`../../README.md`](../../README.md).
-
 Commercial reference (do not deploy into GovCloud):
 [`../../../../s3_notable_pipeline_commercial/docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](../../../../s3_notable_pipeline_commercial/docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md)
 
-## Related docs
+## Next
 
-- Deploy path hub: [`../../README.md`](../../README.md)
-- Customer values checklist: [`GOVCLOUD_CUSTOMER_CONFIGURATION.md`](GOVCLOUD_CUSTOMER_CONFIGURATION.md)
+Pick **Path A**, **Path B**, or **Path C** in [`../../../README.md`](../../../README.md) (deploy path hub).
+Customer values checklist: [`GOVCLOUD_CUSTOMER_CONFIGURATION.md`](GOVCLOUD_CUSTOMER_CONFIGURATION.md).
