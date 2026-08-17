@@ -27,10 +27,24 @@ The Lambda performs bounded, read-only `s3:GetObject` from the private UI bucket
 
 IdP and JWT contract: [`../deployment/PORTAL_JWT_IDENTITY.md`](../deployment/PORTAL_JWT_IDENTITY.md).
 
-- `PortalAuthMode=jwt|iam`, `PortalJwtIssuer`, `PortalJwtAudience`, and at least
-  one of `PortalRequiredAnalystRole` or `PortalRequiredAnalystScope` (JWT mode)
+**Backend**
+
+- `PortalAuthMode=jwt|iam` — `jwt` for generic OIDC access tokens (analyst
+  browsers); `iam` for SigV4 API automation only (not browser analysts)
+- `PortalJwtIssuer`, `PortalJwtAudience`, and at least one of
+  `PortalRequiredAnalystRole` or `PortalRequiredAnalystScope` (JWT mode)
+- optional `PortalJwtTenantId` aligned with the Entra tenant id
 - exact `PortalCorsAllowedOrigins` / `PORTAL_CORS_ALLOWED_ORIGINS`
 - `RagTenantId` and deployment/tenant claim mapping
+
+**Frontend (SPA build, JWT backend)**
+
+- `VITE_PORTAL_AUTH_MODE=manual|entra|none` — `manual` default; `entra` for
+  MSAL PKCE Entra sign-in; `none` when no browser token acquisition is desired
+- Entra production: customer Entra tenant id, API app client id/audience, SPA
+  client id, delegated API scope, optional analyst app role, exact redirect and
+  logout URIs, portal origin in CORS — see PORTAL_JWT_IDENTITY.md
+- use API **access tokens**, not Entra ID tokens; public SPA — no client secret
 - `OpenSearchEndpoint`, `OpenSearchDomainArn`, index names; VPC subnet and security group IDs
 - customer KMS key ARN, retention settings, OpenSearch ISM policy
 - approved analysis, embedding, and optional portal chat model IDs/ARNs
@@ -38,9 +52,21 @@ IdP and JWT contract: [`../deployment/PORTAL_JWT_IDENTITY.md`](../deployment/POR
 
 ## Authentication And Authorization
 
-JWT mode: API Gateway JWT authorizer plus Lambda validation of issuer, audience,
-tenant, and analyst grant. Valid token without configured role or scope receives
-`403`. IAM mode: SigV4 API Gateway request plus application tenant checks.
+JWT mode (`PortalAuthMode=jwt`): API Gateway JWT authorizer plus Lambda
+validation of issuer, audience, optional tenant (`PortalJwtTenantId` when
+set), and analyst grant. Missing or invalid bearer token returns `401`. Valid
+access token without configured role or scope returns `403`.
+
+IAM mode (`PortalAuthMode=iam`): SigV4-signed API calls for automation and
+operator tooling only. Analysts do not authenticate through the browser with IAM
+credentials; browser sessions require JWT mode and customer IdP or `manual` /
+`entra` SPA token acquisition.
+
+Frontend `VITE_PORTAL_AUTH_MODE` controls browser token acquisition only when
+backend JWT mode is enabled: `manual` stores a supplied access token,
+`entra` performs interactive Entra sign-in (MSAL PKCE, no client secret),
+`none` does not acquire tokens in the browser.
+
 `/health` and `/ready` are unauthenticated; case and chat routes are never public.
 
 Static SPA routes are unauthenticated (no customer data or credentials). Portal

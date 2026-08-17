@@ -172,6 +172,48 @@ class ConfigTests(unittest.TestCase):
         ):
             load_config()
 
+    def test_portal_jwt_auth_requires_https_issuer(self) -> None:
+        """JWT discovery must not use an insecure issuer endpoint."""
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "PORTAL_ENABLED": "true",
+                    "CASE_INDEX_TABLE": "notable-case-index",
+                    "PORTAL_JWT_ISSUER": "http://issuer.example.test",
+                    "PORTAL_JWT_AUDIENCE": "notable-portal",
+                    "PORTAL_REQUIRED_ANALYST_ROLE": "Case.Reader",
+                },
+                clear=True,
+            ),
+            self.assertRaisesRegex(ValueError, "PORTAL_JWT_ISSUER must be an HTTPS URL"),
+        ):
+            load_config()
+
+    def test_portal_jwt_tenant_id_requires_matching_entra_issuer(self) -> None:
+        """Tenant enforcement and issuer must identify the same Entra tenant."""
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "PORTAL_ENABLED": "true",
+                    "CASE_INDEX_TABLE": "notable-case-index",
+                    "PORTAL_JWT_ISSUER": (
+                        "https://login.microsoftonline.com/"
+                        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/v2.0"
+                    ),
+                    "PORTAL_JWT_AUDIENCE": "notable-portal",
+                    "PORTAL_JWT_TENANT_ID": (
+                        "ffffffff-ffff-ffff-ffff-ffffffffffff"
+                    ),
+                    "PORTAL_REQUIRED_ANALYST_ROLE": "Case.Reader",
+                },
+                clear=True,
+            ),
+            self.assertRaisesRegex(ValueError, "must match PORTAL_JWT_TENANT_ID"),
+        ):
+            load_config()
+
     def test_portal_jwt_auth_requires_analyst_grant(self) -> None:
         """A valid JWT audience alone must not grant analyst access."""
         with (
@@ -307,6 +349,71 @@ class ConfigTests(unittest.TestCase):
             self.assertRaisesRegex(ValueError, "private or local IP"),
         ):
             load_config()
+
+    def test_portal_jwt_tenant_id_must_be_uuid_when_configured(self) -> None:
+        with (
+            patch.dict(
+                "os.environ",
+                {"PORTAL_JWT_TENANT_ID": "not-a-uuid"},
+                clear=True,
+            ),
+            self.assertRaisesRegex(ValueError, "PORTAL_JWT_TENANT_ID"),
+        ):
+            load_config()
+
+    def test_portal_jwt_tenant_id_is_optional_for_jwt_portal(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "CAPABILITY_PROFILES": "core,analyst_portal",
+                "OUTPUT_BUCKET_NAME": "notable-output",
+                "CASE_INDEX_TABLE": "notable-case-index",
+                "CASE_EMBED_QUEUE_URL": "https://sqs.us-east-1.amazonaws.com/123456789012/embed",
+                "PORTAL_JWT_ISSUER": "https://issuer.example.test",
+                "PORTAL_JWT_AUDIENCE": "notable-portal",
+                "PORTAL_REQUIRED_ANALYST_ROLE": "Case.Reader",
+                "OPENSEARCH_ENDPOINT": "https://search-notable.example.test",
+                "RAG_TENANT_ID": "customer-a",
+            },
+            clear=True,
+        ):
+            config = load_config()
+
+        self.assertEqual(config.PORTAL_JWT_TENANT_ID, "")
+
+    def test_portal_jwt_tenant_id_loads_when_configured(self) -> None:
+        tenant_id = "11111111-2222-3333-4444-555555555555"
+        with patch.dict(
+            "os.environ",
+            {
+                "PORTAL_JWT_TENANT_ID": tenant_id,
+            },
+            clear=True,
+        ):
+            config = load_config()
+
+        self.assertEqual(config.PORTAL_JWT_TENANT_ID, tenant_id)
+
+    def test_iam_portal_auth_allows_empty_jwt_settings(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "CAPABILITY_PROFILES": "core,analyst_portal",
+                "OUTPUT_BUCKET_NAME": "notable-output",
+                "CASE_INDEX_TABLE": "notable-case-index",
+                "CASE_EMBED_QUEUE_URL": "https://sqs.us-east-1.amazonaws.com/123456789012/embed",
+                "PORTAL_AUTH_MODE": "iam",
+                "OPENSEARCH_ENDPOINT": "https://search-notable.example.test",
+                "RAG_TENANT_ID": "customer-a",
+            },
+            clear=True,
+        ):
+            config = load_config()
+
+        self.assertEqual(config.PORTAL_AUTH_MODE, "iam")
+        self.assertEqual(config.PORTAL_JWT_ISSUER, "")
+        self.assertEqual(config.PORTAL_JWT_AUDIENCE, "")
+        self.assertEqual(config.PORTAL_JWT_TENANT_ID, "")
 
 
 if __name__ == "__main__":

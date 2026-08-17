@@ -105,6 +105,12 @@ def portal_claims_authorized(claims: dict[str, Any] | None, config: Config) -> b
     if not isinstance(claims, dict):
         return False
 
+    required_tenant = _setting(config, "PORTAL_JWT_TENANT_ID")
+    if required_tenant:
+        token_tenant = str(claims.get("tid") or "").strip()
+        if token_tenant.casefold() != required_tenant.casefold():
+            return False
+
     if required_role:
         roles = _claim_values(
             claims,

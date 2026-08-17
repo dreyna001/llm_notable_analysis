@@ -40,6 +40,7 @@ PortalUiBucketName=<customer-portal-ui-bucket> \
 PortalAuthMode=jwt \
 PortalJwtIssuer=<oidc-issuer-url> \
 PortalJwtAudience=<portal-api-audience> \
+PortalJwtTenantId=<entra-tenant-id-or-empty> \
 PortalRequiredAnalystRole=<analyst-role-claim-value> \
 PortalCorsAllowedOrigins=<https://portal.example.com> \
 OpenSearchEndpoint=<vpc-opensearch-endpoint> \

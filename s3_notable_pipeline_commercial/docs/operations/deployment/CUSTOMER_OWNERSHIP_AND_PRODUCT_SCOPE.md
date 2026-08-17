@@ -23,7 +23,7 @@ product does not run CloudFormation or automation for them.
 | --- | --- | --- |
 | OpenSearch domain | VPC-only domain, security groups, domain access policy | [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) |
 | VPC, subnets, NAT, VPC endpoints | Private subnets, routing, Lambda security groups | [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md) |
-| JWT / OIDC IdP | Cognito, Okta, Keycloak, or corporate OIDC; analyst role/scope claims | [`PORTAL_JWT_IDENTITY.md`](PORTAL_JWT_IDENTITY.md) |
+| JWT / OIDC IdP | Cognito, Okta, Keycloak, Microsoft Entra, or corporate OIDC; API access tokens; Entra API + SPA app registrations when using `entra` SPA mode; analyst role/scope claims | [`PORTAL_JWT_IDENTITY.md`](PORTAL_JWT_IDENTITY.md) |
 | CloudFront, WAF, public DNS, portal TLS | Optional front door in front of API Gateway URL | Not in v1 — see [`../analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../analyst_portal/ANALYST_PORTAL_OPERATIONS.md) |
 | Customer CMK (optional) | Create key, key policy for Lambda roles + OpenSearch | [`KMS_CUSTOMER_KEY.md`](KMS_CUSTOMER_KEY.md) |
 | ECR image | Build, push, record digest for deploy | [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md) |

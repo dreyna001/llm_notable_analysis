@@ -176,6 +176,7 @@ class DeployTemplateTests(unittest.TestCase):
                     "CASE_EMBED_QUEUE_URL",
                     "PORTAL_REQUIRED_ANALYST_ROLE",
                     "PORTAL_REQUIRED_ANALYST_SCOPE",
+                    "PORTAL_JWT_TENANT_ID",
                     "ReportBatchItemFailures",
                 ]
                 if path.endswith("template-sam.yaml"):
@@ -593,6 +594,18 @@ class DeployTemplateTests(unittest.TestCase):
                 rules = template.get("Rules", {})
                 for rule_name in required_rules:
                     self.assertIn(rule_name, rules, msg=f"{path} missing rule {rule_name}")
+
+    def test_portal_jwt_tenant_id_parameter_is_optional(self) -> None:
+        valid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        invalid = ("not-a-uuid", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeeg")
+        for path in TEMPLATE_PATHS:
+            with self.subTest(path=path):
+                parameter = load_template(path)["Parameters"]["PortalJwtTenantId"]
+                pattern = parameter["AllowedPattern"]
+                self.assertIsNotNone(re.fullmatch(pattern, ""))
+                self.assertIsNotNone(re.fullmatch(pattern, valid))
+                for candidate in invalid:
+                    self.assertIsNone(re.fullmatch(pattern, candidate))
 
 
 if __name__ == "__main__":

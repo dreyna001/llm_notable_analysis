@@ -192,7 +192,16 @@ class PortalHandlerTests(unittest.TestCase):
         s3 = StaticS3()
         with (
             patch.dict("os.environ", {"PORTAL_UI_BUCKET": "portal-ui"}),
-            patch.object(portal_handler, "load_config", return_value=portal_config()),
+            patch.object(
+                portal_handler,
+                "load_config",
+                return_value=portal_config(
+                    PORTAL_JWT_ISSUER=(
+                        "https://login.microsoftonline.com/"
+                        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/v2.0"
+                    )
+                ),
+            ),
             patch.object(portal_handler, "s3_client", return_value=s3),
         ):
             response = portal_handler.handler({"rawPath": "/", "requestContext": {"http": {"method": "GET"}}}, None)
@@ -201,6 +210,15 @@ class PortalHandlerTests(unittest.TestCase):
         self.assertTrue(response["isBase64Encoded"])
         self.assertEqual(base64.b64decode(response["body"]), b"<html>portal</html>")
         self.assertEqual(s3.request, {"Bucket": "portal-ui", "Key": "index.html"})
+        policy = response["headers"]["content-security-policy"]
+        self.assertIn(
+            "connect-src 'self' https://login.microsoftonline.com",
+            policy,
+        )
+        self.assertIn(
+            "frame-src 'self' https://login.microsoftonline.com",
+            policy,
+        )
 
     def test_bearer_jwt_without_analyst_grant_is_rejected(self) -> None:
         request = {
@@ -224,6 +242,42 @@ class PortalHandlerTests(unittest.TestCase):
             response = portal_handler.handler(request, None)
 
         self.assertEqual(response["statusCode"], 403)
+
+    def test_bearer_jwt_with_wrong_tenant_is_forbidden_not_unauthorized(self) -> None:
+        tenant_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        request = {
+            "rawPath": "/api/cases",
+            "requestContext": {"http": {"method": "GET"}},
+            "headers": {"Authorization": "Bearer test-token"},
+        }
+        with (
+            patch.object(
+                portal_handler,
+                "load_config",
+                return_value=portal_config(
+                    PORTAL_JWT_ISSUER=(
+                        f"https://login.microsoftonline.com/{tenant_id}/v2.0"
+                    ),
+                    PORTAL_JWT_TENANT_ID=tenant_id,
+                ),
+            ),
+            patch.object(
+                portal_handler,
+                "resolve_portal_jwt_claims",
+                return_value={
+                    "iss": "https://issuer.example.test",
+                    "aud": "portal",
+                    "sub": "user-1",
+                    "tid": "ffffffff-ffff-ffff-ffff-ffffffffffff",
+                    "roles": ["Case.Reader"],
+                },
+            ),
+            patch.object(portal_handler, "dynamodb_client", return_value=FakeDynamoDbClient()),
+        ):
+            response = portal_handler.handler(request, None)
+
+        self.assertEqual(response["statusCode"], 403)
+        self.assertEqual(json.loads(response["body"])["error"], "Forbidden")
 
     def test_mutating_method_is_rejected(self) -> None:
         with patch.object(portal_handler, "load_config", return_value=portal_config()):

@@ -141,6 +141,50 @@ class PortalJwtTests(unittest.TestCase):
         }
         self.assertEqual(portal_jwt.resolve_portal_user_id(event, config), "analyst-1")
 
+    def test_portal_claims_authorized_enforces_tid_when_configured(self) -> None:
+        from s3_notable_pipeline.config import Config
+
+        tenant_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        config = Config(
+            PORTAL_ENABLED=True,
+            PORTAL_AUTH_MODE="jwt",
+            PORTAL_JWT_ISSUER=(
+                f"https://login.microsoftonline.com/{tenant_id}/v2.0"
+            ),
+            PORTAL_JWT_AUDIENCE="portal",
+            PORTAL_JWT_TENANT_ID=tenant_id,
+            PORTAL_REQUIRED_ANALYST_ROLE="Case.Reader",
+            CASE_INDEX_TABLE="case-index",
+        )
+        authorized_claims = {
+            "tid": tenant_id,
+            "roles": ["Case.Reader"],
+        }
+        wrong_tenant_claims = {
+            "tid": "ffffffff-ffff-ffff-ffff-ffffffffffff",
+            "roles": ["Case.Reader"],
+        }
+        missing_tenant_claims = {"roles": ["Case.Reader"]}
+
+        self.assertTrue(portal_jwt.portal_claims_authorized(authorized_claims, config))
+        self.assertFalse(portal_jwt.portal_claims_authorized(wrong_tenant_claims, config))
+        self.assertFalse(portal_jwt.portal_claims_authorized(missing_tenant_claims, config))
+
+    def test_portal_claims_authorized_ignores_tid_when_not_configured(self) -> None:
+        from s3_notable_pipeline.config import Config
+
+        config = Config(
+            PORTAL_ENABLED=True,
+            PORTAL_AUTH_MODE="jwt",
+            PORTAL_JWT_ISSUER="https://issuer.example.test",
+            PORTAL_JWT_AUDIENCE="portal",
+            PORTAL_REQUIRED_ANALYST_ROLE="Case.Reader",
+            CASE_INDEX_TABLE="case-index",
+        )
+        claims = {"roles": ["Case.Reader"]}
+
+        self.assertTrue(portal_jwt.portal_claims_authorized(claims, config))
+
 
 if __name__ == "__main__":
     unittest.main()

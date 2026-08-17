@@ -12,6 +12,9 @@ from .runtime_security import validate_https_url
 _TRUE_VALUES = {"true", "1", "yes"}
 _FALSE_VALUES = {"false", "0", "no"}
 _DYNAMODB_TABLE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{3,255}$")
+_PORTAL_JWT_TENANT_ID_PATTERN = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
 
 _CAPABILITY_PROFILE_FLAGS: dict[str, dict[str, Any]] = {
     "core": {},
@@ -321,6 +324,7 @@ class Config:
     PORTAL_MAX_DETAIL_BYTES: int = 262_144
     PORTAL_JWT_ISSUER: str = ""
     PORTAL_JWT_AUDIENCE: str = ""
+    PORTAL_JWT_TENANT_ID: str = ""
     PORTAL_REQUIRED_ANALYST_ROLE: str = "Case.Reader"
     PORTAL_REQUIRED_ANALYST_SCOPE: str = ""
     PORTAL_CORS_ALLOWED_ORIGINS: str = ""
@@ -563,11 +567,36 @@ class Config:
         self.PORTAL_AUTH_MODE = (self.PORTAL_AUTH_MODE or "jwt").strip().lower()
         if self.PORTAL_AUTH_MODE not in {"jwt", "iam"}:
             raise ValueError("PORTAL_AUTH_MODE must be jwt or iam")
+        self.PORTAL_JWT_TENANT_ID = self.PORTAL_JWT_TENANT_ID.strip()
+        if self.PORTAL_JWT_TENANT_ID and not _PORTAL_JWT_TENANT_ID_PATTERN.fullmatch(
+            self.PORTAL_JWT_TENANT_ID
+        ):
+            raise ValueError(
+                "PORTAL_JWT_TENANT_ID must be a UUID when configured"
+            )
         if self.PORTAL_ENABLED and self.PORTAL_AUTH_MODE == "jwt":
             if not self.PORTAL_JWT_ISSUER.strip():
                 raise ValueError(
                     "PORTAL_JWT_ISSUER is required when portal JWT auth is enabled"
                 )
+            self.PORTAL_JWT_ISSUER = validate_https_url(
+                self.PORTAL_JWT_ISSUER,
+                setting_name="PORTAL_JWT_ISSUER",
+                allow_private=self.ALLOW_PRIVATE_OUTBOUND_ENDPOINTS,
+            )
+            if self.PORTAL_JWT_TENANT_ID:
+                expected_entra_issuer = (
+                    "https://login.microsoftonline.com/"
+                    f"{self.PORTAL_JWT_TENANT_ID}/v2.0"
+                )
+                if (
+                    self.PORTAL_JWT_ISSUER.rstrip("/").casefold()
+                    != expected_entra_issuer.casefold()
+                ):
+                    raise ValueError(
+                        "PORTAL_JWT_ISSUER must match PORTAL_JWT_TENANT_ID "
+                        "for an Entra tenant"
+                    )
             if not self.PORTAL_JWT_AUDIENCE.strip():
                 raise ValueError(
                     "PORTAL_JWT_AUDIENCE is required when portal JWT auth is enabled"
@@ -1006,6 +1035,7 @@ def load_config() -> Config:
         ),
         PORTAL_JWT_ISSUER=os.getenv("PORTAL_JWT_ISSUER", ""),
         PORTAL_JWT_AUDIENCE=os.getenv("PORTAL_JWT_AUDIENCE", ""),
+        PORTAL_JWT_TENANT_ID=_optional_str_env("PORTAL_JWT_TENANT_ID"),
         PORTAL_REQUIRED_ANALYST_ROLE=os.getenv(
             "PORTAL_REQUIRED_ANALYST_ROLE", ""
         ),

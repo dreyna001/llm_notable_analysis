@@ -9,6 +9,7 @@ import os
 import re
 import threading
 from typing import Any
+from urllib.parse import urlparse
 
 from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
@@ -192,12 +193,39 @@ def _handle_static_asset(config: Config, path: str) -> dict[str, Any]:
             "cache-control": cache_control,
             # style-src/font-src allow the "Federal SOC Dark" Google Fonts import
             # (Public Sans / Roboto Mono) in frontend/analyst-portal/src/index.css.
-            "content-security-policy": "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'",
+            "content-security-policy": _portal_content_security_policy(config),
             "x-content-type-options": "nosniff",
         },
         "isBase64Encoded": True,
         "body": base64.b64encode(payload).decode("ascii"),
     }
+
+
+def _portal_content_security_policy(config: Config) -> str:
+    """Return a bounded CSP for the configured browser authentication flow."""
+
+    issuer = str(getattr(config, "PORTAL_JWT_ISSUER", "") or "").strip()
+    parsed_issuer = urlparse(issuer)
+    connect_sources = ["'self'"]
+    frame_sources = ["'self'"]
+    if (
+        str(getattr(config, "PORTAL_AUTH_MODE", "")).lower() == "jwt"
+        and parsed_issuer.scheme == "https"
+        and parsed_issuer.hostname == "login.microsoftonline.com"
+    ):
+        entra_origin = "https://login.microsoftonline.com"
+        connect_sources.append(entra_origin)
+        frame_sources.append(entra_origin)
+
+    return (
+        "default-src 'self'; "
+        f"connect-src {' '.join(connect_sources)}; "
+        f"frame-src {' '.join(frame_sources)}; "
+        "img-src 'self' data:; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "script-src 'self'"
+    )
 
 
 def _handle_chat_session_route(

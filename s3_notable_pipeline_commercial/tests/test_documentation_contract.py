@@ -299,6 +299,44 @@ class DocumentationContractTests(unittest.TestCase):
         self.assertNotIn("#path-b--", deployment_docs)
         self.assertNotIn("#path-c--", deployment_docs)
 
+    def test_portal_auth_documentation_covers_configurable_modes(self) -> None:
+        jwt_doc = (
+            PROJECT_ROOT / "docs/operations/deployment/PORTAL_JWT_IDENTITY.md"
+        ).read_text(encoding="utf-8")
+        portal_ops = (
+            PROJECT_ROOT
+            / "docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md"
+        ).read_text(encoding="utf-8")
+        frontend_readme = (
+            PROJECT_ROOT / "frontend/analyst-portal/README.md"
+        ).read_text(encoding="utf-8")
+
+        combined = "\n".join((jwt_doc, portal_ops, frontend_readme))
+        for snippet in (
+            "PortalAuthMode=jwt",
+            "PortalAuthMode=iam",
+            "VITE_PORTAL_AUTH_MODE",
+            "manual",
+            "entra",
+            "none",
+            "access token",
+            "PortalJwtTenantId",
+            "VITE_PORTAL_ENTRA_TENANT_ID",
+            "VITE_PORTAL_ENTRA_CLIENT_ID",
+            "VITE_PORTAL_ENTRA_API_SCOPE",
+            "VITE_PORTAL_ENTRA_REDIRECT_URI",
+            "VITE_PORTAL_ENTRA_POST_LOGOUT_URI",
+            "/auth/silent.html",
+            "no client secret",
+            "401",
+            "403",
+            "MSAL",
+        ):
+            self.assertIn(snippet, combined)
+
+        self.assertIn("browser analyst path", combined.lower())
+        self.assertNotIn("iam works in the browser", combined.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,6 +11,7 @@ import {
   parseHealthResponse,
   parsePortalCapabilities,
 } from "./responseSchemas";
+import { portalAuthMode } from "../auth/authConfig";
 import type {
   CaseDetail,
   CaseListCursor,
@@ -25,9 +26,15 @@ import type {
 } from "../types";
 
 export type ApiErrorKind = "cancelled" | "timeout" | "http" | "invalid_response";
+export type PortalAuthErrorKind = "unauthorized" | "forbidden";
+type PortalTokenProvider = () => Promise<string>;
+type PortalAuthErrorHandler = (kind: PortalAuthErrorKind) => void;
 
 export const INVALID_RESPONSE_STATUS = 502;
 export const PORTAL_AUTH_TOKEN_STORAGE_KEY = "notable.portal.jwt";
+
+let portalTokenProvider: PortalTokenProvider | null = null;
+let portalAuthErrorHandler: PortalAuthErrorHandler | null = null;
 
 export class ApiError extends Error {
   status: number;
@@ -123,9 +130,20 @@ export function setPortalAuthToken(token: string): void {
 
 export function clearPortalAuthToken(): void {
   window.sessionStorage.removeItem(PORTAL_AUTH_TOKEN_STORAGE_KEY);
+  window.localStorage.removeItem(PORTAL_AUTH_TOKEN_STORAGE_KEY);
 }
 
-function portalAuthToken(): string {
+export function setPortalTokenProvider(provider: PortalTokenProvider | null): void {
+  portalTokenProvider = provider;
+}
+
+export function setPortalAuthErrorHandler(
+  handler: PortalAuthErrorHandler | null,
+): void {
+  portalAuthErrorHandler = handler;
+}
+
+function manualPortalAuthToken(): string {
   return (
     window.sessionStorage.getItem(PORTAL_AUTH_TOKEN_STORAGE_KEY) ||
     window.localStorage.getItem(PORTAL_AUTH_TOKEN_STORAGE_KEY) ||
@@ -133,13 +151,33 @@ function portalAuthToken(): string {
   ).trim();
 }
 
-function withAuthHeaders(headers: HeadersInit | undefined): Headers {
+async function portalAuthToken(): Promise<string> {
+  if (portalTokenProvider) {
+    return (await portalTokenProvider()).trim();
+  }
+  if (portalAuthMode() !== "manual") {
+    return "";
+  }
+  return manualPortalAuthToken();
+}
+
+async function withAuthHeaders(headers: HeadersInit | undefined): Promise<Headers> {
   const merged = new Headers(headers);
-  const token = portalAuthToken();
+  const token = await portalAuthToken();
   if (token) {
     merged.set("Authorization", `Bearer ${token}`);
   }
   return merged;
+}
+
+function notifyPortalAuthError(status: number): void {
+  if (status === 401) {
+    portalAuthErrorHandler?.("unauthorized");
+    return;
+  }
+  if (status === 403) {
+    portalAuthErrorHandler?.("forbidden");
+  }
 }
 
 function mergeAbortSignals(
@@ -187,12 +225,21 @@ async function apiFetch(
     signal ?? undefined,
   );
   try {
-    return await fetch(apiUrl(input), {
+    const headers = await withAuthHeaders(init.headers);
+    if (signal?.aborted) {
+      throw new ApiError(0, "Request cancelled.", "cancelled");
+    }
+    const response = await fetch(apiUrl(input), {
       ...init,
-      headers: withAuthHeaders(init.headers),
+      headers,
       signal: mergedSignal,
     });
+    notifyPortalAuthError(response.status);
+    return response;
   } catch (error) {
+    if (error instanceof ApiError && error.kind === "cancelled") {
+      throw error;
+    }
     if (signal?.aborted) {
       throw new ApiError(0, "Request cancelled.", "cancelled");
     }

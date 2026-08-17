@@ -33,8 +33,11 @@ update, ServiceNow create) are gated and deduplicated.
 - Treat generated SPL, Elasticsearch Query DSL, and ticket payloads as untrusted
   until policy validation passes.
 - For the analyst portal, use `PortalAuthMode=jwt` with exact JWT issuer,
-  audience, tenant, analyst role or scope, and `PortalCorsAllowedOrigins`.
-  Do not put JWTs in static assets or logs.
+  audience, optional `PortalJwtTenantId`, analyst role or scope, and
+  `PortalCorsAllowedOrigins`. Production Entra browsers use `VITE_PORTAL_AUTH_MODE=entra`
+  (MSAL PKCE, no client secret) and API access tokens — not ID tokens. Do not put
+  tokens in static assets or logs. `PortalAuthMode=iam` is for SigV4 API automation,
+  not analyst browser sessions.
 
 ## IAM Least Privilege
 

@@ -569,6 +569,12 @@ Parameters:
     Description: JWT audience required when PortalAuthMode=jwt and the portal is enabled.
     Default: ''
 
+  PortalJwtTenantId:
+    Type: String
+    Description: Optional Entra tenant ID (JWT tid claim) enforced when PortalAuthMode=jwt.
+    Default: ''
+    AllowedPattern: '^$|^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+
   PortalCorsAllowedOrigins:
     Type: String
     Description: Comma-separated browser origins allowed to call the portal API.
@@ -1949,6 +1955,7 @@ Resources:
           PORTAL_MAX_DETAIL_BYTES: !Ref PortalMaxDetailBytes
           PORTAL_JWT_ISSUER: !Ref PortalJwtIssuer
           PORTAL_JWT_AUDIENCE: !Ref PortalJwtAudience
+          PORTAL_JWT_TENANT_ID: !Ref PortalJwtTenantId
           PORTAL_CORS_ALLOWED_ORIGINS: !Ref PortalCorsAllowedOrigins
           PORTAL_REQUIRED_ANALYST_ROLE: !Ref PortalRequiredAnalystRole
           PORTAL_REQUIRED_ANALYST_SCOPE: !Ref PortalRequiredAnalystScope
@@ -2748,6 +2755,7 @@ Resources:
           PORTAL_MAX_DETAIL_BYTES: !Ref PortalMaxDetailBytes
           PORTAL_JWT_ISSUER: !Ref PortalJwtIssuer
           PORTAL_JWT_AUDIENCE: !Ref PortalJwtAudience
+          PORTAL_JWT_TENANT_ID: !Ref PortalJwtTenantId
           PORTAL_CORS_ALLOWED_ORIGINS: !Ref PortalCorsAllowedOrigins
           PORTAL_REQUIRED_ANALYST_ROLE: !Ref PortalRequiredAnalystRole
           PORTAL_REQUIRED_ANALYST_SCOPE: !Ref PortalRequiredAnalystScope
