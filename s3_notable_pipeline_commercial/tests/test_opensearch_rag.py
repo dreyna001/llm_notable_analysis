@@ -432,6 +432,43 @@ class RagIngestionTests(unittest.TestCase):
         self.assertEqual(adapter.bulks[0]["index"], "soc-knowledge")
         self.assertEqual(adapter.bulks[0]["actions"][0]["document"]["tenant_id"], "tenant-a")
 
+    def test_manifest_ingestion_stores_canonical_corpus_id_for_documented_alias(self):
+        manifest = {
+            "manifest_schema_version": 1,
+            "manifest_id": "manifest-documented-alias",
+            "manifest_version": "v1",
+            "tenant_id": "tenant-a",
+            "corpus_id": "soc_operational_knowledge",
+            "documents": [
+                {
+                    "bucket": "docs",
+                    "key": "rag-sources/sop.md",
+                    "version_id": "v1",
+                    "source_file": "sop.md",
+                }
+            ],
+        }
+        adapter = FakeIngestionAdapter()
+
+        result = ingest_manifest(
+            manifest_bucket="docs",
+            manifest_key="rag-sources/manifest.json",
+            manifest_version_id="manifest-v1",
+            manifest_etag="",
+            config=ingestion_config(),
+            s3_client=FakeIngestionS3(manifest),
+            bedrock_client=FakeBedrockClient(),
+            adapter=adapter,
+        )
+
+        indexed_document = adapter.bulks[0]["actions"][0]["document"]
+        self.assertEqual(result.corpus_id, "soc")
+        self.assertEqual(indexed_document["corpus_id"], "soc")
+        self.assertIn(
+            {"term": {"corpus_id.keyword": "soc"}},
+            adapter.searches[0]["query"]["query"]["bool"]["filter"],
+        )
+
     def test_ingestion_rejects_size_before_tombstoning(self):
         manifest = {
             "manifest_schema_version": 1,
@@ -575,6 +612,58 @@ class RagIngestionTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "duplicate"):
             validate_manifest(payload)
+
+    def test_manifest_validation_canonicalizes_supported_corpus_aliases(self):
+        aliases = {
+            "soc": "soc",
+            "soc_knowledge": "soc",
+            "soc_operational_knowledge": "soc",
+            "spl": "spl",
+            "spl_dictionary": "spl",
+            "splunk_data_dictionary": "spl",
+            "elastic": "elastic",
+            "elasticsearch": "elastic",
+            "elastic_dictionary": "elastic",
+            "elastic_data_dictionary": "elastic",
+        }
+        for supplied, expected in aliases.items():
+            with self.subTest(corpus_id=supplied):
+                manifest = validate_manifest(
+                    {
+                        "manifest_schema_version": 1,
+                        "manifest_id": f"manifest-{supplied}",
+                        "manifest_version": "v1",
+                        "tenant_id": "tenant-a",
+                        "corpus_id": supplied,
+                        "documents": [
+                            {
+                                "bucket": "docs",
+                                "key": f"rag-sources/{supplied}.md",
+                                "version_id": "v1",
+                            }
+                        ],
+                    }
+                )
+                self.assertEqual(manifest.corpus_id, expected)
+
+    def test_manifest_validation_rejects_unknown_corpus_id(self):
+        with self.assertRaisesRegex(ValueError, "unsupported RAG corpus_id"):
+            validate_manifest(
+                {
+                    "manifest_schema_version": 1,
+                    "manifest_id": "manifest-unknown",
+                    "manifest_version": "v1",
+                    "tenant_id": "tenant-a",
+                    "corpus_id": "unknown_lane",
+                    "documents": [
+                        {
+                            "bucket": "docs",
+                            "key": "rag-sources/unknown.md",
+                            "version_id": "v1",
+                        }
+                    ],
+                }
+            )
 
     def test_chunking_and_embedding_attach_versioned_provenance(self):
         manifest = validate_manifest(

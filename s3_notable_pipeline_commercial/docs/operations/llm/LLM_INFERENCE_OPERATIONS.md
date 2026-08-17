@@ -61,6 +61,11 @@ The commercial template copies `BedrockAnalysisModelId` into `BEDROCK_MODEL_ID` 
 assume commercial-region model or cross-region inference-profile availability.
 Record the selected ID with release evidence and scope IAM to its foundation
 model or inference profile during customer operationalization.
+For geographic cross-region profiles, also supply every source/destination
+foundation-model ARN through
+`BedrockAnalysisInferenceProfileFoundationModelArns`; the canonical discovery
+and IAM procedure is in
+[`BEDROCK_ACCOUNT_ENABLEMENT.md`](../deployment/BEDROCK_ACCOUNT_ENABLEMENT.md#geographic-cross-region-inference-profiles).
 
 `lambda_handler.py` passes `config.BEDROCK_MODEL_ID` into `BedrockAnalyzer`;
 startup fails when it is empty.

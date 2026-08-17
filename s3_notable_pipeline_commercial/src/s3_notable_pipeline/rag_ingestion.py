@@ -21,6 +21,21 @@ from .runtime_security import read_bounded_bytes
 
 MANIFEST_SCHEMA_VERSION = 1
 _SAFE_CORPUS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+_CANONICAL_CORPUS_IDS = {
+    "soc": "soc",
+    "soc_knowledge": "soc",
+    "soc_operational_knowledge": "soc",
+    "spl": "spl",
+    "splunk": "spl",
+    "spl_dictionary": "spl",
+    "splunk_data_dictionary": "spl",
+    "elastic": "elastic",
+    "elasticsearch": "elastic",
+    "elastic_dictionary": "elastic",
+    "elastic_data_dictionary": "elastic",
+    "closed_ticket": "closed_tickets",
+    "closed_tickets": "closed_tickets",
+}
 _DEFAULT_EXTRACT_CONFIG = SimpleNamespace(
     KB_EXTRACT_MAX_BYTES=10_485_760,
     KB_EXTRACT_MAX_PDF_PAGES=50,
@@ -86,9 +101,10 @@ def validate_manifest(payload: Mapping[str, Any]) -> RagManifest:
     manifest_id = _required_string(payload, "manifest_id")
     manifest_version = _required_string(payload, "manifest_version")
     tenant_id = _required_string(payload, "tenant_id")
-    corpus_id = _required_string(payload, "corpus_id")
-    if not _SAFE_CORPUS_RE.fullmatch(corpus_id):
+    supplied_corpus_id = _required_string(payload, "corpus_id")
+    if not _SAFE_CORPUS_RE.fullmatch(supplied_corpus_id):
         raise ValueError("corpus_id contains unsupported characters")
+    corpus_id = _canonical_corpus_id(supplied_corpus_id)
     raw_documents = payload.get("documents")
     if not isinstance(raw_documents, list) or not raw_documents:
         raise ValueError("RAG manifest documents must be a non-empty list")
@@ -820,22 +836,32 @@ def _document_suffix(key: str) -> str:
 def _index_for_corpus(corpus_id: str, config: Any) -> str:
     from .opensearch_retrieval import config_value
 
-    normalized = corpus_id.strip().lower()
-    if normalized in {"soc", "soc_knowledge"}:
+    normalized = _canonical_corpus_id(corpus_id)
+    if normalized == "soc":
         name = "OPENSEARCH_SOC_INDEX"
         default = "notable-soc-knowledge"
-    elif normalized in {"spl", "splunk", "spl_dictionary"}:
+    elif normalized == "spl":
         name = "OPENSEARCH_SPLUNK_INDEX"
         default = "notable-splunk-dictionary"
-    elif normalized in {"elastic", "elasticsearch", "elastic_dictionary"}:
+    elif normalized == "elastic":
         name = "OPENSEARCH_ELASTIC_INDEX"
         default = "notable-elastic-dictionary"
-    elif normalized in {"closed_tickets", "closed_ticket"}:
+    elif normalized == "closed_tickets":
         name = "OPENSEARCH_CLOSED_TICKET_INDEX"
         default = "closed_tickets"
     else:
         raise ValueError(f"unsupported RAG corpus_id: {corpus_id}")
     return str(config_value(config, name, default)).strip()
+
+
+def _canonical_corpus_id(corpus_id: str) -> str:
+    """Return the stable corpus filter value for a supported manifest alias."""
+
+    normalized = corpus_id.strip().lower()
+    try:
+        return _CANONICAL_CORPUS_IDS[normalized]
+    except KeyError as exc:
+        raise ValueError(f"unsupported RAG corpus_id: {corpus_id}") from exc
 
 
 def _is_key_in_prefix(key: str, prefix: str) -> bool:

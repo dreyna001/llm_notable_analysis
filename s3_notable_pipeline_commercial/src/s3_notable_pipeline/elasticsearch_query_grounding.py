@@ -151,7 +151,7 @@ def retrieve_elasticsearch_grounding(
                     )
                 ),
                 tenant_id=tenant_id_for(config, required=True),
-                corpus_id="elasticsearch",
+                corpus_id="elastic",
                 top_k=config.ELASTICSEARCH_GROUNDING_MAX_SNIPPETS,
                 adapter=adapter_for(
                     config,

@@ -282,6 +282,67 @@ class DeployTemplateTests(unittest.TestCase):
                 self.assertIn("dynamodb:DescribeTable", source)
                 self.assertIn("bedrock:CountTokens", source)
 
+    def test_analyzer_and_portal_can_invoke_configured_embedding_model(self) -> None:
+        embedding_arn = (
+            "arn:${AWS::Partition}:bedrock:${AWS::Region}::"
+            "foundation-model/${CaseQaEmbeddingModel}"
+        )
+        for path in TEMPLATE_PATHS:
+            with self.subTest(path=path):
+                template = load_template(path)
+                resources = template["Resources"]
+                analyzer_resource = (
+                    "NotableAnalyzerFunction"
+                    if path.endswith("template-sam.yaml")
+                    else "LambdaExecutionRole"
+                )
+                portal_resource = (
+                    "PortalApiFunction"
+                    if path.endswith("template-sam.yaml")
+                    else "PortalApiLambdaRole"
+                )
+                self.assertIn(embedding_arn, str(resources[analyzer_resource]))
+                self.assertIn(embedding_arn, str(resources[portal_resource]))
+
+                portal_variables = resources["PortalApiFunction"]["Properties"]["Environment"][
+                    "Variables"
+                ]
+                self.assertIn("HasVectorRetrieval", template["Conditions"])
+                self.assertEqual(portal_variables["RAG_ENABLED"], "RagEnabled")
+                self.assertEqual(portal_variables["RAG_MAX_SNIPPETS"], "RagMaxSnippets")
+                self.assertEqual(
+                    portal_variables["RAG_CONTEXT_BUDGET_CHARS"],
+                    "RagContextBudgetChars",
+                )
+                self.assertEqual(
+                    portal_variables["SPL_QUERY_RAG_ENABLED"],
+                    "SplQueryRagEnabled",
+                )
+                self.assertEqual(
+                    portal_variables["CASE_QA_EMBEDDING_MODEL"],
+                    "CaseQaEmbeddingModel",
+                )
+                self.assertEqual(
+                    portal_variables["CASE_QA_VECTOR_DIMENSIONS"],
+                    "CaseQaVectorDimensions",
+                )
+                self.assertEqual(
+                    portal_variables["CASE_QA_EMBED_NORMALIZE"],
+                    "CaseQaEmbedNormalize",
+                )
+
+    def test_portal_vision_separation_condition_avoids_nested_if_comparison(self) -> None:
+        for path in TEMPLATE_PATHS:
+            with self.subTest(path=path):
+                template = load_template(path)
+                conditions = template["Conditions"]
+                self.assertIn("HasPortalChatVisionDifferentFromOverride", conditions)
+                self.assertIn("HasPortalChatVisionDifferentFromAnalysis", conditions)
+                self.assertNotIn(
+                    "If",
+                    str(conditions["HasPortalChatVisionBedrockModelSeparate"]),
+                )
+
     def test_runtime_safety_limits_are_deploy_configurable(self) -> None:
         expected_parameters = {
             "MaxCompressedInputBytes",
@@ -361,6 +422,59 @@ class DeployTemplateTests(unittest.TestCase):
                 self.assertNotIn("inference-profile/*", source)
                 self.assertIn("PortalChatBedrockModelArn", source)
                 self.assertIn("BedrockAnalysisModelArn", source)
+
+    def test_geographic_inference_profiles_include_scoped_foundation_models(self) -> None:
+        parameter_names = (
+            "BedrockAnalysisInferenceProfileFoundationModelArns",
+            "PortalChatInferenceProfileFoundationModelArns",
+            "PortalChatVisionInferenceProfileFoundationModelArns",
+        )
+        valid_arn = (
+            "arn:aws:bedrock:us-west-2::"
+            "foundation-model/anthropic.claude-sonnet-4-20250514-v1:0"
+        )
+        invalid_arns = (
+            valid_arn.replace("arn:aws:", "arn:aws-us-gov:"),
+            valid_arn.replace("::foundation-model", ":123456789012:foundation-model"),
+            "arn:aws:bedrock:::foundation-model/global-model",
+        )
+        multi_arn_value = ",".join(
+            (
+                valid_arn.replace("us-west-2", "us-east-1"),
+                valid_arn.replace("us-west-2", "us-east-2"),
+                valid_arn,
+            )
+        )
+        for path in TEMPLATE_PATHS:
+            with self.subTest(path=path):
+                template = load_template(path)
+                parameters = template["Parameters"]
+                source = (PROJECT_ROOT / path).read_text(encoding="utf-8")
+                for name in parameter_names:
+                    self.assertIn(name, parameters)
+                    pattern = parameters[name]["AllowedPattern"]
+                    self.assertIsNotNone(re.fullmatch(pattern, valid_arn))
+                    self.assertIsNotNone(re.fullmatch(pattern, ""))
+                    self.assertTrue(
+                        all(
+                            re.fullmatch(pattern, member)
+                            for member in multi_arn_value.split(",")
+                        ),
+                        "CloudFormation applies AllowedPattern to each "
+                        "CommaDelimitedList member",
+                    )
+                    for candidate in invalid_arns:
+                        self.assertIsNone(re.fullmatch(pattern, candidate))
+                    self.assertIn(name, source)
+                self.assertIn("bedrock:InferenceProfileArn", source)
+                self.assertIn(
+                    "HasBedrockAnalysisInferenceProfileFoundationModels",
+                    template["Conditions"],
+                )
+                self.assertIn(
+                    "PortalChatUsesAnalysisInferenceProfileFoundationModels",
+                    template["Conditions"],
+                )
 
     def test_commercial_partition_and_region_are_locked(self) -> None:
         for path in TEMPLATE_PATHS:

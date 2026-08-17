@@ -15,8 +15,10 @@ Partition `aws`, region `us-east-1` — see
 | Case chunk + RAG embeddings | `CaseQaEmbeddingModel` | `amazon.titan-embed-text-v2:0` (1024 dimensions, locked in v1) |
 | Portal chat (optional override) | `PortalChatBedrockModelId`, `PortalChatBedrockModelArn` | Falls back to analysis model when blank |
 
-RAG ingestion and case embed Lambdas need `bedrock:InvokeModel` on the embedding
-model ARN. Analyzer and portal need invoke on the analysis (and optional chat) model.
+RAG ingestion, case embed, analyzer, and portal Lambdas receive
+`bedrock:InvokeModel` on the configured embedding model when private vector
+retrieval is configured. Analyzer and portal also receive invoke on their
+configured analysis/chat models.
 
 ## Enablement checklist
 
@@ -69,10 +71,38 @@ profile ID you deploy.
 
 Rules:
 
-- **ID and ARN must refer to the same deploy-time choice** — the template validates both are non-empty and IAM is scoped to the ARN you pass
-- Use the **inference profile ARN** when routing through a profile (least privilege for cross-region inference setups your org approves)
+- **ID and ARN must refer to the same deploy-time choice** — the template
+  validates both are non-empty and IAM is scoped to the ARNs you pass
+- Use the **inference profile ARN** when routing through a profile and complete
+  the geographic cross-region IAM step below
 - Do not hardcode unapproved model IDs in shared presets; keep them in customer env files only
 - Setup/deploy readiness probes that list Nova or Claude availability are hints only; mismatched ID/ARN pairs still fail closed at deploy or runtime
+
+### Geographic cross-region inference profiles
+
+For a geographic profile, AWS also requires `bedrock:InvokeModel` on the
+profile's foundation model in the source region and every listed destination
+region. Read the exact ARNs from `GetInferenceProfile` and pass them, with no
+wildcards, as a comma-separated `BedrockAnalysisInferenceProfileFoundationModelArns`
+value:
+
+```bash
+aws bedrock get-inference-profile \
+  --region us-east-1 \
+  --inference-profile-identifier "$MODEL_ID" \
+  --query 'models[].modelArn' \
+  --output text
+```
+
+The template restricts those foundation-model grants with
+`bedrock:InferenceProfileArn`. Portal overrides have independent IAM: when a
+chat or vision override is set, pass its model ARNs through
+`PortalChatInferenceProfileFoundationModelArns` or
+`PortalChatVisionInferenceProfileFoundationModelArns`, even if that override
+reuses the analysis profile ARN. Leave these parameters blank for direct
+foundation-model invocation. Global profiles require a different
+`aws:RequestedRegion=unspecified` policy and are not supported by these
+geographic-profile parameters.
 
 ## Embedding model (RAG + portal)
 
@@ -85,8 +115,9 @@ case chunks; mixed vectors in one index are unsupported.
 ## Portal chat model override
 
 When `PortalChatBedrockModelId` is set, also set `PortalChatBedrockModelArn` to
-the matching ARN. Portal IAM is scoped to that ARN in addition to the analysis model
-when override is present.
+the matching ARN. Portal IAM is scoped to that ARN instead of the analysis model
+when override is present. If it is a geographic profile, also set
+`PortalChatInferenceProfileFoundationModelArns`.
 
 ## VPC Lambdas and Bedrock
 

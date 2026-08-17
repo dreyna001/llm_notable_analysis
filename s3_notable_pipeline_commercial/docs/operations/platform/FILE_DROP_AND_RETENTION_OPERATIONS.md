@@ -123,8 +123,9 @@ suffix).
   before Bedrock. The same limit applies to uncompressed object bytes.
 - Compressed gzip objects may exceed the limit on the wire; only decompressed
   size is bounded.
-- Output report names strip both compression and inner data extensions (for
-  example `incoming/abc-123.json.gz` -> `reports/abc-123.md`).
+- Output report names preserve the source prefix and strip both compression and
+  inner data extensions (for example `incoming/abc-123.json.gz` ->
+  `reports/incoming/abc-123--<processing_id>.md` for an S3 event).
 
 **Failure modes (CloudWatch):**
 
@@ -159,8 +160,10 @@ completes. This avoids partial reads on in-progress uploads.
 | Case envelopes (analyst portal) | `{CaseArchivePrefix}/` | `cases/` |
 | Case chunks (analyst portal) | `{CaseArchiveChunksPrefix}/` | `case_chunks/` |
 
-Output object names use the input file stem, stripping gzip and inner data
-extensions (for example `incoming/abc-123.json.gz` -> `reports/abc-123.md`).
+Output object names preserve the input prefix and use the input file stem,
+stripping gzip and inner data extensions (for example
+`incoming/abc-123.json.gz` ->
+`reports/incoming/abc-123--<processing_id>.md` for an S3 event).
 
 When `CaseArchiveBucketName` is blank, case archive objects and report outputs
 share the output bucket. A non-blank `CaseArchiveBucketName` points writes at an
@@ -228,12 +231,14 @@ Runtime environment variables mirror the SAM/CloudFormation parameters above.
 
 1. Deploy the stack and confirm bucket names from stack outputs.
 2. Upload a small representative notable to `s3://<input-bucket>/incoming/test-notable.json`.
-3. Confirm `reports/test-notable.md` and `reports/test-notable.json` appear in
-   the output bucket.
-4. If `html_reports` is enabled, confirm `reports/test-notable.html`.
+3. Confirm `reports/incoming/test-notable--<processing_id>.md` and
+   `reports/incoming/test-notable--<processing_id>.json` appear in the output
+   bucket with the same processing ID.
+4. If `html_reports` is enabled, confirm the matching
+   `reports/incoming/test-notable--<processing_id>.html`.
 5. Upload `incoming/test-notable.json.gz` (valid gzip JSON) and confirm
-   `reports/test-notable.md` and `reports/test-notable.json` use the stem
-   without `.gz`.
+   the new version-suffixed markdown and JSON keys use the source stem without
+   `.gz`.
 6. Upload an oversized or malformed object and confirm the invocation fails
    with a clear error in CloudWatch logs.
 7. If `analyst_portal` is enabled, confirm case envelopes under `cases/`,

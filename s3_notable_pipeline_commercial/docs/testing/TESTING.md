@@ -221,9 +221,20 @@ OUTPUT_BUCKET=$(aws cloudformation describe-stacks --region us-east-1 --stack-na
 STAMP=$(date -u +%Y%m%d-%H%M%S)
 BASE="test-notable-$STAMP"
 aws s3 cp data/test-notable.txt "s3://$INPUT_BUCKET/incoming/$BASE.txt" --region us-east-1
-sleep 60
-aws s3 ls "s3://$OUTPUT_BUCKET/reports/$BASE.md" --region us-east-1
-aws s3 cp "s3://$OUTPUT_BUCKET/reports/$BASE.md" "./$BASE.md" --region us-east-1
+PREFIX="reports/incoming/$BASE--"
+REPORT_KEY=None
+for _ in {1..12}; do
+  REPORT_KEY=$(aws s3api list-objects-v2 --bucket "$OUTPUT_BUCKET" \
+    --prefix "$PREFIX" --region us-east-1 \
+    --query "Contents[?ends_with(Key, '.md')].Key | [0]" --output text)
+  [[ "$REPORT_KEY" != "None" && -n "$REPORT_KEY" ]] && break
+  sleep 5
+done
+[[ "$REPORT_KEY" != "None" && -n "$REPORT_KEY" ]] || {
+  echo "Versioned markdown report not found under $PREFIX" >&2
+  exit 1
+}
+aws s3 cp "s3://$OUTPUT_BUCKET/$REPORT_KEY" "./$BASE.md" --region us-east-1
 ```
 
 Manual follow-ups still required for **action_gated** idempotency replay, signed

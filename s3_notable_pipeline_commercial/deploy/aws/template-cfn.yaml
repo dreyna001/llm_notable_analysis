@@ -52,6 +52,12 @@ Parameters:
     Description: Exact ARN corresponding to BedrockAnalysisModelId for least-privilege IAM.
     AllowedPattern: '^arn:aws:bedrock:us-east-1:([0-9]{12})?:(foundation-model|inference-profile)/.+$'
 
+  BedrockAnalysisInferenceProfileFoundationModelArns:
+    Type: CommaDelimitedList
+    Description: Exact source and destination foundation-model ARNs required when BedrockAnalysisModelArn is a geographic cross-region inference profile.
+    Default: ''
+    AllowedPattern: '^$|^arn:aws:bedrock:[a-z0-9-]+::foundation-model/[A-Za-z0-9._:-]+$'
+
   SplunkSinkMode:
     Type: String
     Description: Output sink mode
@@ -450,6 +456,12 @@ Parameters:
     Default: ''
     AllowedPattern: '^$|^arn:aws:bedrock:us-east-1:([0-9]{12})?:(foundation-model|inference-profile)/.+$'
 
+  PortalChatInferenceProfileFoundationModelArns:
+    Type: CommaDelimitedList
+    Description: Exact source and destination foundation-model ARNs required when PortalChatBedrockModelArn is a geographic cross-region inference profile.
+    Default: ''
+    AllowedPattern: '^$|^arn:aws:bedrock:[a-z0-9-]+::foundation-model/[A-Za-z0-9._:-]+$'
+
   PortalUiBucketName:
     Type: String
     Description: Optional S3 bucket name for the analyst portal static SPA. Leave blank to skip static hosting resources.
@@ -636,6 +648,12 @@ Parameters:
     Description: Exact ARN for PortalChatVisionBedrockModelId when set.
     Default: ''
     AllowedPattern: '^$|^arn:aws:bedrock:us-east-1:([0-9]{12})?:(foundation-model|inference-profile)/.+$'
+
+  PortalChatVisionInferenceProfileFoundationModelArns:
+    Type: CommaDelimitedList
+    Description: Exact source and destination foundation-model ARNs required when PortalChatVisionBedrockModelArn is a geographic cross-region inference profile.
+    Default: ''
+    AllowedPattern: '^$|^arn:aws:bedrock:[a-z0-9-]+::foundation-model/[A-Za-z0-9._:-]+$'
 
   ChatSessionsTableName:
     Type: String
@@ -1165,17 +1183,43 @@ Conditions:
     - !Condition HasRagIngestion
     - !Not [!Condition HasRagSource]
   HasOpenSearch: !Not [!Equals [!Ref OpenSearchDomainArn, '']]
+  HasVectorRetrieval: !And
+    - !Condition HasOpenSearch
+    - !Or
+      - !Equals [!Ref RagEnabled, 'true']
+      - !Equals [!Ref SplQueryRagEnabled, 'true']
+      - !Equals [!Ref ElasticsearchGroundingEnabled, 'true']
+      - !Equals [!Ref CaseQaEnabled, 'true']
+  HasBedrockAnalysisInferenceProfileFoundationModels: !Not
+    - !Equals [!Join [',', !Ref BedrockAnalysisInferenceProfileFoundationModelArns], '']
   HasPortalChatBedrockModelOverride: !Not [!Equals [!Ref PortalChatBedrockModelId, '']]
+  HasPortalChatInferenceProfileFoundationModels: !And
+    - !Condition HasPortalChatBedrockModelOverride
+    - !Not [!Equals [!Join [',', !Ref PortalChatInferenceProfileFoundationModelArns], '']]
+  PortalChatUsesAnalysisInferenceProfileFoundationModels: !And
+    - !Not [!Condition HasPortalChatBedrockModelOverride]
+    - !Condition HasBedrockAnalysisInferenceProfileFoundationModels
   HasPortalChatVisionBedrockModelOverride: !Not [!Equals [!Ref PortalChatVisionBedrockModelId, '']]
-  HasPortalChatVisionBedrockModelSeparate: !And
+  HasPortalChatVisionInferenceProfileFoundationModels: !And
     - !Condition HasPortalChatVisionBedrockModelOverride
+    - !Not [!Equals [!Join [',', !Ref PortalChatVisionInferenceProfileFoundationModelArns], '']]
+  HasPortalChatVisionDifferentFromOverride: !And
+    - !Condition HasPortalChatVisionBedrockModelOverride
+    - !Condition HasPortalChatBedrockModelOverride
     - !Not
       - !Equals
         - !Ref PortalChatVisionBedrockModelArn
-        - !If
-          - HasPortalChatBedrockModelOverride
-          - !Ref PortalChatBedrockModelArn
-          - !Ref BedrockAnalysisModelArn
+        - !Ref PortalChatBedrockModelArn
+  HasPortalChatVisionDifferentFromAnalysis: !And
+    - !Condition HasPortalChatVisionBedrockModelOverride
+    - !Not [!Condition HasPortalChatBedrockModelOverride]
+    - !Not
+      - !Equals
+        - !Ref PortalChatVisionBedrockModelArn
+        - !Ref BedrockAnalysisModelArn
+  HasPortalChatVisionBedrockModelSeparate: !Or
+    - !Condition HasPortalChatVisionDifferentFromOverride
+    - !Condition HasPortalChatVisionDifferentFromAnalysis
 
 Resources:
   CustomerKmsReadPolicy:
@@ -1641,6 +1685,24 @@ Resources:
                   - bedrock:InvokeModel
                 Resource:
                   - !Ref BedrockAnalysisModelArn
+              - !If
+                - HasBedrockAnalysisInferenceProfileFoundationModels
+                - Effect: Allow
+                  Action:
+                    - bedrock:InvokeModel
+                  Resource: !Ref BedrockAnalysisInferenceProfileFoundationModelArns
+                  Condition:
+                    StringEquals:
+                      bedrock:InferenceProfileArn: !Ref BedrockAnalysisModelArn
+                - !Ref AWS::NoValue
+              - !If
+                - HasVectorRetrieval
+                - Effect: Allow
+                  Action:
+                    - bedrock:InvokeModel
+                  Resource:
+                    - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${CaseQaEmbeddingModel}'
+                - !Ref AWS::NoValue
               - !If
                 - HasSplunkMcpSecret
                 - Effect: Allow
@@ -2390,6 +2452,46 @@ Resources:
                     - !Ref PortalChatBedrockModelArn
                     - !Ref BedrockAnalysisModelArn
         - !If
+          - PortalChatUsesAnalysisInferenceProfileFoundationModels
+          - PolicyName: PortalAnalysisInferenceProfileFoundationModelPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - bedrock:InvokeModel
+                  Resource: !Ref BedrockAnalysisInferenceProfileFoundationModelArns
+                  Condition:
+                    StringEquals:
+                      bedrock:InferenceProfileArn: !Ref BedrockAnalysisModelArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasPortalChatInferenceProfileFoundationModels
+          - PolicyName: PortalChatInferenceProfileFoundationModelPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - bedrock:InvokeModel
+                  Resource: !Ref PortalChatInferenceProfileFoundationModelArns
+                  Condition:
+                    StringEquals:
+                      bedrock:InferenceProfileArn: !Ref PortalChatBedrockModelArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasVectorRetrieval
+          - PolicyName: PortalEmbeddingPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - bedrock:InvokeModel
+                  Resource:
+                    - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${CaseQaEmbeddingModel}'
+          - !Ref AWS::NoValue
+        - !If
           - HasPortalChatVisionBedrockModelSeparate
           - PolicyName: PortalBedrockVisionPolicy
             PolicyDocument:
@@ -2401,6 +2503,20 @@ Resources:
                     - bedrock:CountTokens
                   Resource:
                     - !Ref PortalChatVisionBedrockModelArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasPortalChatVisionInferenceProfileFoundationModels
+          - PolicyName: PortalChatVisionInferenceProfileFoundationModelPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - bedrock:InvokeModel
+                  Resource: !Ref PortalChatVisionInferenceProfileFoundationModelArns
+                  Condition:
+                    StringEquals:
+                      bedrock:InferenceProfileArn: !Ref PortalChatVisionBedrockModelArn
           - !Ref AWS::NoValue
         - !If
           - HasOpenSearch
@@ -2494,6 +2610,10 @@ Resources:
           OPENSEARCH_SOC_INDEX: !Ref OpenSearchSocIndex
           OPENSEARCH_SPLUNK_INDEX: !Ref OpenSearchSplunkIndex
           OPENSEARCH_ELASTIC_INDEX: !Ref OpenSearchElasticIndex
+          RAG_ENABLED: !Ref RagEnabled
+          RAG_MAX_SNIPPETS: !Ref RagMaxSnippets
+          RAG_CONTEXT_BUDGET_CHARS: !Ref RagContextBudgetChars
+          SPL_QUERY_RAG_ENABLED: !Ref SplQueryRagEnabled
           CASE_ARCHIVE_BUCKET: !If [HasCaseArchiveBucketName, !Ref CaseArchiveBucketName, !Ref OutputBucketName]
           CASE_ARCHIVE_PREFIX: !Ref CaseArchivePrefix
           CASE_ARCHIVE_CHUNKS_PREFIX: !Ref CaseArchiveChunksPrefix
@@ -2519,6 +2639,9 @@ Resources:
           CASE_QA_GENERAL_KNOWLEDGE_ENABLED: !Ref CaseQaGeneralKnowledgeEnabled
           CASE_QA_MAX_QUESTION_CHARS: !Ref CaseQaMaxQuestionChars
           CASE_QA_MAX_ANSWER_TOKENS: !Ref CaseQaMaxAnswerTokens
+          CASE_QA_EMBEDDING_MODEL: !Ref CaseQaEmbeddingModel
+          CASE_QA_VECTOR_DIMENSIONS: !Ref CaseQaVectorDimensions
+          CASE_QA_EMBED_NORMALIZE: !Ref CaseQaEmbedNormalize
           CASE_QA_CHAT_HISTORY_ENABLED: !Ref CaseQaChatHistoryEnabled
           CASE_QA_CHAT_HISTORY_RETENTION_DAYS: !Ref CaseQaChatHistoryRetentionDays
           CASE_QA_MAX_SESSIONS_PER_USER: !Ref CaseQaMaxSessionsPerUser

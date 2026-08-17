@@ -139,16 +139,104 @@ function Test-S3ObjectExists {
     return $LASTEXITCODE -eq 0
 }
 
+function Wait-ForS3ObjectExists {
+    param(
+        [string]$Bucket,
+        [string]$Key,
+        [int]$TimeoutSeconds
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds([Math]::Max(1, $TimeoutSeconds))
+    do {
+        if (Test-S3ObjectExists -Bucket $Bucket -Key $Key) {
+            return $true
+        }
+        if ([DateTime]::UtcNow -ge $deadline) {
+            break
+        }
+        Start-Sleep -Seconds 5
+    } while ($true)
+    return $false
+}
+
+function Get-S3ReportObjectKey {
+    param(
+        [string]$Bucket,
+        [string]$ReportStem,
+        [ValidateSet("md", "json", "html")]
+        [string]$Extension
+    )
+
+    if (
+        $ReportStem -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*$' -or
+        @($ReportStem.Split('/') | Where-Object { $_ -in @("", ".", "..") }).Count -gt 0
+    ) {
+        throw "ReportStem is not a normalized S3 key stem"
+    }
+
+    $prefix = "reports/$ReportStem--"
+    $keysOutput = aws s3api list-objects-v2 `
+        --region $region `
+        --bucket $Bucket `
+        --prefix $prefix `
+        --query 'Contents[].Key' `
+        --output text 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($keysOutput) -or $keysOutput -eq "None") {
+        return $null
+    }
+
+    $escapedStem = [Regex]::Escape($ReportStem)
+    $pattern = "^reports/$escapedStem--[a-f0-9]{32}\.$([Regex]::Escape($Extension))$"
+    $matches = @(
+        ($keysOutput -split '\s+') |
+            Where-Object { $_ -and $_ -match $pattern } |
+            Sort-Object -Unique
+    )
+    if ($matches.Count -gt 1) {
+        throw "Multiple report artifacts matched s3://$Bucket/$prefix*.$Extension"
+    }
+    if ($matches.Count -eq 1) {
+        return $matches[0]
+    }
+    return $null
+}
+
+function Wait-ForS3ReportObjectKey {
+    param(
+        [string]$Bucket,
+        [string]$ReportStem,
+        [ValidateSet("md", "json", "html")]
+        [string]$Extension,
+        [int]$TimeoutSeconds
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds([Math]::Max(1, $TimeoutSeconds))
+    do {
+        $key = Get-S3ReportObjectKey -Bucket $Bucket -ReportStem $ReportStem -Extension $Extension
+        if ($key) {
+            return $key
+        }
+        if ([DateTime]::UtcNow -ge $deadline) {
+            break
+        }
+        Start-Sleep -Seconds 5
+    } while ($true)
+    return $null
+}
+
 function Invoke-Wave1SmokeChecks {
     param(
         [string]$OutputBucketName,
-        [string]$ReportBaseName,
+        [string]$ReportObjectStem,
+        [string]$LocalReportBaseName,
         [hashtable]$LambdaEnv,
-        [string]$LambdaFunctionName
+        [string]$LambdaFunctionName,
+        [int]$ArtifactTimeoutSeconds
     )
 
     Write-Host "`n=== Wave 1 Smoke Checks (optional) ===" -ForegroundColor Cyan
     Write-Host "Lambda function: $LambdaFunctionName" -ForegroundColor Gray
+    $wave1Failed = $false
 
     $profilesRaw = if ($LambdaEnv -and $LambdaEnv.ContainsKey("CAPABILITY_PROFILES")) {
         [string]$LambdaEnv["CAPABILITY_PROFILES"]
@@ -186,12 +274,18 @@ function Invoke-Wave1SmokeChecks {
         }
     }
 
-    $jsonKey = "reports/$ReportBaseName.json"
-    $htmlKey = "reports/$ReportBaseName.html"
-    $localJson = "$ReportBaseName.json"
-    $wave1Failed = $false
+    $jsonKey = "$ReportObjectStem.json"
+    $htmlKey = "$ReportObjectStem.html"
+    $localJson = "$LocalReportBaseName.json"
 
-    if (-not (Test-S3ObjectExists -Bucket $OutputBucketName -Key $jsonKey)) {
+    if (
+        -not (
+            Wait-ForS3ObjectExists `
+                -Bucket $OutputBucketName `
+                -Key $jsonKey `
+                -TimeoutSeconds $ArtifactTimeoutSeconds
+        )
+    ) {
         Write-Host "  JSON report missing: s3://$OutputBucketName/$jsonKey" -ForegroundColor Red
         $wave1Failed = $true
     } else {
@@ -208,7 +302,12 @@ function Invoke-Wave1SmokeChecks {
             }
 
             if ("html_reports" -in $profiles) {
-                if (Test-S3ObjectExists -Bucket $OutputBucketName -Key $htmlKey) {
+                if (
+                    Wait-ForS3ObjectExists `
+                        -Bucket $OutputBucketName `
+                        -Key $htmlKey `
+                        -TimeoutSeconds $ArtifactTimeoutSeconds
+                ) {
                     Write-Host "  html_reports: HTML companion report found" -ForegroundColor Green
                 } else {
                     Write-Host "  html_reports: HTML report missing at s3://$OutputBucketName/$htmlKey" -ForegroundColor Red
@@ -342,18 +441,23 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "  Upload successful" -ForegroundColor Green
 
-# Wait for processing
-Write-Host "`nWaiting $WaitSeconds seconds for Lambda to process..." -ForegroundColor Yellow
-Start-Sleep -Seconds $WaitSeconds
-
 # Check output
 Write-Host "`nChecking output bucket..." -ForegroundColor Yellow
-$outputKey = "reports/$reportBaseName.md"
+$reportStem = "incoming/$reportBaseName"
+Write-Host "  Waiting up to $WaitSeconds seconds for the versioned report artifact" -ForegroundColor Gray
+try {
+    $outputKey = Wait-ForS3ReportObjectKey `
+        -Bucket $outputBucket `
+        -ReportStem $reportStem `
+        -Extension "md" `
+        -TimeoutSeconds $WaitSeconds
+} catch {
+    Write-Host "  Report discovery failed: $_" -ForegroundColor Red
+    exit 1
+}
 
-Write-Host "  Looking for: s3://$outputBucket/$outputKey" -ForegroundColor Gray
-$null = aws s3 ls "s3://$outputBucket/$outputKey" --region $region 2>&1
-
-if ($LASTEXITCODE -eq 0) {
+if ($outputKey) {
+    Write-Host "  Found: s3://$outputBucket/$outputKey" -ForegroundColor Gray
     Write-Host "  Report found!" -ForegroundColor Green
 
     # Download report
@@ -366,12 +470,15 @@ if ($LASTEXITCODE -eq 0) {
         Write-Host "`n=== Report Preview (first 50 lines) ===" -ForegroundColor Cyan
         Get-Content $localReport -Head 50
         Write-Host "`n... (full report saved to $localReport)" -ForegroundColor Gray
+    } else {
+        Write-Host "  Report download failed" -ForegroundColor Red
+        exit 1
     }
 } else {
-    Write-Host "  Report not found yet" -ForegroundColor Yellow
-    Write-Host "  Listing all reports in output bucket:" -ForegroundColor Gray
-    aws s3 ls "s3://$outputBucket/reports/" --recursive --region $region | Select-Object -Last 5
-    Write-Host "`n  You may need to wait a bit longer or check CloudWatch logs" -ForegroundColor Yellow
+    Write-Host "  Report not found within $WaitSeconds seconds" -ForegroundColor Red
+    Write-Host "  Expected one key matching reports/$reportStem--<processing-id>.md" -ForegroundColor Gray
+    Write-Host "  Check the analyzer queue, DLQ, and CloudWatch logs." -ForegroundColor Yellow
+    exit 1
 }
 
 if ($Wave1Smoke) {
@@ -382,9 +489,11 @@ if ($Wave1Smoke) {
     } else {
         Invoke-Wave1SmokeChecks `
             -OutputBucketName $outputBucket `
-            -ReportBaseName $reportBaseName `
+            -ReportObjectStem ($outputKey.Substring(0, $outputKey.Length - 3)) `
+            -LocalReportBaseName $reportBaseName `
             -LambdaEnv $lambdaEnv `
-            -LambdaFunctionName $lambdaFunctionName
+            -LambdaFunctionName $lambdaFunctionName `
+            -ArtifactTimeoutSeconds $WaitSeconds
     }
 }
 

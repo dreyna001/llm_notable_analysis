@@ -48,12 +48,17 @@ Approved source documents are versioned in customer S3. The ingestion workflow
 validates, chunks, embeds, and writes retrieval documents to separate indexes in
 the deployment's private OpenSearch domain.
 
-| Corpus lane | Runtime use | Required content |
+| Manifest `corpus_id` | Runtime use | Required content |
 | --- | --- | --- |
-| `soc_operational_knowledge` | Initial alert analysis and optional chat context | Triage SOPs, escalation guidance, detection notes, approved pivots |
-| `splunk_data_dictionary` | SPL generation only | Indexes, sourcetypes, fields/types, CIM models, macros, lookups, approved examples |
+| `soc` | Initial alert analysis and optional chat context | Triage SOPs, escalation guidance, detection notes, approved pivots |
+| `spl` | SPL generation only | Indexes, sourcetypes, fields/types, CIM models, macros, lookups, approved examples |
 | `case_chunks` | Selected-case chatbot evidence | Generated immutable case-analysis chunks with S3 provenance |
-| `elastic_data_dictionary` | Elasticsearch query generation only | Index patterns, fields/types, timestamp rules, approved DSL examples |
+| `elastic` | Elasticsearch query generation only | Index patterns, fields/types, timestamp rules, approved DSL examples |
+
+Ingestion canonicalizes the legacy aliases `soc_knowledge`,
+`soc_operational_knowledge`, `splunk`, `spl_dictionary`,
+`splunk_data_dictionary`, `elasticsearch`, `elastic_dictionary`, and
+`elastic_data_dictionary` to those three stable filter values.
 
 Customer source content changes do not require application code changes. A
 source update produces a new manifest/version. The worker tombstones prior

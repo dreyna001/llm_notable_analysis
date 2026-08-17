@@ -89,6 +89,7 @@ sam deploy \
     ImageDigest="$IMAGE_DIGEST" \
     BedrockAnalysisModelId="$BEDROCK_ANALYSIS_MODEL_ID" \
     BedrockAnalysisModelArn="$BEDROCK_ANALYSIS_MODEL_ARN" \
+    BedrockAnalysisInferenceProfileFoundationModelArns="$BEDROCK_ANALYSIS_INFERENCE_PROFILE_FOUNDATION_MODEL_ARNS" \
     InputBucketName="$INPUT_BUCKET_NAME" \
     OutputBucketName="$OUTPUT_BUCKET_NAME" \
     CapabilityProfiles=core,rag,analyst_portal \

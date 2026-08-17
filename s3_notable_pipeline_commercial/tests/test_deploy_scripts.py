@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -179,6 +180,23 @@ echo "Docker fake"
         self.assertIn('$region = "us-east-1"', source)
         self.assertIn("--region $region", source)
         self.assertNotIn("arn:aws-us-gov:", source)
+
+    def test_smoke_script_discovers_versioned_reports_and_fails_when_missing(self) -> None:
+        source = SMOKE_POWERSHELL_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn("Get-S3ReportObjectKey", source)
+        self.assertIn("Wait-ForS3ObjectExists", source)
+        self.assertIn("list-objects-v2", source)
+        self.assertIn("[a-f0-9]{32}", source)
+        self.assertIn('$reportStem = "incoming/$reportBaseName"', source)
+        self.assertIn('$jsonKey = "$ReportObjectStem.json"', source)
+        self.assertIn("-ArtifactTimeoutSeconds $WaitSeconds", source)
+        self.assertNotIn('$outputKey = "reports/$reportBaseName.md"', source)
+        self.assertNotIn('$jsonKey = "reports/$ReportBaseName.json"', source)
+        self.assertRegex(
+            source,
+            re.compile(r"Report not found within.*?exit 1", re.DOTALL),
+        )
 
     def test_localstack_bootstrap_rejects_remote_endpoint_before_aws_calls(self) -> None:
         env = {

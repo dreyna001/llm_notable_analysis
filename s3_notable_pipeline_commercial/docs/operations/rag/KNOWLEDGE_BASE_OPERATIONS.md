@@ -58,6 +58,11 @@ rag-sources/
 Each ingestion job identifies: schema version, deployment/tenant identifier,
 corpus lane and version, source bucket/key/version ID/ETag/checksum, embedding
 model and dimensions, and operation (create/update, delete, or rebuild).
+Set manifest `corpus_id` to `soc`, `spl`, or `elastic` for the matching source
+lane. The ingestion validator canonicalizes documented legacy aliases before
+indexing so stored corpus filters remain stable. If an earlier release indexed
+documents under an alias, rebuild that corpus once so old active chunks are
+removed rather than left as unreachable index data.
 
 Unsupported file types, oversized documents, malformed manifests, tenant
 mismatches, and checksum mismatches are terminal validation failures and go to

@@ -23,6 +23,7 @@ EcrRepositoryUri=<account>.dkr.ecr.us-east-1.amazonaws.com/notable-analyzer-s3 \
 ImageDigest=sha256:<immutable-digest> \
 BedrockAnalysisModelId=<approved-model-or-profile-id> \
 BedrockAnalysisModelArn=<approved-model-or-profile-arn> \
+BedrockAnalysisInferenceProfileFoundationModelArns=<comma-separated-foundation-model-arns-or-empty> \
 InputBucketName=<customer-input-bucket> \
 OutputBucketName=<customer-output-bucket> \
 CapabilityProfiles=core,rag,analyst_portal \

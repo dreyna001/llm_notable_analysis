@@ -6,6 +6,8 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
@@ -17,6 +19,7 @@ from s3_notable_pipeline.elastic_query_generation import (
     merge_elastic_query_fields_by_position,
     validate_elastic_query_contract,
 )
+from s3_notable_pipeline.elasticsearch_query_grounding import retrieve_elasticsearch_grounding
 
 
 def _hypotheses() -> list[dict[str, object]]:
@@ -143,6 +146,46 @@ class ElasticQueryGenerationTests(unittest.TestCase):
             merged[0]["primary_elastic_query_grounding_refs"],
             [{"source_file": "elastic.md", "section_path": "indexes"}],
         )
+
+    def test_opensearch_grounding_queries_canonical_elastic_corpus(self) -> None:
+        config = SimpleNamespace(
+            ELASTICSEARCH_GROUNDING_ENABLED=True,
+            ELASTICSEARCH_GROUNDING_MAX_SNIPPETS=4,
+            ELASTICSEARCH_GROUNDING_CONTEXT_BUDGET_CHARS=1600,
+        )
+        with (
+            patch(
+                "s3_notable_pipeline.opensearch_retrieval.opensearch_enabled",
+                return_value=True,
+            ),
+            patch(
+                "s3_notable_pipeline.opensearch_retrieval.tenant_id_for",
+                return_value="tenant-a",
+            ),
+            patch(
+                "s3_notable_pipeline.opensearch_retrieval.adapter_for",
+                return_value=object(),
+            ),
+            patch(
+                "s3_notable_pipeline.opensearch_retrieval.retrieve_documents",
+                return_value=[],
+            ) as retrieve,
+            patch(
+                "s3_notable_pipeline.opensearch_retrieval.render_documents",
+                return_value="",
+            ),
+            patch("s3_notable_pipeline.case_embed.embed_text", return_value=[0.1]),
+        ):
+            result = retrieve_elasticsearch_grounding(
+                alert_text="user=alice",
+                hypotheses=_hypotheses(),
+                config=config,
+                bedrock_client=object(),
+                opensearch_client=object(),
+            )
+
+        self.assertEqual(result.status, "no_match")
+        self.assertEqual(retrieve.call_args.kwargs["corpus_id"], "elastic")
 
 
 if __name__ == "__main__":
