@@ -1,5 +1,11 @@
 # Azure Government customer configuration
 
+Customer decisions and acceptance evidence for Azure Government deployment.
+Keep tenant IDs, resource IDs, endpoints, quotas, secrets, and approval records
+in the customer's approved deployment system — not in this repository.
+
+Deploy path order: [`../../../README.md`](../../../README.md).
+
 ## Operating rule
 
 This guide defines the values a customer must decide and the evidence required
@@ -58,3 +64,9 @@ validation result, rollback condition, and expiration for any exception. A
 rollback disables the affected capability or restores the last qualified image
 and UI artifact. It does not make a private origin public or delete durable
 evidence.
+
+## Next
+
+- **Path B step 1:** continue on this path — [`../../../README.md`](../../../README.md#path-b-customer-default)
+- Customer-default deploy: [`AZURE_CUSTOMER_DEFAULT_DEPLOYMENT.md`](AZURE_CUSTOMER_DEFAULT_DEPLOYMENT.md)
+- **Path C:** custom profile bundles — [`../../../README.md`](../../../README.md#path-c-custom-profiles)

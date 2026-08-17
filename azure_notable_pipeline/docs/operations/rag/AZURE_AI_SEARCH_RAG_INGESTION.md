@@ -49,3 +49,11 @@ Search documents after the source-of-truth decision is recorded. Reconcile
 manifest counts, missing chunks, stale generations, vector dimensions, and
 orphaned documents. Retain audit metadata according to the customer's policy,
 not indefinitely by default.
+
+Operator provisioning, validation, and promotion gates:
+[`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md).
+
+## Deploy path — next
+
+- **Path B (step 7):** return to [`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md) for ingest validation and promotion
+- **Path C:** [`../../../README.md`](../../../README.md#path-c-custom-profiles) when vector corpora are enabled

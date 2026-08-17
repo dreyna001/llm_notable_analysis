@@ -1,16 +1,36 @@
 # Azure analyst portal operations
 
-The browser, API, and chat share one Front Door Premium hostname. Static `$web`,
-the portal Function backend, and the `$web` origin are private. Front Door sends
-all API requests directly to the Function; direct origin access must fail. Every API route,
-including `/health` and `/ready`, requires a valid bearer token.
+Canonical operator guide for the Azure Government analyst portal: private Front
+Door architecture, authentication boundaries, chat contracts, and readiness. SPA
+build and upload:
+[`../../../frontend/analyst-portal/README.md`](../../../frontend/analyst-portal/README.md).
+Production deploy gate:
+[`../ANALYST_PORTAL_DEPLOYMENT.md`](../ANALYST_PORTAL_DEPLOYMENT.md). Profile
+flags: [`../platform/CAPABILITY_PROFILES.md`](../platform/CAPABILITY_PROFILES.md)
+(`analyst_portal`).
+
+## Architecture
+
+Production path in `usgovvirginia` (Front Door Premium, no public origins):
+
+```text
+Browser -> Front Door Premium (single hostname)
+              |-> /api/* -> private portal Function (Private Link)
+              |-> other paths -> private Storage $web (Private Link)
+```
+
+Static `$web`, the portal Function backend, and the `$web` origin are private.
+Front Door sends all API requests directly to the Function; direct origin access
+must fail. Every API route, including `/health` and `/ready`, requires a valid
+bearer token. API caching is disabled. The synchronous chat timeout chain is
+browser 220 seconds, Function 225 seconds, and Front Door 240 seconds.
 
 ## Authentication and ownership
 
 Both portal modes validate issuer, audience, expiry, signature, `sub`, and the
-configured role or delegated scope. Stable ownership is
-derived only from `sub`; email, display name, and caller headers are not identity
-contracts. Production is same-origin and emits no permissive CORS policy.
+configured role or delegated scope. Stable ownership is derived only from `sub`;
+email, display name, and caller headers are not identity contracts. Production is
+same-origin and emits no permissive CORS policy.
 
 Register the UI as an Entra public SPA client using authorization-code + PKCE.
 Set `PORTAL_OIDC_CLIENT_ID`, `PORTAL_OIDC_AUTHORITY`, and
@@ -20,8 +40,7 @@ as a redirect/logout URI. No browser client secret is used.
 Before enablement, test missing, expired, wrong-issuer, wrong-audience,
 missing-`sub`, and missing-role tokens. Use two valid test identities to prove
 one cannot read, append to, or delete the other's chat session. Run the copied
-OpenAPI contract unchanged. Browser chat timeout is 220 seconds, Function
-timeout 225 seconds and Front Door origin timeout 240 seconds.
+OpenAPI contract unchanged.
 
 ## Chat abuse and cost controls
 
@@ -80,11 +99,10 @@ Expected status is `200` with the published readiness response. When distributed
 admission is enabled, readiness reads the quota container metadata and reports
 `chat_admission: unavailable` with `503` if the container is missing or its RBAC
 grant is ineffective. Alert after the customer-approved consecutive-failure
-threshold. Record monitor location,
-identity object ID, token issuance method, renewal/rotation owner, action group,
-and escalation route. The stack does not store a browser token or IdP client
-credential. Front Door origin probes remain disabled because they cannot
-authenticate.
+threshold. Record monitor location, identity object ID, token issuance method,
+renewal/rotation owner, action group, and escalation route. The stack does not
+store a browser token or IdP client credential. Front Door origin probes remain
+disabled because they cannot authenticate.
 
 ## Operations and recovery
 
@@ -106,11 +124,19 @@ traces
 | summarize requests=count() by tostring(customDimensions.chat_quota_outcome), bin(timestamp, 5m)
 ```
 
-Deploy UI and API together when their contract changes. Roll back to the last
-qualified UI artifact plus immutable Function image digest. Never make Function,
-Function, or `$web` public to recover service. If the synthetic credential
-fails, rotate it through the customer IdP and prove an analyst identity still
-works before classifying the event as application downtime.
+Deploy UI and API together when their contract changes. Build and upload the SPA
+through [`../../../frontend/analyst-portal/README.md`](../../../frontend/analyst-portal/README.md)
+and follow [`../ANALYST_PORTAL_DEPLOYMENT.md`](../ANALYST_PORTAL_DEPLOYMENT.md)
+for the private deploy gate. Roll back to the last qualified UI artifact plus
+immutable Function image digest. Never make Function or `$web` public to recover
+service. If the synthetic credential fails, rotate it through the customer IdP
+and prove an analyst identity still works before classifying the event as
+application downtime.
 
-See [`../deployment/DEPLOYMENT_IMAGE_STEPS.md`](../deployment/DEPLOYMENT_IMAGE_STEPS.md)
-and [`../AZURE_MONITORING_AND_RECOVERY.md`](../AZURE_MONITORING_AND_RECOVERY.md).
+See [`../AZURE_MONITORING_AND_RECOVERY.md`](../AZURE_MONITORING_AND_RECOVERY.md).
+
+## Deploy path — next
+
+- **Path B (step 8):** [`../../../frontend/analyst-portal/README.md`](../../../frontend/analyst-portal/README.md) — build and upload SPA
+- **Path B (step 9):** [`../testing/AZURE_GOVERNMENT_TESTING.md`](../testing/AZURE_GOVERNMENT_TESTING.md) — customer-default staging validation
+- **Path C:** same when `analyst_portal` is enabled — [`../../../README.md`](../../../README.md#path-c-custom-profiles)

@@ -39,3 +39,12 @@ To roll back, redeploy the prior immutable index name/version. Do not rebuild an
 in-use index destructively. Remove a compromised source, rebuild, validate, and
 then switch configuration. Search outage recovery never authorizes claiming
 ungrounded content as case evidence.
+
+Corpus ingestion mechanics and tombstone flow:
+[`AZURE_AI_SEARCH_RAG_INGESTION.md`](AZURE_AI_SEARCH_RAG_INGESTION.md).
+
+## Deploy path — next
+
+- **Path B (step 7):** load approved SOC corpus after Bicep deploy — see ingestion flow above
+- **Path B (step 8):** [`../analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../analyst_portal/ANALYST_PORTAL_OPERATIONS.md) and [`../../../frontend/analyst-portal/README.md`](../../../frontend/analyst-portal/README.md)
+- **Path C:** [`../../../README.md`](../../../README.md#path-c-custom-profiles) when `rag` or portal case Q&A applies

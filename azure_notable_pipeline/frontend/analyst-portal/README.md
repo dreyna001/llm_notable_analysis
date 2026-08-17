@@ -1,24 +1,18 @@
 # Azure Analyst Portal UI
 
-Vendored React + Vite + Tailwind + shadcn-style SPA for the Azure read-only
-analyst portal API (JWT or Entra app-role browser auth, Front Door Premium and
-private Storage `$web` hosting).
-
-Production builds are always same-origin: leave `VITE_PORTAL_API_BASE_URL`
-unset. `scripts/setup-and-deploy.sh` and `.ps1` run the unit suite, build the SPA,
-and upload `dist/` to `$web` with `az storage blob upload-batch --auth-mode
-login`; shared keys and SAS tokens are not supported. The deployment runner
-must resolve and reach the storage private endpoint.
-
-Visual design: "Federal SOC Dark" — see [docs/operations/analyst_portal/ANALYST_PORTAL_THEME.md](../../docs/operations/analyst_portal/ANALYST_PORTAL_THEME.md) (palette, fonts, radius, accessibility contrast notes, browser-openable mockup).
-
-Front Door routes `/api/*`, including chat, directly to the private portal
-Function and serves all other paths from the private `$web` origin. API caching
-is disabled. The synchronous chat timeout chain is browser 220 seconds,
-Function 225 seconds, and Front Door 240 seconds.
-
-Deploy and operator runbooks:
+Canonical guide for building, configuring, and uploading the Azure Government
+read-only analyst portal SPA (React + Vite + Tailwind). Stack architecture,
+auth, and contracts:
 [`docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../../docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md).
+Visual design:
+[`docs/operations/analyst_portal/ANALYST_PORTAL_THEME.md`](../../docs/operations/analyst_portal/ANALYST_PORTAL_THEME.md).
+
+**Azure Government production deploy:** Front Door Premium routes all browser
+traffic to private `$web` and the portal Function over Private Link. Follow
+[`docs/operations/ANALYST_PORTAL_DEPLOYMENT.md`](../../docs/operations/ANALYST_PORTAL_DEPLOYMENT.md)
+for the deploy gate, origin approval, and authenticated `/ready` validation.
+`scripts/setup-and-deploy.sh` and `.ps1` also build, test, and upload `dist/`
+when portal UI hosting is enabled.
 
 ## Prerequisites
 
@@ -106,9 +100,7 @@ In JWT mode, the final scope name in `VITE_PORTAL_OIDC_API_SCOPE` must equal
 `PORTAL_ENTRA_REQUIRED_APP_ROLE` (for example, both use `Portal.Access`). The
 Function enforces that value from the token's `scp` or `roles` claim.
 
-## Build
-
-Build static assets for Storage `$web` and Front Door:
+## Build and production upload
 
 ```powershell
 npm --prefix frontend/analyst-portal run build
@@ -117,20 +109,18 @@ npm --prefix frontend/analyst-portal run build
 Output: `dist/`.
 
 **Front Door same-origin deployment (required):** leave
-`VITE_PORTAL_API_BASE_URL` unset. The deployment helpers upload `dist/` to the
-dedicated account's `$web` container using Entra auth. Front Door routes
-`/api/*` directly to the portal Function and uses `index.html` as the Storage
-static-site 404 document. Both origins use Private Link, and direct public
-origin access remains disabled.
+`VITE_PORTAL_API_BASE_URL` unset. Upload `dist/` to the dedicated account's
+`$web` container using Entra auth (`az storage blob upload-batch --auth-mode
+login`). Front Door routes `/api/*` directly to the portal Function and uses
+`index.html` as the Storage static-site 404 document. Both origins use Private
+Link, and direct public origin access remains disabled.
 
-**Split UI and API hostnames:** set the API base at build time:
+**Split UI and API hostnames:** set the API base at build time, ensure
+`PortalCorsAllowedOrigins` includes the exact SPA browser origin, then build
+and upload as above.
 
-```powershell
-$env:VITE_PORTAL_API_BASE_URL = "https://<PortalBrowserApiBaseUrl>"
-npm --prefix frontend/analyst-portal run build
-```
-
-Ensure `PortalCorsAllowedOrigins` includes the exact SPA browser origin.
+Production deploy gate, private-endpoint approval, and rollback:
+[`docs/operations/ANALYST_PORTAL_DEPLOYMENT.md`](../../docs/operations/ANALYST_PORTAL_DEPLOYMENT.md).
 
 Example keyless upload after build from a private-network-connected runner:
 
@@ -188,3 +178,7 @@ Environment variables:
 | `PORTAL_E2E_CASE_ID` | `portal-test-1780770539` | Sample archived case in the target environment |
 | `PORTAL_E2E_CHAT` | `true` | Run selected/global chat checks |
 | `PORTAL_E2E_CHAT_TIMEOUT_MS` | `180000` | Chat response wait |
+
+## Deploy path — next
+
+- **Path B (step 9):** [`../../docs/operations/testing/AZURE_GOVERNMENT_TESTING.md`](../../docs/operations/testing/AZURE_GOVERNMENT_TESTING.md) — staging gate and customer-default validation

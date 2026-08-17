@@ -53,3 +53,9 @@ Rollback is a Bicep redeployment using the prior immutable image digest and UI
 artifact. Do not restore public origin access. If any managed private endpoint
 is pending or rejected, correct approval permissions and rerun the gate before
 production use.
+
+## Deploy path — next
+
+- **Path B (step 8):** [`../../../frontend/analyst-portal/README.md`](../../../frontend/analyst-portal/README.md) — build and upload SPA when not already done by `setup-and-deploy`
+- **Path B (step 9):** [`testing/AZURE_GOVERNMENT_TESTING.md`](testing/AZURE_GOVERNMENT_TESTING.md) — staging gate and customer-default validation
+- **Path C:** same when `analyst_portal` is in the profile set — [`../../../README.md`](../../../README.md#path-c-custom-profiles)

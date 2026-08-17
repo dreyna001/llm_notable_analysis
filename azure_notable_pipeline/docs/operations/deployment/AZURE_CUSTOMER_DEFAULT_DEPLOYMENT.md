@@ -12,6 +12,9 @@ Government (`AzureUSGovernment`, `usgovvirginia` default):
 On-prem normative reference:
 [`../../../../llm_notable_analysis_onprem_systemd/docs/operations/deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md`](../../../../llm_notable_analysis_onprem_systemd/docs/operations/deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md)
 
+**Path B step 7** (Bicep deploy):
+[`../../../README.md`](../../../README.md#path-b-customer-default).
+
 ## Preset files (copy and fill)
 
 | File | Purpose |
@@ -23,7 +26,8 @@ Image build and ACR push still follow
 
 ## Step 0: Customer prerequisites (required for this preset)
 
-Complete these runbooks **before** `az deployment group create`:
+Complete these runbooks **before** `az deployment group create` (Path B order:
+[`../../../README.md`](../../../README.md#path-b-customer-default)):
 
 | Order | Runbook | Purpose |
 | --- | --- | --- |
@@ -32,15 +36,10 @@ Complete these runbooks **before** `az deployment group create`:
 | 3 | Customer Azure OpenAI enablement | Analysis, embeddings, and portal chat deployments |
 | 4 | Portal JWT / Entra configuration | Issuer, audience, analyst grant |
 
-Copy into `customer-default.env`:
-
-- `AzureSearchEndpoint`, `AzureSearchResourceId`, `RagTenantId`
-- `AzureOpenAiEndpoint`, `AzureOpenAiResourceId`, deployment names
-- `PortalJwtIssuer`, `PortalJwtAudience`, portal OIDC settings
-- Storage account names, Cosmos account/database, ACR image digest
-
-Search indexes for RAG and case Q&A are customer-provisioned with the
-1024-dimension vector contract documented in the Bicep parameter comments.
+Copy into `customer-default.env` from
+[`AZURE_GOVERNMENT_CUSTOMER_CONFIGURATION.md`](AZURE_GOVERNMENT_CUSTOMER_CONFIGURATION.md)
+and the Bicep parameter comments. Search indexes for RAG and case Q&A are
+customer-provisioned with the 1024-dimension vector contract.
 
 ## Why both profiles and explicit Bicep flags
 
@@ -60,16 +59,8 @@ timer isolation, and RBAC. For customer-default, set **both** to the same intent
 | `CaseQaChatImagesEnabled` | `false` |
 | `CaseQaChatHistoryEnabled` | `false` (enable after chat containers are provisioned) |
 
-## Customer values checklist
-
-| Area | Parameters |
-| --- | --- |
-| Image | `ContainerImageUri`, `ContainerRegistryResourceId` |
-| Azure OpenAI | `AzureOpenAiEndpoint`, `AzureOpenAiResourceId`, analysis/embeddings/portal deployments |
-| Storage | `StorageAccountNameInput`, `StorageAccountNameOutput`, `FunctionsHostStorageAccountName` |
-| Portal | `StorageAccountNamePortalUi`, `PortalJwtIssuer`, `PortalJwtAudience`, OIDC settings |
-| Search | `AzureSearchEndpoint`, `AzureSearchResourceId`, `RagTenantId`, `RagAzureSearchIndex`, `CaseQaAzureSearchIndex`, RAG source storage |
-| Cosmos | `CosmosAccountName`, `CosmosDatabaseName` |
+Full customer values checklist:
+[`AZURE_GOVERNMENT_CUSTOMER_CONFIGURATION.md`](AZURE_GOVERNMENT_CUSTOMER_CONFIGURATION.md).
 
 ## Deploy (fast path)
 
@@ -92,7 +83,7 @@ applies `deploy/azure/main.bicep` with the sourced environment values.
 2. **SOC KB ingest** -- load approved general SOC corpus to RAG source storage,
    publish manifest through the analyzer `rag_ingest_queue` path.
 3. **Smoke** -- run Wave 1 + portal staging checks in
-   [`../../testing/TESTING.md`](../../testing/TESTING.md).
+   [`../testing/AZURE_GOVERNMENT_TESTING.md`](../testing/AZURE_GOVERNMENT_TESTING.md).
 
 ## Intentional gaps vs on-prem customer-default
 
@@ -106,9 +97,7 @@ applies `deploy/azure/main.bicep` with the sourced environment values.
 Track remaining parity work in
 [`../../planning/TODOS.md`](../../planning/TODOS.md).
 
-## Related docs
+## Next
 
-- [`AZURE_GOVERNMENT_CUSTOMER_CONFIGURATION.md`](AZURE_GOVERNMENT_CUSTOMER_CONFIGURATION.md)
-- [`../platform/CAPABILITY_PROFILES.md`](../platform/CAPABILITY_PROFILES.md)
-- [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md)
-- [`../integrations/SERVICENOW_CLOSED_TICKET_OPERATIONS.md`](../integrations/SERVICENOW_CLOSED_TICKET_OPERATIONS.md)
+- **Path B steps (post-deploy):** [`../../../README.md`](../../../README.md#path-b-customer-default) (portal SPA, KB ingest, smoke)
+- **Path C:** optional profile rollout — [`../../../README.md`](../../../README.md#path-c-custom-profiles)

@@ -52,3 +52,9 @@ Default CI remains mocked and never calls live models.
 Rollback is configuration redeployment to the last customer-qualified
 deployment name/image digest. Record who owns quota escalation and who approves
 any model or content-filter change.
+
+## Deploy path — next
+
+- **Path B step 4 complete (or skipped):** [`../deployment/DEPLOYMENT_IMAGE_STEPS.md`](../deployment/DEPLOYMENT_IMAGE_STEPS.md)
+- **Path B step 6:** [`../deployment/AZURE_CUSTOMER_DEFAULT_DEPLOYMENT.md`](../deployment/AZURE_CUSTOMER_DEFAULT_DEPLOYMENT.md) when deploying the customer-default bundle
+- **Path C:** [`../../../README.md`](../../../README.md#path-c-custom-profiles) when analysis or embeddings are enabled

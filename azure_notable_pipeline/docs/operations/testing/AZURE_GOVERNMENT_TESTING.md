@@ -1,5 +1,11 @@
 # Azure Government testing
 
+Canonical commands for unit, local parity, contract, golden, and Azure
+Government staging validation. **Deploy path terminus:** all paths in
+commercial AWS. **Deploy path terminus:** all paths in
+[`../../../README.md`](../../../README.md#3-validate-all-paths-end-here) section 3 end
+here.
+
 ## Test boundary
 
 Unit tests never call real Azure, Splunk, Elasticsearch, ServiceNow, or model
@@ -43,3 +49,9 @@ Record test fixture ID, subscription/resource group, region, deployment/image
 digest, identity object ID, operation ID, timestamp, expected/actual result,
 and residual gap. Do not record tokens, full sensitive payloads, or customer
 production data in this repository.
+
+## Deploy path — next
+
+Path validation complete. Return to
+[`../../../README.md`](../../../README.md#3-validate-all-paths-end-here) section 3 to
+start another path or confirm the active path is finished.

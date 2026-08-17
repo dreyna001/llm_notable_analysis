@@ -1,9 +1,17 @@
 # Azure deployment image operations
 
-This is the production image runbook for the Azure notable pipeline. One
-immutable `linux/amd64` image digest is used by analyzer, embed, disposition,
-and portal Function Apps. Tags are build inputs only; a digest URI is the
-deployment contract.
+Build, scan, and promote one immutable `linux/amd64` digest for analyzer, embed,
+disposition, and portal Function Apps. Tags are build inputs only; a digest URI
+is the deployment contract.
+
+Cloud `AzureUSGovernment`, default region `usgovvirginia`. Before ACR push or
+Bicep deploy, follow the live mutation gate in
+[`../../../README.md`](../../../README.md#1-prerequisites) (subscription ID,
+partition, region, role/profile, resource group, deployment name, explicit
+customer approval).
+
+**Path B step 6** (digest-qualified image before Bicep):
+[`../../../README.md`](../../../README.md#path-b-customer-default).
 
 ## Prerequisites and decisions
 
@@ -70,3 +78,10 @@ deployment operation ID, logs, and staging evidence until incident closure.
 Image rollback does not reverse durable Cosmos/Blob schema changes. This v1
 contract has no destructive schema migration; a future migration requires its
 own forward/backward compatibility plan.
+
+## Next
+
+- **Path A step 3:** `setup-and-deploy.*` — [`../../../README.md`](../../../README.md#path-a-core-only)
+- **Path B step 7:** [`AZURE_CUSTOMER_DEFAULT_DEPLOYMENT.md`](AZURE_CUSTOMER_DEFAULT_DEPLOYMENT.md)
+- **Path C step 6:** Bicep deploy with profile-specific parameters — [`../../../README.md`](../../../README.md#path-c-custom-profiles)
+- Post-deploy (portal SPA, KB ingest, smoke): [`AZURE_CUSTOMER_DEFAULT_DEPLOYMENT.md`](AZURE_CUSTOMER_DEFAULT_DEPLOYMENT.md#post-deploy-required-for-full-customer-default)
