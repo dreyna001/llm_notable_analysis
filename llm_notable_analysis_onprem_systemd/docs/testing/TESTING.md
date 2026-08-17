@@ -1,5 +1,9 @@
 # On-Prem Test Guide
 
+**Validation terminus:** all deploy paths end here. You are done when path-specific
+smoke and staging checks pass on the deployed host. Path order:
+root [`README.md`](../../README.md#3-validate-all-paths-end-here) section 3.
+
 Run commands from the **monorepo root**. Use the shared dev virtualenv at
 `.venv/` (see [`DEVELOPING.md`](../../../DEVELOPING.md) for bootstrap, daily
 workflow, and portal E2E).
@@ -188,6 +192,12 @@ The smoke script uses `LLM_API_TOKEN` from the config file for both the LiteLLM
 models and chat-completion checks without placing the token in process arguments.
 `--skip-file-drop` checks only vLLM and LiteLLM HTTP paths. See script
 `--help` for `CONFIG_ENV`, timeout, and `ALLOW_NON_LOOPBACK_HTTP` overrides.
+
+## Next
+
+- Path complete: return to root [`README.md`](../../README.md#3-validate-all-paths-end-here) section 3
+- Host install context: [`operations/deployment/INSTALL.md`](../operations/deployment/INSTALL.md) (Verification)
+- Path B KB validation: [`operations/rag/KNOWLEDGE_BASE_OPERATIONS.md`](../operations/rag/KNOWLEDGE_BASE_OPERATIONS.md) (Validation Checklist)
 
 ## Related docs
 

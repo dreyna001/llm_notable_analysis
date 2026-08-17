@@ -17,7 +17,7 @@ for templates, scripts, and upgrades.
 Inference and proxy stacks use their own fixed trees: `/opt/vllm`, `/opt/litellm`,
 `/opt/models/`, `/etc/litellm/config.yaml`. See
 [`INSTALL.md`](INSTALL.md) and the package
-[`Filesystem map`](../../../README.md#filesystem-map).
+[`README.md`](../../../README.md) prerequisites and Path A/B/C journeys.
 
 ## Intended behavior
 
@@ -172,6 +172,13 @@ Customer default bundle and hardware profile baselines:
 
 See [`DEVELOPING.md`](../../../../DEVELOPING.md) for bootstrap; do not copy
 `.venv` between Windows and Linux.
+
+## Next
+
+- Path A/B step 2: [`INSTALL.md`](INSTALL.md) — host install after you understand the layout
+- Path B step 4: [`CUSTOMER_DEFAULT_DEPLOYMENT.md`](CUSTOMER_DEFAULT_DEPLOYMENT.md) — env mirror checklist
+- Upgrades: re-run `install.sh` with `AUTO_START_SERVICES=false` per Update workflow above
+- Path order: root [`README.md`](../../../README.md#2-deploy--pick-one-path) section 2
 
 ## Related docs
 

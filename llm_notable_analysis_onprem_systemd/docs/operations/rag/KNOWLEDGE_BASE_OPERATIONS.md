@@ -597,6 +597,13 @@ host if rollback auditability is required.
 - `scripts/smoke_postgres_rag.sh` passes on a Docker-capable validation host.
 - The service-chain smoke test produces a report.
 
+## Next
+
+- Path B step 6: [`../integrations/SERVICENOW_CLOSED_TICKET_OPERATIONS.md`](../integrations/SERVICENOW_CLOSED_TICKET_OPERATIONS.md) — when closed-ticket lane is in scope
+- Path B step 7: [`../analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](../analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md)
+- Validation terminus: [`../../testing/TESTING.md`](../../testing/TESTING.md)
+- Path order: root [`README.md`](../../../README.md#2-deploy--pick-one-path) section 2
+
 ## Related Docs
 
 - [`IMAGE_INGEST_PREREQUISITES.md`](IMAGE_INGEST_PREREQUISITES.md) — OCR, PDF, Granite, offline bundle

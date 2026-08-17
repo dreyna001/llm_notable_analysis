@@ -239,3 +239,10 @@ Parity status:
 | LLM serving ops | [`../llm/LLM_INFERENCE_OPERATIONS.md`](../llm/LLM_INFERENCE_OPERATIONS.md) |
 | Recovery | [`../platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`](../platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md) |
 | Tests | [`../../testing/TESTING.md`](../../testing/TESTING.md) |
+
+## Next
+
+- Path B step 3: [`INSTALL.md`](INSTALL.md) — offline install commands
+- Path B step 4: [`CUSTOMER_DEFAULT_DEPLOYMENT.md`](CUSTOMER_DEFAULT_DEPLOYMENT.md) — customer-default bundle
+- Validation terminus: [`../../testing/TESTING.md`](../../testing/TESTING.md)
+- Path order: root [`README.md`](../../../README.md#2-deploy--pick-one-path) section 2

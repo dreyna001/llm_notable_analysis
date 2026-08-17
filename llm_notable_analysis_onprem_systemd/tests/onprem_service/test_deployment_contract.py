@@ -765,12 +765,14 @@ class TestDeploymentContract(unittest.TestCase):
         self.assertNotIn("not production-equivalent", analyzer_readme)
 
     def test_readme_uses_current_sftp_chroot_contract(self) -> None:
-        """README SFTP guidance should match installer-created paths."""
-        readme_text = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+        """Install runbook SFTP guidance should match installer-created paths."""
+        install_text = (
+            PROJECT_ROOT / "docs/operations/deployment/INSTALL.md"
+        ).read_text(encoding="utf-8")
 
-        self.assertIn("chroot `/var/sftp/soar`", readme_text)
-        self.assertIn("/var/notables/incoming -> /var/sftp/soar/incoming", readme_text)
-        self.assertNotIn("ChrootDirectory /var/notables", readme_text)
+        self.assertIn("/var/sftp/soar", install_text)
+        self.assertIn("incoming -> /var/sftp/soar/incoming", install_text)
+        self.assertNotIn("ChrootDirectory /var/notables", install_text)
 
     def test_dependency_manifest_captures_litellm_unit_and_venv(self) -> None:
         """Dependency evidence should include the LiteLLM proxy after refactor."""

@@ -155,3 +155,9 @@ Dry-run (no writes):
 
 `CLOSED_TICKET_RETENTION_DAYS` sets `expires_at` on upsert. Retrieval and incremental
 indexing ignore inactive or expired tickets. Raw rows remain until separately purged.
+
+## Next
+
+- Path B step 7: [`../analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](../analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md)
+- Path B step 9: [`../../testing/TESTING.md`](../../testing/TESTING.md) — chat closed-ticket lane after sync
+- Path order: root [`README.md`](../../../README.md#2-deploy--pick-one-path) section 2

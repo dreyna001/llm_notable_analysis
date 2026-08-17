@@ -386,6 +386,12 @@ sudo journalctl -u notable-portal.service -n 100 --no-pager
 sudo tail -n 50 /var/log/nginx/notable-portal.error.log
 ```
 
+## Next
+
+- Path B step 9: [`../../testing/TESTING.md`](../../testing/TESTING.md) — portal browser and smoke validation
+- Day-two ops: [`ANALYST_PORTAL_OPERATIONS.md`](ANALYST_PORTAL_OPERATIONS.md)
+- Path order: root [`README.md`](../../../README.md#2-deploy--pick-one-path) section 2
+
 ## Related Docs
 
 - [`ANALYST_PORTAL_OPERATIONS.md`](ANALYST_PORTAL_OPERATIONS.md) — enable/disable, maintenance, API surface, chat readiness

@@ -1,5 +1,9 @@
 # Installation Guide
 
+Host bring-up for the production systemd chain (`vllm` -> `litellm` ->
+`notable-analyzer`, optional portal): prerequisites, `scripts/install.sh`, verification,
+and uninstall. Per-feature tuning belongs in area-specific operations guides.
+
 ## What This Controls
 
 Host bring-up: users, directories, virtual environments, systemd units, model
@@ -20,11 +24,11 @@ tuning belongs in the area-specific operations guides under
 
 | Guide | Purpose |
 |-------|---------|
+| [`../../../README.md`](../../../README.md) | Path A/B/C deploy journeys |
+| [`HOST_LAYOUT_AND_UPDATES.md`](HOST_LAYOUT_AND_UPDATES.md) | Checkout vs install tree vs runtime config |
+| [`OFFLINE_PRESTAGE_GUIDE.md`](OFFLINE_PRESTAGE_GUIDE.md) | Air-gap artifact staging |
+| [`CUSTOMER_DEFAULT_DEPLOYMENT.md`](CUSTOMER_DEFAULT_DEPLOYMENT.md) | Path B env mirror and data-plane checklist |
 | [`../README.md`](../README.md) | Operations index by area |
-| [`OFFLINE_PRESTAGE_GUIDE.md`](OFFLINE_PRESTAGE_GUIDE.md) | Artifacts to stage before an air-gapped install |
-| [`AIRGAPPED_DEPLOYMENT.md`](AIRGAPPED_DEPLOYMENT.md) | Air-gapped bring-up and acceptance checks |
-| [`deployment_profiles/README.md`](deployment_profiles/README.md) | GPU/CPU starting values for vLLM and `config.env` |
-| [`../../../README.md`](../../../README.md) | Package overview and filesystem map |
 
 ## Customer Decisions
 
@@ -602,6 +606,17 @@ sudo journalctl -u notable-analyzer -f
 | Analyzer can't read files | Symlink broken | Recreate: `ln -sf /var/sftp/soar/incoming /var/notables/incoming` |
 | SELinux denials | Missing context | `restorecon -Rv /var/sftp/soar` |
 | Config not found | Wrong path in service | Check `EnvironmentFile=` in systemd unit |
+
+---
+
+## Next
+
+- Path A step 3: [`../../../config.env.example`](../../../config.env.example) — set `CAPABILITY_PROFILES=core` and LLM settings
+- Path A step 4: [`../llm/LLM_INFERENCE_OPERATIONS.md`](../llm/LLM_INFERENCE_OPERATIONS.md) — LiteLLM/vLLM tuning
+- Path B step 4: [`CUSTOMER_DEFAULT_DEPLOYMENT.md`](CUSTOMER_DEFAULT_DEPLOYMENT.md) — dual-file env checklist
+- Path C: [`../platform/CAPABILITY_PROFILES.md`](../platform/CAPABILITY_PROFILES.md) — select profile bundles
+- All paths: [`../../testing/TESTING.md`](../../testing/TESTING.md) — validation terminus
+- Path order: root [`README.md`](../../../README.md#2-deploy--pick-one-path) section 2
 
 ---
 

@@ -203,6 +203,12 @@ Document/chunk embeddings do not use a retrieval prefix.
 5. Tune budgets/snippets only after reviewing real output.
 6. Enable `RAG_FAIL_CLOSED=true` only after retrieval availability is proven.
 
+## Next
+
+- Path B step 5: continue KB ingest in [`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md)
+- Validation terminus: [`../../testing/TESTING.md`](../../testing/TESTING.md) (`smoke_postgres_rag.sh`)
+- Path order: root [`README.md`](../../../README.md#2-deploy--pick-one-path) section 2
+
 ## Related Docs
 
 - [`KNOWLEDGE_BASE_OPERATIONS.md`](KNOWLEDGE_BASE_OPERATIONS.md)

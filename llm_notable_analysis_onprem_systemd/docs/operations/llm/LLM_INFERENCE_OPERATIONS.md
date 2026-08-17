@@ -482,6 +482,11 @@ Optional operator surfaces (not `LLM_*` keys):
 7. Review parse/repair metadata, report completeness, and latency.
 8. Change one inference setting at a time between validation runs.
 
+## Next
+
+- Path A step 5: [`../../testing/TESTING.md`](../../testing/TESTING.md) — service chain smoke
+- Path order: root [`README.md`](../../../README.md#2-deploy--pick-one-path) section 2
+
 ## Related Docs
 
 - [`LLM_INFERENCE_BENCHMARKING.md`](LLM_INFERENCE_BENCHMARKING.md)

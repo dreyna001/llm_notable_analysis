@@ -1,198 +1,192 @@
 # On-Prem Notable Analysis Service
 
-Air-gapped-capable, single-host notable analysis service for SOC workflows. The
-default deployment runs local inference through **LiteLLM -> vLLM** and uses a
-file-drop workflow for incoming `.json` or `.txt` notables.
+Air-gapped-capable, single-host notable analysis for SOC workflows. The default
+deployment runs local inference through **LiteLLM -> vLLM** and uses a file-drop
+workflow for incoming `.json` or `.txt` notables.
 
-This README is a **jumping board**. Install steps, tuning, security, and
-integration detail live under [`docs/`](docs/).
+**Deployers start here.** Pick one path in section 2, follow the linked documents in
+order, and finish at validation. Topic shortcuts live in
+[`docs/README.md`](docs/README.md).
 
-## What This Package Provides
+Optional capabilities include RAG grounding, read-only Splunk or Elasticsearch
+investigation, Splunk/ServiceNow writeback (`action_gated`), HTML reports, and a
+Postgres-backed analyst portal with retrieval-bound chat (`analyst_portal`).
 
-- `systemd`-managed analyzer (`onprem_main`) that watches an incoming directory
-  and writes markdown reports (optional HTML via `html_reports`).
-- Local OpenAI-compatible inference through LiteLLM/vLLM.
-- Optional RAG grounding from a local knowledge base (`rag`).
-- Optional SPL or Elasticsearch read-only investigation (`spl_readonly` or
-  `elastic_readonly`; mutually exclusive).
-- Optional Splunk writeback and ServiceNow draft/create with approval-gated
-  create (`action_gated`).
-- Optional Postgres-backed analyst portal, 30-day case archive, and
-  retrieval-bound chat (`analyst_portal`; separate `portal_app` service).
-- MITRE ATT&CK TTP validation and operator docs for install, offline prestage,
-  recovery, security, and per-customer tuning.
+## 1) Prerequisites
 
-## Start Here
+- RHEL 8/9 (or compatible) host with root access for install
+- NVIDIA GPU with CUDA drivers when using the default vLLM path (see Path C for alternates)
+- Model weights on disk before starting vLLM (default under `/opt/models/`)
+- Monorepo siblings on the install host: `onprem-llm-sdk/` and `onprem_rag_notable_analysis/`
+- Production layout: git checkout (pull/upgrade) vs `/opt/notable-analyzer` (runtime)
+  vs `/etc/notable-analyzer/` (secrets and tuning) — see
+  [`docs/operations/deployment/HOST_LAYOUT_AND_UPDATES.md`](docs/operations/deployment/HOST_LAYOUT_AND_UPDATES.md)
 
-| Need | Read this |
-|------|-----------|
-| Doc index and reading order | [`docs/README.md`](docs/README.md) |
-| Executive build summary | [`docs/delivery_package/EXECUTIVE_ONPREM_BUILD_WRITEUP.md`](docs/delivery_package/EXECUTIVE_ONPREM_BUILD_WRITEUP.md) |
-| End-to-end behavior | [`docs/delivery_package/EXECUTIVE_ONPREM_WORKFLOW.md`](docs/delivery_package/EXECUTIVE_ONPREM_WORKFLOW.md) |
-| Install on a host | [`docs/operations/deployment/INSTALL.md`](docs/operations/deployment/INSTALL.md) |
-| Two-T4 llama.cpp demo build | [`docs/operations/deployment/deployment_profiles/t4x2-llamacpp-gemma4-demo.md`](docs/operations/deployment/deployment_profiles/t4x2-llamacpp-gemma4-demo.md) |
-| Offline / air-gapped prep | [`docs/operations/deployment/OFFLINE_PRESTAGE_GUIDE.md`](docs/operations/deployment/OFFLINE_PRESTAGE_GUIDE.md), [`AIRGAPPED_DEPLOYMENT.md`](docs/operations/deployment/AIRGAPPED_DEPLOYMENT.md) |
-| Capability profiles | [`docs/operations/platform/CAPABILITY_PROFILES.md`](docs/operations/platform/CAPABILITY_PROFILES.md) |
-| Customer tuning by area | [`docs/operations/README.md`](docs/operations/README.md) |
-| Analyzer config template | [`config.env.example`](config.env.example) |
-| Portal config template | [`config.portal.env.example`](config.portal.env.example) |
-| Tests and validation | [`docs/testing/TESTING.md`](docs/testing/TESTING.md) |
-| Local dev (repo `.venv`, portal preview) | [`../DEVELOPING.md`](../DEVELOPING.md) |
-| Host paths vs local checkout | [Filesystem map](#filesystem-map), [HOST_LAYOUT_AND_UPDATES.md](docs/operations/deployment/HOST_LAYOUT_AND_UPDATES.md) |
-| Security posture | [`docs/operations/security/SECURITY_OPERATIONS.md`](docs/operations/security/SECURITY_OPERATIONS.md), [`docs/security/SECURITY_POSTURE.md`](docs/security/SECURITY_POSTURE.md) |
-| Deployment readiness | [`docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.md`](docs/delivery_package/AIOPTIMIZED_SOC_ANALYSIS_ONPREM_READINESS_OVERVIEW.md) |
-| Developer / maintainer guide | [`docs/internal/DEVELOPER_MAINTAINER_GUIDE.md`](docs/internal/DEVELOPER_MAINTAINER_GUIDE.md) |
-| AWS EC2 GPU lab stack | [`deploy/aws/README.md`](deploy/aws/README.md) |
+Quick checks:
 
-## Customer Operations Guides
-
-Config-focused pages for tuning shipped behavior without code changes.
-
-| Area | Guide |
-|------|-------|
-| Capability profiles | [`docs/operations/platform/CAPABILITY_PROFILES.md`](docs/operations/platform/CAPABILITY_PROFILES.md) |
-| File drop, payloads, retention, concurrency | [`docs/operations/platform/FILE_DROP_AND_RETENTION_OPERATIONS.md`](docs/operations/platform/FILE_DROP_AND_RETENTION_OPERATIONS.md) |
-| MITRE ATT&CK/TTP validation | [`docs/operations/platform/MITRE_TTP_OPERATIONS.md`](docs/operations/platform/MITRE_TTP_OPERATIONS.md) |
-| Recovery behavior | [`docs/operations/platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`](docs/operations/platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md) |
-| LLM inference tuning | [`docs/operations/llm/LLM_INFERENCE_OPERATIONS.md`](docs/operations/llm/LLM_INFERENCE_OPERATIONS.md) |
-| LLM serving benchmarks | [`docs/operations/llm/LLM_INFERENCE_BENCHMARKING.md`](docs/operations/llm/LLM_INFERENCE_BENCHMARKING.md) |
-| Knowledge base lifecycle | [`docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md`](docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md) |
-| RAG retrieval tuning | [`docs/operations/rag/RAG_OPERATIONS.md`](docs/operations/rag/RAG_OPERATIONS.md) |
-| SPL generation and read-only execution | [`docs/operations/investigation/SPL_OPERATIONS.md`](docs/operations/investigation/SPL_OPERATIONS.md) |
-| Elasticsearch read-only execution | [`docs/operations/investigation/ELASTICSEARCH_OPERATIONS.md`](docs/operations/investigation/ELASTICSEARCH_OPERATIONS.md) |
-| Splunk notable writeback | [`docs/operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md`](docs/operations/integrations/SPLUNK_WRITEBACK_OPERATIONS.md) |
-| ServiceNow draft/create | [`docs/operations/integrations/SERVICENOW_OPERATIONS.md`](docs/operations/integrations/SERVICENOW_OPERATIONS.md) |
-| Analyst portal and case archive | [`docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md) |
-| Analyst portal network rollout | [`docs/operations/analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](docs/operations/analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md) |
-| Analyst portal chat security | [`docs/operations/analyst_portal/ANALYST_PORTAL_CHAT_SECURITY.md`](docs/operations/analyst_portal/ANALYST_PORTAL_CHAT_SECURITY.md) |
-| Analyst portal local preview (dev) | [`docs/operations/analyst_portal/ANALYST_PORTAL_PREVIEW.md`](docs/operations/analyst_portal/ANALYST_PORTAL_PREVIEW.md) |
-| SOAR / Phantom file drop | [`docs/integrations/SOAR_PLAYBOOK_PHANTOM.md`](docs/integrations/SOAR_PLAYBOOK_PHANTOM.md) |
-
-## Default Runtime Shape
-
-```text
-SOAR/SFTP/operator file drop
-  -> notable-analyzer (onprem_main)
-  -> LiteLLM -> vLLM
-  -> markdown report (+ optional HTML)
-  -> processed / quarantine movement
-  -> optional Postgres case archive
-  -> optional Splunk / ServiceNow outputs
-  -> optional analyst portal (portal_app + nginx) for read-only browse/chat
+```bash
+python3.12 --version
+nvidia-smi   # when using vLLM
+ls ../onprem-llm-sdk ../onprem_rag_notable_analysis
 ```
 
-**Production `systemd` units:** `vllm`, `litellm`, `notable-analyzer`; optional
-`notable-portal`; optional `notable-retention` timer for file and case retention.
+**Air-gapped hosts:** stage artifacts with
+[`docs/operations/deployment/OFFLINE_PRESTAGE_GUIDE.md`](docs/operations/deployment/OFFLINE_PRESTAGE_GUIDE.md)
+before install, then follow your chosen path and finish with the acceptance checks in
+[`docs/operations/deployment/AIRGAPPED_DEPLOYMENT.md`](docs/operations/deployment/AIRGAPPED_DEPLOYMENT.md).
 
-Supported profiles (`CAPABILITY_PROFILES`): `core`, `html_reports`, `rag`,
-`spl_readonly`, `elastic_readonly`, `ticket_draft`, `action_gated`,
-`analyst_portal`. Details:
-[`docs/operations/platform/CAPABILITY_PROFILES.md`](docs/operations/platform/CAPABILITY_PROFILES.md).
+**Before any production install or upgrade** (`scripts/install.sh`, profile apply
+scripts, KB rebuilds that clear data):
 
-Installed Python package:
-[`src/llm_notable_analysis_onprem_systemd/`](src/llm_notable_analysis_onprem_systemd/).
+1. Confirm the target host, GPU profile, and Python 3.12 runtime are approved
+2. Confirm model weights, wheelhouse, and portal `dist/` are staged when offline
+3. Confirm monorepo checkout paths and sibling packages
+4. Review [`config.env.example`](config.env.example) (and [`config.portal.env.example`](config.portal.env.example) when portal is in scope)
+5. Obtain explicit customer approval for that mutation
 
-## Filesystem map
+## 2) Deploy — pick one path
 
-Production hosts keep **two trees**: a **git checkout** (where you `git pull` and
-run `scripts/install.sh`) and **`/opt/notable-analyzer`** (what `systemd` runs).
-Runtime secrets and tuning live in **`/etc/notable-analyzer/`**, not in either
-tree. That split is intentional; see
-[`docs/operations/deployment/HOST_LAYOUT_AND_UPDATES.md`](docs/operations/deployment/HOST_LAYOUT_AND_UPDATES.md).
+| Path | When to use |
+| --- | --- |
+| **A — Core only** | File-drop analysis only; no RAG or analyst portal |
+| **B — Customer-default** | `core,rag,analyst_portal` parity with cloud customer-default bundles |
+| **C — Custom profiles** | Specific capability bundles, hardware tuning, or alternate inference backends |
 
-Local dev uses only the git tree and repo-root `.venv`; see
-[Local dev](#local-dev-repo-checkout-no-full-install).
+Each runbook ends with a **Next** line for path navigation. Stay on one path until you
+reach [`docs/testing/TESTING.md`](docs/testing/TESTING.md).
 
-### Installed host (production)
+**Core systemd units:** `vllm`, `litellm`, `notable-analyzer`; optional `notable-portal`,
+`notable-retention.timer`, `notable-closed-ticket-sync.timer`.
 
-| Path | Purpose |
-|------|---------|
-| `/opt/notable-analyzer` | App install: venv, package, React `frontend/analyst-portal/dist` |
-| `/etc/notable-analyzer/config.env` | Analyzer secrets, directories, capability profiles |
-| `/etc/notable-analyzer/portal.env` | Portal Postgres DSN, bind, proxy secret |
-| `/var/notables/incoming` | File drop (often symlink to SFTP incoming) |
-| `/var/notables/processed`, `quarantine`, `reports`, `archive` | Runtime artifact dirs |
-| `/var/notables/cache` | HuggingFace / sentence-transformers cache |
-| `/var/sftp/soar` | SFTP chroot for SOAR (`incoming` under chroot) |
-| `/opt/llm-notable-analysis/knowledge_base/` | RAG and query-grounding source docs |
-| `/opt/models/` | LLM weights (override with `VLLM_MODEL_PATH`) |
-| `/opt/vllm`, `/opt/litellm` | Inference stack venvs |
-| `/etc/litellm/config.yaml` | LiteLLM routing |
-| `/etc/nginx/conf.d/notable-portal.conf` | Portal TLS, basic auth, static UI, API proxy |
+### Path A — Core only
 
-**PostgreSQL** runs as a separate OS service. Defaults in `config.env.example`:
-database `notable_rag` on `127.0.0.1:5432`; case archive schema `notable_cases`;
-RAG chunks in schema `notable_rag`; optional chat history on the same instance.
+Follow in order:
 
-Portal: nginx on `443` serves React static files and proxies `/api/`, `/health`,
-`/ready` to FastAPI on `127.0.0.1:8080`.
+1. [`docs/operations/deployment/HOST_LAYOUT_AND_UPDATES.md`](docs/operations/deployment/HOST_LAYOUT_AND_UPDATES.md) — checkout vs install tree vs runtime config paths
+2. [`docs/operations/deployment/INSTALL.md`](docs/operations/deployment/INSTALL.md) — host install, systemd units, post-install checks
+3. [`config.env.example`](config.env.example) — set `CAPABILITY_PROFILES=core`, LLM endpoint, directories, secrets
+4. [`docs/operations/llm/LLM_INFERENCE_OPERATIONS.md`](docs/operations/llm/LLM_INFERENCE_OPERATIONS.md) — LiteLLM/vLLM model id, tokens, structured output
+5. [`docs/testing/TESTING.md`](docs/testing/TESTING.md) — unit tests and `smoke_service_chain.sh` validation
 
-SFTP contract: chroot `/var/sftp/soar`; typical symlink
-`/var/notables/incoming -> /var/sftp/soar/incoming`.
+Install command:
 
-### Local dev (repo checkout, no full install)
-
-| Path / endpoint | Purpose |
-|-----------------|---------|
-| `<repo-root>/llm_notable_analysis_onprem_systemd/` | This package |
-| `<repo-root>/.venv` | Shared dev venv (Python + embedded Node/npm) |
-| `<repo-root>/scripts/bootstrap_dev_venv.ps1` / `.sh` | One-time dev bootstrap |
-| `<repo-root>/scripts/dev_portal_preview.ps1` | Portal preview API wrapper |
-| `<repo-root>/scripts/dev_portal_ui.ps1` | Vite dev server wrapper |
-| `config.portal-preview.env` | Optional local OpenAI key for preview chat (gitignored) |
-| `http://127.0.0.1:8765` | Preview API (in-memory fake data, not Postgres) |
-| `http://127.0.0.1:5173` | Vite dev server (proxies API to `8765`) |
-
-Workflow: [`../DEVELOPING.md`](../DEVELOPING.md) and
-[`frontend/analyst-portal/README.md`](frontend/analyst-portal/README.md). Playwright
-E2E targets a deployed VM, not the local preview layout.
-
-## Optional Capabilities
-
-Enable bundles with `CAPABILITY_PROFILES` in `config.env`; endpoint, path, secret,
-and tuning values stay in the same file (portal process reads `portal.env`).
-
-- **RAG:** `rag` — [`RAG_OPERATIONS.md`](docs/operations/rag/RAG_OPERATIONS.md)
-- **SPL read-only:** `spl_readonly` — [`SPL_OPERATIONS.md`](docs/operations/investigation/SPL_OPERATIONS.md)
-- **Elastic read-only:** `elastic_readonly` instead of `spl_readonly` — [`ELASTICSEARCH_OPERATIONS.md`](docs/operations/investigation/ELASTICSEARCH_OPERATIONS.md)
-- **HTML reports:** `html_reports`
-- **ServiceNow draft:** `ticket_draft`
-- **Analyst portal:** `analyst_portal` — [`ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](docs/operations/analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md)
-- **External writes:** `action_gated` only after Splunk writeback, ServiceNow create, approval metadata, and idempotency are accepted
-
-Advanced overrides (not profiles): `SPL_QUERY_RAG_ENABLED`, `QUERY_RESULT_INTERPRETATION_ENABLED`.
-
-All optional integrations are disabled by default.
-
-## Validation Quick Links
-
-- Test guide: [`docs/testing/TESTING.md`](docs/testing/TESTING.md) (152 service tests; 190 full package)
-- Postgres/pgvector RAG smoke: [`scripts/smoke_postgres_rag.sh`](scripts/smoke_postgres_rag.sh)
-- Full service-chain smoke: [`scripts/smoke_service_chain.sh`](scripts/smoke_service_chain.sh)
-- Dependency manifest: [`scripts/tools/generate_dependency_manifest.sh`](scripts/tools/generate_dependency_manifest.sh)
-
-## Repository Map
-
-```text
-llm_notable_analysis_onprem_systemd/
-  config.env.example       # Analyzer runtime template
-  config.portal.env.example
-  deploy/                  # systemd, nginx, Postgres schema, AWS lab stack
-  docs/                    # Operator, integration, security, testing docs
-  frontend/analyst-portal/ # React portal UI (Vite -> dist/)
-  scripts/                 # install.sh, smoke tests, RAG/case helpers
-  src/                     # Installable Python package
-  tests/                   # Unit and contract tests
+```bash
+cd /path/to/llm_notable_analysis_onprem_systemd
+sudo bash scripts/install.sh
 ```
 
-Host install also requires sibling monorepo packages (`onprem_rag_notable_analysis`,
-`onprem-llm-sdk`); see [`docs/operations/deployment/INSTALL.md`](docs/operations/deployment/INSTALL.md).
+Offline example:
 
-## Important Boundaries
+```bash
+sudo INSTALL_PYTHON=false MODEL_DOWNLOAD=false PIP_NO_INDEX=1 \
+  PIP_FIND_LINKS=/path/to/wheelhouse bash scripts/install.sh
+```
+
+### Path B — Customer-default
+
+Bundle: analyzer `CAPABILITY_PROFILES=core,rag,analyst_portal`; portal
+`core,analyst_portal` with explicit RAG mirror flags on `portal.env`. Follow in order.
+
+1. [`docs/operations/deployment/HOST_LAYOUT_AND_UPDATES.md`](docs/operations/deployment/HOST_LAYOUT_AND_UPDATES.md) — host path model before first install
+2. [`docs/operations/deployment/OFFLINE_PRESTAGE_GUIDE.md`](docs/operations/deployment/OFFLINE_PRESTAGE_GUIDE.md) — artifact staging when the host has no outbound internet
+3. [`docs/operations/deployment/INSTALL.md`](docs/operations/deployment/INSTALL.md) — install with portal assets and Postgres schema hooks
+4. [`docs/operations/deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md`](docs/operations/deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md) — dual-file env checklist and data-plane steps
+5. [`docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md`](docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md) — general SOC and SPL KB ingest
+6. [`docs/operations/integrations/SERVICENOW_CLOSED_TICKET_OPERATIONS.md`](docs/operations/integrations/SERVICENOW_CLOSED_TICKET_OPERATIONS.md) — closed-ticket sync when ServiceNow is in scope
+7. [`docs/operations/analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](docs/operations/analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md) — TLS, nginx, DNS, firewall, analyst browser validation
+8. [`docs/operations/deployment/deployment_profiles/README.md`](docs/operations/deployment/deployment_profiles/README.md) — optional hardware tuning (Blackwell, A6000, T4 demo)
+9. [`docs/testing/TESTING.md`](docs/testing/TESTING.md) — `smoke_postgres_rag.sh`, service chain, portal case and chat checks
+
+Install command:
+
+```bash
+sudo INSTALL_ANALYST_PORTAL=true bash scripts/install.sh
+```
+
+Air-gapped portal build:
+
+```bash
+sudo INSTALL_ANALYST_PORTAL=true INSTALL_PORTAL_SKIP_FRONTEND_BUILD=true \
+  MODEL_DOWNLOAD=false bash scripts/install.sh
+```
+
+Portal env mirror: the portal process does **not** inherit analyzer env. Copy RAG DSN,
+embedding model ids, and `PORTAL_PROXY_SECRET` to both `/etc/notable-analyzer/config.env`
+and `portal.env` per the customer-default checklist.
+
+### Path C — Custom profiles
+
+1. [`docs/operations/platform/CAPABILITY_PROFILES.md`](docs/operations/platform/CAPABILITY_PROFILES.md) — select bundles; note mutual exclusions (`spl_readonly` vs `elastic_readonly`)
+2. [`docs/operations/deployment/HOST_LAYOUT_AND_UPDATES.md`](docs/operations/deployment/HOST_LAYOUT_AND_UPDATES.md) — when upgrading an existing host
+3. [`docs/operations/deployment/INSTALL.md`](docs/operations/deployment/INSTALL.md) — base install (or alternate installers below)
+4. Profile ops from [`docs/operations/README.md`](docs/operations/README.md) — enable only guides matching your `CAPABILITY_PROFILES` slice
+5. [`docs/operations/deployment/deployment_profiles/README.md`](docs/operations/deployment/deployment_profiles/README.md) — GPU/CPU starting values when sizing differs from defaults
+6. [`docs/testing/TESTING.md`](docs/testing/TESTING.md) — profile-specific smoke and contract tests
+
+Alternate inference backends (Path C only, not default production):
+
+- Two-T4 llama.cpp demo: [`docs/operations/deployment/deployment_profiles/t4x2-llamacpp-gemma4-demo.md`](docs/operations/deployment/deployment_profiles/t4x2-llamacpp-gemma4-demo.md) via `scripts/install_t4x2_llamacpp_demo.sh`
+- External CPU Qwen at `127.0.0.1:8000`: `scripts/install_mini_qwen_cpu_client.sh` in [`INSTALL.md`](docs/operations/deployment/INSTALL.md)
+
+Runtime env reference: [`config.env.example`](config.env.example),
+[`config.portal.env.example`](config.portal.env.example).
+
+## 3) Validate (all paths end here)
+
+Path-specific checklists live in [`docs/testing/TESTING.md`](docs/testing/TESTING.md).
+You are done when path-specific smoke and staging checks pass on the deployed host.
+
+Core service chain (on host):
+
+```bash
+sudo bash scripts/smoke_service_chain.sh --config-env /etc/notable-analyzer/config.env
+```
+
+Customer-default RAG smoke (workstation or host with Docker):
+
+```bash
+bash scripts/smoke_postgres_rag.sh
+```
+
+Unit tests (from monorepo root, dev venv):
+
+```bash
+pytest llm_notable_analysis_onprem_systemd/tests/onprem_service -q
+```
+
+## 4) Rollback and teardown
+
+**Rollback (failed release, not teardown):** redeploy a previous git checkout and
+re-run `scripts/install.sh` with `AUTO_START_SERVICES=false` first; restore env files
+from backup. Hardware profile scripts write backups under `/root/notable-profile-backups/`
+— see [`docs/operations/deployment/deployment_profiles/README.md`](docs/operations/deployment/deployment_profiles/README.md).
+KB content rollback: [`docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md`](docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md)
+(Rollback). T4 llama.cpp backend rollback:
+[`t4x2-llamacpp-gemma4-demo.md`](docs/operations/deployment/deployment_profiles/t4x2-llamacpp-gemma4-demo.md).
+
+**Teardown (destructive — approval required):** stopping services and removing install
+trees is **irreversible** for local runtime state and is not rollback. After explicit
+customer approval, follow [`docs/operations/deployment/INSTALL.md`](docs/operations/deployment/INSTALL.md)
+(Uninstall) plus customer procedures for Postgres data, nginx TLS material, and retained
+artifacts under `/var/notables/`. No automated bulk deletion workflow is provided.
+
+## 5) Important boundaries
 
 - No production notables, model weights, KB indexes, wheelhouses, or secrets in git.
 - RAG and portal chat context are advisory; they are not direct alert evidence.
 - Portal chat is retrieval-bound and does not execute Splunk, ServiceNow, SOAR, or writeback.
 - Generated SPL/Elastic queries are policy-checked; Splunk/Elastic remain syntax authority.
-- ServiceNow create is approval-gated by default.
+- ServiceNow create is approval-gated by default (`action_gated`).
 - Live Splunk, Elastic, and ServiceNow validation needs customer-controlled systems.
+
+## 6) Further reading
+
+| Topic | Doc |
+| --- | --- |
+| Capability profiles | [`docs/operations/platform/CAPABILITY_PROFILES.md`](docs/operations/platform/CAPABILITY_PROFILES.md) |
+| Operations guides by area | [`docs/operations/README.md`](docs/operations/README.md) |
+| Recovery and replay behavior | [`docs/operations/platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`](docs/operations/platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md) |
+| Security posture | [`docs/operations/security/SECURITY_OPERATIONS.md`](docs/operations/security/SECURITY_OPERATIONS.md) |
+| Analyst portal UI (build/E2E) | [`frontend/analyst-portal/README.md`](frontend/analyst-portal/README.md) |
+| Documentation index | [`docs/README.md`](docs/README.md) |
+| Local dev (repo checkout) | [`../DEVELOPING.md`](../DEVELOPING.md) |

@@ -200,6 +200,14 @@ Examples of safe legacy-only overrides:
 
 Unknown profile names and invalid boolean overrides fail startup validation.
 
+## Next
+
+- Path C step 4: open profile-specific guides from [`../README.md`](../README.md)
+- Path A: set `CAPABILITY_PROFILES=core` only before validation
+- `rag` -> [`../rag/KNOWLEDGE_BASE_OPERATIONS.md`](../rag/KNOWLEDGE_BASE_OPERATIONS.md)
+- `analyst_portal` -> [`../analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](../analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md)
+- Path order: root [`README.md`](../../../README.md#2-deploy--pick-one-path) section 2
+
 ## Related Docs
 
 - [`RAG_OPERATIONS.md`](../rag/RAG_OPERATIONS.md)

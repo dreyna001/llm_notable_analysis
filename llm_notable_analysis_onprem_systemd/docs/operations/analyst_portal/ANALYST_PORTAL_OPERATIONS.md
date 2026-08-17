@@ -543,3 +543,9 @@ Portal startup failures:
   only optional scoped write surface.
 - Portal chat cannot execute integrations or filesystem operations; see
   [`ANALYST_PORTAL_CHAT_SECURITY.md`](ANALYST_PORTAL_CHAT_SECURITY.md).
+
+## Next
+
+- Path B step 9: [`../../testing/TESTING.md`](../../testing/TESTING.md) — health, chat readiness, E2E checks
+- Network rollout not done: [`ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](ANALYST_PORTAL_NETWORK_DEPLOYMENT.md)
+- Path order: root [`README.md`](../../../README.md#2-deploy--pick-one-path) section 2

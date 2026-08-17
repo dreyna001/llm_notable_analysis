@@ -1,5 +1,9 @@
 # Analyst Portal UI (React)
 
+Production build, proxy-auth checks, and Playwright E2E for the analyst portal SPA.
+Local two-terminal preview workflow lives in
+[`docs/operations/analyst_portal/ANALYST_PORTAL_PREVIEW.md`](../../docs/operations/analyst_portal/ANALYST_PORTAL_PREVIEW.md).
+
 Minimal React + Vite + Tailwind + shadcn-style UI for the read-only analyst portal APIs.
 
 Visual design: "Federal SOC Dark" — see
@@ -165,3 +169,10 @@ Environment variables:
 | `PORTAL_E2E_CASE_ID` | `portal-test-1780770539` | Sample archived case |
 | `PORTAL_E2E_CHAT` | `true` | Run selected/global chat checks |
 | `PORTAL_E2E_CHAT_TIMEOUT_MS` | `180000` | Chat response wait |
+
+## Next
+
+- Operator preview workflow: [`docs/operations/analyst_portal/ANALYST_PORTAL_PREVIEW.md`](../../docs/operations/analyst_portal/ANALYST_PORTAL_PREVIEW.md)
+- Production network rollout: [`docs/operations/analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](../../docs/operations/analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md)
+- Path B step 9: [`docs/testing/TESTING.md`](../../docs/testing/TESTING.md)
+- Monorepo dev: [`DEVELOPING.md`](../../../DEVELOPING.md)

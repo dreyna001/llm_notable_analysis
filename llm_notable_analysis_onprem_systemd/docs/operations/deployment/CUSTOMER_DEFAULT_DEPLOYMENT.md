@@ -1,5 +1,9 @@
 # Customer default deployment (portal + RAG + closed tickets)
 
+Path B go-live checklist: mirrored analyzer/portal env files, Postgres data plane,
+KB ingest, closed-ticket sync, and portal network rollout. Use after base install when
+targeting cloud customer-default parity — not for core-only or single-profile custom rollouts.
+
 Normative **repo templates** (copy to the host):
 
 - `config.env.example` → `/etc/notable-analyzer/config.env` (analyzer)
@@ -19,16 +23,9 @@ Hardware-specific tuning (vLLM drop-in, chat concurrency) remains in
 
 ## What retrieval does (accuracy)
 
-All KB lanes are **retrieve then inject**:
-
-1. Hybrid search (Postgres FTS + pgvector, RRF fusion, quality gates).
-2. Optional **cross-encoder rerank** when `RAG_RERANK_ENABLED=true`.
-3. Bounded snippets appended to the LLM prompt as **advisory** context (labeled
-   separately from alert/case evidence).
-
-This applies to **first-pass analysis** (general SOC RAG, SPL query RAG,
-historical closed tickets) and to **portal chat** (same KB lanes + pinned-case
-chunks + optional closed-ticket lane).
+Retrieve-then-inject: hybrid Postgres FTS + pgvector search, optional rerank, bounded
+advisory snippets in the LLM prompt. Details:
+[`../rag/RAG_OPERATIONS.md`](../rag/RAG_OPERATIONS.md).
 
 ## Config checklist (both files)
 
@@ -78,3 +75,11 @@ chunks + optional closed-ticket lane).
 
 No additional application code changes are required when the above data plane
 and env mirror are in place.
+
+## Next
+
+- Path B step 5: [`../rag/KNOWLEDGE_BASE_OPERATIONS.md`](../rag/KNOWLEDGE_BASE_OPERATIONS.md) — general and SPL KB ingest
+- Path B step 6: [`../integrations/SERVICENOW_CLOSED_TICKET_OPERATIONS.md`](../integrations/SERVICENOW_CLOSED_TICKET_OPERATIONS.md) — closed-ticket sync when ServiceNow is in scope
+- Path B step 7: [`../analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](../analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md) — TLS, nginx, analyst browser validation
+- Path B step 9 / all paths: [`../../testing/TESTING.md`](../../testing/TESTING.md) — validation terminus
+- Path order: root [`README.md`](../../../README.md#2-deploy--pick-one-path) section 2

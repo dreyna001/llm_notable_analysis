@@ -141,3 +141,9 @@ Implemented in `llm_notable_analysis_onprem_systemd/src/llm_notable_analysis_onp
 - Use atomic upload upstream (`.tmp` then rename) to avoid partial reads.
 - Enable `action_gated` (or set `SIDE_EFFECT_IDEMPOTENCY_ENABLED=true`) when duplicate Splunk/ServiceNow side effects are operationally sensitive.
 - If strict exactly-once semantics are required end-to-end, add a durable work ledger that spans LLM, local artifacts, and external writes.
+
+## Next
+
+- Enable safe writebacks: [`CAPABILITY_PROFILES.md`](CAPABILITY_PROFILES.md) (`action_gated`)
+- File-drop behavior: [`FILE_DROP_AND_RETENTION_OPERATIONS.md`](FILE_DROP_AND_RETENTION_OPERATIONS.md)
+- Post-restart validation: [`../../testing/TESTING.md`](../../testing/TESTING.md) (`smoke_service_chain.sh`)

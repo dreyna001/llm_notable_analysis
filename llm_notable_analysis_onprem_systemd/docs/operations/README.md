@@ -1,47 +1,35 @@
 # Operations Guide Index
 
-Use this folder for customer-facing operations decisions: which settings to
-enable, what values should differ by environment, and how to validate a safe
-configuration without changing application code.
+Customer-facing operations decisions: which settings to enable, what values differ by
+environment, and how to validate a safe configuration without changing application code.
+
+**Deployers:** ordered Path A/B/C journeys live in the root
+[`README.md`](../../README.md) section 2. Use this index for topic discovery after you
+pick a path.
 
 Start with [`platform/CAPABILITY_PROFILES.md`](platform/CAPABILITY_PROFILES.md)
-and [`../../config.env.example`](../../config.env.example) for supported feature
-bundles and runtime variables. Then open the category that matches your task.
-
-## Common Guide Shape
-
-Area guides should generally use this pattern:
-
-- **What This Controls**: the runtime behavior covered by the page.
-- **Recommended Starting Posture**: conservative defaults for first rollout.
-- **Customer Decisions**: questions operators must answer for each deployment.
-- **Config Quick Reference**: the relevant `config.env` variables.
-- **Validation And Rollout**: how to prove the configuration is safe.
-- **Related Docs**: where to go for deeper install, architecture, or security
-  context.
-
-These guides are not feature specs. They help customers tune shipped behavior
-within supported config bounds.
+and [`../../config.env.example`](../../config.env.example) for supported feature bundles.
+Then open the category that matches your task.
 
 ## Deployment
 
-Host install, offline prestage, air-gapped bring-up, and hardware-specific
-starting values. Not controlled by capability profiles.
+Host install, offline prestage, air-gapped bring-up, customer-default bundle, and
+hardware-specific starting values.
 
 | Guide | Purpose |
 |-------|---------|
 | [`deployment/INSTALL.md`](deployment/INSTALL.md) | Host install, services, post-install smoke checks. |
+| [`deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md`](deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md) | Path B: portal + RAG + closed-ticket env mirror and data-plane checklist. |
 | [`deployment/HOST_LAYOUT_AND_UPDATES.md`](deployment/HOST_LAYOUT_AND_UPDATES.md) | Git checkout vs `/opt/notable-analyzer` vs `/etc/notable-analyzer/`; pull and upgrade workflow. |
 | [`deployment/OFFLINE_PRESTAGE_GUIDE.md`](deployment/OFFLINE_PRESTAGE_GUIDE.md) | Artifacts to stage before an air-gapped install. |
-| [`rag/IMAGE_INGEST_PREREQUISITES.md`](rag/IMAGE_INGEST_PREREQUISITES.md) | OCR, PDF, Granite retrieval, offline image-ingest bundle. |
 | [`deployment/AIRGAPPED_DEPLOYMENT.md`](deployment/AIRGAPPED_DEPLOYMENT.md) | Air-gapped bring-up: AWS-to-on-prem mapping, sizing, acceptance checks. |
+| [`rag/IMAGE_INGEST_PREREQUISITES.md`](rag/IMAGE_INGEST_PREREQUISITES.md) | OCR, PDF, Granite retrieval, offline image-ingest bundle. |
 | [`deployment/deployment_profiles/README.md`](deployment/deployment_profiles/README.md) | Recommended vLLM and `config.env` starting values per CPU/GPU build. |
 
 ## Platform
 
-Cross-cutting runtime configuration: `CAPABILITY_PROFILES` bundles (default
-`core`), file-drop ingest, MITRE validation, retention, and recovery
-expectations.
+Cross-cutting runtime configuration: `CAPABILITY_PROFILES` bundles (default `core`),
+file-drop ingest, MITRE validation, retention, and recovery expectations.
 
 | Guide | Purpose |
 |-------|---------|
@@ -52,8 +40,8 @@ expectations.
 
 ## Analyst Portal
 
-Requires the `analyst_portal` profile. Internal HTTPS rollout, day-two portal
-ops, chat security boundaries, and local dev preview.
+Requires the `analyst_portal` profile. Internal HTTPS rollout, day-two portal ops,
+chat security boundaries, and local dev preview.
 
 | Guide | Purpose |
 |-------|---------|
@@ -61,12 +49,11 @@ ops, chat security boundaries, and local dev preview.
 | [`analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](analyst_portal/ANALYST_PORTAL_OPERATIONS.md) | Enable/disable, portal service, nginx, health checks, DB maintenance, chunk rebuild, backfill, chat guardrails. |
 | [`analyst_portal/ANALYST_PORTAL_CHAT_SECURITY.md`](analyst_portal/ANALYST_PORTAL_CHAT_SECURITY.md) | LLM non-execution boundaries, prompting, post-checks, separation from analyzer actions. |
 | [`analyst_portal/ANALYST_PORTAL_PREVIEW.md`](analyst_portal/ANALYST_PORTAL_PREVIEW.md) | Dev preview with stored cases 1-5, synthetic cases 6-55, optional live chat LLM. |
-| [`analyst_portal/ANALYST_PORTAL_THEME.md`](analyst_portal/ANALYST_PORTAL_THEME.md) | "Federal SOC Dark" theme: palette, fonts, radius, WCAG notes, visual reference. |
+| [`analyst_portal/ANALYST_PORTAL_THEME.md`](analyst_portal/ANALYST_PORTAL_THEME.md) | "Federal SOC Dark" theme: palette, fonts, radius, WCAG notes. |
 
 ## LLM Inference
 
-Core inference path (LiteLLM/vLLM on every host). Endpoint tuning and serving
-benchmarks.
+Core inference path (LiteLLM/vLLM on every host). Endpoint tuning and serving benchmarks.
 
 | Guide | Purpose |
 |-------|---------|
@@ -85,8 +72,8 @@ Requires the `rag` profile. Source document lifecycle and retrieval tuning.
 
 ## Investigation
 
-Requires `spl_readonly` or `elastic_readonly` (mutually exclusive). Read-only
-query generation and execution against Splunk or Elasticsearch.
+Requires `spl_readonly` or `elastic_readonly` (mutually exclusive). Read-only query
+generation and execution against Splunk or Elasticsearch.
 
 | Guide | Purpose |
 |-------|---------|
@@ -95,22 +82,24 @@ query generation and execution against Splunk or Elasticsearch.
 
 ## Integrations
 
-Optional outbound writeback and ticketing. ServiceNow drafts use
-`ticket_draft`; Splunk writeback and ServiceNow create require `action_gated`.
+Optional outbound writeback and ticketing. ServiceNow drafts use `ticket_draft`; Splunk
+writeback and ServiceNow create require `action_gated`.
 
 | Guide | Purpose |
 |-------|---------|
 | [`integrations/SPLUNK_WRITEBACK_OPERATIONS.md`](integrations/SPLUNK_WRITEBACK_OPERATIONS.md) | Notable comment writeback: endpoint, token, TLS, identifier mapping. |
 | [`integrations/SERVICENOW_OPERATIONS.md`](integrations/SERVICENOW_OPERATIONS.md) | Incident draft/create profiles, assignment group, HTTPS/token, approval payload. |
-| [`integrations/SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md`](integrations/SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md) | Inbound closed disposition sync: SN table/fields, read token, field maps (planned). |
+| [`integrations/SERVICENOW_CLOSED_TICKET_OPERATIONS.md`](integrations/SERVICENOW_CLOSED_TICKET_OPERATIONS.md) | Closed-ticket sync, vision/OCR ingest, portal closed-ticket lane (Path B). |
+| [`integrations/SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md`](integrations/SERVICENOW_DISPOSITION_SYNC_OPERATIONS.md) | Inbound closed disposition sync (planned). |
 
 ## Security
 
-Customer decisions around exposure, secrets, TLS, systemd hardening, and audit
-posture. Applies regardless of capability profiles.
+Customer decisions around exposure, secrets, TLS, systemd hardening, and audit posture.
 
 | Guide | Purpose |
 |-------|---------|
 | [`security/SECURITY_OPERATIONS.md`](security/SECURITY_OPERATIONS.md) | Exposure, secrets, TLS, systemd hardening, and audit decisions. |
 
 Deeper implemented posture: [`../security/SECURITY_POSTURE.md`](../security/SECURITY_POSTURE.md).
+
+Validation terminus for all paths: [`../testing/TESTING.md`](../testing/TESTING.md).

@@ -304,3 +304,9 @@ Requires only `llm_notable_analysis_onprem_systemd/` and `onprem-llm-sdk/` (no R
 | Image/OCR prerequisites | [`../rag/IMAGE_INGEST_PREREQUISITES.md`](../rag/IMAGE_INGEST_PREREQUISITES.md) |
 | Analyst portal rollout | [`../analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](../analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md) |
 | Hardware starting points | [`deployment_profiles/README.md`](deployment_profiles/README.md) |
+
+## Next
+
+- Path B step 3 / Path A step 2: [`INSTALL.md`](INSTALL.md) — run install with offline flags
+- Air-gap acceptance: [`AIRGAPPED_DEPLOYMENT.md`](AIRGAPPED_DEPLOYMENT.md)
+- Path order: root [`README.md`](../../../README.md#2-deploy--pick-one-path) section 2

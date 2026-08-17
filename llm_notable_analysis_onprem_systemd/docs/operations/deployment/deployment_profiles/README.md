@@ -92,3 +92,9 @@ No measured benchmark report exists yet for `h100x2-intel-tbd`.
 - [`INSTALL.md`](../INSTALL.md) — install and systemd bring-up
 - [`config.env.example`](../../../../config.env.example) — generic template (merge profile overrides)
 - [`deploy/systemd/vllm.service`](../../../../deploy/systemd/vllm.service) — packaged single-GPU unit
+
+## Next
+
+- Path B step 8: apply hardware profile when host sizing differs from defaults
+- Rollback: restore files from `/root/notable-profile-backups/` after `apply_* --execute`
+- Path C step 5: return to root [`README.md`](../../../README.md#2-deploy--pick-one-path) when profile-only tuning is done
