@@ -2,7 +2,7 @@
 
 Goal: list exactly what to download before installing on an offline host.
 
-Related: [`INSTALL.md`](INSTALL.md) (connected install), [`AIRGAPPED_DEPLOYMENT.md`](AIRGAPPED_DEPLOYMENT.md) (air-gap bring-up), [`../rag/RAG_OPERATIONS.md`](../rag/RAG_OPERATIONS.md) (RAG models and cache paths), [`../rag/IMAGE_INGEST_PREREQUISITES.md`](../rag/IMAGE_INGEST_PREREQUISITES.md) (image/OCR/multimodal prerequisites).
+Related: [`DEPENDENCY_LIST.md`](DEPENDENCY_LIST.md) (declared pins inventory), [`INSTALL.md`](INSTALL.md) (connected install), [`AIRGAPPED_DEPLOYMENT.md`](AIRGAPPED_DEPLOYMENT.md) (air-gap bring-up), [`../rag/RAG_OPERATIONS.md`](../rag/RAG_OPERATIONS.md) (RAG models and cache paths), [`../rag/IMAGE_INGEST_PREREQUISITES.md`](../rag/IMAGE_INGEST_PREREQUISITES.md) (image/OCR/multimodal prerequisites).
 
 ## What This Controls
 

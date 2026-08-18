@@ -190,6 +190,10 @@ Intervals are configurable in `config.env` (`INPUT_RETENTION_DAYS`, `REPORT_RETE
 
 Override examples (air-gapped): internal mirror URLs or offline wheel paths (see `scripts/install.sh` comments).
 
+### Declared dependency inventory
+
+See [`../operations/deployment/DEPENDENCY_LIST.md`](../operations/deployment/DEPENDENCY_LIST.md) for repo-pinned direct dependencies (Python, npm, models, OS components). It is not a full transitive SBOM.
+
 ### Evidence-based dependency manifest (recommended)
 
 On the target host:
