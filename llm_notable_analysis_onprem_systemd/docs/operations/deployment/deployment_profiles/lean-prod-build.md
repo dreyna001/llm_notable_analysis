@@ -130,4 +130,3 @@ lead time, operating-system support, and sustained GPU power limit in writing.
 | Workload | Representative alert burst and five-session chat test meet the agreed latency and queue targets |
 | Capacity | No GPU OOM, host-memory pressure, or sustained queue growth |
 | Operations | Retention, backup, restore, monitoring, and failed-drive replacement tested |
-
