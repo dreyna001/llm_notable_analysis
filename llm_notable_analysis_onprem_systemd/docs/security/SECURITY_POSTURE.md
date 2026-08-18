@@ -192,7 +192,7 @@ Override examples (air-gapped): internal mirror URLs or offline wheel paths (see
 
 ### Declared dependency inventory
 
-See [`../operations/deployment/DEPENDENCY_LIST.md`](../operations/deployment/DEPENDENCY_LIST.md) for repo-pinned direct dependencies (Python, npm, models, OS components). It is not a full transitive SBOM.
+See [`DEPENDENCY_LIST.md`](../operations/deployment/DEPENDENCY_LIST.md).
 
 ### Evidence-based dependency manifest (recommended)
 
