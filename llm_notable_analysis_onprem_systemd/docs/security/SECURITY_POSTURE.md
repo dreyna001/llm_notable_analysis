@@ -192,7 +192,7 @@ Override examples (air-gapped): internal mirror URLs or offline wheel paths (see
 
 ### Declared dependency inventory
 
-See [`DEPENDENCY_LIST.md`](../operations/deployment/DEPENDENCY_LIST.md).
+See [`DEPENDENCY_LIST.md`](../operations/deployment/DEPENDENCY_LIST.md). Declared security controls: [`SECURITY_LIST.md`](../operations/deployment/SECURITY_LIST.md).
 
 ### Evidence-based dependency manifest (recommended)
 
