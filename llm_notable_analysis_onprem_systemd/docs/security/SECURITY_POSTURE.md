@@ -190,6 +190,10 @@ Intervals are configurable in `config.env` (`INPUT_RETENTION_DAYS`, `REPORT_RETE
 
 Override examples (air-gapped): internal mirror URLs or offline wheel paths (see `scripts/install.sh` comments).
 
+### Declared dependency inventory
+
+See [`DEPENDENCY_LIST.md`](../operations/deployment/DEPENDENCY_LIST.md). Declared security controls: [`SECURITY_LIST.md`](../operations/deployment/SECURITY_LIST.md).
+
 ### Evidence-based dependency manifest (recommended)
 
 On the target host:

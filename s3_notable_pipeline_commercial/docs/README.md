@@ -32,6 +32,7 @@ The live AWS mutation gate lives in the root README prerequisites.
 | Testing | [TESTING.md](testing/TESTING.md) |
 | Security | [SECURITY_OPERATIONS.md](operations/security/SECURITY_OPERATIONS.md), [ATTACK_LLM_ANALYSIS.md](security/ATTACK_LLM_ANALYSIS.md) |
 | AWS/on-prem parity contract | [AWS_ONPREM_PARITY_TECHNICAL_SPEC.md](technical_specs/AWS_ONPREM_PARITY_TECHNICAL_SPEC.md) |
+| Monthly AWS cost estimate | [AWS_MONTHLY_COST_ESTIMATE.md](technical_specs/AWS_MONTHLY_COST_ESTIMATE.md) |
 | On-prem profile semantics | [`../../llm_notable_analysis_onprem_systemd/docs/operations/platform/CAPABILITY_PROFILES.md`](../../llm_notable_analysis_onprem_systemd/docs/operations/platform/CAPABILITY_PROFILES.md) |
 
 ## Context (optional, before deploy)

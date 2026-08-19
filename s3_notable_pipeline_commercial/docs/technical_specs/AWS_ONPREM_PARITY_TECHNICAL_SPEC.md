@@ -13,6 +13,9 @@ operator closeout steps.
 
 Operator runbooks: [`../operations/README.md`](../operations/README.md).
 
+Monthly cost planning (Bedrock + provisioned AWS services):
+[`AWS_MONTHLY_COST_ESTIMATE.md`](AWS_MONTHLY_COST_ESTIMATE.md).
+
 On-prem normative counterpart:
 [`../../../llm_notable_analysis_onprem_systemd/docs/technical_specs/feature_enhancements_technical_spec.md`](../../../llm_notable_analysis_onprem_systemd/docs/technical_specs/feature_enhancements_technical_spec.md)
 (analyzer) and

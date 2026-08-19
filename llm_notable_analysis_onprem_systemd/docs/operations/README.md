@@ -22,6 +22,8 @@ hardware-specific starting values.
 | [`deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md`](deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md) | Path B: portal + RAG + closed-ticket env mirror and data-plane checklist. |
 | [`deployment/HOST_LAYOUT_AND_UPDATES.md`](deployment/HOST_LAYOUT_AND_UPDATES.md) | Git checkout vs `/opt/notable-analyzer` vs `/etc/notable-analyzer/`; pull and upgrade workflow. |
 | [`deployment/OFFLINE_PRESTAGE_GUIDE.md`](deployment/OFFLINE_PRESTAGE_GUIDE.md) | Artifacts to stage before an air-gapped install. |
+| [`deployment/DEPENDENCY_LIST.md`](deployment/DEPENDENCY_LIST.md) | Declared repo-pinned dependencies (Python, npm, models, OS). |
+| [`deployment/SECURITY_LIST.md`](deployment/SECURITY_LIST.md) | Declared security controls (network, credentials, gates, hardening). |
 | [`deployment/AIRGAPPED_DEPLOYMENT.md`](deployment/AIRGAPPED_DEPLOYMENT.md) | Air-gapped bring-up: AWS-to-on-prem mapping, sizing, acceptance checks. |
 | [`rag/IMAGE_INGEST_PREREQUISITES.md`](rag/IMAGE_INGEST_PREREQUISITES.md) | OCR, PDF, Granite retrieval, offline image-ingest bundle. |
 | [`deployment/deployment_profiles/README.md`](deployment/deployment_profiles/README.md) | Recommended vLLM and `config.env` starting values per CPU/GPU build. |
