@@ -2,6 +2,7 @@
 
 What the **product SAM stack creates and operates** versus what **you must
 provision, host, or run** in your commercial AWS account (`aws`, `us-east-1`).
+Read this during root README **section 3.1** before picking Path A, B, or C.
 Use during sales handoff, deployment planning, and security review.
 
 ## At a glance
@@ -21,7 +22,7 @@ product does not run CloudFormation or automation for them.
 
 | Item | Your responsibility | Operator runbook |
 | --- | --- | --- |
-| OpenSearch domain | VPC-only domain, security groups, domain access policy | [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) |
+| OpenSearch domain | VPC-only domain, security groups, domain access policy; provision with product Terraform using customer-owned state | [`../../../deploy/terraform/opensearch/`](../../../deploy/terraform/opensearch/), [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) |
 | VPC, subnets, NAT, VPC endpoints | Private subnets, routing, Lambda security groups | [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md) |
 | JWT / OIDC IdP | Cognito, Okta, Keycloak, Microsoft Entra, or corporate OIDC; API access tokens; Entra API + SPA app registrations when using `entra` SPA mode; analyst role/scope claims | [`PORTAL_JWT_IDENTITY.md`](PORTAL_JWT_IDENTITY.md) |
 | CloudFront, WAF, public DNS, portal TLS | Optional front door in front of API Gateway URL | Not in v1 — see [`../analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../analyst_portal/ANALYST_PORTAL_OPERATIONS.md) |
@@ -78,6 +79,7 @@ Copy-and-fill SAM preset for the on-prem customer-default bundle:
 
 ## Next
 
-Pick **Path A**, **Path B**, or **Path C** in [`../../../README.md`](../../../README.md) (deploy path hub).
-Customer values checklist: [`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md).
-Approved architecture differences: [`../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md`](../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md).
+- Root README **section 3.2:** [`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md) — customer values checklist
+- Root README **section 3.3:** pick **Path A**, **Path B**, or **Path C**
+- **Path B:** root README **section 3.4** (prepare `customer-default.env` and Terraform tfvars), then [`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default)
+- Approved architecture differences: [`../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md`](../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md)

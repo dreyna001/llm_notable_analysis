@@ -6,12 +6,15 @@ commands are overridden per function. The release image must be stored in the
 customer's `us-east-1` ECR repository and referenced by digest.
 
 Partition `aws`, region `us-east-1` only. Before ECR push or `sam deploy`, follow
-the live mutation gate in [`../../../README.md`](../../../README.md#1-prerequisites)
+the live mutation gate in [`../../../README.md#2-universal-prerequisites`](../../../README.md#2-universal-prerequisites)
 (account ID, partition, region, role/profile, stack name, change set, explicit
 customer approval).
 
+**Prerequisites:** Path B steps **1–5** complete. **Path B step 6:** build, push,
+and record `ECR_REPOSITORY_URI` and `IMAGE_DIGEST` in `customer-default.env`.
+
 **Path B step 6** (digest-qualified image before SAM):
-[`../../../README.md`](../../../README.md#path-b-customer-default).
+[`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default).
 
 ## Build Contract
 
@@ -81,7 +84,7 @@ Required deploy parameters (core stack):
 
 `sam build` and `sam deploy` (full parameter examples and customer-default preset):
 [`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md)
-and Path A deploy scripts in [`../../../README.md`](../../../README.md) section 2.
+and Path A deploy scripts in [`../../../README.md`](../../../README.md) section 4.
 
 `scripts/setup-and-deploy.ps1` and `scripts/setup-and-deploy.sh` run `sam build`
 and `sam deploy` only. They do not build, tag, or push the container image.
@@ -102,7 +105,7 @@ Rollback is **redeploy**, not stack deletion. Do not use `sam delete` as rollbac
 2. Review the previous CloudFormation template/parameters or change set; confirm the same stack name, `EcrRepositoryUri`, and configuration except `ImageDigest`.
 3. Obtain explicit customer approval for the redeploy.
 4. Run `sam deploy` with the previous `ImageDigest` (and prior parameter set if it changed).
-5. Validate recovery: core smoke ([`../../../README.md`](../../../README.md) section 3), OpenSearch preflight if vector capabilities are enabled ([`../../testing/TESTING.md`](../../testing/TESTING.md)), portal `/ready` when applicable.
+5. Validate recovery: core smoke ([`../../../README.md`](../../../README.md) section 5), OpenSearch preflight if vector capabilities are enabled ([`../../testing/TESTING.md`](../../testing/TESTING.md)), portal `/ready` when applicable.
 
 Record rollback digest, deploy time, and validation outcome in release evidence.
 

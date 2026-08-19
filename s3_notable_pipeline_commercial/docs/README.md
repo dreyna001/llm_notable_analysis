@@ -1,8 +1,10 @@
 # Documentation index
 
-**Deployers:** start at the root [`README.md`](../README.md), pick Path A/B/C in section 2,
-and follow each linked runbook in order through [`testing/TESTING.md`](testing/TESTING.md).
-The live AWS mutation gate lives in the root README prerequisites.
+**Deployers:** start at the root [`README.md`](../README.md).
+
+1. Section **2** — universal prerequisites (tools, account, mutation gate)
+2. Section **3** — before you choose a path (ownership, customer checklist; Path B file prep in **3.4**)
+3. Section **4** — pick Path A/B/C and follow each linked runbook in order through [`testing/TESTING.md`](testing/TESTING.md)
 
 ## Operations index
 
@@ -13,7 +15,7 @@ The live AWS mutation gate lives in the root README prerequisites.
 
 | Topic | Primary doc |
 |-------|-------------|
-| Deploy journey (Path A/B/C) | [`../README.md`](../README.md) section 2 |
+| Deploy journey (Path A/B/C) | [`../README.md`](../README.md) sections 2–4 |
 | Image build + SAM parameters | [DEPLOYMENT_IMAGE_STEPS.md](operations/deployment/DEPLOYMENT_IMAGE_STEPS.md) |
 | Customer-default preset | [COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md](operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md), [`../deploy/aws/presets/`](../deploy/aws/presets/) |
 | VPC / network before RAG/portal | [VPC_NETWORK_PREREQUISITES.md](operations/deployment/VPC_NETWORK_PREREQUISITES.md) |

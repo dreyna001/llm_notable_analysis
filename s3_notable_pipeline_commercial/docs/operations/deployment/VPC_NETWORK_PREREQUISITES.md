@@ -6,6 +6,10 @@ endpoints, or any SAM deploy that sets `CustomerVpcSubnetIds` and
 NAT gateway, route tables, or VPC endpoints — it attaches Lambdas to subnets and
 security groups you supply.
 
+**Prerequisites:** root README sections **2–3**. **Path B:** complete **section 3.4**
+(copy `customer-default.env` and `terraform.tfvars`) before this step. Record subnet
+and Lambda SG IDs in both `terraform.tfvars` and `customer-default.env`.
+
 Partition `aws`, region `us-east-1` — see
 [`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md#deployment-boundary).
 
@@ -18,7 +22,7 @@ Partition `aws`, region `us-east-1` — see
 | `spl_readonly` / `elastic_readonly` to **private** SIEM URLs | **Required** — set `AllowPrivateOutboundEndpoints=true` |
 | `analyst_portal` with OpenSearch case retrieval | **Required** |
 
-**Path B step 2:** [`../../../README.md`](../../../README.md#path-b-customer-default).
+**Path B step 2:** [`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default).
 
 ## Target layout
 

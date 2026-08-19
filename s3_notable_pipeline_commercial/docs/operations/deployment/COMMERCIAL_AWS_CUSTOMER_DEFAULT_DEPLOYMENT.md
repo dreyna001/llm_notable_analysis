@@ -5,11 +5,15 @@ AWS (`aws`, `us-east-1`): `CapabilityProfiles=core,rag,analyst_portal`, general
 SOC RAG + Splunk dictionary grounding, case archive, read-only portal API, and
 pinned-case Q&A. **No** `spl_readonly` or closed-ticket RAG in the baseline preset.
 
+**Before this doc:** complete root README sections **2** (universal prerequisites),
+**3.1** (ownership), **3.4** (copy `customer-default.env` and Terraform tfvars),
+and Path B steps **1–6**. This runbook is **Path B step 7** (`sam deploy` only).
+
 On-prem normative reference:
 [`../../../../llm_notable_analysis_onprem_systemd/docs/operations/deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md`](../../../../llm_notable_analysis_onprem_systemd/docs/operations/deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md)
 
 **Path B step 7** (SAM deploy):
-[`../../../README.md`](../../../README.md#path-b-customer-default).
+[`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default).
 
 ## Preset files (copy and fill)
 
@@ -18,14 +22,14 @@ On-prem normative reference:
 | [`../../../deploy/aws/presets/customer-default.env.example`](../../../deploy/aws/presets/customer-default.env.example) | Placeholder env file; source before `sam deploy --parameter-overrides` |
 | [`../../../deploy/aws/presets/samconfig.customer-default.toml.example`](../../../deploy/aws/presets/samconfig.customer-default.toml.example) | Copy to project-root `samconfig.toml` for repeat deploys |
 
-Complete Path B steps 1–6 before `sam deploy` (authoritative order:
-[`../../../README.md`](../../../README.md#path-b-customer-default)):
+Complete Path B steps 1–6 before `sam deploy` (authoritative order and value
+collection table: [`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default)):
 
 | Step | Runbook |
 | --- | --- |
 | 1 (optional) | [`KMS_CUSTOMER_KEY.md`](KMS_CUSTOMER_KEY.md) |
 | 2 | [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md) |
-| 3 | [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) — Phase A |
+| 3 | [`../../../deploy/terraform/opensearch/`](../../../deploy/terraform/opensearch/) and [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) — Terraform Phase A |
 | 4 | [`BEDROCK_ACCOUNT_ENABLEMENT.md`](BEDROCK_ACCOUNT_ENABLEMENT.md) |
 | 5 | [`PORTAL_JWT_IDENTITY.md`](PORTAL_JWT_IDENTITY.md) |
 | 6 | [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md) |
@@ -168,4 +172,4 @@ Track optional capability rollout in
 ## Next
 
 - **Path B step 8:** [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) — Phase B domain access policy (Lambda physical role ARNs)
-- **Path B steps 9–12:** [`../../../README.md`](../../../README.md#path-b-customer-default) (CMK Phase B, KB ingest, portal SPA, smoke)
+- **Path B steps 9–12:** [`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default) (CMK Phase B, KB ingest, portal SPA, smoke)

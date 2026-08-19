@@ -5,8 +5,9 @@ template encrypts supported data-plane resources with that CMK instead of AWS
 owned keys. The product does **not** create the CMK or key policy — you provision
 the key, grant Lambda roles (and OpenSearch when used), then pass the ARN at deploy.
 
-Partition `aws`, region `us-east-1` — see
-[`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md#deployment-boundary).
+**Prerequisites:** root README section **2**. **Path B step 1** (optional, before
+OpenSearch when the domain encrypts with CMK): complete root README **section 3.4**
+first, then record `CUSTOMER_KMS_KEY_ARN` in `customer-default.env`.
 
 ## When to use a CMK
 
@@ -17,7 +18,7 @@ Partition `aws`, region `us-east-1` — see
 | OpenSearch encryption at rest | Same CMK as `CustomerKmsKeyArn`; **create the CMK before the OpenSearch domain** when the domain uses it |
 
 **Path B step 1** (optional CMK before OpenSearch when the domain encrypts with it):
-[`../../../README.md`](../../../README.md#path-b-customer-default).
+[`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default).
 
 Resources encrypted when `CustomerKmsKeyArn` is set (template behavior):
 

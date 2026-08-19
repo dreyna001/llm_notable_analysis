@@ -1,15 +1,21 @@
 # Commercial AWS OpenSearch provisioning
 
 Run **before** the main SAM stack when `rag`, `RagIngestionEnabled`,
-`SplQueryRagEnabled`, or `analyst_portal` case Q&A is enabled. The product stack
-does **not** create an OpenSearch domain — provision a customer-managed VPC-only
-domain in `us-east-1`, wire network access, then pass endpoint and ARN values into
-SAM (`OpenSearchEndpoint`, `OpenSearchDomainArn`, `CustomerVpcSubnetIds`,
-`CustomerSecurityGroupIds`, `RagTenantId`). AWS commercial uses OpenSearch per
+`SplQueryRagEnabled`, or `analyst_portal` case Q&A is enabled. The main SAM stack
+does **not** create an OpenSearch domain. Provision the customer-managed VPC-only
+domain in `us-east-1` with the Terraform stack under
+[`../../../deploy/terraform/opensearch/`](../../../deploy/terraform/opensearch/),
+then pass its endpoint and ARN outputs into SAM (`OpenSearchEndpoint`,
+`OpenSearchDomainArn`, `CustomerVpcSubnetIds`, `CustomerSecurityGroupIds`,
+`RagTenantId`). AWS commercial uses OpenSearch per
 [`../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md`](../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md) (CAWS-004).
 
+**Prerequisites:** Path B steps **1–2** complete; `terraform.tfvars` copied per
+root README **section 3.4**. Phase A creates the domain; Phase B (after SAM) adds
+Lambda role ARNs to the domain policy.
+
 **Path B steps 3 (Phase A) and 8 (Phase B):**
-[`../../../README.md`](../../../README.md#path-b-customer-default).
+[`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default).
 Customer-default preset: [`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md).
 
 ## Domain requirements
@@ -28,6 +34,41 @@ The application creates indexes and k-NN mappings on first write via
 `ensure_vector_index()` in `src/s3_notable_pipeline/opensearch_client.py`. Do
 **not** hand-create index mappings unless you are debugging; use the product
 ingestion and case-embed paths instead.
+
+## Terraform workflow (preferred)
+
+The standalone Terraform stack creates:
+
+- VPC-only OpenSearch domain
+- dedicated OpenSearch security group
+- TCP 443 ingress from existing Lambda security groups only
+- at-rest and node-to-node encryption
+- HTTPS/TLS 1.2 enforcement
+- Phase A admin and Phase B product-role domain access policy
+
+It consumes existing customer VPC, subnet, Lambda security group, and optional
+CMK values. It does not create application indexes; those remain application
+managed.
+
+```bash
+cd deploy/terraform/opensearch
+cp terraform.tfvars.example terraform.tfvars
+# Fill approved account, VPC, subnet, security-group, and admin-role values.
+
+terraform fmt -check -recursive
+terraform init
+terraform validate
+terraform plan -out opensearch.tfplan
+terraform show opensearch.tfplan
+# Obtain explicit customer approval before the live mutation.
+terraform apply opensearch.tfplan
+```
+
+Use `terraform output sam_environment` to populate the customer-default preset.
+After the first SAM deploy, add the physical Lambda role ARNs to
+`read_role_arns` and `write_role_arns`, review a second plan, and apply Phase B.
+Complete commands and state requirements:
+[`../../../deploy/terraform/opensearch/README.md`](../../../deploy/terraform/opensearch/README.md).
 
 OpenSearch cost is separate from Bedrock embedding and Lambda. Start small in
 staging; scale from observed corpus size and query latency. Snapshot and ISM
@@ -120,7 +161,7 @@ Use read-only actions only for analyzer and portal roles if your policy engine
 requires least privilege per principal. The template currently grants write
 actions only to case-embed and rag-ingestion roles.
 
-## Create domain (console or CLI outline)
+## Create domain (Terraform preferred; CLI fallback)
 
 Use your organization's standard OpenSearch baseline. Minimum fields:
 
@@ -137,7 +178,9 @@ Use your organization's standard OpenSearch baseline. Minimum fields:
 | Access policy | Phase A admin-only; Phase B after SAM | No public access |
 | Encryption | CMK optional but recommended | Same key as `CustomerKmsKeyArn` when set |
 
-CLI sketch (adjust for your VPC; requires approved deployment role):
+Use the Terraform workflow above for repeatable provisioning. The CLI below is
+a fallback outline for environments that do not permit Terraform; do not manage
+the same domain with both workflows.
 
 ```bash
 export AWS_REGION=us-east-1
