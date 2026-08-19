@@ -26,6 +26,9 @@ class DocumentationContractTests(unittest.TestCase):
             "docs/internal/AWS_COMMERCIAL_DEFERRED_GAPS.md",
             "deploy/aws/presets/customer-default.env.example",
             "deploy/aws/presets/samconfig.customer-default.toml.example",
+            "deploy/terraform/opensearch/main.tf",
+            "deploy/terraform/opensearch/terraform.tfvars.example",
+            "deploy/terraform/opensearch/README.md",
         )
         retired = (
             "docs/operations/deployment/GOVCLOUD_CUSTOMER_CONFIGURATION.md",

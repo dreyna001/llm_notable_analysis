@@ -25,7 +25,7 @@ Complete Path B steps 1–6 before `sam deploy` (authoritative order:
 | --- | --- |
 | 1 (optional) | [`KMS_CUSTOMER_KEY.md`](KMS_CUSTOMER_KEY.md) |
 | 2 | [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md) |
-| 3 | [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) — Phase A |
+| 3 | [`../../../deploy/terraform/opensearch/`](../../../deploy/terraform/opensearch/) and [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) — Terraform Phase A |
 | 4 | [`BEDROCK_ACCOUNT_ENABLEMENT.md`](BEDROCK_ACCOUNT_ENABLEMENT.md) |
 | 5 | [`PORTAL_JWT_IDENTITY.md`](PORTAL_JWT_IDENTITY.md) |
 | 6 | [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md) |

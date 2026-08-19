@@ -1,0 +1,40 @@
+aws_account_id = "123456789012"
+domain_name    = "notable-rag-staging"
+vpc_id         = "vpc-0123456789abcdef0"
+
+subnet_ids = [
+  "subnet-0123456789abcdef0",
+  "subnet-0fedcba9876543210",
+]
+
+lambda_security_group_ids = [
+  "sg-0123456789abcdef0",
+]
+
+admin_principal_arns = [
+  "arn:aws:iam::123456789012:role/ApprovedOpenSearchAdministrator",
+]
+
+# Phase B: add physical Lambda role ARNs after the first SAM deploy.
+read_role_arns = [
+  # "arn:aws:iam::123456789012:role/notable-analyzer-stack-NotableAnalyzerFunctionRole-abc123",
+  # "arn:aws:iam::123456789012:role/notable-analyzer-stack-PortalApiFunctionRole-def456",
+]
+
+write_role_arns = [
+  # "arn:aws:iam::123456789012:role/notable-analyzer-stack-CaseEmbedFunctionRole-ghi789",
+  # "arn:aws:iam::123456789012:role/notable-analyzer-stack-RagIngestionFunctionRole-jkl012",
+]
+
+engine_version  = "OpenSearch_2.11"
+instance_type   = "t3.small.search"
+instance_count  = 2
+volume_size_gib = 50
+
+# Leave null to use the AWS-managed OpenSearch encryption key.
+kms_key_arn = null
+
+tags = {
+  Environment = "staging"
+  Owner       = "security-platform"
+}

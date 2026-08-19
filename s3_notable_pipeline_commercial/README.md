@@ -89,7 +89,7 @@ steps ahead of SAM deploy.
 
 1. [`docs/operations/deployment/KMS_CUSTOMER_KEY.md`](docs/operations/deployment/KMS_CUSTOMER_KEY.md) — optional production CMK before OpenSearch when the domain encrypts with it
 2. [`docs/operations/deployment/VPC_NETWORK_PREREQUISITES.md`](docs/operations/deployment/VPC_NETWORK_PREREQUISITES.md) — provision VPC private subnets, routing, and Lambda security groups
-3. [`docs/operations/deployment/OPENSEARCH_PROVISIONING.md`](docs/operations/deployment/OPENSEARCH_PROVISIONING.md) — Phase A: create the OpenSearch domain
+3. [`deploy/terraform/opensearch/`](deploy/terraform/opensearch/) and [`docs/operations/deployment/OPENSEARCH_PROVISIONING.md`](docs/operations/deployment/OPENSEARCH_PROVISIONING.md) — Phase A: provision the OpenSearch domain with Terraform
 4. [`docs/operations/deployment/BEDROCK_ACCOUNT_ENABLEMENT.md`](docs/operations/deployment/BEDROCK_ACCOUNT_ENABLEMENT.md) — enable Bedrock analysis and embedding models
 5. [`docs/operations/deployment/PORTAL_JWT_IDENTITY.md`](docs/operations/deployment/PORTAL_JWT_IDENTITY.md) — configure portal JWT, IdP, and CORS before SAM when portal JWT mode is enabled
 6. [`docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`](docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md) — build, push, and record `ImageDigest` before SAM

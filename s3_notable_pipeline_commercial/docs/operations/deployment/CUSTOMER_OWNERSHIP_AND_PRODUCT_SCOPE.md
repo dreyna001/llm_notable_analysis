@@ -21,7 +21,7 @@ product does not run CloudFormation or automation for them.
 
 | Item | Your responsibility | Operator runbook |
 | --- | --- | --- |
-| OpenSearch domain | VPC-only domain, security groups, domain access policy | [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) |
+| OpenSearch domain | VPC-only domain, security groups, domain access policy; provision with product Terraform using customer-owned state | [`../../../deploy/terraform/opensearch/`](../../../deploy/terraform/opensearch/), [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) |
 | VPC, subnets, NAT, VPC endpoints | Private subnets, routing, Lambda security groups | [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md) |
 | JWT / OIDC IdP | Cognito, Okta, Keycloak, Microsoft Entra, or corporate OIDC; API access tokens; Entra API + SPA app registrations when using `entra` SPA mode; analyst role/scope claims | [`PORTAL_JWT_IDENTITY.md`](PORTAL_JWT_IDENTITY.md) |
 | CloudFront, WAF, public DNS, portal TLS | Optional front door in front of API Gateway URL | Not in v1 — see [`../analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../analyst_portal/ANALYST_PORTAL_OPERATIONS.md) |
