@@ -6,6 +6,11 @@ ingress from existing Lambda security groups. It does not create the customer
 VPC, subnets, Lambda security groups, NAT gateways, VPC endpoints, KMS keys, or
 application indexes.
 
+**Deploy context:** root README **section 3.4** (copy `terraform.tfvars`), Path B
+**step 3** Phase A and **step 8** Phase B —
+[`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default).
+Operator runbook: [`../../docs/operations/deployment/OPENSEARCH_PROVISIONING.md`](../../docs/operations/deployment/OPENSEARCH_PROVISIONING.md).
+
 ## Prerequisites
 
 - Terraform 1.6+

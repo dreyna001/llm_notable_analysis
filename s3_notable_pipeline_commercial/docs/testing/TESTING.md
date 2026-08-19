@@ -2,7 +2,7 @@
 
 Canonical commands for unit, smoke, integration, and staging validation on
 commercial AWS. **Deploy path terminus:** all paths in
-[`../../README.md`](../../README.md) section 2 end here.
+[`../../README.md`](../../README.md) section 5 end here.
 
 ## Golden Eval
 

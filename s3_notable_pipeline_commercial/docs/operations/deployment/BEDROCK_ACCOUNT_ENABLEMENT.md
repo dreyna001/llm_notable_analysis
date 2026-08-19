@@ -4,6 +4,9 @@ Enable and select Bedrock models **before** `sam deploy`. The stack requires
 `BedrockAnalysisModelId` and `BedrockAnalysisModelArn` on every deployment; it
 does not enable model access in your account.
 
+**Prerequisites:** root README sections **2–3**. **Path B step 4:** record model
+ID/ARN variables in `customer-default.env` after OpenSearch Phase A.
+
 Partition `aws`, region `us-east-1` — see
 [`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md#deployment-boundary).
 

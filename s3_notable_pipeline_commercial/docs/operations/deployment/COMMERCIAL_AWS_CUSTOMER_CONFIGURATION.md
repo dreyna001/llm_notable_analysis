@@ -4,9 +4,12 @@ Values collected for each customer deployment. The application, templates, queue
 indexes, validation, and operational controls remain product-owned; only
 customer-specific identifiers, policies, content, and capacity values change.
 
-What you provision vs what the stack creates:
-[`CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md`](CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md).
-Deploy path order: [`../../README.md`](../../README.md).
+**Deploy journey:** root README section **3.2** (this checklist), after
+[`CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md`](CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md)
+(section 3.1). Path B operators fill
+[`../../../deploy/aws/presets/customer-default.env.example`](../../../deploy/aws/presets/customer-default.env.example)
+as each prerequisite runbook completes; authoritative step order:
+[`../../README.md#path-b--customer-default`](../../README.md#path-b--customer-default).
 
 ## Deployment Boundary
 
@@ -93,5 +96,6 @@ Record these values for every release:
 
 ## Next
 
-- Customer-default deploy: [`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md)
-- Deploy path hub: [`../../README.md`](../../README.md)
+- Root README **section 3.3:** pick your deploy path
+- **Path B:** section **3.4** (copy preset files), then step 1 at [`../../README.md#path-b--customer-default`](../../README.md#path-b--customer-default)
+- Path B SAM deploy (step 7 only): [`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md)

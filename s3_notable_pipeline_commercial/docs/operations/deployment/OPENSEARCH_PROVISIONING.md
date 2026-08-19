@@ -10,8 +10,12 @@ then pass its endpoint and ARN outputs into SAM (`OpenSearchEndpoint`,
 `RagTenantId`). AWS commercial uses OpenSearch per
 [`../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md`](../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md) (CAWS-004).
 
+**Prerequisites:** Path B steps **1–2** complete; `terraform.tfvars` copied per
+root README **section 3.4**. Phase A creates the domain; Phase B (after SAM) adds
+Lambda role ARNs to the domain policy.
+
 **Path B steps 3 (Phase A) and 8 (Phase B):**
-[`../../../README.md`](../../../README.md#path-b-customer-default).
+[`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default).
 Customer-default preset: [`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md).
 
 ## Domain requirements

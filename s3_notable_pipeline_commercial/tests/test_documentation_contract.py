@@ -275,7 +275,9 @@ class DocumentationContractTests(unittest.TestCase):
 
         root_readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("docs/README.md", root_readme)
-        self.assertIn("Deploy — pick one path", root_readme)
+        self.assertIn("Before you choose a path", root_readme)
+        self.assertIn("Path B — prepare before step 1", root_readme)
+        self.assertIn("Deploy — follow your path", root_readme)
         for path_heading in (
             "Path A — Core only",
             "Path B — Customer-default",
@@ -298,9 +300,12 @@ class DocumentationContractTests(unittest.TestCase):
             path.read_text(encoding="utf-8")
             for path in (PROJECT_ROOT / "docs/operations/deployment").glob("*.md")
         )
-        self.assertNotIn("#path-a--", deployment_docs)
-        self.assertNotIn("#path-b--", deployment_docs)
-        self.assertNotIn("#path-c--", deployment_docs)
+        for duplicate_journey in (
+            "### Path A — Core only",
+            "### Path B — Customer-default",
+            "### Path C — Custom profiles",
+        ):
+            self.assertNotIn(duplicate_journey, deployment_docs)
 
     def test_portal_auth_documentation_covers_configurable_modes(self) -> None:
         jwt_doc = (

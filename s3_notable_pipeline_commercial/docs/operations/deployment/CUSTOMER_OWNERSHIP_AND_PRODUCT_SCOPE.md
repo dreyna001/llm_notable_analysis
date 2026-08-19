@@ -2,6 +2,7 @@
 
 What the **product SAM stack creates and operates** versus what **you must
 provision, host, or run** in your commercial AWS account (`aws`, `us-east-1`).
+Read this during root README **section 3.1** before picking Path A, B, or C.
 Use during sales handoff, deployment planning, and security review.
 
 ## At a glance
@@ -78,6 +79,7 @@ Copy-and-fill SAM preset for the on-prem customer-default bundle:
 
 ## Next
 
-Pick **Path A**, **Path B**, or **Path C** in [`../../../README.md`](../../../README.md) (deploy path hub).
-Customer values checklist: [`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md).
-Approved architecture differences: [`../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md`](../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md).
+- Root README **section 3.2:** [`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md) — customer values checklist
+- Root README **section 3.3:** pick **Path A**, **Path B**, or **Path C**
+- **Path B:** root README **section 3.4** (prepare `customer-default.env` and Terraform tfvars), then [`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default)
+- Approved architecture differences: [`../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md`](../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md)

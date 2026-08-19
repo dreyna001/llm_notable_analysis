@@ -5,11 +5,14 @@ Configure customer-owned identity for the analyst portal when
 again in the portal Lambda — it does **not** host login pages, user directories,
 or token issuance.
 
+**Prerequisites:** root README sections **2–3**. **Path B step 5:** configure IdP
+and record JWT/CORS variables in `customer-default.env` before SAM.
+
 Partition `aws`, region `us-east-1` — see
 [`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md#deployment-boundary).
 
 **Path B step 5** (before SAM when portal JWT mode is enabled):
-[`../../../README.md`](../../../README.md#path-b-customer-default).
+[`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default).
 
 ## Two configuration layers
 

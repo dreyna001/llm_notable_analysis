@@ -4,8 +4,9 @@ Category index for commercial AWS operator runbooks (SAM parameters, Lambda
 environment variables, validation). Profile mappings and constraints:
 [`platform/CAPABILITY_PROFILES.md`](platform/CAPABILITY_PROFILES.md).
 
-**Deploy navigation:** [`../../README.md`](../../README.md) contains the complete
-Path A (core), Path B (customer-default), and Path C (custom profiles) journeys.
+**Deploy navigation:** [`../../README.md`](../../README.md) — sections **2–3**
+(prerequisites and path selection), then section **4** for the complete Path A,
+Path B, and Path C journeys.
 
 ## Deployment
 
