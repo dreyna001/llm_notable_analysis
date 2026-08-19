@@ -68,6 +68,7 @@ Raise analyzer and portal concurrency only after representative load testing.
 | Profile ID | Hardware | vLLM unit | Status |
 |------------|----------|-----------|--------|
 | [`a6000-96gb-ultra9-285k.md`](a6000-96gb-ultra9-285k.md) | 1x NVIDIA RTX PRO 6000 (96 GB) + Intel Core Ultra 9 285K (24 cores / 24 threads) | Packaged [`vllm.service`](../../../../deploy/systemd/vllm.service) | Active baseline |
+| [`lean-prod-build.md`](lean-prod-build.md) | Dual-GPU-ready Dell R770, initially 1x RTX PRO 6000 Server Edition, 2x Xeon 6517P, 256 GB RAM | Start with packaged single-GPU unit; second replica is planned | Procurement plan / load-test required |
 | [`h100x2-intel-tbd.md`](h100x2-intel-tbd.md) | 2x NVIDIA H100 (80 GB) + Intel CPU (model TBD) | Manual override required | Draft / load-test required |
 | [`t4x2-llamacpp-gemma4-demo.md`](t4x2-llamacpp-gemma4-demo.md) | 2x NVIDIA T4 (16 GB each) | Packaged `llamacpp-gemma.service` via dedicated installer | Demo / workload validation required |
 
