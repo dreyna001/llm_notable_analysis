@@ -83,10 +83,23 @@ class PathBConfig:
     opensearch_case_index: str = "case_chunks"
 
 
-def _prompt(text: str, default: str = "") -> str:
+def _hint(text: str) -> None:
+    print(f"  hint: {text}")
+
+
+def _prompt(text: str, default: str = "", *, hint: str | None = None) -> str:
+    if hint:
+        _hint(hint)
     suffix = f" [{default}]" if default else ""
     value = input(f"{text}{suffix}: ").strip()
     return value or default
+
+
+def _prompt_list(text: str, *, hint: str | None = None) -> list[str]:
+    raw = _prompt(text, hint=hint)
+    if not raw:
+        return []
+    return [part.strip() for part in raw.split(",") if part.strip()]
 
 
 def _prompt_yes_no(text: str, default: bool = False) -> bool:
@@ -115,13 +128,6 @@ def _prompt_choice(text: str, choices: dict[str, str]) -> str:
         print(f"Choose one of: {', '.join(sorted(valid))}")
 
 
-def _prompt_list(text: str) -> list[str]:
-    raw = _prompt(text)
-    if not raw:
-        return []
-    return [part.strip() for part in raw.split(",") if part.strip()]
-
-
 def _comma(values: list[str]) -> str:
     return ",".join(values)
 
@@ -131,10 +137,14 @@ def collect_interactive() -> PathBConfig:
     print("This script writes local config files only. It does not deploy anything.\n")
 
     config = PathBConfig()
-    config.aws_account_id = _prompt("Commercial AWS account ID (12 digits)")
+    config.aws_account_id = _prompt(
+        "Commercial AWS account ID (12 digits)",
+        hint="Example: 123456789012",
+    )
     config.commercial_aws_account_id = _prompt(
         "COMMERCIAL_AWS_ACCOUNT_ID (leave blank to match AWS account ID)",
         config.aws_account_id,
+        hint="Must match AWS_ACCOUNT_ID for setup-and-deploy scripts",
     )
 
     cmk_mode = _prompt_choice(
@@ -147,7 +157,12 @@ def collect_interactive() -> PathBConfig:
     )
     config.cmk_mode = cmk_mode  # type: ignore[assignment]
     if cmk_mode == "existing":
-        config.customer_kms_key_arn = _prompt("CMK ARN (us-east-1)")
+        config.customer_kms_key_arn = _prompt(
+            "CMK ARN (us-east-1)",
+            hint="Example: arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555",
+        )
+    elif cmk_mode == "create":
+        _hint("Leave CUSTOMER_KMS_KEY_ARN empty until the key exists; see KMS_CUSTOMER_KEY.md")
 
     vpc_mode = _prompt_choice(
         "VPC and Lambda networking for Path B?",
@@ -158,11 +173,17 @@ def collect_interactive() -> PathBConfig:
     )
     config.vpc_mode = vpc_mode  # type: ignore[assignment]
     if vpc_mode == "existing":
-        config.vpc_id = _prompt("VPC ID")
-        config.subnet_ids = _prompt_list("Private subnet IDs (comma-separated, no spaces)")
-        config.lambda_security_group_ids = _prompt_list(
-            "Lambda security group IDs (comma-separated, no spaces)"
+        config.vpc_id = _prompt("VPC ID", hint="Example: vpc-0abc123def4567890")
+        config.subnet_ids = _prompt_list(
+            "Private subnet IDs (comma-separated, no spaces)",
+            hint="Example: subnet-aaa111,subnet-bbb222 (1 for dev, 2+ AZs for prod)",
         )
+        config.lambda_security_group_ids = _prompt_list(
+            "Lambda security group IDs (comma-separated, no spaces)",
+            hint="Example: sg-0abc123def4567890",
+        )
+    else:
+        _hint("Finish VPC_NETWORK_PREREQUISITES.md first, then re-run with existing network IDs")
 
     opensearch_mode = _prompt_choice(
         "OpenSearch domain?",
@@ -173,47 +194,112 @@ def collect_interactive() -> PathBConfig:
     )
     config.opensearch_mode = opensearch_mode  # type: ignore[assignment]
     if opensearch_mode == "create":
-        config.domain_name = _prompt("OpenSearch domain name", "notable-rag-staging")
+        config.domain_name = _prompt(
+            "OpenSearch domain name",
+            "notable-rag-staging",
+            hint="Lowercase letters, digits, hyphens; 3-28 chars; unique in account",
+        )
         config.admin_principal_arns = _prompt_list(
-            "Admin IAM role ARNs for Phase A (comma-separated)"
+            "Admin IAM role ARNs for Phase A (comma-separated)",
+            hint="Example: arn:aws:iam::123456789012:role/ApprovedOpenSearchAdministrator",
         )
         if _prompt_yes_no("Use default OpenSearch sizing (t3.small.search x2, 50 GiB)?", True):
             pass
         else:
-            config.instance_type = _prompt("Instance type", config.instance_type)
-            config.instance_count = int(_prompt("Instance count", str(config.instance_count)))
+            config.instance_type = _prompt(
+                "Instance type",
+                config.instance_type,
+                hint="Example: t3.small.search",
+            )
+            config.instance_count = int(
+                _prompt("Instance count", str(config.instance_count), hint="1-3")
+            )
             config.volume_size_gib = int(
-                _prompt("Volume size GiB", str(config.volume_size_gib))
+                _prompt("Volume size GiB", str(config.volume_size_gib), hint="Example: 50")
             )
     else:
-        config.opensearch_endpoint = _prompt("OpenSearch HTTPS endpoint")
-        config.opensearch_domain_arn = _prompt("OpenSearch domain ARN")
+        config.opensearch_endpoint = _prompt(
+            "OpenSearch HTTPS endpoint",
+            hint="Example: https://vpc-notable-rag-staging-xxxxx.us-east-1.es.amazonaws.com",
+        )
+        config.opensearch_domain_arn = _prompt(
+            "OpenSearch domain ARN",
+            hint="Example: arn:aws:es:us-east-1:123456789012:domain/notable-rag-staging",
+        )
 
-    config.rag_tenant_id = _prompt("RAG tenant ID (stable per deployment)")
+    config.rag_tenant_id = _prompt(
+        "RAG tenant ID (stable per deployment)",
+        hint="Example: customer-acme-prod (same value on every OpenSearch document)",
+    )
 
     print("\nBedrock analysis model (enable in account before SAM deploy).")
-    config.bedrock_analysis_model_id = _prompt("BedrockAnalysisModelId")
-    config.bedrock_analysis_model_arn = _prompt("BedrockAnalysisModelArn")
+    config.bedrock_analysis_model_id = _prompt(
+        "BedrockAnalysisModelId",
+        hint="Example: amazon.nova-pro-v1:0 or us.anthropic.claude-sonnet-4-20250514-v1:0",
+    )
+    config.bedrock_analysis_model_arn = _prompt(
+        "BedrockAnalysisModelArn",
+        hint="Example: arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0",
+    )
     config.bedrock_analysis_inference_profile_foundation_model_arns = _prompt(
         "Geographic inference profile foundation model ARNs (comma-separated, or leave blank)",
         "",
+        hint="Required only for geographic inference profiles; from get-inference-profile",
     )
 
     print("\nPortal JWT (Path B requires portal JWT mode).")
-    config.portal_jwt_issuer = _prompt("Portal JWT issuer URL")
-    config.portal_jwt_audience = _prompt("Portal JWT audience")
-    config.portal_jwt_tenant_id = _prompt("Portal JWT tenant ID (optional Entra tid)", "")
-    config.portal_required_analyst_role = _prompt("Required analyst role claim (optional)", "")
-    config.portal_required_analyst_scope = _prompt("Required analyst scope claim (optional)", "")
-    config.portal_cors_allowed_origins = _prompt("Portal CORS allowed origins")
+    _hint("Set at least one of role or scope; SAM fails if both are empty")
+    config.portal_jwt_issuer = _prompt(
+        "Portal JWT issuer URL",
+        hint="Example: https://login.microsoftonline.com/<tenant-id>/v2.0",
+    )
+    config.portal_jwt_audience = _prompt(
+        "Portal JWT audience",
+        hint="Example: api://<api-app-client-id> or app client ID",
+    )
+    config.portal_jwt_tenant_id = _prompt(
+        "Portal JWT tenant ID (optional Entra tid)",
+        "",
+        hint="Example: Entra directory tenant GUID; leave blank if unused",
+    )
+    config.portal_required_analyst_role = _prompt(
+        "Required analyst role claim (optional)",
+        "",
+        hint="Example: Analyst",
+    )
+    config.portal_required_analyst_scope = _prompt(
+        "Required analyst scope claim (optional)",
+        "",
+        hint="Example: api://<api-app-id>/portal.analyst",
+    )
+    config.portal_cors_allowed_origins = _prompt(
+        "Portal CORS allowed origins",
+        hint="Example: https://portal.customer.example (scheme + host + port, no path)",
+    )
 
     print("\nECR image (build and push before SAM deploy).")
-    config.ecr_repository_uri = _prompt("ECR repository URI (no tag or digest)")
-    config.image_digest = _prompt("Image digest (sha256:...)", "")
+    config.ecr_repository_uri = _prompt(
+        "ECR repository URI (no tag or digest)",
+        hint="Example: 123456789012.dkr.ecr.us-east-1.amazonaws.com/notable-analyzer-s3",
+    )
+    config.image_digest = _prompt(
+        "Image digest (sha256:...)",
+        "",
+        hint="Example: sha256:abc... from ecr describe-images; leave blank until image is pushed",
+    )
 
-    config.input_bucket_name = _prompt("Input S3 bucket name")
-    config.output_bucket_name = _prompt("Output S3 bucket name")
-    config.portal_ui_bucket_name = _prompt("Portal UI S3 bucket name")
+    config.input_bucket_name = _prompt(
+        "Input S3 bucket name",
+        hint="Globally unique; notables land under incoming/",
+    )
+    config.output_bucket_name = _prompt(
+        "Output S3 bucket name",
+        hint="Globally unique; reports and JSON output",
+    )
+    config.portal_ui_bucket_name = _prompt(
+        "Portal UI S3 bucket name",
+        hint="Globally unique; upload analyst-portal dist/ after SAM deploy",
+    )
 
     return config
 
