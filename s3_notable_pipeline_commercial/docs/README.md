@@ -19,6 +19,7 @@
 | Image build + SAM parameters | [DEPLOYMENT_IMAGE_STEPS.md](operations/deployment/DEPLOYMENT_IMAGE_STEPS.md) |
 | Customer-default preset | [COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md](operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md), [`../deploy/aws/presets/`](../deploy/aws/presets/) |
 | VPC / network before RAG/portal | [VPC_NETWORK_PREREQUISITES.md](operations/deployment/VPC_NETWORK_PREREQUISITES.md) |
+| Terraform foundation (optional) | [`../deploy/terraform/README.md`](../deploy/terraform/README.md) — network, KMS, ECR, OpenSearch; SAM still required |
 | OpenSearch before RAG/portal | [OPENSEARCH_PROVISIONING.md](operations/deployment/OPENSEARCH_PROVISIONING.md) |
 | Bedrock model enablement | [BEDROCK_ACCOUNT_ENABLEMENT.md](operations/deployment/BEDROCK_ACCOUNT_ENABLEMENT.md) |
 | Customer KMS key policies | [KMS_CUSTOMER_KEY.md](operations/deployment/KMS_CUSTOMER_KEY.md) |

@@ -22,12 +22,12 @@ product does not run CloudFormation or automation for them.
 
 | Item | Your responsibility | Operator runbook |
 | --- | --- | --- |
-| OpenSearch domain | VPC-only domain, security groups, domain access policy; provision with product Terraform using customer-owned state | [`../../../deploy/terraform/opensearch/`](../../../deploy/terraform/opensearch/), [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) |
-| VPC, subnets, NAT, VPC endpoints | Private subnets, routing, Lambda security groups | [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md) |
+| OpenSearch domain | VPC-only domain, security groups, domain access policy; provision with Terraform (standalone or foundation) using customer-owned state | [`../../../deploy/terraform/README.md`](../../../deploy/terraform/README.md), [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) |
+| VPC, subnets, NAT, VPC endpoints | Private subnets, routing; Lambda SG via Terraform [`network/`](../../../deploy/terraform/network/) or manual | [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md) |
 | JWT / OIDC IdP | Cognito, Okta, Keycloak, Microsoft Entra, or corporate OIDC; API access tokens; Entra API + SPA app registrations when using `entra` SPA mode; analyst role/scope claims | [`PORTAL_JWT_IDENTITY.md`](PORTAL_JWT_IDENTITY.md) |
 | CloudFront, WAF, public DNS, portal TLS | Optional front door in front of API Gateway URL | Not in v1 — see [`../analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../analyst_portal/ANALYST_PORTAL_OPERATIONS.md) |
-| Customer CMK (optional) | Create key, key policy for Lambda roles + OpenSearch | [`KMS_CUSTOMER_KEY.md`](KMS_CUSTOMER_KEY.md) |
-| ECR image | Build, push, record digest for deploy | [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md) |
+| Customer CMK (optional) | Create key, key policy for Lambda roles + OpenSearch; Terraform [`kms/`](../../../deploy/terraform/kms/) optional | [`KMS_CUSTOMER_KEY.md`](KMS_CUSTOMER_KEY.md) |
+| ECR image | Terraform [`ecr/`](../../../deploy/terraform/ecr/) for repository; build, push, record digest for deploy | [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md) |
 | Bedrock model access | Enable models in account; pass ID + ARN | [`BEDROCK_ACCOUNT_ENABLEMENT.md`](BEDROCK_ACCOUNT_ENABLEMENT.md) |
 | Upstream notable source | Splunk/SOAR/operator writes JSON to `incoming/` | [`../platform/FILE_DROP_AND_RETENTION_OPERATIONS.md`](../platform/FILE_DROP_AND_RETENTION_OPERATIONS.md), [`../../integrations/SOAR_PLAYBOOK_PHANTOM.md`](../../integrations/SOAR_PLAYBOOK_PHANTOM.md) |
 | Splunk / ServiceNow / Elasticsearch | Endpoints, credentials, approval workflows when profiles enabled | [`../integrations/SPLUNK_WRITEBACK_OPERATIONS.md`](../integrations/SPLUNK_WRITEBACK_OPERATIONS.md), [`../integrations/SERVICENOW_OPERATIONS.md`](../integrations/SERVICENOW_OPERATIONS.md) |

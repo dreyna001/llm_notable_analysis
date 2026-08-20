@@ -119,6 +119,27 @@ notable.
 If you set `CustomerKmsKeyArn` **before** Lambda roles exist, leave a break-glass
 admin statement and tighten after deploy (**Path B step 9**).
 
+## Terraform workflow (optional)
+
+Create the CMK with the standalone module or foundation stack (`enable_kms=true`):
+
+```bash
+cd deploy/terraform/kms
+cp terraform.tfvars.example terraform.tfvars
+terraform init && terraform validate
+terraform plan -out kms.tfplan
+# Customer approval gate
+terraform apply kms.tfplan
+terraform output sam_environment
+```
+
+Set `enable_opensearch_grant=true` when OpenSearch will encrypt at rest with this
+key. After SAM deploy, add Lambda **physical** role ARNs to `lambda_role_arns` in
+tfvars and re-apply for Phase B.
+
+Hub: [`../../../deploy/terraform/README.md`](../../../deploy/terraform/README.md).
+Module: [`../../../deploy/terraform/kms/README.md`](../../../deploy/terraform/kms/README.md).
+
 ## Create key (CLI sketch)
 
 ```bash

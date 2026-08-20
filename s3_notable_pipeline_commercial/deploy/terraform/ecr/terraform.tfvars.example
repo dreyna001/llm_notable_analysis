@@ -1,0 +1,12 @@
+aws_account_id = "123456789012"
+
+# Default matches DEPLOYMENT_IMAGE_STEPS.md IMAGE_REPO.
+repository_name = "notable-analyzer-s3"
+
+enable_lifecycle_policy = true
+lifecycle_image_count   = 30
+
+tags = {
+  Environment = "staging"
+  Owner       = "security-platform"
+}

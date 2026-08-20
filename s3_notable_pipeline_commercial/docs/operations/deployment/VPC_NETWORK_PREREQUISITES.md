@@ -7,8 +7,13 @@ NAT gateway, route tables, or VPC endpoints — it attaches Lambdas to subnets a
 security groups you supply.
 
 **Prerequisites:** root README sections **2–3**. **Path B:** complete **section 3.4**
-(copy `customer-default.env` and `terraform.tfvars`) before this step. Record subnet
-and Lambda SG IDs in both `terraform.tfvars` and `customer-default.env`.
+(copy `customer-default.env` and Terraform tfvars) before this step. Record subnet
+and Lambda SG IDs in `customer-default.env`.
+
+**Terraform (optional):** [`../../../deploy/terraform/network/`](../../../deploy/terraform/network/)
+creates the Lambda security group and optional VPC endpoints in an existing VPC.
+See [`../../../deploy/terraform/README.md`](../../../deploy/terraform/README.md)
+for foundation vs standalone layout. SAM still deploys the application stack.
 
 Partition `aws`, region `us-east-1` — see
 [`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md#deployment-boundary).
@@ -100,6 +105,26 @@ Before SAM deploy with VPC parameters:
 2. Route tables send `0.0.0.0/0` to NAT **or** required gateway endpoints exist
 3. Lambda SG can reach a test HTTPS endpoint in the VPC (OpenSearch or a bastion probe)
 4. `CustomerVpcSubnetIds` and `CustomerSecurityGroupIds` are comma-separated with no spaces
+
+## Terraform workflow (optional)
+
+When your organization uses IaC for the Lambda security group and VPC endpoints:
+
+```bash
+cd deploy/terraform/network
+cp terraform.tfvars.example terraform.tfvars
+terraform init && terraform validate
+terraform plan -out network.tfplan
+# Customer approval gate
+terraform apply network.tfplan
+terraform output sam_environment
+```
+
+Copy `CUSTOMER_VPC_SUBNET_IDS` and `CUSTOMER_SECURITY_GROUP_IDS` into
+`customer-default.env`. Use the same Lambda security group ID in OpenSearch
+`lambda_security_group_ids` (standalone module or foundation stack).
+
+Module README: [`../../../deploy/terraform/network/README.md`](../../../deploy/terraform/network/README.md).
 
 After SAM deploy:
 

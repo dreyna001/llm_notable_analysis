@@ -3,9 +3,13 @@
 Run **before** the main SAM stack when `rag`, `RagIngestionEnabled`,
 `SplQueryRagEnabled`, or `analyst_portal` case Q&A is enabled. The main SAM stack
 does **not** create an OpenSearch domain. Provision the customer-managed VPC-only
-domain in `us-east-1` with the Terraform stack under
-[`../../../deploy/terraform/opensearch/`](../../../deploy/terraform/opensearch/),
-then pass its endpoint and ARN outputs into SAM (`OpenSearchEndpoint`,
+domain in `us-east-1` with Terraform under
+[`../../../deploy/terraform/opensearch/`](../../../deploy/terraform/opensearch/)
+(standalone) or
+[`../../../deploy/terraform/foundation/`](../../../deploy/terraform/foundation/)
+(unified Path B foundation). Hub:
+[`../../../deploy/terraform/README.md`](../../../deploy/terraform/README.md).
+Then pass endpoint and ARN outputs into SAM (`OpenSearchEndpoint`,
 `OpenSearchDomainArn`, `CustomerVpcSubnetIds`, `CustomerSecurityGroupIds`,
 `RagTenantId`). AWS commercial uses OpenSearch per
 [`../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md`](../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md) (CAWS-004).

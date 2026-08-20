@@ -505,8 +505,9 @@ def render_remaining_steps(config: PathBConfig) -> str:
         steps.extend(
             [
                 "## CMK (optional)",
-                "- Create the customer CMK and record `CUSTOMER_KMS_KEY_ARN`.",
-                "- Runbook: `docs/operations/deployment/KMS_CUSTOMER_KEY.md`",
+                "- Terraform: `deploy/terraform/kms/` (or `enable_kms=true` in `deploy/terraform/foundation/`).",
+                "- Manual alternative: `docs/operations/deployment/KMS_CUSTOMER_KEY.md`",
+                "- Record `CUSTOMER_KMS_KEY_ARN` from `terraform output sam_environment`.",
                 "",
             ]
         )
@@ -514,9 +515,18 @@ def render_remaining_steps(config: PathBConfig) -> str:
         steps.extend(
             [
                 "## VPC/network (required)",
-                "- Provision VPC, private subnets, routing, NAT or VPC endpoints, and Lambda SG.",
-                "- Runbook: `docs/operations/deployment/VPC_NETWORK_PREREQUISITES.md`",
+                "- Provision VPC, private subnets, routing, NAT or VPC endpoints (customer-owned).",
                 "- Re-run `scripts/configure_path_b.py` with existing network IDs.",
+                "",
+            ]
+        )
+    else:
+        steps.extend(
+            [
+                "## Network (Lambda SG)",
+                "- Terraform: `deploy/terraform/network/` for Lambda SG + optional VPC endpoints.",
+                "- Or foundation stack: `deploy/terraform/foundation/` with `enable_network=true`.",
+                "- Runbook: `docs/operations/deployment/VPC_NETWORK_PREREQUISITES.md`",
                 "",
             ]
         )
@@ -524,11 +534,9 @@ def render_remaining_steps(config: PathBConfig) -> str:
         steps.extend(
             [
                 "## OpenSearch Phase A",
-                "- Configure remote Terraform state, then from `deploy/terraform/opensearch/`:",
-                "  - `terraform init`",
-                "  - `terraform plan`",
-                "  - `terraform apply` (after customer approval)",
-                "- Copy `OPENSEARCH_ENDPOINT` and `OPENSEARCH_DOMAIN_ARN` from Terraform outputs into `customer-default.env`.",
+                "- **Standalone:** configure remote state, then `deploy/terraform/opensearch/` (`terraform init`, `plan`, `apply` after approval).",
+                "- **Unified:** `deploy/terraform/foundation/` with `enable_opensearch=true` (see `deploy/terraform/README.md`).",
+                "- Copy outputs into `customer-default.env` via `terraform output sam_environment`.",
                 "- Runbook: `docs/operations/deployment/OPENSEARCH_PROVISIONING.md`",
                 "",
             ]
@@ -554,6 +562,7 @@ def render_remaining_steps(config: PathBConfig) -> str:
             "- Runbook: `docs/operations/deployment/PORTAL_JWT_IDENTITY.md`",
             "",
             "## ECR image",
+            "- Terraform (repo only): `deploy/terraform/ecr/` or foundation `enable_ecr=true`.",
             "- Build, push, and record an immutable `IMAGE_DIGEST` before SAM deploy.",
             "- Runbook: `docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`",
             "",

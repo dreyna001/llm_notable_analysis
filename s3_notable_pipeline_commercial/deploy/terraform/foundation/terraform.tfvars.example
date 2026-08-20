@@ -1,0 +1,49 @@
+# Commercial Path B foundation — edit every placeholder before apply.
+# Remote state backend: configure in customer policy (not committed here).
+
+aws_account_id = "123456789012"
+aws_region     = "us-east-1"
+
+tags = {
+  Environment = "staging"
+  CostCenter  = "security-ops"
+}
+
+# --- Network (requires existing VPC) ---
+enable_network     = true
+vpc_id             = "vpc-0123456789abcdef0"
+private_subnet_ids = ["subnet-0aaa1111bbbb2222", "subnet-0ccc3333dddd4444"]
+
+create_s3_gateway_endpoint                = false
+create_dynamodb_gateway_endpoint          = false
+create_sqs_interface_endpoint             = false
+create_logs_interface_endpoint            = false
+create_bedrock_runtime_interface_endpoint = false
+create_secretsmanager_interface_endpoint  = false
+
+# --- Optional CMK (enable before OpenSearch when domain encrypts with CMK) ---
+enable_kms = false
+# kms_key_alias            = "alias/notable-analyzer"
+# kms_admin_principal_arns = ["arn:aws:iam::123456789012:role/notable-key-admin"]
+# existing_kms_key_arn     = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
+
+# --- ECR ---
+enable_ecr          = true
+ecr_repository_name = "notable-analyzer-s3"
+
+# --- OpenSearch Phase A ---
+enable_opensearch = true
+domain_name       = "notable-rag-staging"
+
+opensearch_admin_principal_arns = [
+  "arn:aws:iam::123456789012:role/notable-opensearch-admin",
+]
+
+# Phase B — leave empty until after sam deploy:
+read_role_arns  = []
+write_role_arns = []
+
+engine_version  = "OpenSearch_2.11"
+instance_type   = "t3.small.search"
+instance_count  = 2
+volume_size_gib = 50

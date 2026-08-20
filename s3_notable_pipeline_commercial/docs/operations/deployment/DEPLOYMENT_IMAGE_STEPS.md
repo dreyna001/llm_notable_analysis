@@ -16,6 +16,22 @@ and record `ECR_REPOSITORY_URI` and `IMAGE_DIGEST` in `customer-default.env`.
 **Path B step 6** (digest-qualified image before SAM):
 [`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default).
 
+## ECR repository (Terraform optional)
+
+Terraform can create the ECR repository only; build and push remain manual:
+
+```bash
+cd deploy/terraform/ecr
+cp terraform.tfvars.example terraform.tfvars
+terraform init && terraform validate
+terraform plan -out ecr.tfplan
+terraform apply ecr.tfplan
+terraform output ecr_repository_uri
+```
+
+Or set `enable_ecr=true` in [`../../../deploy/terraform/foundation/`](../../../deploy/terraform/foundation/).
+Module README: [`../../../deploy/terraform/ecr/README.md`](../../../deploy/terraform/ecr/README.md).
+
 ## Build Contract
 
 Run from the commercial project root:

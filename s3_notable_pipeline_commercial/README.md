@@ -79,10 +79,11 @@ into one place. You will not run `sam deploy` until Path B step 7.
 | --- | --- |
 | Run `python scripts/configure_path_b.py` (or `python scripts/path_b_deploy_configurator.py`) | Guided Path B questionnaire; writes `customer-default.env`, OpenSearch `terraform.tfvars` when creating a domain, and `path-b-remaining-steps.md` |
 | Or copy [`deploy/aws/presets/customer-default.env.example`](deploy/aws/presets/customer-default.env.example) to `customer-default.env` at repo root | Manual SAM parameter source; fill incrementally in steps 1–6 |
-| Copy [`deploy/terraform/opensearch/terraform.tfvars.example`](deploy/terraform/opensearch/terraform.tfvars.example) to `deploy/terraform/opensearch/terraform.tfvars` | Manual alternative when not using the configurator; configure remote state per [`deploy/terraform/opensearch/README.md`](deploy/terraform/opensearch/README.md) |
+| Pick a **Terraform layout** (optional): [`deploy/terraform/README.md`](deploy/terraform/README.md) | **Foundation** (`deploy/terraform/foundation/`) or **standalone** modules (`network/`, `kms/`, `ecr/`, `opensearch/`) — SAM still required for step 7 |
+| Copy module `terraform.tfvars.example` to `terraform.tfvars` for each enabled slice | Foundation: [`deploy/terraform/foundation/terraform.tfvars.example`](deploy/terraform/foundation/terraform.tfvars.example); or per-module tfvars under [`deploy/terraform/`](deploy/terraform/) |
 | Optional: copy [`deploy/aws/presets/samconfig.customer-default.toml.example`](deploy/aws/presets/samconfig.customer-default.toml.example) to `samconfig.toml` | Repeat deploys after first successful `sam deploy` |
-| Confirm **Terraform 1.6+** and an approved remote state backend | Required for OpenSearch Phase A and Phase B |
-| Coordinate **network** and **IdP** owners early | VPC/subnets/SG (step 2) and JWT/OIDC (step 5) are outside this repo |
+| Confirm **Terraform 1.6+** and an approved remote state backend | Required when using Terraform for foundation resources |
+| Coordinate **network** and **IdP** owners early | VPC/subnets (customer-owned); Lambda SG and OpenSearch via Terraform or manual; JWT/OIDC (step 5) is outside this repo |
 
 Path B deploy order at a glance (details in section 4):
 
@@ -140,12 +141,12 @@ Bundle: `core,rag,analyst_portal`. Complete [section 3.4](#34-path-b--prepare-be
 
 | Step | Runbook | Collect / record |
 | --- | --- | --- |
-| 1 (optional) | [`KMS_CUSTOMER_KEY.md`](docs/operations/deployment/KMS_CUSTOMER_KEY.md) | `CUSTOMER_KMS_KEY_ARN` in `customer-default.env` when domain encrypts with CMK |
-| 2 | [`VPC_NETWORK_PREREQUISITES.md`](docs/operations/deployment/VPC_NETWORK_PREREQUISITES.md) | `vpc_id`, `subnet_ids`, Lambda SG in `terraform.tfvars`; `CUSTOMER_VPC_SUBNET_IDS`, `CUSTOMER_SECURITY_GROUP_IDS` in `customer-default.env` |
-| 3 | [`deploy/terraform/opensearch/`](deploy/terraform/opensearch/) + [`OPENSEARCH_PROVISIONING.md`](docs/operations/deployment/OPENSEARCH_PROVISIONING.md) | **Phase A:** domain endpoint and ARN into `customer-default.env`; `RAG_TENANT_ID` |
+| 1 (optional) | [`KMS_CUSTOMER_KEY.md`](docs/operations/deployment/KMS_CUSTOMER_KEY.md) + [`deploy/terraform/kms/`](deploy/terraform/kms/) | `CUSTOMER_KMS_KEY_ARN` in `customer-default.env` when domain encrypts with CMK |
+| 2 | [`VPC_NETWORK_PREREQUISITES.md`](docs/operations/deployment/VPC_NETWORK_PREREQUISITES.md) + [`deploy/terraform/network/`](deploy/terraform/network/) | `CUSTOMER_VPC_SUBNET_IDS`, `CUSTOMER_SECURITY_GROUP_IDS` in `customer-default.env` (Terraform or manual) |
+| 3 | [`deploy/terraform/opensearch/`](deploy/terraform/opensearch/) + [`OPENSEARCH_PROVISIONING.md`](docs/operations/deployment/OPENSEARCH_PROVISIONING.md) | **Phase A:** domain endpoint and ARN into `customer-default.env`; `RAG_TENANT_ID`. Or use [`deploy/terraform/foundation/`](deploy/terraform/foundation/) for steps 1–3 + ECR repo in one apply |
 | 4 | [`BEDROCK_ACCOUNT_ENABLEMENT.md`](docs/operations/deployment/BEDROCK_ACCOUNT_ENABLEMENT.md) | Bedrock model ID/ARN variables in `customer-default.env` |
 | 5 | [`PORTAL_JWT_IDENTITY.md`](docs/operations/deployment/PORTAL_JWT_IDENTITY.md) | JWT issuer, audience, role/scope, CORS in `customer-default.env` |
-| 6 | [`DEPLOYMENT_IMAGE_STEPS.md`](docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md) | `ECR_REPOSITORY_URI`, `IMAGE_DIGEST` in `customer-default.env` |
+| 6 | [`DEPLOYMENT_IMAGE_STEPS.md`](docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md) + [`deploy/terraform/ecr/`](deploy/terraform/ecr/) (repo only) | `ECR_REPOSITORY_URI`, `IMAGE_DIGEST` in `customer-default.env` |
 | 7 | [`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md) | `sam deploy` using filled `customer-default.env` |
 | 8 | [`OPENSEARCH_PROVISIONING.md`](docs/operations/deployment/OPENSEARCH_PROVISIONING.md) | **Phase B:** Lambda physical role ARNs in domain access policy |
 | 9 (optional) | [`KMS_CUSTOMER_KEY.md`](docs/operations/deployment/KMS_CUSTOMER_KEY.md) | **Phase B:** Lambda role ARNs in CMK key policy when using `CustomerKmsKeyArn` |

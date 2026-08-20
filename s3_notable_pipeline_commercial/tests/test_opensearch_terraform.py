@@ -106,6 +106,8 @@ class OpenSearchTerraformTests(unittest.TestCase):
             PROJECT_ROOT / "docs/operations/deployment/OPENSEARCH_PROVISIONING.md"
         ).read_text(encoding="utf-8")
         self.assertIn("deploy/terraform/opensearch/", root_readme)
+        self.assertIn("deploy/terraform/README.md", root_readme)
+        self.assertIn("deploy/terraform/foundation/", runbook)
         self.assertIn("Terraform workflow (preferred)", runbook)
         self.assertIn("terraform output sam_environment", runbook)
 
