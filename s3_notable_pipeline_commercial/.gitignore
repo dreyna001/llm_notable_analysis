@@ -63,6 +63,8 @@ Thumbs.db
 # Environment variables
 .env
 .env.local
+customer-default.env
+path-b-remaining-steps.md
 
 # Test files
 /test-notable.txt

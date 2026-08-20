@@ -77,8 +77,9 @@ into one place. You will not run `sam deploy` until Path B step 7.
 
 | Prepare now | Purpose |
 | --- | --- |
-| Copy [`deploy/aws/presets/customer-default.env.example`](deploy/aws/presets/customer-default.env.example) to `customer-default.env` at repo root | SAM parameter source; fill incrementally in steps 1–6 |
-| Copy [`deploy/terraform/opensearch/terraform.tfvars.example`](deploy/terraform/opensearch/terraform.tfvars.example) to `deploy/terraform/opensearch/terraform.tfvars` | OpenSearch Phase A (step 3); configure remote state per [`deploy/terraform/opensearch/README.md`](deploy/terraform/opensearch/README.md) |
+| Run `python scripts/configure_path_b.py` (or `python scripts/path_b_deploy_configurator.py`) | Guided Path B questionnaire; writes `customer-default.env`, OpenSearch `terraform.tfvars` when creating a domain, and `path-b-remaining-steps.md` |
+| Or copy [`deploy/aws/presets/customer-default.env.example`](deploy/aws/presets/customer-default.env.example) to `customer-default.env` at repo root | Manual SAM parameter source; fill incrementally in steps 1–6 |
+| Copy [`deploy/terraform/opensearch/terraform.tfvars.example`](deploy/terraform/opensearch/terraform.tfvars.example) to `deploy/terraform/opensearch/terraform.tfvars` | Manual alternative when not using the configurator; configure remote state per [`deploy/terraform/opensearch/README.md`](deploy/terraform/opensearch/README.md) |
 | Optional: copy [`deploy/aws/presets/samconfig.customer-default.toml.example`](deploy/aws/presets/samconfig.customer-default.toml.example) to `samconfig.toml` | Repeat deploys after first successful `sam deploy` |
 | Confirm **Terraform 1.6+** and an approved remote state backend | Required for OpenSearch Phase A and Phase B |
 | Coordinate **network** and **IdP** owners early | VPC/subnets/SG (step 2) and JWT/OIDC (step 5) are outside this repo |

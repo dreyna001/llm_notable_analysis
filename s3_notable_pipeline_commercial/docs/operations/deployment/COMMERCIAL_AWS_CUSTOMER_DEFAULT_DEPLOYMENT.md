@@ -6,7 +6,7 @@ SOC RAG + Splunk dictionary grounding, case archive, read-only portal API, and
 pinned-case Q&A. **No** `spl_readonly` or closed-ticket RAG in the baseline preset.
 
 **Before this doc:** complete root README sections **2** (universal prerequisites),
-**3.1** (ownership), **3.4** (copy `customer-default.env` and Terraform tfvars),
+**3.1** (ownership), **3.4** (run `scripts/configure_path_b.py` or copy preset files),
 and Path B steps **1–6**. This runbook is **Path B step 7** (`sam deploy` only).
 
 On-prem normative reference:
@@ -19,7 +19,7 @@ On-prem normative reference:
 
 | File | Purpose |
 | --- | --- |
-| [`../../../deploy/aws/presets/customer-default.env.example`](../../../deploy/aws/presets/customer-default.env.example) | Placeholder env file; source before `sam deploy --parameter-overrides` |
+| [`../../../deploy/aws/presets/customer-default.env.example`](../../../deploy/aws/presets/customer-default.env.example) | Manual placeholder env file; or generate with `scripts/configure_path_b.py` |
 | [`../../../deploy/aws/presets/samconfig.customer-default.toml.example`](../../../deploy/aws/presets/samconfig.customer-default.toml.example) | Copy to project-root `samconfig.toml` for repeat deploys |
 
 Complete Path B steps 1–6 before `sam deploy` (authoritative order and value
