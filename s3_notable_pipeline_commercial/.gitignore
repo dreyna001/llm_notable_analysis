@@ -65,6 +65,7 @@ Thumbs.db
 .env.local
 customer-default.env
 path-b-remaining-steps.md
+deployment-readiness-report.json
 
 # Test files
 /test-notable.txt

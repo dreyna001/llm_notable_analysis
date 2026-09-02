@@ -20,6 +20,8 @@ hardware-specific starting values.
 |-------|---------|
 | [`deployment/INSTALL.md`](deployment/INSTALL.md) | Host install, services, post-install smoke checks. |
 | [`deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md`](deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md) | Path B: portal + RAG + closed-ticket env mirror and data-plane checklist. |
+| [`../../scripts/preflight_customer_deployment.sh`](../../scripts/preflight_customer_deployment.sh) | Read-only customer-default host and staged-input checks. |
+| [`../../scripts/audit_customer_target_host.sh`](../../scripts/audit_customer_target_host.sh) | Read-only deployed-host audit and saved deployment result. |
 | [`deployment/HOST_LAYOUT_AND_UPDATES.md`](deployment/HOST_LAYOUT_AND_UPDATES.md) | Git checkout vs `/opt/notable-analyzer` vs `/etc/notable-analyzer/`; pull and upgrade workflow. |
 | [`deployment/OFFLINE_PRESTAGE_GUIDE.md`](deployment/OFFLINE_PRESTAGE_GUIDE.md) | Artifacts to stage before an air-gapped install. |
 | [`deployment/DEPENDENCY_LIST.md`](deployment/DEPENDENCY_LIST.md) | Declared repo-pinned dependencies (Python, npm, models, OS). |

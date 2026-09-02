@@ -193,6 +193,38 @@ models and chat-completion checks without placing the token in process arguments
 `--skip-file-drop` checks only vLLM and LiteLLM HTTP paths. See script
 `--help` for `CONFIG_ENV`, timeout, and `ALLOW_NON_LOOPBACK_HTTP` overrides.
 
+## Customer-like acceptance and rollback
+
+Run this release gate on a staging host that matches the customer OS, GPU,
+network controls, offline/connected mode, and enabled capability profiles. Unit
+tests alone do not satisfy this gate.
+
+| Check | Evidence to retain | Pass condition |
+| --- | --- | --- |
+| Preflight | `preflight_customer_deployment.sh --report-file ...` | No `FAIL`; all offline inputs staged when applicable |
+| Install and services | Approved change log plus `systemctl` status | Required services are enabled and active |
+| Database and RAG | `smoke_postgres_rag.sh` output and host audit | Schemas exist, vector sizes match, required corpora contain rows |
+| End-to-end notable | `smoke_service_chain.sh` output and resulting case ID | One synthetic notable reaches processed output and the portal |
+| Portal access | Browser/TLS evidence from the customer network | HTTPS, customer DNS, authentication, case view, and chat work |
+| Real integrations | Customer-controlled SOAR and ServiceNow evidence | One approved test input and one read-only sync complete without excess access |
+| Failure recovery | Quarantine/retry evidence from a malformed test input | Bad input is visible, does not stop later work, and follows documented recovery |
+| Rollback | Previous-release audit report | Prior release is restored and the same smoke checks pass |
+
+Save the final read-only host result after the tests:
+
+```bash
+sudo bash llm_notable_analysis_onprem_systemd/scripts/audit_customer_target_host.sh \
+  --repo-root /path/to/llm_notable_analysis \
+  --report-file /path/to/change-record/onprem-deployment-result.txt
+```
+
+Add `--run-smoke` only after approval for its synthetic file and report writes.
+Treat `FAIL` as a go-live blocker. Resolve or explicitly sign off each `UNKNOWN`;
+the audit intentionally cannot claim evidence from customer-controlled external
+systems. Perform the rollback steps in
+[`operations/deployment/HOST_LAYOUT_AND_UPDATES.md`](../operations/deployment/HOST_LAYOUT_AND_UPDATES.md)
+on the same staging host before approving the release.
+
 ## Next
 
 - Path complete: return to root [`README.md`](../../README.md#3-validate-all-paths-end-here) section 3

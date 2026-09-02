@@ -104,6 +104,9 @@ Integration tuning: [`../integrations/SPLUNK_WRITEBACK_OPERATIONS.md`](../integr
 
 Recovery behavior: [`../platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`](../platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md).
 
+Release-time ownership, live-cloud acceptance, upgrades, and rollback are in
+[`DEPLOYMENT_READINESS_AND_LIFECYCLE.md`](DEPLOYMENT_READINESS_AND_LIFECYCLE.md).
+
 ## GovCloud customer-default preset
 
 GovCloud ships a copy-and-fill SAM preset for the on-prem **customer-default**

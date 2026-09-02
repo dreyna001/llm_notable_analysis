@@ -168,8 +168,10 @@ echo "Docker fake"
                 self.assertNotIn("us-gov-east-1", source)
         self.assertIn('sam deploy --region "$region"', bash_source)
         self.assertIn('sam deploy --guided --region "$region"', bash_source)
+        self.assertIn('sam validate --lint --template-file "$SAM_TEMPLATE"', bash_source)
         self.assertIn("sam deploy --region $region", powershell_source)
         self.assertIn("sam deploy --guided --region $region", powershell_source)
+        self.assertIn("sam validate --lint --template-file $samTemplate", powershell_source)
 
     def test_smoke_script_enforces_commercial_boundary_and_explicit_region(self) -> None:
         source = SMOKE_POWERSHELL_SCRIPT.read_text(encoding="utf-8")

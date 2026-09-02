@@ -98,6 +98,11 @@ echo "Before deploy: ensure EcrRepositoryUri and ImageDigest identify the approv
 echo "Before RAG/portal: complete docs/operations/deployment/OPENSEARCH_PROVISIONING.md"
 echo
 echo "=== Step 1: Building application ==="
+echo "Running: sam validate --lint --template-file $SAM_TEMPLATE"
+if ! sam validate --lint --template-file "$SAM_TEMPLATE"; then
+  echo "SAM template validation failed"
+  exit 1
+fi
 echo "Running: sam build -t $SAM_TEMPLATE"
 if ! sam build -t "$SAM_TEMPLATE"; then
   echo "Build failed"

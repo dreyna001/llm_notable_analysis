@@ -16,6 +16,7 @@ VLLM_OVERRIDE="/etc/systemd/system/vllm.service.d/override.conf"
 NGINX_SITE="/etc/nginx/conf.d/notable-portal.conf"
 ANALYZER_VENV="/opt/notable-analyzer/venv"
 RUN_SMOKE=false
+REPORT_FILE=""
 
 pass_count=0
 fail_count=0
@@ -35,6 +36,7 @@ Options:
   --nginx-site PATH      Installed portal nginx site
   --analyzer-venv PATH   Analyzer virtualenv
   --run-smoke            Run the mutating synthetic file-drop smoke at the end
+  --report-file PATH     Save the complete, secret-free result to PATH
   -h, --help             Show this help
 
 Run as root to inspect protected configuration and database state. The default
@@ -173,6 +175,11 @@ while [[ $# -gt 0 ]]; do
             RUN_SMOKE=true
             shift
             ;;
+        --report-file)
+            require_value "$1" "${2:-}"
+            REPORT_FILE="$2"
+            shift 2
+            ;;
         -h|--help)
             usage
             exit 0
@@ -182,6 +189,13 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [[ -n "$REPORT_FILE" ]]; then
+    report_parent="$(dirname "$REPORT_FILE")"
+    [[ -d "$report_parent" ]] || die "Report directory does not exist: $report_parent"
+    : >"$REPORT_FILE" || die "Cannot write report file: $REPORT_FILE"
+    exec > >(tee "$REPORT_FILE") 2>&1
+fi
 
 command -v python3 >/dev/null 2>&1 || die "python3 is required"
 resolve_checkout

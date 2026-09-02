@@ -21,6 +21,55 @@ flags on `portal.env` (the portal does not inherit analyzer env).
 Hardware-specific tuning (vLLM drop-in, chat concurrency) remains in
 `config.env.rtx-pro-6000-blackwell-5analysts.example` and the apply script.
 
+## Guided deployment and result
+
+Run the read-only preflight before approval to install. It checks the supported
+host, Python, repository packages, config templates, model files, and required
+offline inputs without printing secrets:
+
+```bash
+bash scripts/preflight_customer_deployment.sh \
+  --repo-root /path/to/llm_notable_analysis \
+  --model-path /opt/models/gemma-4-31B-it \
+  --report-file /path/to/change-record/onprem-preflight.txt
+```
+
+For an air-gapped host, add:
+
+```bash
+  --offline \
+  --portal-dist /path/to/staged/portal/dist \
+  --wheelhouse /path/to/wheelhouse
+```
+
+After approval, follow the numbered steps below. At the end, save a deployment
+result. The default audit is read-only; `--run-smoke` is optional because it
+writes a synthetic file-drop input and needs separate operator approval.
+
+```bash
+sudo bash scripts/audit_customer_target_host.sh \
+  --repo-root /path/to/llm_notable_analysis \
+  --report-file /path/to/change-record/onprem-deployment-result.txt
+```
+
+The report contains check names, status, non-secret resource paths, and a final
+count. `FAIL` blocks go-live. `UNKNOWN` identifies evidence the customer must
+add, such as proof from a real SOAR or ServiceNow system.
+
+## Who provides what
+
+| Item | Product deployment provides | Customer provides or approves |
+| --- | --- | --- |
+| Application | Installer, systemd units, config templates, smoke and audit scripts | Approved release, host access, maintenance window |
+| Host and GPU | Supported starting values and profile examples | RHEL-compatible host, GPU/driver, capacity approval |
+| Models and packages | Pinned package/model names and offline staging guidance | Approved mirrors, wheelhouse, model files and licenses |
+| Identity and network | Loopback service defaults and nginx example | DNS, TLS certificate, firewall rules, analyst accounts or SSO |
+| Data | Schemas, ingest and retention tools | KB documents, SOAR feed, ServiceNow scope/token, data retention decision |
+| Operations | Health checks, failure behavior, rollback steps | Backups, monitoring destination, change approval, incident ownership |
+
+Do not put customer secrets, model files, production data, or deployment reports
+in git.
+
 ## What retrieval does (accuracy)
 
 Retrieve-then-inject: hybrid Postgres FTS + pgvector search, optional rerank, bounded
@@ -70,8 +119,10 @@ advisory snippets in the LLM prompt. Details:
 6. **Portal network** — nginx TLS, Basic Auth, DNS/firewall
    ([`../analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md`](../analyst_portal/ANALYST_PORTAL_NETWORK_DEPLOYMENT.md)).
 7. **SOAR file drop** — SFTP ownership/permissions on `INCOMING_DIR`.
-8. **Smoke** — `scripts/smoke_service_chain.sh`, `scripts/smoke_postgres_rag.sh`,
-   one notable → portal case, chat with KB + closed-ticket questions after sync.
+8. **Smoke and result** — `scripts/smoke_service_chain.sh`,
+   `scripts/smoke_postgres_rag.sh`, one notable → portal case, chat with KB +
+   closed-ticket questions after sync, then `scripts/audit_customer_target_host.sh`
+   with `--report-file`.
 
 No additional application code changes are required when the above data plane
 and env mirror are in place.

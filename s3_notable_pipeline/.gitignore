@@ -50,6 +50,8 @@ Thumbs.db
 # Environment variables
 .env
 .env.local
+customer-default.env
+deployment-readiness-report.json
 
 # Test files
 /test-notable.txt

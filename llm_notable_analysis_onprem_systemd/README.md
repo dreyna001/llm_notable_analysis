@@ -87,6 +87,18 @@ sudo INSTALL_PYTHON=false MODEL_DOWNLOAD=false PIP_NO_INDEX=1 \
 Bundle: analyzer `CAPABILITY_PROFILES=core,rag,analyst_portal`; portal
 `core,analyst_portal` with explicit RAG mirror flags on `portal.env`. Follow in order.
 
+Run the read-only preflight before the first install and keep its report with the
+customer change record:
+
+```bash
+bash scripts/preflight_customer_deployment.sh \
+  --repo-root /path/to/llm_notable_analysis \
+  --model-path /opt/models/gemma-4-31B-it \
+  --report-file /path/to/change-record/onprem-preflight.txt
+```
+
+For an air-gapped install, add `--offline`, `--portal-dist`, and `--wheelhouse`.
+
 1. [`docs/operations/deployment/HOST_LAYOUT_AND_UPDATES.md`](docs/operations/deployment/HOST_LAYOUT_AND_UPDATES.md) — host path model before first install
 2. [`docs/operations/deployment/OFFLINE_PRESTAGE_GUIDE.md`](docs/operations/deployment/OFFLINE_PRESTAGE_GUIDE.md) — artifact staging when the host has no outbound internet
 3. [`docs/operations/deployment/INSTALL.md`](docs/operations/deployment/INSTALL.md) — install with portal assets and Postgres schema hooks
@@ -146,6 +158,14 @@ Customer-default RAG smoke (workstation or host with Docker):
 
 ```bash
 bash scripts/smoke_postgres_rag.sh
+```
+
+Customer-default deployed-host result (read-only unless `--run-smoke` is added):
+
+```bash
+sudo bash scripts/audit_customer_target_host.sh \
+  --repo-root /path/to/llm_notable_analysis \
+  --report-file /path/to/change-record/onprem-deployment-result.txt
 ```
 
 Unit tests (from monorepo root, dev venv):

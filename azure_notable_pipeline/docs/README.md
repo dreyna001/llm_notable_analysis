@@ -18,6 +18,7 @@ The live Azure mutation gate lives in the root README prerequisites.
 | Image build + Bicep parameters | [DEPLOYMENT_IMAGE_STEPS.md](operations/deployment/DEPLOYMENT_IMAGE_STEPS.md) |
 | Customer-default preset | [AZURE_CUSTOMER_DEFAULT_DEPLOYMENT.md](operations/deployment/AZURE_CUSTOMER_DEFAULT_DEPLOYMENT.md), [`../deploy/azure/presets/`](../deploy/azure/presets/) |
 | Customer configuration inputs | [AZURE_GOVERNMENT_CUSTOMER_CONFIGURATION.md](operations/deployment/AZURE_GOVERNMENT_CUSTOMER_CONFIGURATION.md) |
+| Upgrade and rollback | [AZURE_UPGRADE_AND_ROLLBACK.md](operations/deployment/AZURE_UPGRADE_AND_ROLLBACK.md) |
 | Azure OpenAI inference | [LLM_INFERENCE_OPERATIONS.md](operations/llm/LLM_INFERENCE_OPERATIONS.md) |
 | Azure AI Search / RAG | [KNOWLEDGE_BASE_OPERATIONS.md](operations/rag/KNOWLEDGE_BASE_OPERATIONS.md), [AZURE_AI_SEARCH_RAG_INGESTION.md](operations/rag/AZURE_AI_SEARCH_RAG_INGESTION.md) |
 | Portal private deploy gate | [ANALYST_PORTAL_DEPLOYMENT.md](operations/ANALYST_PORTAL_DEPLOYMENT.md) |

@@ -184,7 +184,9 @@ fi
 az group create --name "${AZURE_RESOURCE_GROUP}" --location "${LOCATION}" --output none
 deployment_name="${AZURE_DEPLOYMENT_PREFIX}-$(date -u +%Y%m%d%H%M%S)"
 
-az deployment group create \
+run_group_deployment() {
+  local operation="$1"
+  az deployment group "${operation}" \
   --name "${deployment_name}" \
   --resource-group "${AZURE_RESOURCE_GROUP}" \
   --template-file deploy/azure/main.bicep \
@@ -270,7 +272,12 @@ az deployment group create \
     FrontDoor5xxPercentageThreshold="${FRONTDOOR_5XX_PERCENTAGE_THRESHOLD:-5}" \
     DispositionCompletionGraceHours="${DISPOSITION_COMPLETION_GRACE_HOURS:-26}" \
     QueueTelemetryMaxAgeMinutes="${QUEUE_TELEMETRY_MAX_AGE_MINUTES:-10}" \
-  --output none
+    --output none
+}
+
+# Ask Resource Manager to validate the exact parameters before it creates resources.
+run_group_deployment validate
+run_group_deployment create
 
 analyzer_name="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.AnalyzerFunctionAppName.value -o tsv)"
 embed_name="$(az deployment group show --name "${deployment_name}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.outputs.EmbedFunctionAppName.value -o tsv)"
@@ -559,4 +566,13 @@ if [[ "${deploy_portal}" == true ]]; then
   fi
 fi
 
+deployment_report_path="${DEPLOYMENT_REPORT_PATH:-deployment-results/${deployment_name}.json}"
+mkdir -p "$(dirname -- "${deployment_report_path}")"
+az deployment group show \
+  --name "${deployment_name}" \
+  --resource-group "${AZURE_RESOURCE_GROUP}" \
+  --query "{schema_version:'1',cloud:properties.parameters.cloudEnvironment.value,deployment_name:name,resource_group:resourceGroup,location:properties.parameters.Location.value,image_digest:properties.parameters.ContainerImageUri.value,capability_profiles:properties.parameters.CapabilityProfiles.value,provisioning_state:properties.provisioningState,completed_at:properties.timestamp,outputs:properties.outputs,verification:{source_and_image_preflight:'passed',template_validation:'passed',runtime_and_security_checks:'passed'}}" \
+  --output json >"${deployment_report_path}"
+
 echo "Deployment ${deployment_name} completed: ${analyzer_name}, ${embed_name}, ${disposition_name}${portal_name:+, ${portal_name}}."
+echo "Deployment report: ${deployment_report_path}"

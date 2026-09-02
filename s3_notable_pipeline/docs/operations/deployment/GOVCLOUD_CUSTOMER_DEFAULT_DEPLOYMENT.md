@@ -37,6 +37,16 @@ Complete Path B steps 1–6 before `sam deploy` (authoritative order:
 Fill `customer-default.env` from those runbooks (account ID, image digest, OpenSearch, VPC, Bedrock, JWT, optional CMK).
 Indexes (`soc_knowledge`, `splunk_dictionary`, `case_chunks`) auto-create on first ingest or case embed.
 
+Run the local input and SAM validation gate before deployment. It writes a
+machine-readable handoff report:
+
+```bash
+python scripts/deployment_readiness.py --env-file customer-default.env
+```
+
+Release acceptance, upgrades, and rollback:
+[`DEPLOYMENT_READINESS_AND_LIFECYCLE.md`](DEPLOYMENT_READINESS_AND_LIFECYCLE.md).
+
 ## Why both profiles and explicit flags
 
 `CapabilityProfiles` drives runtime behavior in the Lambda image. The SAM template

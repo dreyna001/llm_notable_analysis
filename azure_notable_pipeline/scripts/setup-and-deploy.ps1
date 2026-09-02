@@ -252,7 +252,10 @@ $parameters = @(
     "DispositionCompletionGraceHours=$(if ($env:DISPOSITION_COMPLETION_GRACE_HOURS) { $env:DISPOSITION_COMPLETION_GRACE_HOURS } else { '26' })",
     "QueueTelemetryMaxAgeMinutes=$(if ($env:QUEUE_TELEMETRY_MAX_AGE_MINUTES) { $env:QUEUE_TELEMETRY_MAX_AGE_MINUTES } else { '10' })"
 )
+az deployment group validate --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --template-file deploy/azure/main.bicep --parameters $parameters --output none
+if ($LASTEXITCODE -ne 0) { throw 'Azure Resource Manager template validation failed.' }
 az deployment group create --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --template-file deploy/azure/main.bicep --parameters $parameters --output none
+if ($LASTEXITCODE -ne 0) { throw 'Azure Resource Manager deployment failed.' }
 
 $analyzer = az deployment group show --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --query properties.outputs.AnalyzerFunctionAppName.value -o tsv
 $embed = az deployment group show --name $deploymentName --resource-group $env:AZURE_RESOURCE_GROUP --query properties.outputs.EmbedFunctionAppName.value -o tsv
@@ -586,8 +589,26 @@ if ($deployPortal) {
     }
 }
 
+    $deploymentReportPath = if ($env:DEPLOYMENT_REPORT_PATH) {
+        $env:DEPLOYMENT_REPORT_PATH
+    }
+    else {
+        Join-Path 'deployment-results' "$deploymentName.json"
+    }
+    $deploymentReportDirectory = Split-Path -Parent $deploymentReportPath
+    if ($deploymentReportDirectory) {
+        New-Item -ItemType Directory -Path $deploymentReportDirectory -Force | Out-Null
+    }
+    az deployment group show `
+        --name $deploymentName `
+        --resource-group $env:AZURE_RESOURCE_GROUP `
+        --query "{schema_version:'1',cloud:properties.parameters.cloudEnvironment.value,deployment_name:name,resource_group:resourceGroup,location:properties.parameters.Location.value,image_digest:properties.parameters.ContainerImageUri.value,capability_profiles:properties.parameters.CapabilityProfiles.value,provisioning_state:properties.provisioningState,completed_at:properties.timestamp,outputs:properties.outputs,verification:{source_and_image_preflight:'passed',template_validation:'passed',runtime_and_security_checks:'passed'}}" `
+        --output json | Set-Content -Path $deploymentReportPath -Encoding utf8
+    Assert-AzSucceeded -Operation 'writing the deployment report'
+
     $deploymentSucceeded = $true
     Write-Host "Deployment $deploymentName completed: $analyzer, $embed, $disposition$(if ($portal) { ", $portal" })."
+    Write-Host "Deployment report: $deploymentReportPath"
 }
 finally {
     # Bicep keeps Function and storage origins private even when validation fails.

@@ -35,6 +35,21 @@ customer deployment rather than hardcoding them.
 | Integrations | Splunk/Elastic/ServiceNow URLs, mode, allowlists, secret names, owners | Fake contract tests and isolated live smoke where approved |
 | Operations | Action group, thresholds, on-call, escalation, rollback digest, evidence store | Completed readiness record |
 
+## Who owns what
+
+| Customer owns | Product deployment owns |
+| --- | --- |
+| Azure Government subscription, tenant, region approval, quotas, and budget | Bicep definitions and validation of supported cloud/region inputs |
+| Existing ACR, Azure OpenAI deployments, Search service/indexes, Key Vault, action group, DNS, certificates, and Entra applications | Function apps, managed identities, least-privilege role assignments, storage/Cosmos resources, queues, private endpoints, Front Door configuration, and alerts defined by Bicep |
+| Network routes, private DNS resolution from the deployment runner, firewall approvals, and external integration allowlists | Private-by-default service settings and automated checks that direct portal origins remain closed |
+| Model approval, content filters, Search corpus, retention/legal hold, identity grants, on-call routing, backups policy, SIEM/ServiceNow credentials, and secret rotation | Runtime configuration wiring, keyless Azure access, poison paths, health checks, and the sanitized deployment report |
+| Final staging acceptance, exception approval, production enablement, and evidence storage | Test commands, acceptance criteria, upgrade/rollback instructions, and observable failure on a failed gate |
+
+The deployment does not create or approve customer identity providers, model
+capacity, Search indexes/corpus, notification destinations, external-system
+accounts, public DNS, or certificates. A named customer owner must complete
+those handoffs before production intake is enabled.
+
 ## Baseline application values
 
 The shipped defaults are intentionally safe: `CAPABILITY_PROFILES=core`, private
@@ -69,4 +84,5 @@ evidence.
 
 - **Path B step 1:** continue on this path — [`../../../README.md`](../../../README.md#path-b-customer-default)
 - Customer-default deploy: [`AZURE_CUSTOMER_DEFAULT_DEPLOYMENT.md`](AZURE_CUSTOMER_DEFAULT_DEPLOYMENT.md)
+- Upgrade and rollback: [`AZURE_UPGRADE_AND_ROLLBACK.md`](AZURE_UPGRADE_AND_ROLLBACK.md)
 - **Path C:** custom profile bundles — [`../../../README.md`](../../../README.md#path-c-custom-profiles)

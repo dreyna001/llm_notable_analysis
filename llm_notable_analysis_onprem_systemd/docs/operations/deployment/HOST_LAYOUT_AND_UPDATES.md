@@ -100,6 +100,12 @@ next upgrade.
 
 ## Update workflow after `git pull`
 
+Use an approved release tag or commit, not an unrecorded moving branch. Before
+the upgrade, record the current release, save copies of both runtime env files,
+and take a customer-managed Postgres backup when the release changes schemas or
+embedding dimensions. Run the customer preflight against the new checkout and
+keep the report with the change record.
+
 Run from **`ONPREM_DIR`** (the checkout's `llm_notable_analysis_onprem_systemd/`):
 
 ```bash
@@ -117,6 +123,36 @@ sudo bash scripts/apply_rtx_pro_6000_blackwell_5analysts_profile.sh --execute
 sudo systemctl daemon-reload
 sudo systemctl restart vllm litellm notable-analyzer notable-portal   # as needed
 ```
+
+After restart, run the path-specific checks in
+[`../../testing/TESTING.md`](../../testing/TESTING.md) and save a deployed-host
+result:
+
+```bash
+sudo bash scripts/audit_customer_target_host.sh \
+  --repo-root "$MONOREPO_ROOT" \
+  --report-file /path/to/change-record/onprem-upgrade-result.txt
+```
+
+## Tested rollback procedure
+
+Test this procedure in a customer-like staging host before production use:
+
+1. Stop the analyzer and portal. Leave Postgres and retained data in place.
+2. Return the operator checkout to the previously approved release tag or commit.
+3. Re-run `scripts/install.sh` with `AUTO_START_SERVICES=false` and restore the
+   saved analyzer and portal env files.
+4. If the upgrade changed a database schema or embedding dimensions, restore the
+   matching pre-upgrade database backup. Do not run old code against a newer,
+   unapproved schema.
+5. Start the inference, analyzer, and portal services in dependency order.
+6. Run the same smoke checks and host audit used for the upgrade. Save the
+   rollback report and confirm it names the previous release.
+
+Application rollback does not delete customer data. Teardown is a separate,
+destructive action and requires explicit approval. The Granite dimension
+migration clears chunk rows, so it also requires an index rebuild or restoration
+of the matching database backup.
 
 Compare live env to repo templates (secrets redact before sharing):
 

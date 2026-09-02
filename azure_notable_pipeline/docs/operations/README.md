@@ -14,6 +14,7 @@ Path A (core), Path B (customer-default), and Path C (custom profiles) journeys.
 | [`deployment/AZURE_GOVERNMENT_CUSTOMER_CONFIGURATION.md`](deployment/AZURE_GOVERNMENT_CUSTOMER_CONFIGURATION.md) | Customer decisions and operationalization inputs. |
 | [`deployment/DEPLOYMENT_IMAGE_STEPS.md`](deployment/DEPLOYMENT_IMAGE_STEPS.md) | Build, push, and deploy the immutable container image via Bicep. |
 | [`deployment/AZURE_CUSTOMER_DEFAULT_DEPLOYMENT.md`](deployment/AZURE_CUSTOMER_DEFAULT_DEPLOYMENT.md) | Bicep preset for `core,rag,analyst_portal`. |
+| [`deployment/AZURE_UPGRADE_AND_ROLLBACK.md`](deployment/AZURE_UPGRADE_AND_ROLLBACK.md) | Supported release upgrade, validation, and rollback contract. |
 | [`ANALYST_PORTAL_DEPLOYMENT.md`](ANALYST_PORTAL_DEPLOYMENT.md) | Portal JWT, Entra, and Front Door private-link gate. |
 | [`../../README.md`](../../README.md) | Complete Path A/B/C deploy journeys and validation. |
 

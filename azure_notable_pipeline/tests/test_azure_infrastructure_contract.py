@@ -244,6 +244,44 @@ def test_deployment_preflights_run_before_azure_mutation() -> None:
         assert "Front Door private portal Function origin" in script
 
 
+def test_deployment_scripts_validate_the_exact_template_before_create() -> None:
+    bash = _read(ROOT / "scripts" / "setup-and-deploy.sh")
+    powershell = _read(ROOT / "scripts" / "setup-and-deploy.ps1")
+
+    assert bash.index("run_group_deployment validate") < bash.index(
+        "run_group_deployment create"
+    )
+    assert powershell.index("az deployment group validate") < powershell.index(
+        "az deployment group create"
+    )
+    for script in (bash, powershell):
+        assert "template validation failed" in script.lower() or (
+            "set -euo pipefail" in script
+        )
+
+
+def test_deployment_scripts_write_a_sanitized_success_report() -> None:
+    for name in ("setup-and-deploy.sh", "setup-and-deploy.ps1"):
+        script = _read(ROOT / "scripts" / name)
+        assert "DEPLOYMENT_REPORT_PATH" in script
+        assert "deployment-results" in script
+        assert "schema_version:'1'" in script
+        assert "source_and_image_preflight:'passed'" in script
+        assert "template_validation:'passed'" in script
+        assert "runtime_and_security_checks:'passed'" in script
+        report_query = next(
+            line for line in script.splitlines() if "schema_version:'1'" in line
+        ).lower()
+        for secret_term in (
+            "bearer",
+            "token",
+            "password",
+            "connection_string",
+            "connectionstring",
+        ):
+            assert secret_term not in report_query
+
+
 def test_deployment_scripts_gate_on_host_identity_storage_and_exact_functions() -> None:
     scripts = [
         _read(ROOT / "scripts" / "setup-and-deploy.sh"),

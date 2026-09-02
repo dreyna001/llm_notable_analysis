@@ -567,6 +567,7 @@ def render_remaining_steps(config: PathBConfig) -> str:
             "- Runbook: `docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`",
             "",
             "## SAM deploy (Path B step 7)",
+            "- Run `python scripts/deployment_readiness.py --env-file customer-default.env` and keep the JSON report.",
             "- `sam build -t deploy/aws/template-sam.yaml`",
             "- Source `customer-default.env`, then deploy with the preset runbook.",
             "- Runbook: `docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`",

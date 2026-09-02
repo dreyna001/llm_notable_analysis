@@ -22,6 +22,7 @@ class DocumentationContractTests(unittest.TestCase):
             "docs/operations/deployment/KMS_CUSTOMER_KEY.md",
             "docs/operations/deployment/PORTAL_JWT_IDENTITY.md",
             "docs/operations/deployment/CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md",
+            "docs/operations/deployment/DEPLOYMENT_READINESS_AND_LIFECYCLE.md",
             "docs/planning/AWS_COMMERCIAL_READINESS_PLAN.md",
             "docs/internal/AWS_COMMERCIAL_DEFERRED_GAPS.md",
             "deploy/aws/presets/customer-default.env.example",
@@ -57,6 +58,25 @@ class DocumentationContractTests(unittest.TestCase):
         )
         for retired_name in (Path(path).name for path in retired):
             self.assertNotIn(retired_name, operator_text)
+
+    def test_customer_default_links_release_readiness_contract(self) -> None:
+        deployment = (
+            PROJECT_ROOT
+            / "docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md"
+        ).read_text(encoding="utf-8")
+        lifecycle = (
+            PROJECT_ROOT / "docs/operations/deployment/DEPLOYMENT_READINESS_AND_LIFECYCLE.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("deployment_readiness.py", deployment)
+        self.assertIn("DEPLOYMENT_READINESS_AND_LIFECYCLE.md", deployment)
+        for snippet in (
+            "sam validate --lint",
+            "terraform fmt -check",
+            "Live-cloud acceptance",
+            "Upgrade",
+            "Rollback",
+        ):
+            self.assertIn(snippet, lifecycle)
 
     def test_operator_surface_has_no_govcloud_runtime_identity(self) -> None:
         paths = (

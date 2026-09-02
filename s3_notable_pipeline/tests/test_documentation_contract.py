@@ -20,9 +20,22 @@ class DocumentationContractTests(unittest.TestCase):
             "docs/operations/deployment/PORTAL_JWT_IDENTITY.md",
             "docs/operations/deployment/CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md",
             "docs/operations/deployment/GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md",
+            "docs/operations/deployment/DEPLOYMENT_READINESS_AND_LIFECYCLE.md",
         )
         for relative_path in expected:
             self.assertTrue((PROJECT_ROOT / relative_path).is_file(), relative_path)
+
+    def test_customer_default_links_release_readiness_contract(self) -> None:
+        deployment = (
+            PROJECT_ROOT / "docs/operations/deployment/GOVCLOUD_CUSTOMER_DEFAULT_DEPLOYMENT.md"
+        ).read_text(encoding="utf-8")
+        lifecycle = (
+            PROJECT_ROOT / "docs/operations/deployment/DEPLOYMENT_READINESS_AND_LIFECYCLE.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("deployment_readiness.py", deployment)
+        self.assertIn("DEPLOYMENT_READINESS_AND_LIFECYCLE.md", deployment)
+        for snippet in ("sam validate --lint", "Live-cloud acceptance", "Upgrade", "Rollback"):
+            self.assertIn(snippet, lifecycle)
 
     def test_opensearch_provisioning_doc_exists(self) -> None:
         path = PROJECT_ROOT / "docs/operations/deployment/OPENSEARCH_PROVISIONING.md"

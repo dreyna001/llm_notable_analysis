@@ -16,6 +16,7 @@ class DocumentationContractTests(unittest.TestCase):
             "docs/operations/deployment/AZURE_GOVERNMENT_CUSTOMER_CONFIGURATION.md",
             "docs/operations/deployment/AZURE_CUSTOMER_DEFAULT_DEPLOYMENT.md",
             "docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md",
+            "docs/operations/deployment/AZURE_UPGRADE_AND_ROLLBACK.md",
             "docs/operations/ANALYST_PORTAL_DEPLOYMENT.md",
             "docs/operations/testing/AZURE_GOVERNMENT_TESTING.md",
         )
@@ -33,6 +34,7 @@ class DocumentationContractTests(unittest.TestCase):
             "DEPLOYMENT_IMAGE_STEPS.md",
             "ANALYST_PORTAL_DEPLOYMENT.md",
             "AZURE_GOVERNMENT_TESTING.md",
+            "AZURE_UPGRADE_AND_ROLLBACK.md",
         ):
             self.assertIn(snippet, hub)
 
@@ -74,6 +76,48 @@ class DocumentationContractTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("AZURE_GOVERNMENT_TESTING.md", preset)
         self.assertNotIn("testing/TESTING.md", preset)
+
+    def test_customer_deployment_readiness_contract_is_documented(self) -> None:
+        preset = (
+            PROJECT_ROOT
+            / "docs/operations/deployment/AZURE_CUSTOMER_DEFAULT_DEPLOYMENT.md"
+        ).read_text(encoding="utf-8")
+        customer_config = (
+            PROJECT_ROOT
+            / "docs/operations/deployment/AZURE_GOVERNMENT_CUSTOMER_CONFIGURATION.md"
+        ).read_text(encoding="utf-8")
+        upgrade = (
+            PROJECT_ROOT
+            / "docs/operations/deployment/AZURE_UPGRADE_AND_ROLLBACK.md"
+        ).read_text(encoding="utf-8")
+        live_gate = (
+            PROJECT_ROOT / "docs/operations/testing/AZURE_GOVERNMENT_TESTING.md"
+        ).read_text(encoding="utf-8")
+
+        for snippet in (
+            "Azure Resource Manager to validate",
+            "DEPLOYMENT_REPORT_PATH",
+            "sanitized JSON result",
+        ):
+            self.assertIn(snippet, preset)
+        self.assertIn("## Who owns what", customer_config)
+        self.assertIn("Customer owns", customer_config)
+        self.assertIn("Product deployment owns", customer_config)
+        for snippet in (
+            "## Before the change",
+            "## Upgrade",
+            "## Rollback",
+            "last qualified",
+        ):
+            self.assertIn(snippet, upgrade)
+        self.assertIn("## Required live-cloud release gate", live_gate)
+        for live_boundary in (
+            "Managed identity and RBAC",
+            "Private networking and DNS",
+            "Failure and recovery",
+            "Upgrade and rollback",
+        ):
+            self.assertIn(live_boundary, live_gate)
 
 
 if __name__ == "__main__":

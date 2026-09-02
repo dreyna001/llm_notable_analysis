@@ -12,3 +12,4 @@ frontend/analyst-portal/dist/
 !frontend/analyst-portal/src/lib/utils.ts
 deploy/azure/*.json
 !deploy/azure/*.parameters.example.json
+deployment-results/

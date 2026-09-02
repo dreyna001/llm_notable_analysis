@@ -35,6 +35,10 @@ product does not run CloudFormation or automation for them.
 
 Recovery behavior (retries, DLQ, idempotency): [`../platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`](../platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md).
 
+Release-time ownership, Terraform/SAM gates, live-cloud acceptance, upgrades,
+and rollback are in
+[`DEPLOYMENT_READINESS_AND_LIFECYCLE.md`](DEPLOYMENT_READINESS_AND_LIFECYCLE.md).
+
 ## What the stack does create (when enabled)
 
 Rendered from [`../../../deploy/aws/template-sam.yaml`](../../../deploy/aws/template-sam.yaml) based on capability flags:

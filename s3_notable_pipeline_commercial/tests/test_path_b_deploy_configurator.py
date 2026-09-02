@@ -39,6 +39,7 @@ class PathBDeployConfiguratorTests(unittest.TestCase):
         self.assertIn('domain_name    = "notable-rag-staging"', outputs.tfvars_content)
         self.assertIn("kms_key_arn = ", outputs.tfvars_content)
         self.assertIn("OpenSearch Phase A", outputs.checklist_content)
+        self.assertIn("deployment_readiness.py", outputs.checklist_content)
 
     def test_existing_opensearch_skips_tfvars(self) -> None:
         config = load_config_from_json(FIXTURE)

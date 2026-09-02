@@ -17,6 +17,7 @@ The production install approval gate lives in the root README prerequisites.
 | Deploy journey (Path A/B/C) | [`../README.md`](../README.md) section 2 |
 | Host install | [`operations/deployment/INSTALL.md`](operations/deployment/INSTALL.md) |
 | Customer-default bundle | [`operations/deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md`](operations/deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md) |
+| Preflight and deployment result | [`../scripts/preflight_customer_deployment.sh`](../scripts/preflight_customer_deployment.sh), [`../scripts/audit_customer_target_host.sh`](../scripts/audit_customer_target_host.sh) |
 | Host paths and upgrades | [`operations/deployment/HOST_LAYOUT_AND_UPDATES.md`](operations/deployment/HOST_LAYOUT_AND_UPDATES.md) |
 | Offline / air-gap staging | [`operations/deployment/OFFLINE_PRESTAGE_GUIDE.md`](operations/deployment/OFFLINE_PRESTAGE_GUIDE.md), [`operations/deployment/AIRGAPPED_DEPLOYMENT.md`](operations/deployment/AIRGAPPED_DEPLOYMENT.md) |
 | Hardware deployment profiles | [`operations/deployment/deployment_profiles/README.md`](operations/deployment/deployment_profiles/README.md) |

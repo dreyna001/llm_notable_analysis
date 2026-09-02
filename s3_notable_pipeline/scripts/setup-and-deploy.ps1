@@ -94,6 +94,12 @@ try {
 # Build
 Write-Host "`nBefore deploy: ensure EcrRepositoryUri and ImageDigest identify the approved image in us-gov-east-1." -ForegroundColor Yellow
 Write-Host "`n=== Step 1: Building application ===" -ForegroundColor Cyan
+Write-Host "Running: sam validate --lint --template-file $samTemplate" -ForegroundColor Gray
+sam validate --lint --template-file $samTemplate
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "SAM template validation failed" -ForegroundColor Red
+    exit 1
+}
 Write-Host "Running: sam build -t $samTemplate" -ForegroundColor Gray
 sam build -t $samTemplate
 if ($LASTEXITCODE -ne 0) {

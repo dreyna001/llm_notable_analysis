@@ -72,8 +72,18 @@ set -a && source customer-default.env && set +a
 ./scripts/setup-and-deploy.sh
 ```
 
-The deploy script runs tests, compiles Bicep, builds the container image, and
-applies `deploy/azure/main.bicep` with the sourced environment values.
+The deploy script runs tests, compiles Bicep, builds the container image, asks
+Azure Resource Manager to validate the exact template and parameters, deploys,
+and then runs identity, private-network, Function-host, monitoring, and portal
+checks. It writes a sanitized JSON result to
+`deployment-results/<deployment-name>.json`; set `DEPLOYMENT_REPORT_PATH` to
+choose another location. The report is created only after all automated checks
+pass and contains no bearer tokens, keys, or connection strings.
+
+Archive that report in the customer's approved evidence system. It records the
+deployment name, cloud, region, immutable image, capability profiles, safe
+Bicep outputs, and the checks completed by the script. It does not replace the
+live staging acceptance record described below.
 
 ## Post-deploy (required for full customer-default)
 
@@ -84,6 +94,11 @@ applies `deploy/azure/main.bicep` with the sourced environment values.
    publish manifest through the analyzer `rag_ingest_queue` path.
 3. **Smoke** -- run Wave 1 + portal staging checks in
    [`../testing/AZURE_GOVERNMENT_TESTING.md`](../testing/AZURE_GOVERNMENT_TESTING.md).
+
+Before changing an existing environment, follow
+[`AZURE_UPGRADE_AND_ROLLBACK.md`](AZURE_UPGRADE_AND_ROLLBACK.md). Keep the last
+qualified image digest and portal artifact until the new release passes the
+live staging gate.
 
 ## Intentional gaps vs on-prem customer-default
 
