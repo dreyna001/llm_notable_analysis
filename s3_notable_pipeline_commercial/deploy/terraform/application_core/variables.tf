@@ -210,6 +210,7 @@ variable "lambda_settings" {
     ephemeral_storage_mb          = optional(number, 512)
     analyzer_reserved_concurrency = optional(number, 5)
     analyzer_maximum_concurrency  = optional(number, 5)
+    embed_reserved_concurrency    = optional(number, 5)
     embed_maximum_concurrency     = optional(number, 5)
     rag_reserved_concurrency      = optional(number, 2)
   })
@@ -222,6 +223,7 @@ variable "lambda_settings" {
       var.lambda_settings.ephemeral_storage_mb >= 512 && var.lambda_settings.ephemeral_storage_mb <= 10240 &&
       var.lambda_settings.analyzer_reserved_concurrency >= 1 &&
       var.lambda_settings.analyzer_maximum_concurrency >= 2 && var.lambda_settings.analyzer_maximum_concurrency <= 1000 &&
+      var.lambda_settings.embed_reserved_concurrency >= 1 && var.lambda_settings.embed_reserved_concurrency <= 1000 &&
       var.lambda_settings.embed_maximum_concurrency >= 2 && var.lambda_settings.embed_maximum_concurrency <= 1000 &&
       var.lambda_settings.rag_reserved_concurrency >= 2 && var.lambda_settings.rag_reserved_concurrency <= 1000
     )

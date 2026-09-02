@@ -96,6 +96,17 @@ and validation checks before planning.
 
 ## Evidence and validation
 
+Run the same Terraform gate used by pull requests:
+
+```bash
+python3 -m pip install -r requirements-terraform.txt
+bash scripts/check-terraform.sh
+```
+
+The gate uses Terraform 1.15.9 and Checkov 3.3.16. It checks formatting,
+initializes each Terraform directory without a backend, validates it, runs the
+focused Terraform contract tests, and scans the Terraform tree with Checkov.
+
 Keep these with the customer change record:
 
 - reviewed saved plan

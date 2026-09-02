@@ -44,6 +44,13 @@ locals {
     Resource = var.kms_key_arn
   }] : []
 
+  xray_statement = [{
+    Sid      = "PublishXRayTelemetry"
+    Effect   = "Allow"
+    Action   = ["xray:PutTraceSegments", "xray:PutTelemetryRecords"]
+    Resource = "*"
+  }]
+
   analyzer_policy_statements = concat([
     {
       Sid      = "ConsumeAnalyzerQueue"
@@ -120,7 +127,7 @@ locals {
           "bedrock:InferenceProfileArn" = var.bedrock_analysis_model_arn
         }
       }
-  }] : [], local.vpc_statement, local.kms_write_statement)
+  }] : [], local.vpc_statement, local.kms_write_statement, local.xray_statement)
 
   embed_policy_statements = concat([
     {
@@ -168,7 +175,7 @@ locals {
       Action   = ["es:ESHttpGet", "es:ESHttpPost", "es:ESHttpPut", "es:ESHttpDelete"]
       Resource = "${var.opensearch_domain_arn}/*"
     }
-  ], local.vpc_statement, local.kms_write_statement)
+  ], local.vpc_statement, local.kms_write_statement, local.xray_statement)
 
   rag_policy_statements = concat([
     {
@@ -218,7 +225,7 @@ locals {
       Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
       Resource = var.features.rag_ingestion ? "${aws_cloudwatch_log_group.rag[0].arn}:*" : "*"
     }
-  ], local.vpc_statement, local.kms_read_statement)
+  ], local.vpc_statement, local.kms_read_statement, local.xray_statement)
 }
 
 resource "aws_iam_role" "analyzer" {

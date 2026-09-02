@@ -24,6 +24,9 @@ resource "aws_cloudwatch_log_group" "rag" {
 }
 
 resource "aws_lambda_function" "analyzer" {
+  #checkov:skip=CKV_AWS_116:SQS redrive policies provide per-record retry and DLQ handling for this event-source Lambda.
+  #checkov:skip=CKV_AWS_272:Lambda code-signing configurations support Zip packages, not container images.
+  #checkov:skip=CKV_AWS_173:The customer-default root supplies kms_key_id; the reusable module permits identifier-only environment data with AWS-managed encryption.
   function_name = local.analyzer_function_name
   description   = "Analyze S3 notables with the customer-approved Bedrock model"
   role          = aws_iam_role.analyzer.arn
@@ -36,6 +39,10 @@ resource "aws_lambda_function" "analyzer" {
 
   ephemeral_storage {
     size = var.lambda_settings.ephemeral_storage_mb
+  }
+
+  tracing_config {
+    mode = "Active"
   }
 
   environment {
@@ -71,6 +78,9 @@ resource "aws_lambda_event_source_mapping" "analyzer" {
 }
 
 resource "aws_lambda_function" "embed" {
+  #checkov:skip=CKV_AWS_116:SQS redrive policies provide per-record retry and DLQ handling for this event-source Lambda.
+  #checkov:skip=CKV_AWS_272:Lambda code-signing configurations support Zip packages, not container images.
+  #checkov:skip=CKV_AWS_173:The customer-default root supplies kms_key_id; the reusable module permits identifier-only environment data with AWS-managed encryption.
   count = var.features.case_qa ? 1 : 0
 
   function_name = local.embed_function_name
@@ -79,11 +89,16 @@ resource "aws_lambda_function" "embed" {
   package_type  = "Image"
   image_uri     = var.image_uri
 
-  timeout     = 900
-  memory_size = var.lambda_settings.memory_mb
+  timeout                        = 900
+  memory_size                    = var.lambda_settings.memory_mb
+  reserved_concurrent_executions = var.lambda_settings.embed_reserved_concurrency
 
   ephemeral_storage {
     size = var.lambda_settings.ephemeral_storage_mb
+  }
+
+  tracing_config {
+    mode = "Active"
   }
 
   image_config {
@@ -125,6 +140,9 @@ resource "aws_lambda_event_source_mapping" "embed" {
 }
 
 resource "aws_lambda_function" "rag" {
+  #checkov:skip=CKV_AWS_116:SQS redrive policies provide per-record retry and DLQ handling for this event-source Lambda.
+  #checkov:skip=CKV_AWS_272:Lambda code-signing configurations support Zip packages, not container images.
+  #checkov:skip=CKV_AWS_173:The customer-default root supplies kms_key_id; the reusable module permits identifier-only environment data with AWS-managed encryption.
   count = var.features.rag_ingestion ? 1 : 0
 
   function_name = local.rag_function_name
@@ -139,6 +157,10 @@ resource "aws_lambda_function" "rag" {
 
   image_config {
     command = ["s3_notable_pipeline.rag_ingest_handler.handler"]
+  }
+
+  tracing_config {
+    mode = "Active"
   }
 
   environment {

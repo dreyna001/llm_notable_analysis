@@ -107,6 +107,11 @@ resource "aws_vpc_security_group_ingress_rule" "lambda_https" {
 }
 
 resource "aws_opensearch_domain" "this" {
+  #checkov:skip=CKV_AWS_84:Application log publishing requires a customer-owned CloudWatch Logs destination and resource policy outside this domain module.
+  #checkov:skip=CKV_AWS_317:Audit logging depends on fine-grained access control; this VPC domain uses IAM/SigV4 authorization instead.
+  #checkov:skip=CKV_AWS_318:Dedicated master nodes are an explicit customer sizing option and are not required for the supported small deployment profile.
+  #checkov:skip=CKV2_AWS_52:Fine-grained access control is replaced by VPC isolation plus resource-scoped IAM/SigV4 domain policies.
+  #checkov:skip=CKV2_AWS_59:Dedicated master nodes are exposed as a customer-controlled HA option and remain disabled for small profiles.
   domain_name     = var.domain_name
   engine_version  = var.engine_version
   access_policies = data.aws_iam_policy_document.domain_access.json

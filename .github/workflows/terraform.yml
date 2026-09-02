@@ -1,0 +1,41 @@
+name: Terraform CI
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/terraform.yml"
+      - "s3_notable_pipeline_commercial/deploy/terraform/**"
+      - "s3_notable_pipeline_commercial/scripts/check-terraform.sh"
+      - "s3_notable_pipeline_commercial/requirements-terraform.txt"
+      - "s3_notable_pipeline_commercial/tests/test_terraform_*.py"
+      - "s3_notable_pipeline_commercial/tests/test_opensearch_terraform.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Terraform 1.15.9
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.15.9
+          terraform_wrapper: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: s3_notable_pipeline_commercial/requirements-terraform.txt
+
+      - name: Install Checkov
+        run: python -m pip install -r s3_notable_pipeline_commercial/requirements-terraform.txt
+
+      - name: Check Terraform
+        run: bash s3_notable_pipeline_commercial/scripts/check-terraform.sh

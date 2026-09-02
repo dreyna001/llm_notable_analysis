@@ -1,6 +1,7 @@
 resource "aws_ecr_repository" "this" {
+  #checkov:skip=CKV_AWS_136:ECR-managed AES-256 encryption is the baseline; customer-managed ECR keys are outside this repository module.
   name                 = var.repository_name
-  image_tag_mutability = "MUTABLE"
+  image_tag_mutability = "IMMUTABLE"
 
   image_scanning_configuration {
     scan_on_push = true

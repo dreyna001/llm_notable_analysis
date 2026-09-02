@@ -1,0 +1,21 @@
+---
+description: Enforce one safe Terraform deployment path for every cloud capability
+alwaysApply: true
+---
+
+# Terraform Cloud Deployment
+
+When work creates or changes cloud infrastructure:
+
+- Use Terraform as the only infrastructure owner. Do not mix SAM, CloudFormation, console steps, or application scripts into the same deployment path.
+- Provide one documented root module per customer deployment path and use focused reusable leaf modules.
+- Use encrypted remote state with locking, versioning, restricted access, and a documented bootstrap process.
+- Make planning the default. Apply only an explicit reviewed saved plan.
+- Never silently replace customer-owned resources or policies. Import, reference, or require explicit ownership.
+- Deploy immutable application artifacts such as digest-pinned images.
+- Use least privilege, encryption, private networking where supported, validated inputs, and useful non-secret outputs.
+- Automate required bootstrap dependencies without creating a second deployment path.
+- Keep code, examples, deployment instructions, rollback steps, and tests synchronized.
+- Require CI to run `terraform fmt -check -recursive`, `terraform init -backend=false`, `terraform validate`, Terraform tests, and the repository-pinned security scanner.
+- Put narrow scanner exceptions beside the affected resource with the check ID and a truthful reason. Do not use broad global skips to make CI pass.
+- Report whether live cloud deployment was tested; never imply local validation proves a real deployment.

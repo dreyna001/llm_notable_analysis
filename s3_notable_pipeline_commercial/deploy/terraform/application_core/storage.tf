@@ -1,4 +1,6 @@
 resource "aws_s3_bucket" "input" {
+  #checkov:skip=CKV_AWS_144:The supported commercial deployment boundary is intentionally single-region us-east-1; customer DR policy owns replication.
+  #checkov:skip=CKV_AWS_18:Server-access log destinations are an account-level customer control to avoid a recursive logging bucket in this application module.
   bucket = var.input_bucket_name
   tags   = local.tags
 }
@@ -38,6 +40,16 @@ resource "aws_s3_bucket_lifecycle_configuration" "input" {
     filter { prefix = "incoming/" }
     expiration { days = var.retention.input_days }
   }
+
+  rule {
+    id     = "AbortIncompleteMultipartUploads"
+    status = "Enabled"
+    filter {}
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
 }
 
 resource "aws_s3_bucket_notification" "input" {
@@ -65,6 +77,9 @@ resource "aws_s3_bucket_notification" "input" {
 }
 
 resource "aws_s3_bucket" "output" {
+  #checkov:skip=CKV_AWS_144:The supported commercial deployment boundary is intentionally single-region us-east-1; customer DR policy owns replication.
+  #checkov:skip=CKV_AWS_18:Server-access log destinations are an account-level customer control to avoid a recursive logging bucket in this application module.
+  #checkov:skip=CKV2_AWS_62:The output bucket is a terminal report sink; notifications would create an unintended processing loop.
   bucket = var.output_bucket_name
   tags   = local.tags
 }
@@ -103,6 +118,16 @@ resource "aws_s3_bucket_lifecycle_configuration" "output" {
     status = "Enabled"
     filter { prefix = "reports/" }
     expiration { days = var.retention.output_days }
+  }
+
+  rule {
+    id     = "AbortIncompleteMultipartUploads"
+    status = "Enabled"
+    filter {}
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
   }
 
   dynamic "rule" {
@@ -191,6 +216,10 @@ resource "aws_dynamodb_table" "case_index" {
   server_side_encryption {
     enabled     = true
     kms_key_arn = var.kms_key_arn
+  }
+
+  point_in_time_recovery {
+    enabled = true
   }
 
   tags = local.tags

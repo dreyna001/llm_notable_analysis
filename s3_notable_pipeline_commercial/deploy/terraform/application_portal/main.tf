@@ -172,6 +172,10 @@ resource "aws_dynamodb_table" "chat_messages" {
 }
 
 resource "aws_s3_bucket" "portal_ui" {
+  #checkov:skip=CKV2_AWS_62:The private UI asset bucket has no event-driven consumer, so notifications would have no destination.
+  #checkov:skip=CKV_AWS_144:Cross-region replication is a customer disaster-recovery choice; versioning provides in-region UI rollback.
+  #checkov:skip=CKV_AWS_18:This module does not own a customer access-log destination; authenticated requests are recorded by API Gateway access logs.
+  #checkov:skip=CKV_AWS_145:The module supports a customer KMS key and otherwise uses S3-managed AES-256 encryption for non-sensitive UI assets.
   bucket = var.portal_ui_bucket_name
   tags   = merge(var.tags, { Name = var.portal_ui_bucket_name })
 }
@@ -213,6 +217,27 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "portal_ui" {
   }
 }
 
+resource "aws_s3_bucket_lifecycle_configuration" "portal_ui" {
+  bucket = aws_s3_bucket.portal_ui.id
+
+  rule {
+    id     = "CleanUpOldUiArtifacts"
+    status = "Enabled"
+
+    filter {}
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+  }
+
+  depends_on = [aws_s3_bucket_versioning.portal_ui]
+}
+
 data "aws_iam_policy_document" "lambda_assume_role" {
   statement {
     effect  = "Allow"
@@ -232,6 +257,8 @@ resource "aws_iam_role" "portal" {
 }
 
 data "aws_iam_policy_document" "portal" {
+  #checkov:skip=CKV_AWS_111:Lambda VPC ENI and X-Ray telemetry APIs require wildcard resources; data access remains resource-scoped.
+  #checkov:skip=CKV_AWS_356:Only Lambda VPC ENI and X-Ray telemetry APIs use wildcard resources because those APIs do not support resource ARNs.
   statement {
     sid     = "WriteFunctionLogs"
     effect  = "Allow"
@@ -409,6 +436,16 @@ data "aws_iam_policy_document" "portal" {
     ]
     resources = ["*"]
   }
+
+  statement {
+    sid    = "WriteXRayTelemetry"
+    effect = "Allow"
+    actions = [
+      "xray:PutTelemetryRecords",
+      "xray:PutTraceSegments",
+    ]
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_role_policy" "portal" {
@@ -418,6 +455,7 @@ resource "aws_iam_role_policy" "portal" {
 }
 
 resource "aws_cloudwatch_log_group" "portal" {
+  #checkov:skip=CKV_AWS_338:Log retention is a validated customer policy input and may be shorter than one year.
   name              = "/aws/lambda/${local.function_name}"
   retention_in_days = var.log_retention_days
   kms_key_id        = var.kms_key_arn
@@ -425,6 +463,8 @@ resource "aws_cloudwatch_log_group" "portal" {
 }
 
 resource "aws_lambda_function" "portal" {
+  #checkov:skip=CKV_AWS_116:API Gateway invokes this Lambda synchronously; failures return to the caller and are covered by error alarms.
+  #checkov:skip=CKV_AWS_272:Lambda code-signing configurations apply to Zip packages, while this function uses a digest-pinned container image.
   function_name = local.function_name
   description   = "Read-only analyst portal API and bounded Case Q&A"
   role          = aws_iam_role.portal.arn
@@ -442,6 +482,10 @@ resource "aws_lambda_function" "portal" {
 
   ephemeral_storage {
     size = var.lambda_ephemeral_storage_mb
+  }
+
+  tracing_config {
+    mode = "Active"
   }
 
   vpc_config {
@@ -616,6 +660,7 @@ locals {
 }
 
 resource "aws_apigatewayv2_route" "portal" {
+  #checkov:skip=CKV_AWS_309:Health, readiness, and static SPA routes are intentionally public; all /api routes use JWT or IAM authorization.
   for_each = local.routes
 
   api_id             = aws_apigatewayv2_api.portal.id
@@ -623,6 +668,14 @@ resource "aws_apigatewayv2_route" "portal" {
   authorization_type = each.value.authorization_type
   authorizer_id      = each.value.authorizer_id
   target             = "integrations/${aws_apigatewayv2_integration.portal.id}"
+}
+
+resource "aws_cloudwatch_log_group" "portal_api_access" {
+  #checkov:skip=CKV_AWS_338:Log retention is a validated customer policy input and may be shorter than one year.
+  name              = "/aws/apigateway/${var.name_prefix}-portal-api"
+  retention_in_days = var.log_retention_days
+  kms_key_id        = var.kms_key_arn
+  tags              = merge(var.tags, { Name = "/aws/apigateway/${var.name_prefix}-portal-api" })
 }
 
 resource "aws_apigatewayv2_stage" "portal" {
@@ -633,6 +686,22 @@ resource "aws_apigatewayv2_stage" "portal" {
   default_route_settings {
     throttling_burst_limit = var.api_throttle_burst_limit
     throttling_rate_limit  = var.api_throttle_rate_limit
+  }
+
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.portal_api_access.arn
+    format = jsonencode({
+      httpMethod              = "$context.httpMethod"
+      integrationErrorMessage = "$context.integrationErrorMessage"
+      path                    = "$context.path"
+      protocol                = "$context.protocol"
+      requestId               = "$context.requestId"
+      requestTime             = "$context.requestTime"
+      responseLength          = "$context.responseLength"
+      routeKey                = "$context.routeKey"
+      sourceIp                = "$context.identity.sourceIp"
+      status                  = "$context.status"
+    })
   }
 
   tags = merge(var.tags, { Name = "${var.name_prefix}-portal-default-stage" })

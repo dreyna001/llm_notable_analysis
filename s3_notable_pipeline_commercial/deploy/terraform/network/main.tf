@@ -43,6 +43,7 @@ data "aws_route_tables" "private" {
 }
 
 resource "aws_security_group" "lambda" {
+  #checkov:skip=CKV2_AWS_5:This reusable network module outputs the security group for attachment by application Lambda resources in the composing root module.
   name_prefix = "${var.name_prefix}-lambda-"
   description = "Product Lambda ENIs in customer VPC; egress HTTPS via NAT gateway or VPC endpoints"
   vpc_id      = var.vpc_id

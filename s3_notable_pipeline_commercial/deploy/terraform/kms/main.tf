@@ -1,4 +1,7 @@
 data "aws_iam_policy_document" "key_policy" {
+  #checkov:skip=CKV_AWS_109:KMS key policies require Resource "*" to mean this key; administration is limited to approved role principals.
+  #checkov:skip=CKV_AWS_111:KMS key policies require Resource "*" to mean this key; use grants are constrained by principal and service conditions.
+  #checkov:skip=CKV_AWS_356:KMS key-policy statements cannot use the key ARN before the key exists and Resource "*" is scoped to this key.
   statement {
     sid       = "AllowKeyAdministration"
     effect    = "Allow"
