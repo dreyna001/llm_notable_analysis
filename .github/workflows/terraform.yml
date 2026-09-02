@@ -2,13 +2,6 @@ name: Terraform CI
 
 on:
   pull_request:
-    paths:
-      - ".github/workflows/terraform.yml"
-      - "s3_notable_pipeline_commercial/deploy/terraform/**"
-      - "s3_notable_pipeline_commercial/scripts/check-terraform.sh"
-      - "s3_notable_pipeline_commercial/requirements-terraform.txt"
-      - "s3_notable_pipeline_commercial/tests/test_terraform_*.py"
-      - "s3_notable_pipeline_commercial/tests/test_opensearch_terraform.py"
   workflow_dispatch:
 
 permissions:

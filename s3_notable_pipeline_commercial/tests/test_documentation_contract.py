@@ -23,6 +23,7 @@ class DocumentationContractTests(unittest.TestCase):
             "docs/operations/deployment/PORTAL_JWT_IDENTITY.md",
             "docs/operations/deployment/CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md",
             "docs/operations/deployment/DEPLOYMENT_READINESS_AND_LIFECYCLE.md",
+            "docs/operations/deployment/GITHUB_TERRAFORM_CI_SETUP.md",
             "docs/planning/AWS_COMMERCIAL_READINESS_PLAN.md",
             "docs/internal/AWS_COMMERCIAL_DEFERRED_GAPS.md",
             "deploy/terraform/customer_default/main.tf",

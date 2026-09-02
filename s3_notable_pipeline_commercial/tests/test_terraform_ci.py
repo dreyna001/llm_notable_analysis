@@ -48,6 +48,7 @@ class TerraformCiTests(unittest.TestCase):
         )
 
         self.assertIn("pull_request:", workflow)
+        self.assertNotIn("paths:", workflow)
         self.assertIn("terraform_wrapper: false", workflow)
         self.assertIn(
             "bash s3_notable_pipeline_commercial/scripts/check-terraform.sh", workflow

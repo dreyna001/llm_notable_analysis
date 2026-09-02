@@ -107,6 +107,10 @@ The gate uses Terraform 1.15.9 and Checkov 3.3.16. It checks formatting,
 initializes each Terraform directory without a backend, validates it, runs the
 focused Terraform contract tests, and scans the Terraform tree with Checkov.
 
+Repository administrators: complete the one-time
+[`GITHUB_TERRAFORM_CI_SETUP.md`](../../docs/operations/deployment/GITHUB_TERRAFORM_CI_SETUP.md)
+guide to enable Actions and require this gate before merging.
+
 Keep these with the customer change record:
 
 - reviewed saved plan
