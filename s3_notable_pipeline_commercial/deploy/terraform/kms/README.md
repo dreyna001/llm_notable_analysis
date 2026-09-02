@@ -1,14 +1,13 @@
 # KMS Terraform
 
-Customer-owned Terraform for the commercial AWS Path B optional customer-managed
+Standalone Terraform for legacy commercial AWS Paths A/C optional customer-managed
 KMS key (CMK). It creates the key, alias, and key policy for key administrators,
 OpenSearch domain encryption, and Phase B Lambda roles. It does not create the
 SAM stack, OpenSearch domain, or application resources.
 
-**Deploy context:** root README **section 3.4** (copy `terraform.tfvars`), Path B
-**step 1** (optional CMK before OpenSearch when the domain encrypts with CMK) and
-**step 9** Phase B —
-[`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default).
+Path B does not use this standalone workflow; it uses
+[`../customer_default/`](../customer_default/) and wires role policies in one apply.
+The two-phase instructions below apply only to split-state Paths A/C.
 Operator runbook: [`../../docs/operations/deployment/KMS_CUSTOMER_KEY.md`](../../docs/operations/deployment/KMS_CUSTOMER_KEY.md).
 
 ## Prerequisites
@@ -42,7 +41,7 @@ terraform show kms.tfplan
 terraform apply kms.tfplan
 ```
 
-Copy outputs to `customer-default.env`:
+Copy outputs to the legacy Paths A/C SAM parameter source:
 
 ```bash
 terraform output kms_key_arn
@@ -52,7 +51,7 @@ terraform output sam_environment
 
 Use the key ARN for:
 
-- `CUSTOMER_KMS_KEY_ARN` in `customer-default.env`
+- the legacy SAM `CustomerKmsKeyArn` parameter
 - `kms_key_arn` in the OpenSearch Terraform module when the domain encrypts with this CMK
 
 Create the CMK **before** the OpenSearch domain when the domain uses customer-managed

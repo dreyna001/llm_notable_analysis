@@ -53,6 +53,17 @@ variable "lambda_role_arns" {
   }
 }
 
+variable "s3_notification_bucket_arns" {
+  description = "S3 bucket ARNs allowed to publish notifications to product queues encrypted by this key."
+  type        = set(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for arn in var.s3_notification_bucket_arns : can(regex("^arn:aws:s3:::[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", arn))])
+    error_message = "s3_notification_bucket_arns must contain valid commercial S3 bucket ARNs."
+  }
+}
+
 variable "enable_opensearch_grant" {
   description = "Allow the OpenSearch service principal to use this key for domain encryption at rest."
   type        = bool

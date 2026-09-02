@@ -11,13 +11,13 @@ module "kms" {
   count  = var.enable_kms ? 1 : 0
   source = "../kms"
 
-  aws_account_id       = var.aws_account_id
-  aws_region           = var.aws_region
-  key_alias            = var.kms_key_alias
-  admin_principal_arns = var.kms_admin_principal_arns
-  lambda_role_arns     = var.kms_lambda_role_arns
+  aws_account_id          = var.aws_account_id
+  aws_region              = var.aws_region
+  key_alias               = var.kms_key_alias
+  admin_principal_arns    = var.kms_admin_principal_arns
+  lambda_role_arns        = var.kms_lambda_role_arns
   enable_opensearch_grant = var.enable_opensearch
-  tags                 = var.tags
+  tags                    = var.tags
 }
 
 module "network" {
@@ -42,10 +42,10 @@ module "ecr" {
   count  = var.enable_ecr ? 1 : 0
   source = "../ecr"
 
-  aws_account_id   = var.aws_account_id
-  aws_region       = var.aws_region
-  repository_name  = var.ecr_repository_name
-  tags             = var.tags
+  aws_account_id  = var.aws_account_id
+  aws_region      = var.aws_region
+  repository_name = var.ecr_repository_name
+  tags            = var.tags
 }
 
 module "opensearch" {

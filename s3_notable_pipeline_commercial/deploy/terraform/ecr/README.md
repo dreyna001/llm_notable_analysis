@@ -1,12 +1,12 @@
 # ECR Terraform
 
-Customer-owned Terraform for the commercial AWS Path B Lambda container
+Standalone Terraform for the legacy commercial AWS Paths A/C Lambda container
 repository. It creates one ECR repository with scan-on-push enabled and an
 optional lifecycle policy. It does not build, tag, push, or deploy images.
 
-**Deploy context:** root README **section 3.4** (copy `terraform.tfvars`), Path B
-**step 6** (build and push image, record digest) —
-[`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default).
+Path B uses the ECR bootstrap mode in [`../customer_default/`](../customer_default/).
+Use this standalone module only for an explicitly split foundation state or
+legacy Paths A/C.
 Image build and push runbook:
 [`../../docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`](../../docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md).
 
@@ -41,7 +41,7 @@ terraform show ecr.tfplan
 terraform apply ecr.tfplan
 ```
 
-Copy outputs to `customer-default.env`:
+Copy outputs to the legacy Paths A/C SAM parameter source:
 
 ```bash
 terraform output ecr_repository_uri

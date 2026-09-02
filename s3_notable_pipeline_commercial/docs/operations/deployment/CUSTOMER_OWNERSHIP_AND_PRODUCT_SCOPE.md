@@ -1,6 +1,6 @@
 # Customer ownership and product scope (commercial AWS)
 
-What the **product SAM stack creates and operates** versus what **you must
+What the **product IaC creates and operates** versus what **you must
 provision, host, or run** in your commercial AWS account (`aws`, `us-east-1`).
 Read this during root README **section 3.1** before picking Path A, B, or C.
 Use during sales handoff, deployment planning, and security review.
@@ -9,25 +9,26 @@ Use during sales handoff, deployment planning, and security review.
 
 | Category | You own | Stack creates / app runs |
 | --- | --- | --- |
-| Network + search | VPC, subnets, NAT/endpoints, OpenSearch domain | Lambda ENI attachment to **your** subnets/SGs; index **mappings** inside **your** domain after first write |
+| Network + search | VPC, subnets, NAT/routes | Path B Terraform creates or attaches the Lambda SG and OpenSearch domain; index mappings appear after first write |
 | Identity + edge | IdP, JWT issuance, browser login, VPN/proxy/firewall to API Gateway, CloudFront/WAF/DNS/TLS if used | API Gateway JWT authorizer config; claim validation in portal Lambda — see [`PORTAL_JWT_IDENTITY.md`](PORTAL_JWT_IDENTITY.md) |
-| Crypto + image | Optional CMK + key policies; ECR build/push | Uses `CustomerKmsKeyArn` when set; pulls image by digest |
+| Crypto + image | ECR image build/push and release approval | Path B creates or attaches optional CMK and ECR repository; pulls image by digest |
 | Data + integrations | Notable source to `incoming/`; Splunk/ServiceNow/Elastic endpoints + secrets; RAG corpus files | S3 buckets (configurable names), queues, CaseIndex DDB, analyzer/ingest/embed logic |
 | Ops | Alarms, dashboards, on-call, OpenSearch sizing/ISM/snapshots, staging/prod promotion | CloudWatch logs for product Lambdas; smoke paths in [`../../testing/TESTING.md`](../../testing/TESTING.md) |
 
-## Infrastructure the stack does not create
+## Customer-owned infrastructure and services
 
-These are **customer-owned**. Runbooks describe how to wire values into SAM; the
-product does not run CloudFormation or automation for them.
+These remain **customer-owned** for Path B. Terraform may configure a product
+resource inside the customer account, but the customer retains operational and
+approval ownership.
 
 | Item | Your responsibility | Operator runbook |
 | --- | --- | --- |
-| OpenSearch domain | VPC-only domain, security groups, domain access policy; provision with Terraform (standalone or foundation) using customer-owned state | [`../../../deploy/terraform/README.md`](../../../deploy/terraform/README.md), [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) |
+| OpenSearch domain | Capacity, backups, access approval; Path B creates or attaches it through customer-owned state | [`../../../deploy/terraform/README.md`](../../../deploy/terraform/README.md), [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) |
 | VPC, subnets, NAT, VPC endpoints | Private subnets, routing; Lambda SG via Terraform [`network/`](../../../deploy/terraform/network/) or manual | [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md) |
 | JWT / OIDC IdP | Cognito, Okta, Keycloak, Microsoft Entra, or corporate OIDC; API access tokens; Entra API + SPA app registrations when using `entra` SPA mode; analyst role/scope claims | [`PORTAL_JWT_IDENTITY.md`](PORTAL_JWT_IDENTITY.md) |
 | CloudFront, WAF, public DNS, portal TLS | Optional front door in front of API Gateway URL | Not in v1 — see [`../analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../analyst_portal/ANALYST_PORTAL_OPERATIONS.md) |
-| Customer CMK (optional) | Create key, key policy for Lambda roles + OpenSearch; Terraform [`kms/`](../../../deploy/terraform/kms/) optional | [`KMS_CUSTOMER_KEY.md`](KMS_CUSTOMER_KEY.md) |
-| ECR image | Terraform [`ecr/`](../../../deploy/terraform/ecr/) for repository; build, push, record digest for deploy | [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md) |
+| Customer CMK (optional) | Key administration and approval; Path B creates or attaches the key and policy | [`KMS_CUSTOMER_KEY.md`](KMS_CUSTOMER_KEY.md) |
+| ECR image | Build, push, scan, approve, and record digest; Path B may create the repository | [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md) |
 | Bedrock model access | Enable models in account; pass ID + ARN | [`BEDROCK_ACCOUNT_ENABLEMENT.md`](BEDROCK_ACCOUNT_ENABLEMENT.md) |
 | Upstream notable source | Splunk/SOAR/operator writes JSON to `incoming/` | [`../platform/FILE_DROP_AND_RETENTION_OPERATIONS.md`](../platform/FILE_DROP_AND_RETENTION_OPERATIONS.md), [`../../integrations/SOAR_PLAYBOOK_PHANTOM.md`](../../integrations/SOAR_PLAYBOOK_PHANTOM.md) |
 | Splunk / ServiceNow / Elasticsearch | Endpoints, credentials, approval workflows when profiles enabled | [`../integrations/SPLUNK_WRITEBACK_OPERATIONS.md`](../integrations/SPLUNK_WRITEBACK_OPERATIONS.md), [`../integrations/SERVICENOW_OPERATIONS.md`](../integrations/SERVICENOW_OPERATIONS.md) |
@@ -35,18 +36,18 @@ product does not run CloudFormation or automation for them.
 
 Recovery behavior (retries, DLQ, idempotency): [`../platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md`](../platform/RECOVERY_BEHAVIOR_AND_RESPONSIBILITIES.md).
 
-Release-time ownership, Terraform/SAM gates, live-cloud acceptance, upgrades,
+Release-time ownership, Terraform or legacy SAM gates, live-cloud acceptance, upgrades,
 and rollback are in
 [`DEPLOYMENT_READINESS_AND_LIFECYCLE.md`](DEPLOYMENT_READINESS_AND_LIFECYCLE.md).
 
-## What the stack does create (when enabled)
+## What Path B Terraform creates
 
-Rendered from [`../../../deploy/aws/template-sam.yaml`](../../../deploy/aws/template-sam.yaml) based on capability flags:
+Composed by [`../../../deploy/terraform/customer_default/`](../../../deploy/terraform/customer_default/):
 
-- S3-triggered analyzer Lambda, optional RAG ingestion, case embed, portal API, disposition sync
+- S3-triggered analyzer Lambda, RAG ingestion, case embed, and portal API
 - SQS queues and DLQs for analyzer, embed, and ingestion paths
 - S3 buckets for input, output, and portal UI (names you supply)
-- DynamoDB CaseIndex, side-effect idempotency, disposition, and chat history tables when portal/disposition features are on
+- DynamoDB CaseIndex table
 - Regional API Gateway HTTP API for portal (`/api/*` + static SPA proxy)
 - IAM roles and inline policies scoped to customer ARNs (Bedrock, OpenSearch, secrets, KMS)
 - CloudWatch log groups for product functions
@@ -75,15 +76,15 @@ References:
 [`../rag/RAG_OPERATIONS.md`](../rag/RAG_OPERATIONS.md),
 [`portal_chat_images.py`](../../../src/s3_notable_pipeline/portal_chat_images.py).
 
-## Customer-default preset (commercial)
+## Customer-default deployment (commercial)
 
-Copy-and-fill SAM preset for the on-prem customer-default bundle:
+Fill the Terraform example for the customer-default bundle:
 [`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md) +
-[`../../../deploy/aws/presets/`](../../../deploy/aws/presets/).
+[`../../../deploy/terraform/customer_default/`](../../../deploy/terraform/customer_default/).
 
 ## Next
 
 - Root README **section 3.2:** [`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md) — customer values checklist
 - Root README **section 3.3:** pick **Path A**, **Path B**, or **Path C**
-- **Path B:** root README **section 3.4** (prepare `customer-default.env` and Terraform tfvars), then [`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default)
+- **Path B:** root README **section 3.4** (prepare Terraform inputs), then [`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default)
 - Approved architecture differences: [`../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md`](../../internal/COMMERCIAL_AWS_APPROVED_DIFFERENCES.md)

@@ -1,6 +1,6 @@
 """Generate Path B customer-default deployment artifacts from guided answers.
 
-Path B only. Does not run terraform apply, sam deploy, or live AWS mutations.
+Path B only. Does not run Terraform or make live AWS mutations.
 """
 
 from __future__ import annotations
@@ -9,18 +9,20 @@ import argparse
 import json
 import re
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_ENV_PATH = PROJECT_ROOT / "customer-default.env"
-DEFAULT_TFVARS_PATH = PROJECT_ROOT / "deploy" / "terraform" / "opensearch" / "terraform.tfvars"
+DEFAULT_TFVARS_PATH = (
+    PROJECT_ROOT / "deploy" / "terraform" / "customer_default" / "terraform.tfvars"
+)
 DEFAULT_CHECKLIST_PATH = PROJECT_ROOT / "path-b-remaining-steps.md"
 
 CmkMode = Literal["skip", "existing", "create"]
 VpcMode = Literal["existing", "create"]
 OpenSearchMode = Literal["create", "existing"]
+EcrMode = Literal["create", "existing"]
 
 _ACCOUNT_RE = re.compile(r"^[0-9]{12}$")
 _VPC_RE = re.compile(r"^vpc-[0-9a-f]+$")
@@ -38,9 +40,11 @@ _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 class PathBConfig:
     aws_account_id: str = ""
     commercial_aws_account_id: str = ""
+    name_prefix: str = "notable"
 
     cmk_mode: CmkMode = "skip"
     customer_kms_key_arn: str = ""
+    existing_kms_policy_ready: bool = False
 
     vpc_mode: VpcMode = "existing"
     vpc_id: str = ""
@@ -51,6 +55,7 @@ class PathBConfig:
     domain_name: str = ""
     opensearch_endpoint: str = ""
     opensearch_domain_arn: str = ""
+    replace_existing_opensearch_access_policy: bool = False
     admin_principal_arns: list[str] = field(default_factory=list)
     engine_version: str = "OpenSearch_2.11"
     instance_type: str = "t3.small.search"
@@ -70,6 +75,8 @@ class PathBConfig:
     portal_required_analyst_scope: str = ""
     portal_cors_allowed_origins: str = ""
 
+    ecr_mode: EcrMode = "existing"
+    ecr_repository_name: str = "notable-analyzer-s3"
     ecr_repository_uri: str = ""
     image_digest: str = ""
 
@@ -128,10 +135,6 @@ def _prompt_choice(text: str, choices: dict[str, str]) -> str:
         print(f"Choose one of: {', '.join(sorted(valid))}")
 
 
-def _comma(values: list[str]) -> str:
-    return ",".join(values)
-
-
 def collect_interactive() -> PathBConfig:
     print("Commercial AWS Path B setup (customer-default).")
     print("This script writes local config files only. It does not deploy anything.\n")
@@ -146,13 +149,18 @@ def collect_interactive() -> PathBConfig:
         config.aws_account_id,
         hint="Must match AWS_ACCOUNT_ID for setup-and-deploy scripts",
     )
+    config.name_prefix = _prompt(
+        "Resource name prefix",
+        config.name_prefix,
+        hint="3-28 lowercase letters, numbers, or hyphens",
+    )
 
     cmk_mode = _prompt_choice(
         "Customer-managed KMS (CMK)?",
         {
             "skip": "Skip — use AWS owned keys",
             "existing": "Use an existing CMK ARN",
-            "create": "Create CMK later (manual runbook first)",
+            "create": "Create and wire a CMK in the customer-default Terraform root",
         },
     )
     config.cmk_mode = cmk_mode  # type: ignore[assignment]
@@ -161,14 +169,17 @@ def collect_interactive() -> PathBConfig:
             "CMK ARN (us-east-1)",
             hint="Example: arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555",
         )
+        config.existing_kms_policy_ready = _prompt_yes_no(
+            "Has the existing key policy been updated with every grant in KMS_CUSTOMER_KEY.md?"
+        )
     elif cmk_mode == "create":
-        _hint("Leave CUSTOMER_KMS_KEY_ARN empty until the key exists; see KMS_CUSTOMER_KEY.md")
+        _hint("Terraform creates the key and wires application roles in the same full apply")
 
     vpc_mode = _prompt_choice(
         "VPC and Lambda networking for Path B?",
         {
-            "existing": "Use existing VPC, private subnets, and Lambda security group",
-            "create": "Provision network later (manual runbook first)",
+            "existing": "Use an existing VPC and private subnets; Terraform creates the product Lambda security group",
+            "create": "VPC is not available yet; stop and have the customer provision it",
         },
     )
     config.vpc_mode = vpc_mode  # type: ignore[assignment]
@@ -179,8 +190,8 @@ def collect_interactive() -> PathBConfig:
             hint="Example: subnet-aaa111,subnet-bbb222 (1 for dev, 2+ AZs for prod)",
         )
         config.lambda_security_group_ids = _prompt_list(
-            "Lambda security group IDs (comma-separated, no spaces)",
-            hint="Example: sg-0abc123def4567890",
+            "Additional existing Lambda security group IDs (optional, comma-separated)",
+            hint="Leave blank to use only the product security group Terraform creates",
         )
     else:
         _hint("Finish VPC_NETWORK_PREREQUISITES.md first, then re-run with existing network IDs")
@@ -188,7 +199,7 @@ def collect_interactive() -> PathBConfig:
     opensearch_mode = _prompt_choice(
         "OpenSearch domain?",
         {
-            "create": "Create with product Terraform (Phase A before SAM)",
+            "create": "Create with the customer-default Terraform root",
             "existing": "Use an existing VPC-only domain",
         },
     )
@@ -200,7 +211,7 @@ def collect_interactive() -> PathBConfig:
             hint="Lowercase letters, digits, hyphens; 3-28 chars; unique in account",
         )
         config.admin_principal_arns = _prompt_list(
-            "Admin IAM role ARNs for Phase A (comma-separated)",
+            "OpenSearch administrator IAM role ARNs (comma-separated)",
             hint="Example: arn:aws:iam::123456789012:role/ApprovedOpenSearchAdministrator",
         )
         if _prompt_yes_no("Use default OpenSearch sizing (t3.small.search x2, 50 GiB)?", True):
@@ -226,13 +237,16 @@ def collect_interactive() -> PathBConfig:
             "OpenSearch domain ARN",
             hint="Example: arn:aws:es:us-east-1:123456789012:domain/notable-rag-staging",
         )
+        config.replace_existing_opensearch_access_policy = _prompt_yes_no(
+            "Is this a dedicated domain whose complete access policy Terraform may replace?"
+        )
 
     config.rag_tenant_id = _prompt(
         "RAG tenant ID (stable per deployment)",
         hint="Example: customer-acme-prod (same value on every OpenSearch document)",
     )
 
-    print("\nBedrock analysis model (enable in account before SAM deploy).")
+    print("\nBedrock analysis model (enable in account before Terraform apply).")
     config.bedrock_analysis_model_id = _prompt(
         "BedrockAnalysisModelId",
         hint="Example: amazon.nova-pro-v1:0 or us.anthropic.claude-sonnet-4-20250514-v1:0",
@@ -248,7 +262,7 @@ def collect_interactive() -> PathBConfig:
     )
 
     print("\nPortal JWT (Path B requires portal JWT mode).")
-    _hint("Set at least one of role or scope; SAM fails if both are empty")
+    _hint("Set at least one of role or scope; Terraform validation fails if both are empty")
     config.portal_jwt_issuer = _prompt(
         "Portal JWT issuer URL",
         hint="Example: https://login.microsoftonline.com/<tenant-id>/v2.0",
@@ -277,11 +291,24 @@ def collect_interactive() -> PathBConfig:
         hint="Example: https://portal.customer.example (scheme + host + port, no path)",
     )
 
-    print("\nECR image (build and push before SAM deploy).")
-    config.ecr_repository_uri = _prompt(
-        "ECR repository URI (no tag or digest)",
-        hint="Example: 123456789012.dkr.ecr.us-east-1.amazonaws.com/notable-analyzer-s3",
+    print("\nECR image (build and push before the full Terraform apply).")
+    ecr_mode = _prompt_choice(
+        "ECR repository?",
+        {
+            "create": "Create from the customer-default root before the first image push",
+            "existing": "Use an existing repository URI",
+        },
     )
+    config.ecr_mode = ecr_mode  # type: ignore[assignment]
+    if ecr_mode == "create":
+        config.ecr_repository_name = _prompt(
+            "ECR repository name", config.ecr_repository_name
+        )
+    else:
+        config.ecr_repository_uri = _prompt(
+            "ECR repository URI (no tag or digest)",
+            hint="Example: 123456789012.dkr.ecr.us-east-1.amazonaws.com/notable-analyzer-s3",
+        )
     config.image_digest = _prompt(
         "Image digest (sha256:...)",
         "",
@@ -298,7 +325,7 @@ def collect_interactive() -> PathBConfig:
     )
     config.portal_ui_bucket_name = _prompt(
         "Portal UI S3 bucket name",
-        hint="Globally unique; upload analyst-portal dist/ after SAM deploy",
+        hint="Globally unique; upload analyst-portal dist/ after Terraform apply",
     )
 
     return config
@@ -324,12 +351,16 @@ def validate_config(config: PathBConfig) -> list[str]:
         errors.append("commercial_aws_account_id must be a 12-digit commercial AWS account ID")
     if config.aws_account_id and config.commercial_aws_account_id != config.aws_account_id:
         errors.append("commercial_aws_account_id must match aws_account_id for deploy scripts")
+    if not re.fullmatch(r"[a-z][a-z0-9-]{1,26}[a-z0-9]", config.name_prefix):
+        errors.append("name_prefix must be 3-28 lowercase letters, numbers, or hyphens")
 
     if config.cmk_mode == "existing":
         if not config.customer_kms_key_arn:
             errors.append("customer_kms_key_arn is required when cmk_mode is existing")
         elif not _KMS_ARN_RE.fullmatch(config.customer_kms_key_arn):
             errors.append("customer_kms_key_arn must be a us-east-1 KMS key ARN")
+        if not config.existing_kms_policy_ready:
+            errors.append("existing_kms_policy_ready must be true after required grants are applied")
     elif config.cmk_mode == "skip" and config.customer_kms_key_arn:
         errors.append("customer_kms_key_arn must be empty when cmk_mode is skip")
 
@@ -338,12 +369,10 @@ def validate_config(config: PathBConfig) -> list[str]:
             errors.append("vpc_id is required and must look like vpc-xxxxxxxx")
         if not config.subnet_ids or not all(_SUBNET_RE.fullmatch(v) for v in config.subnet_ids):
             errors.append("subnet_ids must contain one or more subnet-xxxxxxxx values")
-        if not config.lambda_security_group_ids or not all(
+        if not all(
             _SG_RE.fullmatch(v) for v in config.lambda_security_group_ids
         ):
-            errors.append(
-                "lambda_security_group_ids must contain one or more sg-xxxxxxxx values"
-            )
+            errors.append("lambda_security_group_ids must contain only sg-xxxxxxxx values")
     elif config.vpc_mode == "create":
         errors.append(
             "vpc_mode create is not supported for file generation; provision network first, "
@@ -368,6 +397,8 @@ def validate_config(config: PathBConfig) -> list[str]:
             config.opensearch_domain_arn
         ):
             errors.append("opensearch_domain_arn must be a us-east-1 OpenSearch domain ARN")
+        if not config.replace_existing_opensearch_access_policy:
+            errors.append("existing OpenSearch requires approval to replace its complete access policy")
 
     if not config.rag_tenant_id.strip():
         errors.append("rag_tenant_id is required")
@@ -386,10 +417,14 @@ def validate_config(config: PathBConfig) -> list[str]:
     if not config.portal_cors_allowed_origins.strip():
         errors.append("portal_cors_allowed_origins is required")
 
-    if not config.ecr_repository_uri.startswith(
+    if config.ecr_mode == "existing" and not config.ecr_repository_uri.startswith(
         f"{config.aws_account_id}.dkr.ecr.us-east-1.amazonaws.com/"
     ):
         errors.append("ecr_repository_uri must be in the target us-east-1 ECR account")
+    if config.ecr_mode == "create" and not re.fullmatch(
+        r"[a-z0-9]+(?:[._/-][a-z0-9]+)*", config.ecr_repository_name
+    ):
+        errors.append("ecr_repository_name must be a valid private ECR repository name")
     if config.image_digest and not _DIGEST_RE.fullmatch(config.image_digest):
         errors.append("image_digest must look like sha256:64-hex-chars when set")
 
@@ -404,47 +439,6 @@ def validate_config(config: PathBConfig) -> list[str]:
     return errors
 
 
-def render_customer_default_env(config: PathBConfig) -> str:
-    lines = [
-        "# Generated by scripts/configure_path_b.py — review before sam deploy",
-        f"AWS_ACCOUNT_ID={config.aws_account_id}",
-        f"COMMERCIAL_AWS_ACCOUNT_ID={config.commercial_aws_account_id}",
-        f"ECR_REPOSITORY_URI={config.ecr_repository_uri}",
-        f"IMAGE_DIGEST={config.image_digest}",
-        "",
-        f"BEDROCK_ANALYSIS_MODEL_ID={config.bedrock_analysis_model_id}",
-        f"BEDROCK_ANALYSIS_MODEL_ARN={config.bedrock_analysis_model_arn}",
-        "BEDROCK_ANALYSIS_INFERENCE_PROFILE_FOUNDATION_MODEL_ARNS="
-        f"{config.bedrock_analysis_inference_profile_foundation_model_arns}",
-        "",
-        f"INPUT_BUCKET_NAME={config.input_bucket_name}",
-        f"OUTPUT_BUCKET_NAME={config.output_bucket_name}",
-        "",
-        f"CASE_INDEX_TABLE_NAME={config.case_index_table_name}",
-        f"PORTAL_UI_BUCKET_NAME={config.portal_ui_bucket_name}",
-        f"PORTAL_JWT_ISSUER={config.portal_jwt_issuer}",
-        f"PORTAL_JWT_AUDIENCE={config.portal_jwt_audience}",
-        f"PORTAL_JWT_TENANT_ID={config.portal_jwt_tenant_id}",
-        f"PORTAL_REQUIRED_ANALYST_ROLE={config.portal_required_analyst_role}",
-        f"PORTAL_REQUIRED_ANALYST_SCOPE={config.portal_required_analyst_scope}",
-        f"PORTAL_CORS_ALLOWED_ORIGINS={config.portal_cors_allowed_origins}",
-        "",
-        f"OPENSEARCH_ENDPOINT={config.opensearch_endpoint}",
-        f"OPENSEARCH_DOMAIN_ARN={config.opensearch_domain_arn}",
-        f"RAG_TENANT_ID={config.rag_tenant_id}",
-        "",
-        f"CUSTOMER_VPC_SUBNET_IDS={_comma(config.subnet_ids)}",
-        f"CUSTOMER_SECURITY_GROUP_IDS={_comma(config.lambda_security_group_ids)}",
-        "",
-        f"OPENSEARCH_SOC_INDEX={config.opensearch_soc_index}",
-        f"OPENSEARCH_SPLUNK_INDEX={config.opensearch_splunk_index}",
-        f"OPENSEARCH_CASE_INDEX={config.opensearch_case_index}",
-        "",
-        f"CUSTOMER_KMS_KEY_ARN={config.customer_kms_key_arn if config.cmk_mode != 'skip' else ''}",
-    ]
-    return "\n".join(lines) + "\n"
-
-
 def _hcl_string(value: str) -> str:
     return json.dumps(value)
 
@@ -456,38 +450,61 @@ def _hcl_list(values: list[str], indent: str = "  ") -> str:
     return f"[\n{inner},\n{indent}]"
 
 
-def render_opensearch_tfvars(config: PathBConfig) -> str | None:
-    if config.opensearch_mode != "create":
-        return None
-
-    kms_value = "null" if config.cmk_mode != "existing" else _hcl_string(config.customer_kms_key_arn)
+def render_terraform_tfvars(config: PathBConfig) -> str:
+    existing_kms_key_arn = (
+        config.customer_kms_key_arn if config.cmk_mode == "existing" else ""
+    )
     lines = [
+        "# Generated by scripts/configure_path_b.py — review before plan/apply.",
         f"aws_account_id = {_hcl_string(config.aws_account_id)}",
-        f"domain_name    = {_hcl_string(config.domain_name)}",
-        f"vpc_id         = {_hcl_string(config.vpc_id)}",
+        'aws_region     = "us-east-1"',
+        f"name_prefix    = {_hcl_string(config.name_prefix)}",
         "",
-        f"subnet_ids = {_hcl_list(config.subnet_ids)}",
+        f"create_ecr_repository      = {str(config.ecr_mode == 'create').lower()}",
+        f"ecr_repository_name         = {_hcl_string(config.ecr_repository_name)}",
+        f"existing_ecr_repository_uri = {_hcl_string(config.ecr_repository_uri)}",
+        f"image_digest                = {_hcl_string(config.image_digest)}",
         "",
+        f"vpc_id             = {_hcl_string(config.vpc_id)}",
+        f"private_subnet_ids = {_hcl_list(config.subnet_ids)}",
         f"lambda_security_group_ids = {_hcl_list(config.lambda_security_group_ids)}",
         "",
+        f"create_kms_key          = {str(config.cmk_mode == 'create').lower()}",
+        f"existing_kms_key_arn    = {_hcl_string(existing_kms_key_arn)}",
+        f"existing_kms_policy_ready = {str(config.existing_kms_policy_ready).lower()}",
+        f"create_opensearch_domain = {str(config.opensearch_mode == 'create').lower()}",
+        f"opensearch_domain_name   = {_hcl_string(config.domain_name)}",
+        f"existing_opensearch_endpoint = {_hcl_string(config.opensearch_endpoint)}",
+        f"existing_opensearch_domain_arn = {_hcl_string(config.opensearch_domain_arn)}",
+        "replace_existing_opensearch_access_policy = "
+        f"{str(config.replace_existing_opensearch_access_policy).lower()}",
         f"admin_principal_arns = {_hcl_list(config.admin_principal_arns)}",
+        f"opensearch_engine_version  = {_hcl_string(config.engine_version)}",
+        f"opensearch_instance_type   = {_hcl_string(config.instance_type)}",
+        f"opensearch_instance_count  = {config.instance_count}",
+        f"opensearch_volume_size_gib = {config.volume_size_gib}",
         "",
-        "# Phase B: add physical Lambda role ARNs after the first SAM deploy.",
-        "read_role_arns = []",
+        f"bedrock_analysis_model_id  = {_hcl_string(config.bedrock_analysis_model_id)}",
+        f"bedrock_analysis_model_arn = {_hcl_string(config.bedrock_analysis_model_arn)}",
+        "bedrock_analysis_inference_profile_foundation_model_arns = "
+        f"{_hcl_list([item.strip() for item in config.bedrock_analysis_inference_profile_foundation_model_arns.split(',') if item.strip()])}",
         "",
-        "write_role_arns = []",
+        f"input_bucket_name     = {_hcl_string(config.input_bucket_name)}",
+        f"output_bucket_name    = {_hcl_string(config.output_bucket_name)}",
+        f"case_index_table_name = {_hcl_string(config.case_index_table_name)}",
+        f"portal_ui_bucket_name = {_hcl_string(config.portal_ui_bucket_name)}",
         "",
-        f"engine_version  = {_hcl_string(config.engine_version)}",
-        f"instance_type   = {_hcl_string(config.instance_type)}",
-        f"instance_count  = {config.instance_count}",
-        f"volume_size_gib = {config.volume_size_gib}",
+        f"portal_jwt_issuer             = {_hcl_string(config.portal_jwt_issuer)}",
+        f"portal_jwt_audience           = {_hcl_string(config.portal_jwt_audience)}",
+        f"portal_jwt_tenant_id          = {_hcl_string(config.portal_jwt_tenant_id)}",
+        f"portal_required_analyst_role  = {_hcl_string(config.portal_required_analyst_role)}",
+        f"portal_required_analyst_scope = {_hcl_string(config.portal_required_analyst_scope)}",
+        f"portal_cors_allowed_origins   = {_hcl_list([item.strip() for item in config.portal_cors_allowed_origins.split(',') if item.strip()])}",
         "",
-        f"kms_key_arn = {kms_value}",
-        "",
-        "tags = {",
-        '  Environment = "staging"',
-        '  Owner       = "security-platform"',
-        "}",
+        f"rag_tenant_id          = {_hcl_string(config.rag_tenant_id)}",
+        f"opensearch_soc_index    = {_hcl_string(config.opensearch_soc_index)}",
+        f"opensearch_splunk_index = {_hcl_string(config.opensearch_splunk_index)}",
+        f"opensearch_case_index   = {_hcl_string(config.opensearch_case_index)}",
         "",
     ]
     return "\n".join(lines)
@@ -501,16 +518,6 @@ def render_remaining_steps(config: PathBConfig) -> str:
         "",
     ]
 
-    if config.cmk_mode == "create":
-        steps.extend(
-            [
-                "## CMK (optional)",
-                "- Terraform: `deploy/terraform/kms/` (or `enable_kms=true` in `deploy/terraform/foundation/`).",
-                "- Manual alternative: `docs/operations/deployment/KMS_CUSTOMER_KEY.md`",
-                "- Record `CUSTOMER_KMS_KEY_ARN` from `terraform output sam_environment`.",
-                "",
-            ]
-        )
     if config.vpc_mode == "create":
         steps.extend(
             [
@@ -523,9 +530,8 @@ def render_remaining_steps(config: PathBConfig) -> str:
     else:
         steps.extend(
             [
-                "## Network (Lambda SG)",
-                "- Terraform: `deploy/terraform/network/` for Lambda SG + optional VPC endpoints.",
-                "- Or foundation stack: `deploy/terraform/foundation/` with `enable_network=true`.",
+                "## Network",
+                "- Confirm the VPC and private subnet IDs in `deploy/terraform/customer_default/terraform.tfvars`.",
                 "- Runbook: `docs/operations/deployment/VPC_NETWORK_PREREQUISITES.md`",
                 "",
             ]
@@ -533,10 +539,8 @@ def render_remaining_steps(config: PathBConfig) -> str:
     if config.opensearch_mode == "create":
         steps.extend(
             [
-                "## OpenSearch Phase A",
-                "- **Standalone:** configure remote state, then `deploy/terraform/opensearch/` (`terraform init`, `plan`, `apply` after approval).",
-                "- **Unified:** `deploy/terraform/foundation/` with `enable_opensearch=true` (see `deploy/terraform/README.md`).",
-                "- Copy outputs into `customer-default.env` via `terraform output sam_environment`.",
+                "## OpenSearch",
+                "- The customer-default root creates the domain and wires application IAM roles into its policy in the same apply.",
                 "- Runbook: `docs/operations/deployment/OPENSEARCH_PROVISIONING.md`",
                 "",
             ]
@@ -545,7 +549,7 @@ def render_remaining_steps(config: PathBConfig) -> str:
         steps.extend(
             [
                 "## OpenSearch existing domain",
-                "- Confirm the domain is VPC-only and Phase B Lambda role ARNs are in the domain policy.",
+                "- Confirm the domain is VPC-only; Terraform adds the application role ARNs to its policy.",
                 "- Runbook: `docs/operations/deployment/OPENSEARCH_PROVISIONING.md`",
                 "",
             ]
@@ -562,19 +566,16 @@ def render_remaining_steps(config: PathBConfig) -> str:
             "- Runbook: `docs/operations/deployment/PORTAL_JWT_IDENTITY.md`",
             "",
             "## ECR image",
-            "- Terraform (repo only): `deploy/terraform/ecr/` or foundation `enable_ecr=true`.",
-            "- Build, push, and record an immutable `IMAGE_DIGEST` before SAM deploy.",
+            "- If the repository does not exist, run `scripts/setup-and-deploy.sh --bootstrap-ecr`.",
+            "- Build and push the image, then set the immutable `image_digest` in `terraform.tfvars`.",
             "- Runbook: `docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`",
             "",
-            "## SAM deploy (Path B step 7)",
-            "- Run `python scripts/deployment_readiness.py --env-file customer-default.env` and keep the JSON report.",
-            "- `sam build -t deploy/aws/template-sam.yaml`",
-            "- Source `customer-default.env`, then deploy with the preset runbook.",
+            "## Terraform deploy",
+            "- Run `scripts/setup-and-deploy.sh` to create and review the saved plan.",
+            "- Run `scripts/setup-and-deploy.sh --apply` to apply that reviewed plan.",
             "- Runbook: `docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`",
             "",
-            "## Post-SAM",
-            "- OpenSearch Phase B: add deployed Lambda physical role ARNs to the domain policy.",
-            "- CMK Phase B (if used): add Lambda role ARNs to the key policy.",
+            "## Validate",
             "- Ingest SOC and Splunk dictionary corpora.",
             "- Build and upload the analyst portal SPA.",
             "- Run smoke tests in `docs/testing/TESTING.md`.",
@@ -586,10 +587,8 @@ def render_remaining_steps(config: PathBConfig) -> str:
 
 @dataclass
 class GeneratedOutputs:
-    env_path: Path
-    env_content: str
-    tfvars_path: Path | None
-    tfvars_content: str | None
+    tfvars_path: Path
+    tfvars_content: str
     checklist_path: Path
     checklist_content: str
 
@@ -597,7 +596,6 @@ class GeneratedOutputs:
 def build_outputs(
     config: PathBConfig,
     *,
-    env_path: Path = DEFAULT_ENV_PATH,
     tfvars_path: Path = DEFAULT_TFVARS_PATH,
     checklist_path: Path = DEFAULT_CHECKLIST_PATH,
 ) -> GeneratedOutputs:
@@ -606,26 +604,22 @@ def build_outputs(
         raise ValueError("configuration invalid:\n- " + "\n- ".join(errors))
 
     return GeneratedOutputs(
-        env_path=env_path,
-        env_content=render_customer_default_env(config),
-        tfvars_path=tfvars_path if config.opensearch_mode == "create" else None,
-        tfvars_content=render_opensearch_tfvars(config),
+        tfvars_path=tfvars_path,
+        tfvars_content=render_terraform_tfvars(config),
         checklist_path=checklist_path,
         checklist_content=render_remaining_steps(config),
     )
 
 
 def write_outputs(outputs: GeneratedOutputs) -> None:
-    outputs.env_path.write_text(outputs.env_content, encoding="utf-8")
-    if outputs.tfvars_path and outputs.tfvars_content is not None:
-        outputs.tfvars_path.parent.mkdir(parents=True, exist_ok=True)
-        outputs.tfvars_path.write_text(outputs.tfvars_content, encoding="utf-8")
+    outputs.tfvars_path.parent.mkdir(parents=True, exist_ok=True)
+    outputs.tfvars_path.write_text(outputs.tfvars_content, encoding="utf-8")
     outputs.checklist_path.write_text(outputs.checklist_content, encoding="utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Generate Path B customer-default.env, OpenSearch tfvars, and checklist."
+        description="Generate Path B customer-default Terraform inputs and checklist."
     )
     parser.add_argument(
         "--answers-file",
@@ -633,16 +627,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Load answers from JSON instead of interactive prompts (for CI/tests).",
     )
     parser.add_argument(
-        "--env-out",
-        type=Path,
-        default=DEFAULT_ENV_PATH,
-        help=f"Output env file path (default: {DEFAULT_ENV_PATH.name})",
-    )
-    parser.add_argument(
         "--tfvars-out",
         type=Path,
         default=DEFAULT_TFVARS_PATH,
-        help="Output OpenSearch terraform.tfvars path",
+        help="Output customer-default terraform.tfvars path",
     )
     parser.add_argument(
         "--checklist-out",
@@ -665,7 +653,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         outputs = build_outputs(
             config,
-            env_path=args.env_out,
             tfvars_path=args.tfvars_out,
             checklist_path=args.checklist_out,
         )
@@ -675,16 +662,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.dry_run:
         print("Validation passed.")
-        print(f"Would write: {outputs.env_path}")
-        if outputs.tfvars_path:
-            print(f"Would write: {outputs.tfvars_path}")
+        print(f"Would write: {outputs.tfvars_path}")
         print(f"Would write: {outputs.checklist_path}")
         return 0
 
     write_outputs(outputs)
-    print(f"Wrote {outputs.env_path}")
-    if outputs.tfvars_path:
-        print(f"Wrote {outputs.tfvars_path}")
+    print(f"Wrote {outputs.tfvars_path}")
     print(f"Wrote {outputs.checklist_path}")
     print("Next: follow path-b-remaining-steps.md and the Path B runbooks.")
     return 0

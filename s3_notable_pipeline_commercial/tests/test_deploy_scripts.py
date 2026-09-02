@@ -38,15 +38,8 @@ case "$1" in
   *) exit 2 ;;
 esac
 """,
-            "sam": """#!/usr/bin/env bash
-if [ "$1" = "--version" ]; then
-  echo "SAM CLI, fake"
-  exit 0
-fi
-printf 'sam %s\n' "$*" >> "$DEPLOY_TEST_CALL_LOG"
-""",
-            "docker": """#!/usr/bin/env bash
-echo "Docker fake"
+            "terraform": """#!/usr/bin/env bash
+printf 'terraform %s\n' "$*" >> "$DEPLOY_TEST_CALL_LOG"
 """,
         }
         for name, source in tools.items():
@@ -126,7 +119,7 @@ echo "Docker fake"
                 self.assertIn(expected_message, result.stdout)
                 self.assertFalse(call_log.exists())
 
-    def test_bash_guided_deploy_forces_commercial_region(self) -> None:
+    def test_bash_path_b_creates_terraform_plan_without_applying_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             tool_dir = Path(temp_dir)
             call_log = self._write_fake_tools(tool_dir)
@@ -140,7 +133,14 @@ echo "Docker fake"
             }
 
             result = subprocess.run(
-                ["bash", str(BASH_SCRIPT)],
+                [
+                    "bash",
+                    str(BASH_SCRIPT),
+                    "--var-file",
+                    "terraform.tfvars.example",
+                    "--backend-config",
+                    "backend.hcl.example",
+                ],
                 cwd=PROJECT_ROOT,
                 env=env,
                 capture_output=True,
@@ -150,12 +150,78 @@ echo "Docker fake"
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             calls = call_log.read_text(encoding="utf-8")
-            self.assertIn("sam build -t deploy/aws/template-sam.yaml", calls)
-            self.assertIn(
-                "sam deploy --guided --region us-east-1 "
-                "--template-file .aws-sam/build/template.yaml",
-                calls,
+            self.assertIn("terraform -chdir=deploy/terraform/customer_default fmt -check", calls)
+            self.assertIn("-backend-config=backend.hcl.example", calls)
+            self.assertIn("terraform -chdir=deploy/terraform/customer_default validate", calls)
+            self.assertIn("terraform -chdir=deploy/terraform/customer_default plan", calls)
+            self.assertIn("-out=customer-default.tfplan", calls)
+            self.assertNotIn(" apply ", calls)
+
+    def test_bash_path_b_apply_uses_saved_plan_and_bootstrap_targets_only_ecr(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tool_dir = Path(temp_dir)
+            call_log = self._write_fake_tools(tool_dir)
+            env = {
+                **os.environ,
+                "PATH": f"{tool_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+                "AWS_REGION": "us-east-1",
+                "AWS_DEFAULT_REGION": "",
+                "COMMERCIAL_AWS_ACCOUNT_ID": "123456789012",
+                "DEPLOY_TEST_CALL_LOG": str(call_log),
+            }
+            plan_path = (
+                PROJECT_ROOT
+                / "deploy/terraform/customer_default/bootstrap-ecr.tfplan"
             )
+            self.assertFalse(plan_path.exists())
+            try:
+                plan_result = subprocess.run(
+                    [
+                        "bash",
+                        str(BASH_SCRIPT),
+                        "--bootstrap-ecr",
+                        "--var-file",
+                        "terraform.tfvars.example",
+                        "--backend-config",
+                        "backend.hcl.example",
+                    ],
+                    cwd=PROJECT_ROOT,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(
+                    plan_result.returncode, 0, plan_result.stdout + plan_result.stderr
+                )
+                plan_path.touch()
+                apply_result = subprocess.run(
+                    [
+                        "bash",
+                        str(BASH_SCRIPT),
+                        "--bootstrap-ecr",
+                        "--apply",
+                        "--var-file",
+                        "terraform.tfvars.example",
+                        "--backend-config",
+                        "backend.hcl.example",
+                    ],
+                    cwd=PROJECT_ROOT,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(
+                    apply_result.returncode, 0, apply_result.stdout + apply_result.stderr
+                )
+            finally:
+                plan_path.unlink(missing_ok=True)
+            calls = call_log.read_text(encoding="utf-8")
+            self.assertIn("-var=deploy_application=false", calls)
+            self.assertIn("-target=module.ecr[0]", calls)
+            self.assertIn("-out=bootstrap-ecr.tfplan", calls)
+            self.assertIn(" apply bootstrap-ecr.tfplan", calls)
 
     def test_both_scripts_enforce_account_partition_and_region(self) -> None:
         bash_source = BASH_SCRIPT.read_text(encoding="utf-8")
@@ -166,12 +232,11 @@ echo "Docker fake"
                 self.assertIn("arn:aws:", source)
                 self.assertIn("us-east-1", source)
                 self.assertNotIn("us-gov-east-1", source)
-        self.assertIn('sam deploy --region "$region"', bash_source)
-        self.assertIn('sam deploy --guided --region "$region"', bash_source)
-        self.assertIn('sam validate --lint --template-file "$SAM_TEMPLATE"', bash_source)
-        self.assertIn("sam deploy --region $region", powershell_source)
-        self.assertIn("sam deploy --guided --region $region", powershell_source)
-        self.assertIn("sam validate --lint --template-file $samTemplate", powershell_source)
+        for source in (bash_source, powershell_source):
+            self.assertIn("deploy/terraform/customer_default", source)
+            self.assertIn("terraform.tfvars", source)
+            self.assertIn("terraform", source)
+            self.assertNotRegex(source, re.compile(r"\bsam\s+(build|deploy)\b", re.IGNORECASE))
 
     def test_smoke_script_enforces_commercial_boundary_and_explicit_region(self) -> None:
         source = SMOKE_POWERSHELL_SCRIPT.read_text(encoding="utf-8")

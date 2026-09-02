@@ -1,0 +1,37 @@
+aws_account_id = "123456789012"
+aws_region     = "us-east-1"
+name_prefix    = "notable-acme"
+
+create_ecr_repository        = true
+existing_ecr_repository_uri  = "123456789012.dkr.ecr.us-east-1.amazonaws.com/notable-analyzer-s3"
+image_digest                 = "sha256:replace-after-image-push"
+
+vpc_id                     = "vpc-0123456789abcdef0"
+private_subnet_ids          = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
+lambda_security_group_ids   = ["sg-0123456789abcdef0"]
+
+create_kms_key           = true
+kms_key_alias            = "alias/notable-acme"
+# existing_kms_key_arn   = "arn:aws:kms:us-east-1:123456789012:key/replace-me"
+# existing_kms_policy_ready = true # only after applying every grant in KMS_CUSTOMER_KEY.md
+create_opensearch_domain = true
+opensearch_domain_name   = "notable-acme"
+# For an existing domain, set create_opensearch_domain = false and provide:
+# existing_opensearch_endpoint   = "https://vpc-notable.example.us-east-1.es.amazonaws.com"
+# existing_opensearch_domain_arn = "arn:aws:es:us-east-1:123456789012:domain/notable-acme"
+# replace_existing_opensearch_access_policy = true # dedicated domain; Terraform replaces the full policy
+admin_principal_arns     = ["arn:aws:iam::123456789012:role/ApprovedDeploymentAdministrator"]
+
+bedrock_analysis_model_id  = "amazon.nova-pro-v1:0"
+bedrock_analysis_model_arn = "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0"
+
+input_bucket_name     = "notable-acme-input"
+output_bucket_name    = "notable-acme-output"
+portal_ui_bucket_name = "notable-acme-portal"
+rag_tenant_id         = "acme-prod"
+
+portal_jwt_issuer            = "https://login.example.com/tenant/v2.0"
+portal_jwt_audience          = "api://notable-acme"
+portal_required_analyst_role = "Analyst"
+portal_required_analyst_scope = ""
+portal_cors_allowed_origins  = ["https://portal.example.com"]

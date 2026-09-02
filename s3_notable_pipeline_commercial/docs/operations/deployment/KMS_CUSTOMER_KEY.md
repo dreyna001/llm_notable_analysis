@@ -1,166 +1,46 @@
-# Commercial AWS customer-managed KMS (CMK)
+# Customer-managed KMS key
 
-Optional but common for production. When `CustomerKmsKeyArn` is set, the SAM
-template encrypts supported data-plane resources with that CMK instead of AWS
-owned keys. The product does **not** create the CMK or key policy — you provision
-the key, grant Lambda roles (and OpenSearch when used), then pass the ARN at deploy.
+## Path B
 
-**Prerequisites:** root README section **2**. **Path B step 1** (optional, before
-OpenSearch when the domain encrypts with CMK): complete root README **section 3.4**
-first, then record `CUSTOMER_KMS_KEY_ARN` in `customer-default.env`.
+Path B can create an optional KMS key in
+[`deploy/terraform/customer_default/`](../../../deploy/terraform/customer_default/)
+or use an existing approved key ARN.
 
-## When to use a CMK
+For an existing key, Terraform does not replace its key policy. Before setting
+`existing_kms_policy_ready = true`, the customer key owner must permit the four
+deterministic Path B Lambda roles, regional CloudWatch Logs encryption,
+OpenSearch use when applicable, and `s3.amazonaws.com`
+`kms:Decrypt`/`kms:GenerateDataKey` for encrypted queue notifications from the
+input bucket. Scope service grants to the commercial account and exact resource
+ARNs. The full deploy fails closed until this confirmation is set.
 
-| Scenario | Recommendation |
-| --- | --- |
-| Dev/staging core-only | AWS owned keys (leave `CustomerKmsKeyArn` blank) |
-| Production or regulated customer | CMK with explicit key policy |
-| OpenSearch encryption at rest | Same CMK as `CustomerKmsKeyArn`; **create the CMK before the OpenSearch domain** when the domain uses it |
+For a Terraform-created key, the full plan knows the deterministic application
+role ARNs and writes their least-privilege grants into the key policy in the same
+apply. Path B does not require a later role lookup or second apply.
 
-**Path B step 1** (optional CMK before OpenSearch when the domain encrypts with it):
-[`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default).
+Review these controls:
 
-Resources encrypted when `CustomerKmsKeyArn` is set (template behavior):
-
-- S3 input, output, and portal UI buckets (bucket default encryption)
-- SQS queues (analyzer, embed, RAG ingestion, DLQs)
-- DynamoDB tables created by the stack (CaseIndex, idempotency, disposition, chat history when enabled)
-- CloudWatch log groups for product Lambdas
-
-OpenSearch domain encryption uses `KmsKeyId` at **domain create time** — use the
-same CMK ARN you pass to SAM when possible.
-
-## SAM parameters
-
-| Parameter | Purpose |
-| --- | --- |
-| `CustomerKmsKeyArn` | CMK ARN — enables encryption on stack resources above |
-| `CustomerKmsKeyAdminRoleArn` | Optional; recorded as stack output for key administrators |
-
-Lambda execution roles receive managed policies from the template:
-
-- **Read:** `kms:Decrypt`, `kms:DescribeKey`
-- **Write (analyzer, case embed):** also `kms:GenerateDataKey`
-
-## Key policy pattern (Phase B — after first deploy)
-
-Replace placeholders with your account, key id, and **physical** Lambda role
-names from the CloudFormation stack (logical ids such as
-`NotableAnalyzerFunctionRole` map to suffixed physical role names):
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "AllowKeyAdministration",
-      "Effect": "Allow",
-      "Principal": {
-        "AWS": "arn:aws:iam::<account-id>:role/<key-admin-role>"
-      },
-      "Action": "kms:*",
-      "Resource": "*"
-    },
-    {
-      "Sid": "AllowProductLambdaUse",
-      "Effect": "Allow",
-      "Principal": {
-        "AWS": [
-          "arn:aws:iam::<account-id>:role/<physical-role-name-for-NotableAnalyzerFunctionRole>",
-          "arn:aws:iam::<account-id>:role/<physical-role-name-for-CaseEmbedFunctionRole>",
-          "arn:aws:iam::<account-id>:role/<physical-role-name-for-RagIngestionFunctionRole>",
-          "arn:aws:iam::<account-id>:role/<physical-role-name-for-PortalApiFunctionRole>",
-          "arn:aws:iam::<account-id>:role/<physical-role-name-for-DispositionSyncFunctionRole>"
-        ]
-      },
-      "Action": [
-        "kms:Decrypt",
-        "kms:DescribeKey",
-        "kms:GenerateDataKey"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "AllowOpenSearchService",
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "es.amazonaws.com"
-      },
-      "Action": [
-        "kms:Decrypt",
-        "kms:DescribeKey",
-        "kms:CreateGrant"
-      ],
-      "Resource": "*",
-      "Condition": {
-        "StringEquals": {
-          "kms:ViaService": "es.us-east-1.amazonaws.com"
-        }
-      }
-    }
-  ]
-}
-```
-
-Include only Lambda roles that exist for your enabled capabilities.
-
-Copy physical role names from the stack (same command as OpenSearch Phase B):
-[`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md#two-phase-access-policy-required).
-
-## Two-phase CMK rollout (recommended)
-
-**Phase A — create key:** key admin creates CMK with admin-only policy and
-OpenSearch service principal if the domain will use this key at create time.
-
-**Phase B — after `sam deploy`:** add product Lambda **physical** role ARNs from
-`describe-stack-resources`; update key policy; verify encrypt/decrypt from a test
-notable.
-
-If you set `CustomerKmsKeyArn` **before** Lambda roles exist, leave a break-glass
-admin statement and tighten after deploy (**Path B step 9**).
-
-## Terraform workflow (optional)
-
-Create the CMK with the standalone module or foundation stack (`enable_kms=true`):
+- approved customer administrator principals retain key administration;
+- OpenSearch may use the key when the managed domain is encrypted with it;
+- application roles receive only the operations required by their data paths;
+- no wildcard principal, cross-account grant, or public access is introduced;
+- key rotation and deletion-window values match customer policy;
+- deletion remains a separate, explicitly approved teardown action.
 
 ```bash
-cd deploy/terraform/kms
-cp terraform.tfvars.example terraform.tfvars
-terraform init && terraform validate
-terraform plan -out kms.tfplan
-# Customer approval gate
-terraform apply kms.tfplan
-terraform output sam_environment
+terraform -chdir=deploy/terraform/customer_default validate
+bash scripts/setup-and-deploy.sh
+# Review key policy and grants in the saved plan.
+bash scripts/setup-and-deploy.sh --apply
 ```
 
-Set `enable_opensearch_grant=true` when OpenSearch will encrypt at rest with this
-key. After SAM deploy, add Lambda **physical** role ARNs to `lambda_role_arns` in
-tfvars and re-apply for Phase B.
+Validate encrypted S3, SQS, DynamoDB, logs, and OpenSearch operations through the
+live acceptance checklist in
+[`DEPLOYMENT_READINESS_AND_LIFECYCLE.md`](DEPLOYMENT_READINESS_AND_LIFECYCLE.md).
 
-Hub: [`../../../deploy/terraform/README.md`](../../../deploy/terraform/README.md).
-Module: [`../../../deploy/terraform/kms/README.md`](../../../deploy/terraform/kms/README.md).
+## Paths A/C legacy SAM workflow
 
-## Create key (CLI sketch)
-
-```bash
-export AWS_REGION=us-east-1
-aws kms create-key \
-  --region "$AWS_REGION" \
-  --description "notable-analyzer data plane" \
-  --query 'KeyMetadata.Arn' --output text
-```
-
-Create alias, enable rotation per org policy, then pass ARN as `CustomerKmsKeyArn`.
-
-## Validation
-
-1. S3 buckets show SSE-KMS with your key (bucket encryption settings)
-2. Test notable processing succeeds (analyzer decrypts/encrypts via CMK)
-3. SQS send/receive and DynamoDB writes succeed (no `KMS.AccessDeniedException` in logs)
-4. OpenSearch domain reports encryption at rest with the same CMK when aligned
-
-## Next
-
-- **Path B step 1 complete (or skipped):** [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md) (step 2)
-- **Path B step 9 (CMK Phase B):** [`KNOWLEDGE_BASE_OPERATIONS.md`](../rag/KNOWLEDGE_BASE_OPERATIONS.md) after key policy update
-- **Path C:** [`../../../README.md`](../../../README.md#path-c-custom-profiles) when OpenSearch or CMK applies
+Paths A/C may use the standalone [`deploy/terraform/kms/`](../../../deploy/terraform/kms/)
+module with their legacy SAM application deployment. In that split-state layout,
+follow its README for the explicit application-role policy handoff. Do not use
+that handoff for Path B.

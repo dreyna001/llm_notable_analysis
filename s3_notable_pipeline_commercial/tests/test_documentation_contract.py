@@ -25,8 +25,11 @@ class DocumentationContractTests(unittest.TestCase):
             "docs/operations/deployment/DEPLOYMENT_READINESS_AND_LIFECYCLE.md",
             "docs/planning/AWS_COMMERCIAL_READINESS_PLAN.md",
             "docs/internal/AWS_COMMERCIAL_DEFERRED_GAPS.md",
-            "deploy/aws/presets/customer-default.env.example",
-            "deploy/aws/presets/samconfig.customer-default.toml.example",
+            "deploy/terraform/customer_default/main.tf",
+            "deploy/terraform/customer_default/terraform.tfvars.example",
+            "deploy/terraform/customer_default/README.md",
+            "deploy/terraform/application_core/lambda.tf",
+            "deploy/terraform/application_portal/main.tf",
             "deploy/terraform/opensearch/main.tf",
             "deploy/terraform/opensearch/terraform.tfvars.example",
             "deploy/terraform/opensearch/README.md",
@@ -67,10 +70,9 @@ class DocumentationContractTests(unittest.TestCase):
         lifecycle = (
             PROJECT_ROOT / "docs/operations/deployment/DEPLOYMENT_READINESS_AND_LIFECYCLE.md"
         ).read_text(encoding="utf-8")
-        self.assertIn("deployment_readiness.py", deployment)
+        self.assertIn("deploy/terraform/customer_default", deployment)
         self.assertIn("DEPLOYMENT_READINESS_AND_LIFECYCLE.md", deployment)
         for snippet in (
-            "sam validate --lint",
             "terraform fmt -check",
             "Live-cloud acceptance",
             "Upgrade",
@@ -133,94 +135,59 @@ class DocumentationContractTests(unittest.TestCase):
         for snippet in required_snippets:
             self.assertIn(snippet, steps)
 
-    def test_customer_default_preset_documents_core_bundle(self) -> None:
+    def test_customer_default_terraform_documents_core_bundle(self) -> None:
         preset_doc = (
             PROJECT_ROOT
             / "docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md"
         ).read_text(encoding="utf-8")
         for snippet in (
-            "CapabilityProfiles=core,rag,analyst_portal",
-            "SplQueryRagEnabled=true",
-            "PortalAuthMode=jwt",
-            "PortalRequiredAnalystRole",
-            "deploy/aws/presets/customer-default.env.example",
+            "core,rag,analyst_portal",
+            "SplQueryRagEnabled",
+            "PortalAuthMode",
+            "analyst role or scope",
+            "deploy/terraform/customer_default/terraform.tfvars.example",
             "VPC_NETWORK_PREREQUISITES.md",
-            "OPENSEARCH_PROVISIONING.md",
             "PORTAL_JWT_IDENTITY.md",
             "BEDROCK_ACCOUNT_ENABLEMENT.md",
-            "spl_readonly",
-            "OpenSearchSocIndex",
             "soc_knowledge",
             "splunk_dictionary",
             "case_chunks",
         ):
             self.assertIn(snippet, preset_doc)
 
-        env_example = (
-            PROJECT_ROOT / "deploy/aws/presets/customer-default.env.example"
+        tfvars = (
+            PROJECT_ROOT / "deploy/terraform/customer_default/terraform.tfvars.example"
         ).read_text(encoding="utf-8")
-        self.assertIn("RagIngestionEnabled=true", env_example)
-        self.assertIn("PortalEnabled=true", env_example)
-        self.assertIn("PortalRequiredAnalystRole", env_example)
-        self.assertIn("COMMERCIAL_AWS_ACCOUNT_ID", env_example)
-        self.assertIn("AwsAccountId=\"$AWS_ACCOUNT_ID\"", env_example)
+        for snippet in (
+            "aws_account_id",
+            "image_digest",
+            "portal_jwt_issuer",
+            "portal_jwt_audience",
+            "portal_required_analyst_role",
+            "portal_required_analyst_scope",
+            "existing_kms_key_arn",
+        ):
+            self.assertIn(snippet, tfvars)
 
-        samconfig = (
-            PROJECT_ROOT / "deploy/aws/presets/samconfig.customer-default.toml.example"
-        ).read_text(encoding="utf-8")
-        self.assertIn("PortalRequiredAnalystRole", samconfig)
-        self.assertIn("PortalAuthMode=jwt", samconfig)
-
-    def test_customer_default_account_variables_are_consistent(self) -> None:
-        preset_doc = (
-            PROJECT_ROOT
-            / "docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md"
-        ).read_text(encoding="utf-8")
-        env_example = (
-            PROJECT_ROOT / "deploy/aws/presets/customer-default.env.example"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("AWS_ACCOUNT_ID", preset_doc)
-        self.assertIn("COMMERCIAL_AWS_ACCOUNT_ID", preset_doc)
-        self.assertNotIn(
-            "AwsAccountId=\"$COMMERCIAL_AWS_ACCOUNT_ID\"",
-            preset_doc,
+    def test_path_b_docs_and_scripts_are_terraform_only(self) -> None:
+        paths = (
+            PROJECT_ROOT / "deploy/terraform/README.md",
+            PROJECT_ROOT / "docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md",
+            PROJECT_ROOT / "scripts/setup-and-deploy.sh",
+            PROJECT_ROOT / "scripts/setup-and-deploy.ps1",
         )
-        self.assertIn("AwsAccountId=\"$AWS_ACCOUNT_ID\"", preset_doc)
-        self.assertIn("AWS_ACCOUNT_ID=", env_example)
-        self.assertIn("COMMERCIAL_AWS_ACCOUNT_ID=", env_example)
-
-    def test_customer_default_jwt_grant_is_wired_in_preset_workflow(self) -> None:
-        preset_doc = (
-            PROJECT_ROOT
-            / "docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md"
-        ).read_text(encoding="utf-8")
-        env_example = (
-            PROJECT_ROOT / "deploy/aws/presets/customer-default.env.example"
-        ).read_text(encoding="utf-8")
-        samconfig = (
-            PROJECT_ROOT / "deploy/aws/presets/samconfig.customer-default.toml.example"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("PortalRequiredAnalystRole=\"$PORTAL_REQUIRED_ANALYST_ROLE\"", preset_doc)
-        self.assertIn("PortalRequiredAnalystScope=\"$PORTAL_REQUIRED_ANALYST_SCOPE\"", preset_doc)
-        self.assertIn("PortalRequiredAnalystRole", env_example)
-        self.assertIn("PORTAL_REQUIRED_ANALYST_SCOPE=", env_example)
-        self.assertIn("PortalRequiredAnalystRole", samconfig)
-        self.assertIn("PortalAuthMode=jwt", samconfig)
-
-    def test_customer_default_optional_kms_is_wired_in_env_workflow(self) -> None:
-        preset_doc = (
-            PROJECT_ROOT
-            / "docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md"
-        ).read_text(encoding="utf-8")
-        env_example = (
-            PROJECT_ROOT / "deploy/aws/presets/customer-default.env.example"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("CustomerKmsKeyArn=\"$CUSTOMER_KMS_KEY_ARN\"", preset_doc)
-        self.assertIn("CUSTOMER_KMS_KEY_ARN=", env_example)
-        self.assertIn("OpenSearch Phase B", preset_doc)
+        root_readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+        path_b_section = root_readme.split("### Path B — Customer-default", 1)[1].split(
+            "### Path C — Custom profiles", 1
+        )[0]
+        path_b_text = path_b_section + "\n" + "\n".join(
+            path.read_text(encoding="utf-8") for path in paths
+        )
+        self.assertIn("deploy/terraform/customer_default", path_b_text)
+        self.assertIn("--bootstrap-ecr", path_b_text)
+        self.assertNotRegex(path_b_text, re.compile(r"\bsam\s+(build|deploy)\b", re.IGNORECASE))
+        self.assertNotIn("OpenSearch Phase B", path_b_text)
+        self.assertNotIn("CMK Phase B", path_b_text)
 
     def test_shipped_capability_status_is_not_stale_in_scope_doc(self) -> None:
         scope_doc = (
@@ -319,7 +286,7 @@ class DocumentationContractTests(unittest.TestCase):
             "VPC_NETWORK_PREREQUISITES.md",
             "OPENSEARCH_PROVISIONING.md",
             "deploy/terraform/README.md",
-            "deploy/terraform/foundation/",
+            "deploy/terraform/customer_default/",
             "PORTAL_JWT_IDENTITY.md",
             "COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md",
             "KNOWLEDGE_BASE_OPERATIONS.md",

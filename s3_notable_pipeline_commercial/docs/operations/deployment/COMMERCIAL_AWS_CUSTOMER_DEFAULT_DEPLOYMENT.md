@@ -1,59 +1,119 @@
 # Commercial AWS customer-default deployment
 
-One-shot SAM preset for the on-prem **customer-default** bundle on commercial
-AWS (`aws`, `us-east-1`): `CapabilityProfiles=core,rag,analyst_portal`, general
-SOC RAG + Splunk dictionary grounding, case archive, read-only portal API, and
-pinned-case Q&A. **No** `spl_readonly` or closed-ticket RAG in the baseline preset.
+Path B deploys `core,rag,analyst_portal` to commercial AWS `us-east-1` from the
+single native Terraform root
+[`deploy/terraform/customer_default/`](../../../deploy/terraform/customer_default/).
 
-**Before this doc:** complete root README sections **2** (universal prerequisites),
-**3.1** (ownership), **3.4** (run `scripts/configure_path_b.py` or copy preset files),
-and Path B steps **1–6**. This runbook is **Path B step 7** (`sam deploy` only).
+## Required customer inputs
 
-On-prem normative reference:
-[`../../../../llm_notable_analysis_onprem_systemd/docs/operations/deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md`](../../../../llm_notable_analysis_onprem_systemd/docs/operations/deployment/CUSTOMER_DEFAULT_DEPLOYMENT.md)
+- approved AWS account, role, remote state backend, VPC, and private subnets
+- Bedrock analysis model ID, exact ARN, and any inference-profile model ARNs
+- JWT issuer, audience, optional tenant, and at least one analyst role or scope
+- globally unique input, output, and portal UI bucket names
+- OpenSearch administrator principals when Terraform creates the domain
+- immutable ECR image digest
+- alert topic and retention values required by customer policy
 
-**Path B step 7** (SAM deploy):
-[`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default).
-
-## Preset files (copy and fill)
-
-| File | Purpose |
-| --- | --- |
-| [`../../../deploy/aws/presets/customer-default.env.example`](../../../deploy/aws/presets/customer-default.env.example) | Manual placeholder env file; or generate with `scripts/configure_path_b.py` |
-| [`../../../deploy/aws/presets/samconfig.customer-default.toml.example`](../../../deploy/aws/presets/samconfig.customer-default.toml.example) | Copy to project-root `samconfig.toml` for repeat deploys |
-
-Complete Path B steps 1–6 before `sam deploy` (authoritative order and value
-collection table: [`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default)):
-
-| Step | Runbook |
-| --- | --- |
-| 1 (optional) | [`KMS_CUSTOMER_KEY.md`](KMS_CUSTOMER_KEY.md) |
-| 2 | [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md) |
-| 3 | [`../../../deploy/terraform/opensearch/`](../../../deploy/terraform/opensearch/) and [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) — Terraform Phase A |
-| 4 | [`BEDROCK_ACCOUNT_ENABLEMENT.md`](BEDROCK_ACCOUNT_ENABLEMENT.md) |
-| 5 | [`PORTAL_JWT_IDENTITY.md`](PORTAL_JWT_IDENTITY.md) |
-| 6 | [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md) |
-
-Fill `customer-default.env` from those runbooks (account ID, image digest, OpenSearch, VPC, Bedrock, JWT, optional CMK).
-Indexes (`soc_knowledge`, `splunk_dictionary`, `case_chunks`) auto-create on first ingest or case embed.
-
-Run the local input and SAM validation gate before deployment. It writes a
-machine-readable handoff report:
+Run the guided configurator or copy the example:
 
 ```bash
-python scripts/deployment_readiness.py --env-file customer-default.env
+python scripts/configure_path_b.py
 ```
 
-Terraform validation, live-cloud acceptance, upgrades, and rollback:
-[`DEPLOYMENT_READINESS_AND_LIFECYCLE.md`](DEPLOYMENT_READINESS_AND_LIFECYCLE.md).
+```bash
+cp deploy/terraform/customer_default/backend.hcl.example \
+  deploy/terraform/customer_default/backend.hcl
+cp deploy/terraform/customer_default/terraform.tfvars.example \
+  deploy/terraform/customer_default/terraform.tfvars
+# Edit every placeholder.
+```
 
-## Why both profiles and explicit flags
+Customer-owned prerequisite details:
 
-`CapabilityProfiles` drives runtime behavior in the Lambda image. The SAM template
-also uses explicit `*_Enabled` parameters to create queues, Lambdas, DynamoDB
-tables, and API routes. For customer-default, set **both** to the same intent:
+- [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md)
+- [`BEDROCK_ACCOUNT_ENABLEMENT.md`](BEDROCK_ACCOUNT_ENABLEMENT.md)
+- [`PORTAL_JWT_IDENTITY.md`](PORTAL_JWT_IDENTITY.md)
+- [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md)
 
-| SAM parameter | Customer-default value |
+## Greenfield ECR bootstrap
+
+Skip this section when an approved digest-qualified image already exists.
+
+```bash
+export AWS_REGION=us-east-1
+export COMMERCIAL_AWS_ACCOUNT_ID="<approved-12-digit-account>"
+
+bash scripts/setup-and-deploy.sh --bootstrap-ecr
+# Review deploy/terraform/customer_default/bootstrap-ecr.tfplan.
+bash scripts/setup-and-deploy.sh --bootstrap-ecr --apply
+terraform -chdir=deploy/terraform/customer_default output ecr_repository_uri
+```
+
+Build and push the image using [`DEPLOYMENT_IMAGE_STEPS.md`](DEPLOYMENT_IMAGE_STEPS.md),
+then set `image_digest` in `terraform.tfvars`. A full plan fails closed unless the
+image reference is pinned to `sha256:<64-lowercase-hex>`.
+
+## Plan
+
+```bash
+export AWS_REGION=us-east-1
+export COMMERCIAL_AWS_ACCOUNT_ID="<approved-12-digit-account>"
+
+bash scripts/setup-and-deploy.sh
+```
+
+Review the saved plan for:
+
+- approved account, region, names, tags, and remote-state workspace
+- expected creates, updates, replacements, and cost-bearing resources
+- digest-qualified Lambda image URI
+- VPC-only Lambda and OpenSearch configuration
+- separate least-privilege analyzer, case-embed, RAG-ingestion, and portal roles
+- OpenSearch and optional KMS policies containing those deterministic role ARNs
+- analyzer, case-embed, and RAG-ingestion queues with DLQs and alarms
+- JWT authorizer, issuer, audience, and analyst role/scope enforcement
+- encryption, retention, logging, and alert settings
+
+Stop for any unexplained replacement, public access, wildcard data-plane grant,
+mutable image, missing DLQ, or missing JWT grant.
+
+## Apply
+
+After customer approval:
+
+```bash
+bash scripts/setup-and-deploy.sh --apply
+```
+
+PowerShell:
+
+```powershell
+$env:AWS_REGION = "us-east-1"
+$env:COMMERCIAL_AWS_ACCOUNT_ID = "<approved-12-digit-account>"
+.\scripts\setup-and-deploy.ps1
+.\scripts\setup-and-deploy.ps1 -Apply
+```
+
+The apply prints `terraform output -json`. Store it with the reviewed plan and
+change approval. No application role lookup or policy edit follows the apply.
+
+## Path B baseline inventory
+
+This inventory is the migration contract from the former customer-default SAM
+preset.
+
+| Area | Terraform Path B resources |
+| --- | --- |
+| Core compute | Analyzer, case-embed, and RAG-ingestion Lambda functions with deterministic IAM roles |
+| Queues | Analyzer, case-embed, and RAG-ingestion queues, one DLQ per queue, redrive policy, S3 notification policy |
+| Storage | Input and output buckets, private portal UI bucket, CaseIndex table |
+| Search and encryption | VPC-only OpenSearch domain or existing domain, optional KMS key or existing key, direct application-role policy wiring |
+| Portal | Portal Lambda, HTTP API, JWT authorizer, integration, routes, stage, invoke permission |
+| Operations | Dedicated log groups, error/depth/age/DLQ alarms, deployment outputs and JSON report |
+
+Customer-default settings remain fixed to the former preset intent:
+
+| Former SAM setting | Terraform Path B value |
 | --- | --- |
 | `CapabilityProfiles` | `core,rag,analyst_portal` |
 | `SplunkSinkMode` | `s3` |
@@ -65,99 +125,23 @@ tables, and API routes. For customer-default, set **both** to the same intent:
 | `PortalAuthMode` | `jwt` |
 | `CaseArchiveEnabled` | `true` |
 | `CaseQaEnabled` | `true` |
+| OpenSearch indexes | `soc_knowledge`, `splunk_dictionary`, `case_chunks` |
 
-Do **not** add `spl_readonly`, `elastic_readonly`, `ticket_draft`, or
-`action_gated` for this preset.
+The native baseline intentionally omits resources that the former template
+created even while their profiles were disabled: side-effect idempotency,
+disposition sync, closed-ticket sync/embed, and chat-history resources. Those
+belong to separately approved custom-profile work and are not idle Path B cost or
+permission surface.
 
-When `PortalEnabled=true` and `PortalAuthMode=jwt`, SAM requires `PortalJwtIssuer`,
-`PortalJwtAudience`, and at least one of `PortalRequiredAnalystRole` or
-`PortalRequiredAnalystScope`. Do not leave both grant parameters empty.
+## Post-deploy
 
-Shipped capabilities **not** in the baseline preset (opt-in): closed-ticket RAG,
-rich PDF/DOCX/image KB ingest, portal chat images, Bedrock rerank — see
-[`CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md`](CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md).
-Full customer values checklist: [`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md).
-
-## Deploy (fast path)
-
-```bash
-export AWS_REGION=us-east-1
-
-cp deploy/aws/presets/customer-default.env.example customer-default.env
-# edit customer-default.env — set AWS_ACCOUNT_ID and COMMERCIAL_AWS_ACCOUNT_ID to the same value
-
-sam build -t deploy/aws/template-sam.yaml
-
-set -a && source customer-default.env && set +a
-# setup-and-deploy scripts read COMMERCIAL_AWS_ACCOUNT_ID; keep it aligned with AWS_ACCOUNT_ID
-export COMMERCIAL_AWS_ACCOUNT_ID="${COMMERCIAL_AWS_ACCOUNT_ID:-$AWS_ACCOUNT_ID}"
-
-sam deploy \
-  --template-file .aws-sam/build/template.yaml \
-  --stack-name notable-analyzer-stack \
-  --region us-east-1 \
-  --capabilities CAPABILITY_IAM \
-  --parameter-overrides \
-    AwsAccountId="$AWS_ACCOUNT_ID" \
-    EcrRepositoryUri="$ECR_REPOSITORY_URI" \
-    ImageDigest="$IMAGE_DIGEST" \
-    BedrockAnalysisModelId="$BEDROCK_ANALYSIS_MODEL_ID" \
-    BedrockAnalysisModelArn="$BEDROCK_ANALYSIS_MODEL_ARN" \
-    BedrockAnalysisInferenceProfileFoundationModelArns="$BEDROCK_ANALYSIS_INFERENCE_PROFILE_FOUNDATION_MODEL_ARNS" \
-    InputBucketName="$INPUT_BUCKET_NAME" \
-    OutputBucketName="$OUTPUT_BUCKET_NAME" \
-    CapabilityProfiles=core,rag,analyst_portal \
-    SplunkSinkMode=s3 \
-    HtmlReportEnabled=false \
-    RagEnabled=true \
-    RagIngestionEnabled=true \
-    SplQueryRagEnabled=true \
-    PortalEnabled=true \
-    PortalAuthMode=jwt \
-    CaseArchiveEnabled=true \
-    CaseQaEnabled=true \
-    CaseIndexTableName="$CASE_INDEX_TABLE_NAME" \
-    PortalUiBucketName="$PORTAL_UI_BUCKET_NAME" \
-    PortalJwtIssuer="$PORTAL_JWT_ISSUER" \
-    PortalJwtAudience="$PORTAL_JWT_AUDIENCE" \
-    PortalRequiredAnalystRole="$PORTAL_REQUIRED_ANALYST_ROLE" \
-    PortalRequiredAnalystScope="$PORTAL_REQUIRED_ANALYST_SCOPE" \
-    PortalCorsAllowedOrigins="$PORTAL_CORS_ALLOWED_ORIGINS" \
-    OpenSearchEndpoint="$OPENSEARCH_ENDPOINT" \
-    OpenSearchDomainArn="$OPENSEARCH_DOMAIN_ARN" \
-    OpenSearchSocIndex="$OPENSEARCH_SOC_INDEX" \
-    OpenSearchSplunkIndex="$OPENSEARCH_SPLUNK_INDEX" \
-    OpenSearchCaseIndex="$OPENSEARCH_CASE_INDEX" \
-    RagTenantId="$RAG_TENANT_ID" \
-    CustomerVpcSubnetIds="$CUSTOMER_VPC_SUBNET_IDS" \
-    CustomerSecurityGroupIds="$CUSTOMER_SECURITY_GROUP_IDS" \
-    CustomerKmsKeyArn="$CUSTOMER_KMS_KEY_ARN"
-```
-
-Set at least one of `PORTAL_REQUIRED_ANALYST_ROLE` or
-`PORTAL_REQUIRED_ANALYST_SCOPE`; the other may remain empty.
-
-Repeat deploys: copy
-[`samconfig.customer-default.toml.example`](../../../deploy/aws/presets/samconfig.customer-default.toml.example)
-to `samconfig.toml`, fill placeholders, then run `scripts/setup-and-deploy.sh` or
-`scripts/setup-and-deploy.ps1`.
-
-## Post-deploy (required for full customer-default)
-
-1. **OpenSearch Phase B** — add the deployed Lambda physical role ARNs to the
-   domain access policy before ingest or portal retrieval. See
-   [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md).
-2. **CMK Phase B (when used)** — add the deployed Lambda physical role ARNs to
-   the key policy. See [`KMS_CUSTOMER_KEY.md`](KMS_CUSTOMER_KEY.md).
-3. **SOC KB ingest** — load approved general SOC corpus to S3, publish manifest.
-   See [`../rag/KNOWLEDGE_BASE_OPERATIONS.md`](../rag/KNOWLEDGE_BASE_OPERATIONS.md).
-4. **Splunk dictionary ingest** — required when `SplQueryRagEnabled=true` (portal
-   SPL grounding). Same manifest workflow; target index `splunk_dictionary`.
-5. **Portal SPA** — build `frontend/analyst-portal`, upload `dist/` to
-   `PortalUiBucketName`. See
-   [`../analyst_portal/ANALYST_PORTAL_OPERATIONS.md`](../analyst_portal/ANALYST_PORTAL_OPERATIONS.md).
-6. **Smoke** — run Wave 1 + portal staging checks in
-   [`../../testing/TESTING.md`](../../testing/TESTING.md).
+1. Load the approved SOC and Splunk dictionary corpora using
+   [`KNOWLEDGE_BASE_OPERATIONS.md`](../rag/KNOWLEDGE_BASE_OPERATIONS.md).
+2. Build and upload the analyst portal SPA using
+   [`ANALYST_PORTAL_OPERATIONS.md`](../analyst_portal/ANALYST_PORTAL_OPERATIONS.md).
+3. Run every applicable live acceptance check in
+   [`DEPLOYMENT_READINESS_AND_LIFECYCLE.md`](DEPLOYMENT_READINESS_AND_LIFECYCLE.md)
+   and [`TESTING.md`](../../testing/TESTING.md).
 
 ```powershell
 $env:AWS_REGION = "us-east-1"
@@ -165,21 +149,8 @@ $env:COMMERCIAL_AWS_ACCOUNT_ID = "<approved-12-digit-account>"
 .\scripts\test-pipeline.ps1 -Wave1Smoke -ExpectCapabilityProfiles "core,rag,analyst_portal"
 ```
 
-## Intentional gaps vs on-prem customer-default
+## Rollback
 
-| On-prem setting | Commercial AWS customer-default preset |
-| --- | --- |
-| `SPL_QUERY_GENERATION_ENABLED=true` (no live Splunk) | **Off** — no `spl_readonly` profile |
-| `CLOSED_TICKET_RAG_ENABLED` / ServiceNow closed-ticket sync | **Shipped, opt-in** — not in baseline preset; enable optional block in preset env |
-| Postgres + Granite embed/rerank | OpenSearch + Bedrock Titan embed (see approved differences) |
-| `CASE_QA_CHAT_HISTORY_ENABLED=true` | Default `false`; enable after DynamoDB chat tables are provisioned |
-| nginx Basic Auth front door | Customer edge (CloudFront, ALB, or corporate proxy) + JWT or IAM portal auth |
-| Rich KB ingest (PDF/DOCX/images), rerank, portal chat images | **Shipped, opt-in** — not enabled in baseline preset |
-
-Track optional capability rollout in
-[`../../planning/COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md`](../../planning/COMMERCIAL_AWS_ONPREM_CUSTOMER_DEFAULT_PARITY_PLAN.md).
-
-## Next
-
-- **Path B step 8:** [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) — Phase B domain access policy (Lambda physical role ARNs)
-- **Path B steps 9–12:** [`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default) (CMK Phase B, KB ingest, portal SPA, smoke)
+Restore the last approved `terraform.tfvars` values and immutable image digest,
+create and review a new saved plan, then apply it through the same approval path.
+Data-store, KMS, OpenSearch, or bucket deletion is teardown, not rollback.

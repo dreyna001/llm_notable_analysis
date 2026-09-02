@@ -24,6 +24,7 @@ Complete this section **before** choosing Path A, B, or C.
 | Commercial AWS account in `us-east-1` | Customer-approved Bedrock model access |
 | AWS CLI | Configured (`aws configure`) |
 | `COMMERCIAL_AWS_ACCOUNT_ID` | Set to the approved 12-digit account; deployment scripts compare it with the active STS caller |
+| Terraform 1.10+ | Required for Path B remote state locking |
 | AWS SAM CLI | Install: [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html) — no dedicated install runbook in this repo |
 | Docker | Required for Lambda image build |
 | Lambda image in ECR | Published to customer commercial AWS ECR in `us-east-1` with immutable digest (`EcrRepositoryUri` + `ImageDigest`) — see image runbook on your path |
@@ -33,18 +34,19 @@ Quick checks:
 ```bash
 aws sts get-caller-identity
 sam --version
+terraform version
 docker --version
 ```
 
 ### Live AWS mutation gate
 
-Before **any** live AWS mutation (ECR push, OpenSearch create, `sam deploy`, key
+Before **any** live AWS mutation (ECR push, Terraform apply, `sam deploy`, key
 policy update):
 
 1. Confirm STS account ID matches `COMMERCIAL_AWS_ACCOUNT_ID`
 2. Confirm partition `aws` and region `us-east-1`
 3. Confirm active CLI role or profile and target stack name
-4. Review intended resources or CloudFormation change set
+4. Review the Terraform plan or CloudFormation change set
 5. Obtain explicit customer approval for that mutation
 
 ## 3) Before you choose a path
@@ -73,31 +75,29 @@ Each runbook ends with a **Next** line for path navigation. Stay on one path unt
 ### 3.4 Path B — prepare before step 1
 
 If you chose **Path B**, set up working files now so each runbook can drop values
-into one place. You will not run `sam deploy` until Path B step 7.
+into one place. Path B uses only the native Terraform root for infrastructure and
+application deployment.
 
 | Prepare now | Purpose |
 | --- | --- |
-| Run `python scripts/configure_path_b.py` (or `python scripts/path_b_deploy_configurator.py`) | Guided Path B questionnaire; writes `customer-default.env`, OpenSearch `terraform.tfvars` when creating a domain, and `path-b-remaining-steps.md` |
-| Or copy [`deploy/aws/presets/customer-default.env.example`](deploy/aws/presets/customer-default.env.example) to `customer-default.env` at repo root | Manual SAM parameter source; fill incrementally in steps 1–6 |
-| Pick a **Terraform layout** (optional): [`deploy/terraform/README.md`](deploy/terraform/README.md) | **Foundation** (`deploy/terraform/foundation/`) or **standalone** modules (`network/`, `kms/`, `ecr/`, `opensearch/`) — SAM still required for step 7 |
-| Copy module `terraform.tfvars.example` to `terraform.tfvars` for each enabled slice | Foundation: [`deploy/terraform/foundation/terraform.tfvars.example`](deploy/terraform/foundation/terraform.tfvars.example); or per-module tfvars under [`deploy/terraform/`](deploy/terraform/) |
-| Optional: copy [`deploy/aws/presets/samconfig.customer-default.toml.example`](deploy/aws/presets/samconfig.customer-default.toml.example) to `samconfig.toml` | Repeat deploys after first successful `sam deploy` |
-| Confirm **Terraform 1.6+** and an approved remote state backend | Required when using Terraform for foundation resources |
-| Coordinate **network** and **IdP** owners early | VPC/subnets (customer-owned); Lambda SG and OpenSearch via Terraform or manual; JWT/OIDC (step 5) is outside this repo |
+| Run `python scripts/configure_path_b.py` | Writes `deploy/terraform/customer_default/terraform.tfvars` and `path-b-remaining-steps.md` |
+| Or copy [`deploy/terraform/customer_default/terraform.tfvars.example`](deploy/terraform/customer_default/terraform.tfvars.example) to `terraform.tfvars` | Manual input path |
+| Read [`deploy/terraform/README.md`](deploy/terraform/README.md) | Path B root, bootstrap, plan, apply, and output contract |
+| Confirm an approved remote state backend | State may contain customer infrastructure metadata |
+| Coordinate network and IdP owners early | VPC/subnets and JWT/OIDC remain customer inputs |
 
 Path B deploy order at a glance (details in section 4):
 
 ```text
-optional CMK -> VPC/network -> OpenSearch Phase A -> Bedrock -> JWT/IdP -> ECR image
-  -> sam deploy (step 7) -> OpenSearch Phase B -> optional CMK Phase B
-  -> RAG ingest -> portal SPA -> smoke tests
+VPC/network + Bedrock + JWT/IdP inputs -> optional ECR bootstrap -> immutable image
+  -> one Terraform plan/apply -> RAG ingest -> portal SPA -> smoke tests
 ```
 
-OpenSearch is **two-phase**: Phase A before SAM; Phase B after SAM adds Lambda
-role ARNs to the domain policy. Vector calls can return **403** until Phase B
-is applied even when Lambda IAM looks correct.
+Terraform creates deterministic application IAM roles and wires them into the
+OpenSearch and optional KMS policies in the same full apply. Path B has no manual
+role-copy phase.
 
-Normative Path B SAM preset runbook (step 7 only):
+Normative Path B runbook:
 [`docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md).
 
 ## 4) Deploy — follow your path
@@ -108,27 +108,23 @@ Follow in order:
 
 1. [`docs/operations/deployment/BEDROCK_ACCOUNT_ENABLEMENT.md`](docs/operations/deployment/BEDROCK_ACCOUNT_ENABLEMENT.md) — enable customer-approved Bedrock analysis models in the account
 2. [`docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`](docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md) — build, push, and record `ImageDigest` before SAM
-3. **Deploy** with `CapabilityProfiles=core` using `setup-and-deploy.*` (commands below)
+3. **Deploy** with `CapabilityProfiles=core` using the legacy SAM template
 4. [`docs/testing/TESTING.md`](docs/testing/TESTING.md) — unit tests and core smoke validation
 
-Deploy commands:
+Deploy commands (Path A remains SAM):
 
 ```powershell
-$env:AWS_REGION = "us-east-1"
-$env:COMMERCIAL_AWS_ACCOUNT_ID = "<approved-12-digit-account>"
-.\scripts\setup-and-deploy.ps1
+sam build -t deploy/aws/template-sam.yaml
+sam deploy --guided --region us-east-1 --template-file .aws-sam/build/template.yaml
 ```
 
 ```bash
-export AWS_REGION=us-east-1
-export COMMERCIAL_AWS_ACCOUNT_ID="<approved-12-digit-account>"
-chmod +x ./scripts/setup-and-deploy.sh
-./scripts/setup-and-deploy.sh
+sam build -t deploy/aws/template-sam.yaml
+sam deploy --guided --region us-east-1 --template-file .aws-sam/build/template.yaml
 ```
 
-The setup scripts run prerequisite checks, `sam build`, and `sam deploy` only. They do
-not build or push the container image. Pass `EcrRepositoryUri` and `ImageDigest` via
-guided deploy, `samconfig.toml`, or parameter overrides.
+Pass `EcrRepositoryUri` and `ImageDigest` via guided deploy, `samconfig.toml`, or
+parameter overrides. `setup-and-deploy.*` is reserved for Terraform Path B.
 
 Infrastructure template: [`deploy/aws/template-sam.yaml`](deploy/aws/template-sam.yaml).
 Runtime env reference: [`config.env.example`](config.env.example).
@@ -137,22 +133,16 @@ Runtime env reference: [`config.env.example`](config.env.example).
 
 Bundle: `core,rag,analyst_portal`. Complete [section 3.4](#34-path-b--prepare-before-step-1) first.
 
-**Do not skip VPC, JWT, OpenSearch Phase A, or image steps ahead of SAM deploy.**
+**Do not skip VPC, JWT, Bedrock access, or the immutable image step.**
 
 | Step | Runbook | Collect / record |
 | --- | --- | --- |
-| 1 (optional) | [`KMS_CUSTOMER_KEY.md`](docs/operations/deployment/KMS_CUSTOMER_KEY.md) + [`deploy/terraform/kms/`](deploy/terraform/kms/) | `CUSTOMER_KMS_KEY_ARN` in `customer-default.env` when domain encrypts with CMK |
-| 2 | [`VPC_NETWORK_PREREQUISITES.md`](docs/operations/deployment/VPC_NETWORK_PREREQUISITES.md) + [`deploy/terraform/network/`](deploy/terraform/network/) | `CUSTOMER_VPC_SUBNET_IDS`, `CUSTOMER_SECURITY_GROUP_IDS` in `customer-default.env` (Terraform or manual) |
-| 3 | [`deploy/terraform/opensearch/`](deploy/terraform/opensearch/) + [`OPENSEARCH_PROVISIONING.md`](docs/operations/deployment/OPENSEARCH_PROVISIONING.md) | **Phase A:** domain endpoint and ARN into `customer-default.env`; `RAG_TENANT_ID`. Or use [`deploy/terraform/foundation/`](deploy/terraform/foundation/) for steps 1–3 + ECR repo in one apply |
-| 4 | [`BEDROCK_ACCOUNT_ENABLEMENT.md`](docs/operations/deployment/BEDROCK_ACCOUNT_ENABLEMENT.md) | Bedrock model ID/ARN variables in `customer-default.env` |
-| 5 | [`PORTAL_JWT_IDENTITY.md`](docs/operations/deployment/PORTAL_JWT_IDENTITY.md) | JWT issuer, audience, role/scope, CORS in `customer-default.env` |
-| 6 | [`DEPLOYMENT_IMAGE_STEPS.md`](docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md) + [`deploy/terraform/ecr/`](deploy/terraform/ecr/) (repo only) | `ECR_REPOSITORY_URI`, `IMAGE_DIGEST` in `customer-default.env` |
-| 7 | [`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md) | `sam deploy` using filled `customer-default.env` |
-| 8 | [`OPENSEARCH_PROVISIONING.md`](docs/operations/deployment/OPENSEARCH_PROVISIONING.md) | **Phase B:** Lambda physical role ARNs in domain access policy |
-| 9 (optional) | [`KMS_CUSTOMER_KEY.md`](docs/operations/deployment/KMS_CUSTOMER_KEY.md) | **Phase B:** Lambda role ARNs in CMK key policy when using `CustomerKmsKeyArn` |
-| 10 | [`KNOWLEDGE_BASE_OPERATIONS.md`](docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md) | SOC and Splunk dictionary corpora ingest |
-| 11 | [`ANALYST_PORTAL_OPERATIONS.md`](docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md), [`frontend/analyst-portal/README.md`](frontend/analyst-portal/README.md) | Build and upload analyst portal SPA |
-| 12 | [`TESTING.md`](docs/testing/TESTING.md) | OpenSearch preflight and customer-default staging validation |
+| 1 | [`VPC_NETWORK_PREREQUISITES.md`](docs/operations/deployment/VPC_NETWORK_PREREQUISITES.md), [`BEDROCK_ACCOUNT_ENABLEMENT.md`](docs/operations/deployment/BEDROCK_ACCOUNT_ENABLEMENT.md), [`PORTAL_JWT_IDENTITY.md`](docs/operations/deployment/PORTAL_JWT_IDENTITY.md) | Fill customer network, model, and JWT inputs in `terraform.tfvars` |
+| 2 (greenfield ECR only) | [`DEPLOYMENT_IMAGE_STEPS.md`](docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md) | Run the ECR bootstrap target, push the image, record `image_digest` |
+| 3 | [`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](docs/operations/deployment/COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md) | Review one full Terraform plan and apply it |
+| 4 | [`KNOWLEDGE_BASE_OPERATIONS.md`](docs/operations/rag/KNOWLEDGE_BASE_OPERATIONS.md) | SOC and Splunk dictionary corpora ingest |
+| 5 | [`ANALYST_PORTAL_OPERATIONS.md`](docs/operations/analyst_portal/ANALYST_PORTAL_OPERATIONS.md), [`frontend/analyst-portal/README.md`](frontend/analyst-portal/README.md) | Build and upload analyst portal SPA |
+| 6 | [`TESTING.md`](docs/testing/TESTING.md) | Live customer-default acceptance |
 
 Follow the numbered steps in order — use the **Next** line at the bottom of each runbook.
 
@@ -164,7 +154,7 @@ Follow the numbered steps in order — use the **Next** line at the bottom of ea
 4. [`docs/operations/deployment/BEDROCK_ACCOUNT_ENABLEMENT.md`](docs/operations/deployment/BEDROCK_ACCOUNT_ENABLEMENT.md) — enable Bedrock models when analysis or embeddings are used
 5. If `analyst_portal`: [`docs/operations/deployment/PORTAL_JWT_IDENTITY.md`](docs/operations/deployment/PORTAL_JWT_IDENTITY.md) — configure portal identity before SAM
 6. [`docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`](docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md) — build ECR image, then SAM deploy with profile-specific parameters
-7. OpenSearch Phase B and optional CMK Phase B — same runbooks as Path B steps 8–9
+7. OpenSearch Phase B and optional CMK Phase B — legacy SAM-only handoff for Path C
 8. Profile ops guides from [`docs/operations/README.md`](docs/operations/README.md) — day-two tuning for enabled profiles
 9. [`docs/testing/TESTING.md`](docs/testing/TESTING.md) — Wave 1 and portal staging tables for your profile slice
 
@@ -190,8 +180,9 @@ Customer-default example:
 
 ## 6) Rollback and teardown
 
-**Rollback (failed release, not teardown):** redeploy a previous immutable `ImageDigest`
-with the same configuration — see
+**Rollback (failed release, not teardown):** Path B restores the previous approved
+Terraform input set and immutable `image_digest`, reviews the plan, and applies it.
+Paths A/C redeploy the previous SAM `ImageDigest`. See
 [`docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md`](docs/operations/deployment/DEPLOYMENT_IMAGE_STEPS.md)
 (Rollback).
 

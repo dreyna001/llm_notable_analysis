@@ -1,13 +1,12 @@
 # Network Terraform
 
-Customer-owned Terraform for the commercial AWS Path B VPC network slice. It
+Standalone Terraform for the legacy commercial AWS Paths A/C VPC network slice. It
 creates a product Lambda security group in an existing VPC and optionally
 creates gateway or interface VPC endpoints. It does **not** create a VPC,
 subnets, NAT gateways, route tables, or OpenSearch resources.
 
-**Deploy context:** root README **section 3.4** (copy `terraform.tfvars`), Path B
-**step 2** —
-[`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default).
+Path B uses [`../customer_default/`](../customer_default/). Use this standalone
+module only for an explicitly split foundation state or legacy Paths A/C.
 Operator runbook: [`../../docs/operations/deployment/VPC_NETWORK_PREREQUISITES.md`](../../docs/operations/deployment/VPC_NETWORK_PREREQUISITES.md).
 
 ## Prerequisites
@@ -60,7 +59,7 @@ terraform show network.tfplan
 terraform apply network.tfplan
 ```
 
-Copy outputs to `customer-default.env`:
+Copy outputs to the legacy Paths A/C SAM parameter source:
 
 ```bash
 terraform output lambda_security_group_id

@@ -7,7 +7,7 @@ customer-specific identifiers, policies, content, and capacity values change.
 **Deploy journey:** root README section **3.2** (this checklist), after
 [`CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md`](CUSTOMER_OWNERSHIP_AND_PRODUCT_SCOPE.md)
 (section 3.1). Path B operators fill
-[`../../../deploy/aws/presets/customer-default.env.example`](../../../deploy/aws/presets/customer-default.env.example)
+[`../../../deploy/terraform/customer_default/terraform.tfvars.example`](../../../deploy/terraform/customer_default/terraform.tfvars.example)
 as each prerequisite runbook completes; authoritative step order:
 [`../../README.md#path-b--customer-default`](../../README.md#path-b--customer-default).
 
@@ -32,7 +32,7 @@ differences recorded in
 | Identity | OIDC issuer, audience, analyst application role and/or delegated scope — see [`PORTAL_JWT_IDENTITY.md`](PORTAL_JWT_IDENTITY.md) |
 | Deployment scope | Stable deployment/tenant identifier used on every OpenSearch document and query |
 | Network | VPC, private subnets, Lambda security groups — see [`VPC_NETWORK_PREREQUISITES.md`](VPC_NETWORK_PREREQUISITES.md) |
-| OpenSearch | VPC-only domain in `us-east-1`; provision before RAG/portal SAM deploy — see [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) |
+| OpenSearch | VPC-only domain in `us-east-1`; create or attach it in the same Path B Terraform root — see [`OPENSEARCH_PROVISIONING.md`](OPENSEARCH_PROVISIONING.md) |
 | Encryption | Customer-managed KMS keys — see [`KMS_CUSTOMER_KEY.md`](KMS_CUSTOMER_KEY.md) |
 | Models | Approved Bedrock analysis, chat, and embedding model IDs — see [`BEDROCK_ACCOUNT_ENABLEMENT.md`](BEDROCK_ACCOUNT_ENABLEMENT.md) |
 | Integrations | Private Splunk, ServiceNow, or Elasticsearch endpoints and Secrets Manager ARNs |
@@ -83,7 +83,7 @@ case event occurred and cannot be promoted to direct alert evidence.
 
 Record these values for every release:
 
-- rendered CloudFormation template and change set
+- reviewed Terraform plan for Path B, or CloudFormation change set for Paths A/C
 - image repository, immutable tag, and digest
 - region, account, stack, and deployment/tenant identifier
 - model and embedding IDs
@@ -97,5 +97,5 @@ Record these values for every release:
 ## Next
 
 - Root README **section 3.3:** pick your deploy path
-- **Path B:** section **3.4** (copy preset files), then step 1 at [`../../README.md#path-b--customer-default`](../../README.md#path-b--customer-default)
-- Path B SAM deploy (step 7 only): [`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md)
+- **Path B:** section **3.4** (create `terraform.tfvars`), then [`../../README.md#path-b--customer-default`](../../README.md#path-b--customer-default)
+- Path B Terraform plan/apply: [`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md)

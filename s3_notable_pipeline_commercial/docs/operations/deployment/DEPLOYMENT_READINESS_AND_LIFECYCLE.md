@@ -1,94 +1,81 @@
-# Deployment readiness, acceptance, upgrades, and rollback
+# Path B readiness, acceptance, upgrades, and rollback
 
-Use this checklist for every commercial AWS customer-default release. It
-separates local proof from checks that require the customer's real AWS account.
+Use this checklist for every commercial AWS customer-default release.
 
-## One local preflight and report
-
-After generating or filling `customer-default.env`, run:
+## Local plan gate
 
 ```bash
-python scripts/deployment_readiness.py \
-  --env-file customer-default.env \
-  --report-out deployment-readiness-report.json
-```
+export AWS_REGION=us-east-1
+export COMMERCIAL_AWS_ACCOUNT_ID="<approved-12-digit-account>"
 
-The command rejects missing values, example placeholders, account mismatches,
-mutable image references, and non-HTTPS JWT issuers. It also runs
-`sam validate --lint`. The JSON report contains no secret values and can be attached to change
-records. A `blocked` report must not be promoted.
-
-The deployment script runs the same SAM validation gate before `sam build`:
-
-```bash
-bash scripts/setup-and-deploy.sh
-```
-
-For Terraform-managed prerequisites, run these gates in every module changed by
-the release before an approved apply:
-
-```bash
 terraform fmt -check -recursive deploy/terraform
-terraform -chdir=deploy/terraform/foundation init -backend=false
-terraform -chdir=deploy/terraform/foundation validate
-terraform -chdir=deploy/terraform/foundation plan -out=tfplan
-terraform -chdir=deploy/terraform/foundation show -json tfplan > tfplan.json
+terraform -chdir=deploy/terraform/customer_default init
+terraform -chdir=deploy/terraform/customer_default validate
+bash scripts/setup-and-deploy.sh
+terraform -chdir=deploy/terraform/customer_default show -json \
+  customer-default.tfplan > customer-default.tfplan.json
 ```
 
-Repeat `init`, `validate`, and `plan` for a changed standalone module when it is
-used instead of `foundation`. Store plans as change evidence; do not commit them.
+Store the saved plan, JSON plan, immutable image digest, reviewer, approval, and
+later `terraform output -json` with the change record. Do not commit them.
 
-## Live-cloud acceptance checklist
+A release is blocked when the plan contains an unexplained replacement, mutable
+image, public access, wrong account/region, missing JWT grant, missing queue/DLQ,
+or IAM access beyond the documented runtime needs.
 
-Record Pass, Fail, or Not applicable and attach CloudFormation event IDs, object
-keys, log query links, and approved screenshots. Do not put tokens in evidence.
+## Live-cloud acceptance
+
+Record Pass, Fail, or Not applicable. Attach Terraform run ID or plan digest,
+object keys, log-query links, alarm evidence, and approved screenshots. Never put
+tokens, credentials, or raw JWTs in evidence.
 
 | Check | Pass condition |
 | --- | --- |
 | Identity boundary | STS shows the approved account, `aws` partition, role, and `us-east-1` |
-| Stack | CloudFormation reaches `CREATE_COMPLETE` or `UPDATE_COMPLETE` with no unexpected replacement |
-| Private network | Lambdas reach Bedrock and the VPC-only OpenSearch domain; public paths are not required |
-| Encryption | S3, SQS, DynamoDB, logs, and OpenSearch use the approved keys and policies |
+| Terraform convergence | A second full plan reports no unexpected changes |
+| Private network | Lambdas reach Bedrock and VPC-only OpenSearch without a public application path |
+| Encryption | S3, SQS, DynamoDB, logs, and OpenSearch use approved encryption and policies |
+| IAM wiring | OpenSearch and optional KMS policies already include the deterministic application role ARNs after the one full apply |
 | Core pipeline | A test notable produces versioned Markdown and JSON reports |
-| RAG | Approved SOC and Splunk dictionary documents ingest and can be retrieved only for the deployment tenant |
-| Portal | An approved analyst token works; missing, expired, wrong-audience, and wrong-role tokens fail |
-| Failure recovery | A poison message reaches the DLQ, alarms fire, and approved redrive processes it once |
-| Rollback | The previous image digest and parameter set redeploy successfully in staging |
+| RAG | Approved SOC and Splunk dictionary documents ingest and retrieve only for the deployment tenant |
+| Portal auth | Approved analyst token succeeds; missing, expired, wrong-audience, and wrong-role/scope tokens fail |
+| Queue recovery | A poison message reaches each applicable DLQ, alarms fire, and approved redrive processes it once |
+| Operational outputs | Terraform outputs identify buckets, queues, DLQs, API endpoint, roles, and search endpoint without exposing secrets |
+| Rollback rehearsal | Staging accepts the previous approved digest and inputs without data-store replacement |
 
 Use [`../../testing/TESTING.md`](../../testing/TESTING.md) for commands and expected
-outputs. Production approval requires all applicable checks to pass.
+outcomes. Production approval requires every applicable check to pass.
 
 ## Upgrade
 
-1. Save the current Terraform outputs, stack parameters, template, image digest,
-   and readiness and acceptance reports.
-2. Review Terraform plans and the CloudFormation change set. Stop for unexpected
-   replacements or IAM changes outside the approved release.
-3. Deploy to staging with an immutable digest and run the full acceptance checklist.
-4. Back up customer-owned OpenSearch data and verify restore before mapping or retention changes.
-5. Promote the same plans, template, parameters, and digest to production.
+1. Save current Terraform inputs, outputs, state version, image digest, plan, and acceptance report.
+2. Back up OpenSearch and verify restore before mapping, retention, or engine changes.
+3. Plan in staging and stop for unexplained replacement or IAM expansion.
+4. Apply the immutable image digest in staging and run the full acceptance table.
+5. Promote the same reviewed configuration and digest through the production approval path.
 
 Application code must remain compatible with existing S3 objects, DynamoDB
-items, queues, and OpenSearch documents unless a release-specific migration is
-documented and approved.
+items, queues, and OpenSearch documents unless a versioned migration is supplied,
+tested, and approved.
 
 ## Rollback
 
-Rollback means redeploying the last approved Terraform configuration, SAM
-template, parameter set, and image digest. It does not mean deleting resources.
+Rollback restores the last approved Terraform input set and immutable image
+digest. It does not delete infrastructure.
 
-1. Stop new upstream file drops if the failing release could produce bad side effects.
-2. Redeploy the last approved artifacts through normal plan and change-set review.
-3. Re-run core, RAG, portal-auth, and replay checks.
-4. Redrive only after confirming idempotency and receiving customer approval.
+1. Stop new upstream file drops if the release could create bad side effects.
+2. Restore the previous versioned `terraform.tfvars` values and digest.
+3. Create and review a fresh saved plan; stop if it replaces a data store.
+4. Apply after approval.
+5. Re-run core, RAG, portal-auth, queue replay, and convergence checks.
 
-Bucket, table, OpenSearch-domain, KMS-key, state, or stack deletion is teardown
-and may cause permanent data loss. It requires a separate approved teardown plan.
+Bucket, table, OpenSearch-domain, KMS-key, or state deletion is teardown and may
+cause permanent data loss. It requires a separate approved teardown plan.
 
 ## Ownership at release time
 
-The product team supplies versioned IaC, immutable image reference, parameter
-contract, tests, and runbooks. The customer owns AWS account access, Terraform
-state, networking, IdP, DNS/TLS/edge controls, keys, OpenSearch capacity and
-backups, model access and quotas, integration endpoints and secrets, alerts and
-on-call, change approval, evidence retention, and production rollback authority.
+The product team supplies versioned Terraform, the input and output contract,
+tests, runbooks, and a digest-pinned image release. The customer owns AWS access,
+remote state, networking, IdP, DNS/TLS/edge controls, keys, OpenSearch capacity
+and backups, model access and quotas, integrations and secrets, alert routing,
+change approval, evidence retention, and production rollback authority.

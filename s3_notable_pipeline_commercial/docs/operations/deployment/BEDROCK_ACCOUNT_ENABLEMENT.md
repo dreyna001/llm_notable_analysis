@@ -1,18 +1,18 @@
 # Commercial AWS Bedrock account enablement
 
-Enable and select Bedrock models **before** `sam deploy`. The stack requires
+Enable and select Bedrock models before infrastructure deployment. Path B Terraform requires
 `BedrockAnalysisModelId` and `BedrockAnalysisModelArn` on every deployment; it
 does not enable model access in your account.
 
-**Prerequisites:** root README sections **2–3**. **Path B step 4:** record model
-ID/ARN variables in `customer-default.env` after OpenSearch Phase A.
+**Prerequisites:** root README sections **2–3**. **Path B:** record model ID/ARN
+values in `deploy/terraform/customer_default/terraform.tfvars`.
 
 Partition `aws`, region `us-east-1` — see
 [`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md#deployment-boundary).
 
 ## Models the product uses
 
-| Use | SAM / env | Default product choice |
+| Use | Former SAM name / Terraform equivalent | Default product choice |
 | --- | --- | --- |
 | Notable analysis (required) | `BedrockAnalysisModelId`, `BedrockAnalysisModelArn` | Customer-approved Claude or Nova inference profile |
 | Case chunk + RAG embeddings | `CaseQaEmbeddingModel` | `amazon.titan-embed-text-v2:0` (1024 dimensions, locked in v1) |
@@ -33,7 +33,7 @@ Run in the **target commercial account** before deploy:
 3. **Enable embedding model** — ensure `amazon.titan-embed-text-v2:0` (or your
    approved alternate documented with engineering) is available if RAG or portal
    case Q&A is enabled
-4. **Record IDs and ARNs** — copy exact strings for SAM parameters (see below)
+4. **Record IDs and ARNs** — copy exact strings for deployment inputs (see below)
 5. **Verify invoke** — from an approved role in the account, confirm your
    **customer-approved** model or inference profile is listed and invocable.
    The examples below are discovery commands only; they do not choose deploy values.
@@ -54,10 +54,11 @@ aws bedrock list-inference-profiles --region us-east-1 \
 `scripts/setup-and-deploy.ps1` runs illustrative readiness probes (Nova, Claude).
 Those probes only confirm list APIs succeed — they are **not** the deploy-time
 model choice. Record the exact customer-approved `BedrockAnalysisModelId` and
-`BedrockAnalysisModelArn` pair and pass both at `sam deploy`.
+`BedrockAnalysisModelArn` pair. Path B maps them to
+`bedrock_analysis_model_id` and `bedrock_analysis_model_arn`.
 
-6. **Map to SAM** — set deploy parameters (guided deploy, `samconfig.toml`, or preset env file)
-7. **Scope IAM** — template grants `bedrock:InvokeModel` only on ARNs you pass; mismatched ID/ARN pairs fail closed at deploy or runtime
+6. **Map inputs** — use Path B `terraform.tfvars`; Paths A/C use legacy SAM parameters
+7. **Scope IAM** — IaC grants `bedrock:InvokeModel` only on ARNs you pass; mismatched ID/ARN pairs fail closed at deploy or runtime
 
 ## Choosing `BedrockAnalysisModelId` and `BedrockAnalysisModelArn`
 

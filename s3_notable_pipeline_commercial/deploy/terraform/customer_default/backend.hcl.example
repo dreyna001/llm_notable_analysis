@@ -1,0 +1,3 @@
+bucket = "customer-approved-terraform-state-bucket"
+key    = "llm-notable-analysis/customer-default/terraform.tfstate"
+region = "us-east-1"

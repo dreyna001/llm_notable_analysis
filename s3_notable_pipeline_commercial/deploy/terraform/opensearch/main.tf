@@ -37,7 +37,13 @@ data "aws_iam_policy_document" "domain_access" {
 
       principals {
         type        = "AWS"
-        identifiers = sort(tolist(var.read_role_arns))
+        identifiers = ["arn:${data.aws_partition.current.partition}:iam::${var.aws_account_id}:root"]
+      }
+
+      condition {
+        test     = "ArnEquals"
+        variable = "aws:PrincipalArn"
+        values   = sort(tolist(var.read_role_arns))
       }
     }
   }
@@ -57,7 +63,13 @@ data "aws_iam_policy_document" "domain_access" {
 
       principals {
         type        = "AWS"
-        identifiers = sort(tolist(var.write_role_arns))
+        identifiers = ["arn:${data.aws_partition.current.partition}:iam::${var.aws_account_id}:root"]
+      }
+
+      condition {
+        test     = "ArnEquals"
+        variable = "aws:PrincipalArn"
+        values   = sort(tolist(var.write_role_arns))
       }
     }
   }

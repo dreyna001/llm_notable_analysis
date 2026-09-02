@@ -1,14 +1,14 @@
 # OpenSearch Terraform
 
-Customer-owned Terraform for the commercial AWS Path B VPC-only OpenSearch
+Standalone Terraform for legacy commercial AWS Paths A/C VPC-only OpenSearch
 domain. It creates the domain, a dedicated domain security group, and HTTPS
 ingress from existing Lambda security groups. It does not create the customer
 VPC, subnets, Lambda security groups, NAT gateways, VPC endpoints, KMS keys, or
 application indexes.
 
-**Deploy context:** root README **section 3.4** (copy `terraform.tfvars`), Path B
-**step 3** Phase A and **step 8** Phase B —
-[`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default).
+Path B does not use this standalone workflow; it uses
+[`../customer_default/`](../customer_default/) and wires role policies in one apply.
+The two-phase instructions below apply only to split-state Paths A/C.
 Operator runbook: [`../../docs/operations/deployment/OPENSEARCH_PROVISIONING.md`](../../docs/operations/deployment/OPENSEARCH_PROVISIONING.md).
 
 ## Prerequisites
@@ -43,7 +43,7 @@ terraform show opensearch.tfplan
 terraform apply opensearch.tfplan
 ```
 
-Copy outputs to `customer-default.env`:
+Copy outputs to the legacy Paths A/C SAM parameter source:
 
 ```bash
 terraform output opensearch_endpoint

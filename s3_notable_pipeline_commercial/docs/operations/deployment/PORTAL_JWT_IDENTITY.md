@@ -5,13 +5,13 @@ Configure customer-owned identity for the analyst portal when
 again in the portal Lambda — it does **not** host login pages, user directories,
 or token issuance.
 
-**Prerequisites:** root README sections **2–3**. **Path B step 5:** configure IdP
-and record JWT/CORS variables in `customer-default.env` before SAM.
+**Prerequisites:** root README sections **2–3**. **Path B:** configure the IdP and
+record JWT/CORS values in `deploy/terraform/customer_default/terraform.tfvars`.
 
 Partition `aws`, region `us-east-1` — see
 [`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md#deployment-boundary).
 
-**Path B step 5** (before SAM when portal JWT mode is enabled):
+**Path B identity step** (before the full Terraform plan):
 [`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default).
 
 ## Two configuration layers
@@ -39,7 +39,7 @@ browser analyst path.
 
 ## What you must provide (JWT backend mode)
 
-| SAM parameter | Purpose |
+| Former SAM name / Terraform equivalent | Purpose |
 | --- | --- |
 | `PortalJwtIssuer` | OIDC issuer URL (HTTPS, no credentials in URL) |
 | `PortalJwtAudience` | API audience (`aud`) expected on every access token |

@@ -50,8 +50,65 @@ data "aws_iam_policy_document" "key_policy" {
 
       principals {
         type        = "AWS"
-        identifiers = sort(tolist(var.lambda_role_arns))
+        identifiers = ["arn:${data.aws_partition.current.partition}:iam::${var.aws_account_id}:root"]
       }
+
+      condition {
+        test     = "ArnEquals"
+        variable = "aws:PrincipalArn"
+        values   = sort(tolist(var.lambda_role_arns))
+      }
+    }
+  }
+
+  dynamic "statement" {
+    for_each = length(var.s3_notification_bucket_arns) > 0 ? [1] : []
+    content {
+      sid       = "AllowS3NotificationQueueEncryption"
+      effect    = "Allow"
+      actions   = ["kms:Decrypt", "kms:GenerateDataKey"]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["s3.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [var.aws_account_id]
+      }
+
+      condition {
+        test     = "ArnLike"
+        variable = "aws:SourceArn"
+        values   = sort(tolist(var.s3_notification_bucket_arns))
+      }
+    }
+  }
+
+  statement {
+    sid    = "AllowCloudWatchLogsEncryption"
+    effect = "Allow"
+    actions = [
+      "kms:Decrypt",
+      "kms:DescribeKey",
+      "kms:Encrypt",
+      "kms:GenerateDataKey*",
+      "kms:ReEncrypt*",
+    ]
+    resources = ["*"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["logs.${var.aws_region}.amazonaws.com"]
+    }
+
+    condition {
+      test     = "ArnLike"
+      variable = "kms:EncryptionContext:aws:logs:arn"
+      values   = ["arn:${data.aws_partition.current.partition}:logs:${var.aws_region}:${var.aws_account_id}:*"]
     }
   }
 }

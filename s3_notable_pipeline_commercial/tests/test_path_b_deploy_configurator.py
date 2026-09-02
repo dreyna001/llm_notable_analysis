@@ -15,7 +15,7 @@ from path_b_deploy_configurator import (  # noqa: E402
     build_outputs,
     load_config_from_json,
     main,
-    render_opensearch_tfvars,
+    render_terraform_tfvars,
     validate_config,
 )
 
@@ -27,28 +27,35 @@ class PathBDeployConfiguratorTests(unittest.TestCase):
         config = load_config_from_json(FIXTURE)
         self.assertEqual([], validate_config(config))
 
-    def test_build_outputs_writes_expected_env_and_tfvars_fields(self) -> None:
+    def test_build_outputs_writes_single_customer_default_tfvars(self) -> None:
         config = load_config_from_json(FIXTURE)
         outputs = build_outputs(config)
 
-        self.assertIn("AWS_ACCOUNT_ID=123456789012", outputs.env_content)
-        self.assertIn("RAG_TENANT_ID=customer-acme-staging", outputs.env_content)
-        self.assertIn("CUSTOMER_KMS_KEY_ARN=arn:aws:kms:", outputs.env_content)
-        self.assertIsNotNone(outputs.tfvars_content)
-        assert outputs.tfvars_content is not None
-        self.assertIn('domain_name    = "notable-rag-staging"', outputs.tfvars_content)
-        self.assertIn("kms_key_arn = ", outputs.tfvars_content)
-        self.assertIn("OpenSearch Phase A", outputs.checklist_content)
-        self.assertIn("deployment_readiness.py", outputs.checklist_content)
+        self.assertIn('aws_account_id = "123456789012"', outputs.tfvars_content)
+        self.assertIn('rag_tenant_id          = "customer-acme-staging"', outputs.tfvars_content)
+        self.assertIn("existing_kms_key_arn", outputs.tfvars_content)
+        self.assertIn('opensearch_domain_name   = "notable-rag-staging"', outputs.tfvars_content)
+        self.assertNotIn("read_role_arns", outputs.tfvars_content)
+        self.assertNotIn("write_role_arns", outputs.tfvars_content)
+        self.assertIn("Terraform deploy", outputs.checklist_content)
+        self.assertNotIn("SAM deploy", outputs.checklist_content)
 
-    def test_existing_opensearch_skips_tfvars(self) -> None:
+    def test_existing_opensearch_is_wired_in_same_tfvars(self) -> None:
         config = load_config_from_json(FIXTURE)
         config.opensearch_mode = "existing"
         config.opensearch_endpoint = "https://vpc-notable.example.es.amazonaws.com"
         config.opensearch_domain_arn = "arn:aws:es:us-east-1:123456789012:domain/notable-rag-staging"
-        outputs = build_outputs(config)
-        self.assertIsNone(outputs.tfvars_path)
-        self.assertIsNone(render_opensearch_tfvars(config))
+        tfvars = render_terraform_tfvars(config)
+        self.assertIn("create_opensearch_domain = false", tfvars)
+        self.assertIn('existing_opensearch_endpoint = "https://vpc-notable.example.es.amazonaws.com"', tfvars)
+
+    def test_greenfield_ecr_can_bootstrap_without_an_image_uri(self) -> None:
+        config = load_config_from_json(FIXTURE)
+        config.ecr_mode = "create"
+        config.ecr_repository_uri = ""
+        tfvars = render_terraform_tfvars(config)
+        self.assertIn("create_ecr_repository      = true", tfvars)
+        self.assertIn('ecr_repository_name         = "notable-analyzer-s3"', tfvars)
 
     def test_validation_requires_jwt_grant(self) -> None:
         config = load_config_from_json(FIXTURE)
@@ -73,15 +80,12 @@ class PathBDeployConfiguratorTests(unittest.TestCase):
     def test_main_writes_files_from_answers_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
-            env_out = temp_path / "customer-default.env"
             tfvars_out = temp_path / "terraform.tfvars"
             checklist_out = temp_path / "steps.md"
             exit_code = main(
                 [
                     "--answers-file",
                     str(FIXTURE),
-                    "--env-out",
-                    str(env_out),
                     "--tfvars-out",
                     str(tfvars_out),
                     "--checklist-out",
@@ -89,7 +93,6 @@ class PathBDeployConfiguratorTests(unittest.TestCase):
                 ]
             )
             self.assertEqual(exit_code, 0)
-            self.assertTrue(env_out.is_file())
             self.assertTrue(tfvars_out.is_file())
             self.assertTrue(checklist_out.is_file())
 

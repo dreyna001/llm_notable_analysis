@@ -100,16 +100,16 @@ class OpenSearchTerraformTests(unittest.TestCase):
         ):
             self.assertIn(snippet, source)
 
-    def test_operator_docs_route_path_b_through_terraform(self) -> None:
+    def test_operator_docs_route_path_b_through_customer_default_root(self) -> None:
         root_readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
         runbook = (
             PROJECT_ROOT / "docs/operations/deployment/OPENSEARCH_PROVISIONING.md"
         ).read_text(encoding="utf-8")
-        self.assertIn("deploy/terraform/opensearch/", root_readme)
+        self.assertIn("deploy/terraform/customer_default/", root_readme)
         self.assertIn("deploy/terraform/README.md", root_readme)
-        self.assertIn("deploy/terraform/foundation/", runbook)
-        self.assertIn("Terraform workflow (preferred)", runbook)
-        self.assertIn("terraform output sam_environment", runbook)
+        self.assertIn("deploy/terraform/customer_default/", runbook)
+        self.assertIn("setup-and-deploy.sh", runbook)
+        self.assertIn("output -json", runbook)
 
 
 if __name__ == "__main__":

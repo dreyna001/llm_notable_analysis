@@ -1,36 +1,34 @@
 # Commercial AWS Lambda Image Build and Deployment
 
-The SAM and CloudFormation templates deploy one image to the analyzer, case
-embedding, RAG ingestion, disposition sync, and portal functions. Handler
-commands are overridden per function. The release image must be stored in the
-customer's `us-east-1` ECR repository and referenced by digest.
+Path B Terraform deploys one image to the analyzer, case embedding, RAG
+ingestion, and portal functions. Paths A/C retain the legacy SAM template.
+Handler commands are overridden per function. The release image must be stored
+in the customer's `us-east-1` ECR repository and referenced by digest.
 
-Partition `aws`, region `us-east-1` only. Before ECR push or `sam deploy`, follow
+Partition `aws`, region `us-east-1` only. Before ECR push or infrastructure apply, follow
 the live mutation gate in [`../../../README.md#2-universal-prerequisites`](../../../README.md#2-universal-prerequisites)
 (account ID, partition, region, role/profile, stack name, change set, explicit
 customer approval).
 
-**Prerequisites:** Path B steps **1–5** complete. **Path B step 6:** build, push,
-and record `ECR_REPOSITORY_URI` and `IMAGE_DIGEST` in `customer-default.env`.
+**Path B:** build, push, and record the immutable `image_digest` in
+`deploy/terraform/customer_default/terraform.tfvars` before the full plan.
 
-**Path B step 6** (digest-qualified image before SAM):
+**Path B image step**:
 [`../../../README.md#path-b--customer-default`](../../../README.md#path-b--customer-default).
 
-## ECR repository (Terraform optional)
+## Path B ECR bootstrap
 
-Terraform can create the ECR repository only; build and push remain manual:
+If the repository does not exist, create it from the same Path B root:
 
 ```bash
-cd deploy/terraform/ecr
-cp terraform.tfvars.example terraform.tfvars
-terraform init && terraform validate
-terraform plan -out ecr.tfplan
-terraform apply ecr.tfplan
-terraform output ecr_repository_uri
+bash scripts/setup-and-deploy.sh --bootstrap-ecr
+# Review the saved ECR-only plan.
+bash scripts/setup-and-deploy.sh --bootstrap-ecr --apply
+terraform -chdir=deploy/terraform/customer_default output ecr_repository_uri
 ```
 
-Or set `enable_ecr=true` in [`../../../deploy/terraform/foundation/`](../../../deploy/terraform/foundation/).
-Module README: [`../../../deploy/terraform/ecr/README.md`](../../../deploy/terraform/ecr/README.md).
+Terraform does not build or push the image and does not use a Docker provider or
+provisioner.
 
 ## Build Contract
 
@@ -82,7 +80,7 @@ Pull the digest-qualified artifact before promotion:
 docker pull $ECR_REPOSITORY_URI@$IMAGE_DIGEST
 ```
 
-## Deploy Contract
+## Deployment contract
 
 Required deploy parameters (core stack):
 
@@ -98,14 +96,12 @@ Required deploy parameters (core stack):
 | `DeploymentRegion` | `us-east-1` |
 | `DeploymentPartition` | `aws` |
 
-`sam build` and `sam deploy` (full parameter examples and customer-default preset):
-[`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md)
-and Path A deploy scripts in [`../../../README.md`](../../../README.md) section 4.
+For Path B, set the equivalent Terraform inputs and follow
+[`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md).
+Paths A/C map these values to their legacy SAM parameters.
 
-`scripts/setup-and-deploy.ps1` and `scripts/setup-and-deploy.sh` run `sam build`
-and `sam deploy` only. They do not build, tag, or push the container image.
-Publish the digest-qualified image to ECR before deploy, or include
-`EcrRepositoryUri` and `ImageDigest` in `samconfig.toml` / guided prompts.
+`scripts/setup-and-deploy.ps1` and `scripts/setup-and-deploy.sh` plan or apply
+Path B Terraform only. They do not build, tag, or push the container image.
 
 Vector, portal, and integration capabilities require additional values in
 [`COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md`](COMMERCIAL_AWS_CUSTOMER_CONFIGURATION.md)
@@ -115,12 +111,12 @@ or other required inputs for an enabled capability are missing.
 
 ## Rollback (failed release)
 
-Rollback is **redeploy**, not stack deletion. Do not use `sam delete` as rollback.
+Rollback is **redeploy**, not infrastructure deletion.
 
 1. Identify the last known-good immutable `ImageDigest` for the same ECR repository (release evidence or ECR describe-images).
-2. Review the previous CloudFormation template/parameters or change set; confirm the same stack name, `EcrRepositoryUri`, and configuration except `ImageDigest`.
+2. Path B: restore the previous approved Terraform inputs. Paths A/C: restore the previous CloudFormation template and parameters.
 3. Obtain explicit customer approval for the redeploy.
-4. Run `sam deploy` with the previous `ImageDigest` (and prior parameter set if it changed).
+4. Path B: review and apply a fresh Terraform plan with the previous digest. Paths A/C: redeploy the previous SAM digest and parameters.
 5. Validate recovery: core smoke ([`../../../README.md`](../../../README.md) section 5), OpenSearch preflight if vector capabilities are enabled ([`../../testing/TESTING.md`](../../testing/TESTING.md)), portal `/ready` when applicable.
 
 Record rollback digest, deploy time, and validation outcome in release evidence.
@@ -128,12 +124,12 @@ Record rollback digest, deploy time, and validation outcome in release evidence.
 ## Release Evidence
 
 Record the source commit, base-image digest, final image digest, ECR repository,
-rendered template, CloudFormation change set, test results, smoke-test results,
+Terraform plan or CloudFormation change set, test results, smoke-test results,
 and rollback digest. Do not use `latest` as a release reference.
 
 ## Next
 
-- **Path A step 3:** `setup-and-deploy.*` — [`../../../README.md`](../../../README.md#path-a-core-only)
-- **Path B step 7:** [`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md)
+- **Path A step 3:** legacy SAM — [`../../../README.md`](../../../README.md#path-a-core-only)
+- **Path B full plan/apply:** [`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md)
 - **Path C step 6:** SAM deploy with profile-specific parameters — [`../../../README.md`](../../../README.md#path-c-custom-profiles)
-- Post-deploy (OpenSearch Phase B, portal SPA, RAG ingest): [`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md#post-deploy-required-for-full-customer-default)
+- Path B post-deploy (portal SPA, RAG ingest, live acceptance): [`COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md`](COMMERCIAL_AWS_CUSTOMER_DEFAULT_DEPLOYMENT.md#post-deploy)

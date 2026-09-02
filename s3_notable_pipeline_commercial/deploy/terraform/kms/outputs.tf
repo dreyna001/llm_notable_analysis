@@ -16,8 +16,8 @@ output "kms_key_alias" {
 output "sam_environment" {
   description = "Values to copy into the customer-default SAM preset."
   value = {
-    CUSTOMER_KMS_KEY_ARN          = aws_kms_key.this.arn
-    KMS_PHASE_B_ROLES_APPLIED     = length(var.lambda_role_arns) > 0
-    KMS_OPENSEARCH_GRANT_ENABLED  = var.enable_opensearch_grant
+    CUSTOMER_KMS_KEY_ARN         = aws_kms_key.this.arn
+    KMS_PHASE_B_ROLES_APPLIED    = length(var.lambda_role_arns) > 0
+    KMS_OPENSEARCH_GRANT_ENABLED = var.enable_opensearch_grant
   }
 }
